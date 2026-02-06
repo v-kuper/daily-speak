@@ -30,7 +30,8 @@ export default function SpeakScreen() {
     recordingDuration,
     topics,
     showAddTopicInput,
-    customTopicDraft
+    customTopicDraft,
+    isAuthenticated
   } = useAppSelector((state) => state.app);
 
   useEffect(() => {
@@ -177,16 +178,20 @@ export default function SpeakScreen() {
   return (
     <section>
       <div className="recorded-banner">
-        <div className="recorded-title">Recording saved</div>
+        <div className="recorded-title">Recording complete</div>
         <div className="recorded-subtitle">Duration: {formatTime(recordingDuration)}</div>
       </div>
+
+      {!isAuthenticated && (
+        <div className="notice">Saving is available only for authorized users. Sign in to continue.</div>
+      )}
 
       <div className="btn-group">
         <button className="btn btn-secondary" onClick={() => dispatch(reRecord())}>
           Re-record
         </button>
         <button className="btn btn-primary" onClick={() => dispatch(saveRecording())}>
-          Save and continue
+          {isAuthenticated ? "Save and continue" : "Sign in to save"}
         </button>
       </div>
     </section>
