@@ -1,5 +1,6 @@
 import { createSlice, type PayloadAction } from "@reduxjs/toolkit";
 import {
+  ALL_TOPICS,
   generateSuggestions,
   generateTranscript,
   pickRandomTopics,
@@ -63,7 +64,7 @@ const initialState: AppState = {
   currentRecordingId: null,
   isPlaying: false,
   playbackPosition: 0,
-  topics: pickRandomTopics(),
+  topics: ALL_TOPICS.slice(0, 3),
   showAddTopicInput: false,
   customTopicDraft: "",
   calendarVisible: false,
