@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import { buildTranscriptSegments } from "../lib/transcriptHighlight";
 import { formatTime } from "../lib/utils";
 import { useAppDispatch, useAppSelector } from "../store/hooks";
 import { backToHistory } from "../store/slices/appSlice";
@@ -15,6 +16,13 @@ export default function ShareScreen() {
   );
   const hasTranscript = recording?.transcript.trim().length ? true : false;
   const hasSuggestions = recording?.suggestions.length ? true : false;
+  const transcriptSegments = useMemo(() => {
+    if (!recording) {
+      return [];
+    }
+
+    return buildTranscriptSegments(recording.transcript, recording.suggestions.map((item) => item.wrong));
+  }, [recording]);
 
   if (!recording) {
     return (
@@ -57,7 +65,17 @@ export default function ShareScreen() {
       <div className="transcript-section">
         <div className="section-title">Transcript</div>
         {hasTranscript ? (
-          <div className="transcript-text">{recording.transcript}</div>
+          <div className="transcript-text">
+            {transcriptSegments.map((segment, index) =>
+              segment.isError ? (
+                <mark key={`segment-${index}`} className="transcript-error-mark">
+                  {segment.text}
+                </mark>
+              ) : (
+                <span key={`segment-${index}`}>{segment.text}</span>
+              )
+            )}
+          </div>
         ) : (
           <div className="empty-state">Transcript is in progress and will be available soon.</div>
         )}

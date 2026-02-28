@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, type MouseEvent } from "react";
+import { buildTranscriptSegments } from "../lib/transcriptHighlight";
 import { formatTime } from "../lib/utils";
 import { useAppDispatch, useAppSelector } from "../store/hooks";
 import {
@@ -50,6 +51,10 @@ export default function DetailsScreen() {
   const playbackPercent = recording.duration > 0 ? (playbackPosition / recording.duration) * 100 : 0;
   const hasTranscript = recording.transcript.trim().length > 0;
   const hasSuggestions = recording.suggestions.length > 0;
+  const transcriptSegments = useMemo(
+    () => buildTranscriptSegments(recording.transcript, recording.suggestions.map((item) => item.wrong)),
+    [recording.transcript, recording.suggestions]
+  );
 
   const onSeek = (event: MouseEvent<HTMLDivElement>) => {
     const bounds = event.currentTarget.getBoundingClientRect();
@@ -91,7 +96,17 @@ export default function DetailsScreen() {
       <div className="transcript-section">
         <div className="section-title">Transcript</div>
         {hasTranscript ? (
-          <div className="transcript-text">{recording.transcript}</div>
+          <div className="transcript-text">
+            {transcriptSegments.map((segment, index) =>
+              segment.isError ? (
+                <mark key={`segment-${index}`} className="transcript-error-mark">
+                  {segment.text}
+                </mark>
+              ) : (
+                <span key={`segment-${index}`}>{segment.text}</span>
+              )
+            )}
+          </div>
         ) : (
           <div className="empty-state">Transcript is in progress and will be available soon.</div>
         )}
