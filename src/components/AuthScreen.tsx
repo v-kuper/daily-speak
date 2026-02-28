@@ -3,88 +3,79 @@
 import { FormEvent } from "react";
 import { useAppDispatch, useAppSelector } from "../store/hooks";
 import {
-  backToEmailStep,
   cancelAuth,
-  setAuthCodeDraft,
   setAuthEmailDraft,
-  submitAuthEmail,
-  verifyAuthCode
+  setAuthPasswordDraft,
+  signIn,
+  signUp
 } from "../store/slices/appSlice";
 
 export default function AuthScreen() {
   const dispatch = useAppDispatch();
-  const { authStep, authEmailDraft, authCodeDraft, authPendingEmail, authError, pendingSaveAfterAuth } =
-    useAppSelector((state) => state.app);
+  const { authEmailDraft, authPasswordDraft, authError, authStatus, pendingSaveAfterAuth } = useAppSelector(
+    (state) => state.app
+  );
+  const isLoading = authStatus === "loading";
 
-  const onSubmitEmail = (event: FormEvent<HTMLFormElement>) => {
+  const onSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    dispatch(submitAuthEmail());
+    void dispatch(signIn());
   };
 
-  const onSubmitCode = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    dispatch(verifyAuthCode());
+  const onRegister = () => {
+    void dispatch(signUp());
   };
 
   return (
     <section className="auth-screen">
       <h2>{pendingSaveAfterAuth ? "Sign in to save recording" : "Sign in / Register"}</h2>
 
-      {authStep === "email" ? (
-        <form className="auth-form" onSubmit={onSubmitEmail}>
-          <label htmlFor="auth-email" className="auth-label">
-            Email
-          </label>
-          <input
-            id="auth-email"
-            type="email"
-            autoComplete="email"
-            placeholder="name@example.com"
-            value={authEmailDraft}
-            onChange={(event) => dispatch(setAuthEmailDraft(event.target.value))}
-          />
+      <form className="auth-form" onSubmit={onSubmit}>
+        <label htmlFor="auth-email" className="auth-label">
+          Email
+        </label>
+        <input
+          id="auth-email"
+          type="email"
+          autoComplete="email"
+          placeholder="name@example.com"
+          value={authEmailDraft}
+          onChange={(event) => dispatch(setAuthEmailDraft(event.target.value))}
+          disabled={isLoading}
+        />
 
-          {authError && <div className="auth-error">{authError}</div>}
+        <label htmlFor="auth-password" className="auth-label">
+          Password
+        </label>
+        <input
+          id="auth-password"
+          type="password"
+          autoComplete="current-password"
+          placeholder="At least 8 characters"
+          value={authPasswordDraft}
+          onChange={(event) => dispatch(setAuthPasswordDraft(event.target.value))}
+          disabled={isLoading}
+        />
 
-          <div className="auth-buttons">
-            <button type="button" className="btn btn-secondary" onClick={() => dispatch(cancelAuth())}>
-              Back
-            </button>
-            <button type="submit" className="btn btn-primary">
-              Continue
-            </button>
-          </div>
-        </form>
-      ) : (
-        <form className="auth-form" onSubmit={onSubmitCode}>
-          <div className="auth-hint">Code was sent to {authPendingEmail}</div>
-          <div className="auth-hint">Mock code: 123456</div>
+        {authError && <div className="auth-error">{authError}</div>}
 
-          <label htmlFor="auth-code" className="auth-label">
-            Verification code
-          </label>
-          <input
-            id="auth-code"
-            type="text"
-            inputMode="numeric"
-            placeholder="123456"
-            maxLength={6}
-            value={authCodeDraft}
-            onChange={(event) => dispatch(setAuthCodeDraft(event.target.value.replace(/\s/g, "")))}
-          />
-
-          {authError && <div className="auth-error">{authError}</div>}
-
-          <div className="auth-buttons">
-            <button type="button" className="btn btn-secondary" onClick={() => dispatch(backToEmailStep())}>
-              Change email
-            </button>
-            <button type="submit" className="btn btn-primary">
-              Confirm
-            </button>
-          </div>
-        </form>
-      )}
+        <div className="auth-buttons">
+          <button type="button" className="btn btn-secondary" onClick={() => dispatch(cancelAuth())} disabled={isLoading}>
+            Back
+          </button>
+          <button type="submit" className="btn btn-primary" disabled={isLoading}>
+            {isLoading ? "Please wait..." : "Sign in"}
+          </button>
+        </div>
+        <button
+          type="button"
+          className="btn btn-secondary btn-large auth-create-btn"
+          onClick={onRegister}
+          disabled={isLoading}
+        >
+          {isLoading ? "Please wait..." : "Create account"}
+        </button>
+      </form>
     </section>
   );
 }

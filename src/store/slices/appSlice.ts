@@ -6,7 +6,7 @@ export type ScreenName = "speak" | "history" | "details" | "share" | "auth" | "p
 export type TabName = "speak" | "history";
 export type SpeakMode = "idle" | "readyToRecord" | "recording" | "recorded";
 export type ShareAction = "copy" | "preview";
-export type AuthStep = "email" | "code";
+export type AuthStatus = "idle" | "loading";
 export type QuestionsStatus = "idle" | "loading" | "ready" | "failed";
 export type InterestOption = {
   id: string;
@@ -141,11 +141,11 @@ export type AppState = {
   copyMessage: string | null;
   isAuthenticated: boolean;
   userEmail: string | null;
-  authStep: AuthStep;
   authEmailDraft: string;
-  authCodeDraft: string;
-  authPendingEmail: string;
+  authPasswordDraft: string;
   authError: string | null;
+  authStatus: AuthStatus;
+  authInitialized: boolean;
   pendingSaveAfterAuth: boolean;
   screenBeforeAuth: TabName;
   questionsStatus: QuestionsStatus;
@@ -162,8 +162,8 @@ export type AppState = {
 };
 
 const today = new Date();
-const MOCK_AUTH_CODE = "123456";
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const MIN_PASSWORD_LENGTH = 8;
 export const MAX_SELECTED_INTERESTS = 10;
 
 const INTEREST_LOOKUP = new Map(INTEREST_OPTIONS.map((item) => [item.id, item]));
@@ -202,6 +202,25 @@ type TopicGuidanceResponse = {
   questions?: unknown;
   words?: unknown;
   error?: string;
+};
+
+type AuthUserPayload = {
+  email?: unknown;
+};
+
+type AuthResponse = {
+  user?: AuthUserPayload;
+  error?: string;
+};
+
+const parseAuthEmail = (payload: AuthResponse | null): string | null => {
+  const email = payload?.user?.email;
+  if (typeof email !== "string") {
+    return null;
+  }
+
+  const normalized = email.trim().toLowerCase();
+  return EMAIL_PATTERN.test(normalized) ? normalized : null;
 };
 
 const buildInterestsKey = (interestIds: string[]): string => {
@@ -355,6 +374,120 @@ export const fetchTopicGuidance = createAsyncThunk<
   }
 );
 
+export const restoreSession = createAsyncThunk<
+  { email: string | null },
+  void,
+  { rejectValue: string }
+>("app/restoreSession", async (_, { rejectWithValue }) => {
+  try {
+    const response = await fetch("/api/auth/session", {
+      cache: "no-store"
+    });
+    const payload = (await response.json().catch(() => null)) as AuthResponse | null;
+
+    if (response.status === 401) {
+      return { email: null };
+    }
+
+    if (!response.ok) {
+      return rejectWithValue(payload?.error ?? "Failed to restore session.");
+    }
+
+    const email = parseAuthEmail(payload);
+    if (!email) {
+      return rejectWithValue("Invalid session payload.");
+    }
+
+    return { email };
+  } catch {
+    return rejectWithValue("Cannot connect to authentication service.");
+  }
+});
+
+export const signIn = createAsyncThunk<{ email: string }, void, { state: { app: AppState }; rejectValue: string }>(
+  "app/signIn",
+  async (_, { getState, rejectWithValue }) => {
+    const { authEmailDraft, authPasswordDraft } = getState().app;
+    const email = authEmailDraft.trim().toLowerCase();
+    const password = authPasswordDraft.trim();
+
+    if (!EMAIL_PATTERN.test(email)) {
+      return rejectWithValue("Enter a valid email address.");
+    }
+
+    if (password.length < MIN_PASSWORD_LENGTH) {
+      return rejectWithValue(`Password must be at least ${MIN_PASSWORD_LENGTH} characters.`);
+    }
+
+    try {
+      const response = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ email, password })
+      });
+      const payload = (await response.json().catch(() => null)) as AuthResponse | null;
+      const parsedEmail = parseAuthEmail(payload);
+
+      if (!response.ok || !parsedEmail) {
+        return rejectWithValue(payload?.error ?? "Failed to sign in.");
+      }
+
+      return { email: parsedEmail };
+    } catch {
+      return rejectWithValue("Cannot connect to authentication service.");
+    }
+  }
+);
+
+export const signUp = createAsyncThunk<{ email: string }, void, { state: { app: AppState }; rejectValue: string }>(
+  "app/signUp",
+  async (_, { getState, rejectWithValue }) => {
+    const { authEmailDraft, authPasswordDraft } = getState().app;
+    const email = authEmailDraft.trim().toLowerCase();
+    const password = authPasswordDraft.trim();
+
+    if (!EMAIL_PATTERN.test(email)) {
+      return rejectWithValue("Enter a valid email address.");
+    }
+
+    if (password.length < MIN_PASSWORD_LENGTH) {
+      return rejectWithValue(`Password must be at least ${MIN_PASSWORD_LENGTH} characters.`);
+    }
+
+    try {
+      const response = await fetch("/api/auth/register", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ email, password })
+      });
+      const payload = (await response.json().catch(() => null)) as AuthResponse | null;
+      const parsedEmail = parseAuthEmail(payload);
+
+      if (!response.ok || !parsedEmail) {
+        return rejectWithValue(payload?.error ?? "Failed to create account.");
+      }
+
+      return { email: parsedEmail };
+    } catch {
+      return rejectWithValue("Cannot connect to authentication service.");
+    }
+  }
+);
+
+export const logout = createAsyncThunk("app/logout", async () => {
+  try {
+    await fetch("/api/auth/logout", {
+      method: "POST"
+    });
+  } catch {
+    // Network failures should not block local logout.
+  }
+});
+
 const initialState: AppState = {
   currentScreen: "speak",
   activeTab: "speak",
@@ -379,11 +512,11 @@ const initialState: AppState = {
   copyMessage: null,
   isAuthenticated: false,
   userEmail: null,
-  authStep: "email",
   authEmailDraft: "",
-  authCodeDraft: "",
-  authPendingEmail: "",
+  authPasswordDraft: "",
   authError: null,
+  authStatus: "idle",
+  authInitialized: false,
   pendingSaveAfterAuth: false,
   screenBeforeAuth: "speak",
   questionsStatus: "idle",
@@ -417,10 +550,9 @@ const openAuthFlow = (state: AppState, pendingSaveAfterAuth: boolean): void => {
   state.screenBeforeAuth = state.activeTab;
   state.currentScreen = "auth";
   state.activeTab = "speak";
-  state.authStep = "email";
-  state.authCodeDraft = "";
-  state.authPendingEmail = "";
+  state.authPasswordDraft = "";
   state.authError = null;
+  state.authStatus = "idle";
   state.pendingSaveAfterAuth = pendingSaveAfterAuth;
   state.shareModalOpen = false;
   state.copyMessage = null;
@@ -459,6 +591,47 @@ const saveRecordingForAuthenticatedUser = (state: AppState): void => {
   resetPlayback(state);
 };
 
+const completeAuthSuccess = (state: AppState, email: string): void => {
+  state.isAuthenticated = true;
+  state.userEmail = email;
+  state.authPasswordDraft = "";
+  state.authError = null;
+  state.authStatus = "idle";
+  state.authInitialized = true;
+
+  if (state.pendingSaveAfterAuth && state.speakState === "recorded") {
+    saveRecordingForAuthenticatedUser(state);
+    return;
+  }
+
+  state.pendingSaveAfterAuth = false;
+  state.currentScreen = state.screenBeforeAuth;
+  state.activeTab = state.screenBeforeAuth;
+};
+
+const clearAuthenticatedState = (state: AppState): void => {
+  state.isAuthenticated = false;
+  state.userEmail = null;
+  state.activeTab = "speak";
+  state.currentScreen = "speak";
+  state.shareModalOpen = false;
+  state.copyMessage = null;
+  state.authPasswordDraft = "";
+  state.authError = null;
+  state.authStatus = "idle";
+  state.authInitialized = true;
+  state.pendingSaveAfterAuth = false;
+  state.screenBeforeAuth = "speak";
+  state.selectedInterestIds = [];
+  state.questionsInterestsKey = "";
+  state.questionsDate = null;
+  state.topics = [];
+  state.questionsStatus = "idle";
+  state.questionsError = null;
+  clearTopicGuidanceState(state);
+  resetPlayback(state);
+};
+
 const appSlice = createSlice({
   name: "app",
   initialState,
@@ -469,10 +642,9 @@ const appSlice = createSlice({
       }
       if (state.currentScreen === "auth") {
         state.pendingSaveAfterAuth = false;
-        state.authStep = "email";
-        state.authCodeDraft = "";
-        state.authPendingEmail = "";
+        state.authPasswordDraft = "";
         state.authError = null;
+        state.authStatus = "idle";
       }
       state.activeTab = action.payload;
       state.currentScreen = action.payload;
@@ -741,83 +913,75 @@ const appSlice = createSlice({
     cancelAuth: (state) => {
       state.currentScreen = state.screenBeforeAuth;
       state.activeTab = state.screenBeforeAuth;
-      state.authStep = "email";
-      state.authCodeDraft = "";
-      state.authPendingEmail = "";
+      state.authPasswordDraft = "";
       state.authError = null;
+      state.authStatus = "idle";
       state.pendingSaveAfterAuth = false;
     },
     setAuthEmailDraft: (state, action: PayloadAction<string>) => {
       state.authEmailDraft = action.payload;
       state.authError = null;
     },
-    submitAuthEmail: (state) => {
-      const email = state.authEmailDraft.trim().toLowerCase();
-      if (!EMAIL_PATTERN.test(email)) {
-        state.authError = "Enter a valid email address.";
-        return;
-      }
-      state.authPendingEmail = email;
-      state.authStep = "code";
-      state.authCodeDraft = "";
+    setAuthPasswordDraft: (state, action: PayloadAction<string>) => {
+      state.authPasswordDraft = action.payload;
       state.authError = null;
-    },
-    backToEmailStep: (state) => {
-      state.authStep = "email";
-      state.authCodeDraft = "";
-      state.authError = null;
-    },
-    setAuthCodeDraft: (state, action: PayloadAction<string>) => {
-      state.authCodeDraft = action.payload;
-      state.authError = null;
-    },
-    verifyAuthCode: (state) => {
-      if (state.authCodeDraft.trim() !== MOCK_AUTH_CODE) {
-        state.authError = `Invalid code. Use ${MOCK_AUTH_CODE} for demo login.`;
-        return;
-      }
-
-      state.isAuthenticated = true;
-      state.userEmail = state.authPendingEmail || state.authEmailDraft.trim().toLowerCase();
-      state.authStep = "email";
-      state.authCodeDraft = "";
-      state.authPendingEmail = "";
-      state.authError = null;
-
-      if (state.pendingSaveAfterAuth && state.speakState === "recorded") {
-        saveRecordingForAuthenticatedUser(state);
-        return;
-      }
-
-      state.pendingSaveAfterAuth = false;
-      state.currentScreen = state.screenBeforeAuth;
-      state.activeTab = state.screenBeforeAuth;
-    },
-    logout: (state) => {
-      state.isAuthenticated = false;
-      state.userEmail = null;
-      state.activeTab = "speak";
-      state.currentScreen = "speak";
-      state.shareModalOpen = false;
-      state.copyMessage = null;
-      state.authStep = "email";
-      state.authCodeDraft = "";
-      state.authPendingEmail = "";
-      state.authError = null;
-      state.pendingSaveAfterAuth = false;
-      state.screenBeforeAuth = "speak";
-      state.selectedInterestIds = [];
-      state.questionsInterestsKey = "";
-      state.questionsDate = null;
-      state.topics = [];
-      state.questionsStatus = "idle";
-      state.questionsError = null;
-      clearTopicGuidanceState(state);
-      resetPlayback(state);
     }
   },
   extraReducers: (builder) => {
     builder
+      .addCase(restoreSession.pending, (state) => {
+        state.authStatus = "loading";
+        state.authError = null;
+      })
+      .addCase(restoreSession.fulfilled, (state, action) => {
+        state.authStatus = "idle";
+        state.authInitialized = true;
+        const email = action.payload.email;
+
+        if (email) {
+          state.isAuthenticated = true;
+          state.userEmail = email;
+          return;
+        }
+
+        state.isAuthenticated = false;
+        state.userEmail = null;
+      })
+      .addCase(restoreSession.rejected, (state, action) => {
+        state.authStatus = "idle";
+        state.authInitialized = true;
+        state.authError = action.payload ?? null;
+        state.isAuthenticated = false;
+        state.userEmail = null;
+      })
+      .addCase(signIn.pending, (state) => {
+        state.authStatus = "loading";
+        state.authError = null;
+      })
+      .addCase(signIn.fulfilled, (state, action) => {
+        completeAuthSuccess(state, action.payload.email);
+      })
+      .addCase(signIn.rejected, (state, action) => {
+        state.authStatus = "idle";
+        state.authError = action.payload ?? "Failed to sign in.";
+      })
+      .addCase(signUp.pending, (state) => {
+        state.authStatus = "loading";
+        state.authError = null;
+      })
+      .addCase(signUp.fulfilled, (state, action) => {
+        completeAuthSuccess(state, action.payload.email);
+      })
+      .addCase(signUp.rejected, (state, action) => {
+        state.authStatus = "idle";
+        state.authError = action.payload ?? "Failed to create account.";
+      })
+      .addCase(logout.fulfilled, (state) => {
+        clearAuthenticatedState(state);
+      })
+      .addCase(logout.rejected, (state) => {
+        clearAuthenticatedState(state);
+      })
       .addCase(fetchDailyQuestions.pending, (state) => {
         state.questionsStatus = "loading";
         state.questionsError = null;
@@ -900,11 +1064,7 @@ export const {
   openAuth,
   cancelAuth,
   setAuthEmailDraft,
-  submitAuthEmail,
-  backToEmailStep,
-  setAuthCodeDraft,
-  verifyAuthCode,
-  logout
+  setAuthPasswordDraft
 } = appSlice.actions;
 
 export default appSlice.reducer;

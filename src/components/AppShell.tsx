@@ -1,7 +1,8 @@
 "use client";
 
+import { useEffect } from "react";
 import { useAppDispatch, useAppSelector } from "../store/hooks";
-import { logout, navigateToTab, openAuth, openProfile } from "../store/slices/appSlice";
+import { logout, navigateToTab, openAuth, openProfile, restoreSession } from "../store/slices/appSlice";
 import AuthScreen from "./AuthScreen";
 import DetailsScreen from "./DetailsScreen";
 import HistoryScreen from "./HistoryScreen";
@@ -12,7 +13,17 @@ import SpeakScreen from "./SpeakScreen";
 
 export default function AppShell() {
   const dispatch = useAppDispatch();
-  const { currentScreen, activeTab, isAuthenticated, userEmail } = useAppSelector((state) => state.app);
+  const { currentScreen, activeTab, isAuthenticated, userEmail, authInitialized, authStatus } = useAppSelector(
+    (state) => state.app
+  );
+
+  useEffect(() => {
+    if (authInitialized || authStatus === "loading") {
+      return;
+    }
+
+    void dispatch(restoreSession());
+  }, [authInitialized, authStatus, dispatch]);
 
   return (
     <div className="app-container">
@@ -50,8 +61,9 @@ export default function AppShell() {
                 className="btn btn-secondary btn-small"
                 onClick={(event) => {
                   event.stopPropagation();
-                  dispatch(logout());
+                  void dispatch(logout());
                 }}
+                disabled={authStatus === "loading"}
               >
                 Log out
               </button>

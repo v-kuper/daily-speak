@@ -15,6 +15,32 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000).
 
+## PostgreSQL setup (real auth)
+
+The app now uses PostgreSQL for real authentication:
+- user registration (`email + password`)
+- sign-in
+- server-side session storage with HTTP-only cookie
+
+Set these variables before running the app:
+
+```bash
+export DATABASE_URL=postgres://user:password@localhost:5432/daily_speaking
+# Optional: use for managed PostgreSQL with SSL requirement
+export DATABASE_SSL=require
+```
+
+Database schema is created automatically on first request to auth API.
+
+Quick local start with Docker:
+
+```bash
+docker compose up -d postgres
+cp .env.example .env.local
+```
+
+After creating/updating `.env.local`, restart `npm run dev`.
+
 ## Ollama setup (daily questions)
 
 The app now uses local Ollama to:

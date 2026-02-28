@@ -822,6 +822,10 @@ input {
   flex: 1;
 }
 
+.auth-create-btn {
+  margin-top: 12px;
+}
+
 .auth-hint {
   color: #666;
   font-size: 13px;
