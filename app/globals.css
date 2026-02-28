@@ -127,6 +127,11 @@ input {
   text-align: center;
 }
 
+.btn:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
 .btn-primary {
   background: #2c2c2c;
   color: #fff;
@@ -736,6 +741,10 @@ input {
   border-radius: 8px;
   font-size: 13px;
   padding: 8px 10px;
+}
+
+.top-spaced {
+  margin-top: 12px;
 }
 
 @media (max-width: 720px) {

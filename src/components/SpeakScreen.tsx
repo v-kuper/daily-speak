@@ -1,11 +1,13 @@
 "use client";
 
 import { useEffect } from "react";
-import { getTopicData } from "../lib/data";
-import { formatTime } from "../lib/utils";
+import { formatTime, toDateKey } from "../lib/utils";
 import { useAppDispatch, useAppSelector } from "../store/hooks";
 import {
-  refreshTopics,
+  clearQuestionsError,
+  clearTopicGuidanceError,
+  fetchDailyQuestions,
+  fetchTopicGuidance,
   reRecord,
   saveRecording,
   selectTopic,
@@ -31,7 +33,13 @@ export default function SpeakScreen() {
     topics,
     showAddTopicInput,
     customTopicDraft,
-    isAuthenticated
+    isAuthenticated,
+    questionsStatus,
+    questionsError,
+    topicGuidanceQuestions,
+    topicGuidanceWords,
+    topicGuidanceStatus,
+    topicGuidanceError
   } = useAppSelector((state) => state.app);
 
   useEffect(() => {
@@ -46,6 +54,32 @@ export default function SpeakScreen() {
     return () => window.clearInterval(timer);
   }, [dispatch, speakState]);
 
+  useEffect(() => {
+    const dateKey = toDateKey(new Date());
+    void dispatch(fetchDailyQuestions({ dateKey }));
+  }, [dispatch]);
+
+  useEffect(() => {
+    if (!selectedTopic) {
+      return;
+    }
+    void dispatch(fetchTopicGuidance({ topic: selectedTopic }));
+  }, [dispatch, selectedTopic]);
+
+  const onRefreshQuestions = () => {
+    const dateKey = toDateKey(new Date());
+    dispatch(clearQuestionsError());
+    void dispatch(fetchDailyQuestions({ dateKey, force: true, refreshToken: String(Date.now()) }));
+  };
+
+  const onRefreshTopicGuidance = () => {
+    if (!selectedTopic) {
+      return;
+    }
+    dispatch(clearTopicGuidanceError());
+    void dispatch(fetchTopicGuidance({ topic: selectedTopic, force: true, refreshToken: String(Date.now()) }));
+  };
+
   if (speakState === "idle") {
     return (
       <section>
@@ -54,7 +88,13 @@ export default function SpeakScreen() {
         </button>
 
         <div className="section">
-          <div className="section-title">Today&apos;s topics</div>
+          <div className="section-title">Today&apos;s questions</div>
+          {questionsStatus === "loading" && topics.length === 0 && (
+            <div className="section-content">Generating questions with local Ollama...</div>
+          )}
+          {topics.length === 0 && questionsStatus !== "loading" && (
+            <div className="empty-state">No daily questions yet.</div>
+          )}
           <div className="topics-grid">
             {topics.map((topic) => (
               <button key={topic} className="topic-btn" onClick={() => dispatch(selectTopic(topic))}>
@@ -62,9 +102,14 @@ export default function SpeakScreen() {
               </button>
             ))}
           </div>
-          <button className="btn btn-secondary btn-small" onClick={() => dispatch(refreshTopics())}>
-            ↻ Refresh topics
+          <button
+            className="btn btn-secondary btn-small"
+            onClick={onRefreshQuestions}
+            disabled={questionsStatus === "loading"}
+          >
+            {questionsStatus === "loading" ? "Generating..." : "↻ Regenerate questions"}
           </button>
+          {questionsError && <div className="auth-error top-spaced">{questionsError}</div>}
         </div>
 
         <div className="section">
@@ -96,25 +141,30 @@ export default function SpeakScreen() {
   }
 
   if (speakState === "readyToRecord") {
-    const topicData = getTopicData(selectedTopic ?? "");
+    const shouldShowQuestions = showQuestions && topicGuidanceQuestions.length > 0;
+    const shouldShowWords = showWords && topicGuidanceWords.length > 0;
 
     return (
       <section>
-        <div className="heading-sm">Selected topic</div>
+        <div className="heading-sm">Selected question</div>
         <h2 className="heading-xl">{selectedTopic}</h2>
 
         <button className="btn btn-primary btn-large" onClick={() => dispatch(startRecording())}>
           Start speaking
         </button>
 
-        {topicData.questions.length > 0 && (
+        {topicGuidanceStatus === "loading" && (
+          <div className="section-content">Generating follow-up questions and useful words...</div>
+        )}
+
+        {topicGuidanceQuestions.length > 0 && (
           <div className="collapsible-section">
             <button className="collapsible-header" onClick={() => dispatch(toggleQuestions())}>
-              <span>Show questions</span>
+              <span>Follow-up questions</span>
               <span className={`toggle-arrow ${showQuestions ? "open" : ""}`}>↓</span>
             </button>
-            <div className={`collapsible-content ${showQuestions ? "open" : ""}`}>
-              {topicData.questions.map((question) => (
+            <div className={`collapsible-content ${shouldShowQuestions ? "open" : ""}`}>
+              {topicGuidanceQuestions.map((question) => (
                 <div key={question} className="question-item">
                   {question}
                 </div>
@@ -123,14 +173,14 @@ export default function SpeakScreen() {
           </div>
         )}
 
-        {topicData.words.length > 0 && (
+        {topicGuidanceWords.length > 0 && (
           <div className="collapsible-section">
             <button className="collapsible-header" onClick={() => dispatch(toggleWords())}>
-              <span>Useful words (optional)</span>
+              <span>Useful words</span>
               <span className={`toggle-arrow ${showWords ? "open" : ""}`}>↓</span>
             </button>
-            <div className={`collapsible-content ${showWords ? "open" : ""}`}>
-              {topicData.words.map((word) => (
+            <div className={`collapsible-content ${shouldShowWords ? "open" : ""}`}>
+              {topicGuidanceWords.map((word) => (
                 <div key={word} className="word-item">
                   {word}
                 </div>
@@ -138,13 +188,22 @@ export default function SpeakScreen() {
             </div>
           </div>
         )}
+
+        <button
+          className="btn btn-secondary btn-small"
+          onClick={onRefreshTopicGuidance}
+          disabled={topicGuidanceStatus === "loading"}
+        >
+          {topicGuidanceStatus === "loading" ? "Generating..." : "↻ Regenerate questions and words"}
+        </button>
+
+        {topicGuidanceError && <div className="auth-error top-spaced">{topicGuidanceError}</div>}
       </section>
     );
   }
 
   if (speakState === "recording") {
-    const topicData = selectedTopic ? getTopicData(selectedTopic) : { questions: [], words: [] };
-    const shouldShowQuestions = showQuestions && topicData.questions.length > 0;
+    const shouldShowQuestions = showQuestions && topicGuidanceQuestions.length > 0;
 
     return (
       <section>
@@ -159,7 +218,7 @@ export default function SpeakScreen() {
           <div className="section">
             <div className="section-title">Questions</div>
             <div className="section-content">
-              {topicData.questions.map((question) => (
+              {topicGuidanceQuestions.map((question) => (
                 <div key={question} className="question-item">
                   {question}
                 </div>

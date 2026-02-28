@@ -1,11 +1,5 @@
-import { createSlice, type PayloadAction } from "@reduxjs/toolkit";
-import {
-  ALL_TOPICS,
-  generateSuggestions,
-  generateTranscript,
-  pickRandomTopics,
-  type Recording
-} from "../../lib/data";
+import { createAsyncThunk, createSlice, type PayloadAction } from "@reduxjs/toolkit";
+import { generateSuggestions, generateTranscript, type Recording } from "../../lib/data";
 import { toDateKey } from "../../lib/utils";
 
 export type ScreenName = "speak" | "history" | "details" | "share" | "auth";
@@ -13,6 +7,7 @@ export type TabName = "speak" | "history";
 export type SpeakMode = "idle" | "readyToRecord" | "recording" | "recorded";
 export type ShareAction = "copy" | "preview";
 export type AuthStep = "email" | "code";
+export type QuestionsStatus = "idle" | "loading" | "ready" | "failed";
 
 export type AppState = {
   currentScreen: ScreenName;
@@ -45,11 +40,178 @@ export type AppState = {
   authError: string | null;
   pendingSaveAfterAuth: boolean;
   screenBeforeAuth: TabName;
+  questionsStatus: QuestionsStatus;
+  questionsError: string | null;
+  questionsDate: string | null;
+  topicGuidanceQuestions: string[];
+  topicGuidanceWords: string[];
+  topicGuidanceStatus: QuestionsStatus;
+  topicGuidanceError: string | null;
+  topicGuidanceTopic: string | null;
 };
 
 const today = new Date();
 const MOCK_AUTH_CODE = "123456";
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+type FetchDailyQuestionsArgs = {
+  dateKey: string;
+  force?: boolean;
+  refreshToken?: string;
+};
+
+type FetchDailyQuestionsResult = {
+  dateKey: string;
+  questions: string[];
+};
+
+type DailyQuestionsResponse = {
+  questions?: unknown;
+  error?: string;
+};
+
+type FetchTopicGuidanceArgs = {
+  topic: string;
+  force?: boolean;
+  refreshToken?: string;
+};
+
+type FetchTopicGuidanceResult = {
+  topic: string;
+  questions: string[];
+  words: string[];
+};
+
+type TopicGuidanceResponse = {
+  questions?: unknown;
+  words?: unknown;
+  error?: string;
+};
+
+export const fetchDailyQuestions = createAsyncThunk<
+  FetchDailyQuestionsResult,
+  FetchDailyQuestionsArgs,
+  { state: { app: AppState }; rejectValue: string }
+>(
+  "app/fetchDailyQuestions",
+  async ({ dateKey, refreshToken }, { rejectWithValue }) => {
+    try {
+      const params = new URLSearchParams({ date: dateKey });
+      if (refreshToken) {
+        params.set("refresh", refreshToken);
+      }
+
+      const response = await fetch(`/api/daily-questions?${params.toString()}`, {
+        cache: "no-store"
+      });
+      const payload = (await response.json().catch(() => null)) as DailyQuestionsResponse | null;
+
+      if (!response.ok) {
+        return rejectWithValue(payload?.error ?? "Failed to load daily questions from Ollama.");
+      }
+
+      const questions = Array.isArray(payload?.questions)
+        ? payload.questions
+            .filter((item): item is string => typeof item === "string")
+            .map((item) => item.trim())
+            .filter((item) => item.length > 0)
+        : [];
+
+      if (questions.length !== 3) {
+        return rejectWithValue("Ollama must return exactly 3 questions.");
+      }
+
+      return { dateKey, questions };
+    } catch {
+      return rejectWithValue("Cannot connect to local Ollama. Make sure Ollama is running.");
+    }
+  },
+  {
+    condition: ({ dateKey, force }, { getState }) => {
+      if (force) {
+        return true;
+      }
+      const { app } = getState();
+      if (app.questionsStatus === "loading") {
+        return false;
+      }
+      if (app.questionsDate === dateKey && app.topics.length === 3) {
+        return false;
+      }
+      return true;
+    }
+  }
+);
+
+export const fetchTopicGuidance = createAsyncThunk<
+  FetchTopicGuidanceResult,
+  FetchTopicGuidanceArgs,
+  { state: { app: AppState }; rejectValue: string }
+>(
+  "app/fetchTopicGuidance",
+  async ({ topic, refreshToken }, { rejectWithValue }) => {
+    try {
+      const params = new URLSearchParams({ topic });
+      if (refreshToken) {
+        params.set("refresh", refreshToken);
+      }
+
+      const response = await fetch(`/api/topic-guidance?${params.toString()}`, {
+        cache: "no-store"
+      });
+      const payload = (await response.json().catch(() => null)) as TopicGuidanceResponse | null;
+
+      if (!response.ok) {
+        return rejectWithValue(payload?.error ?? "Failed to generate questions and useful words.");
+      }
+
+      const questions = Array.isArray(payload?.questions)
+        ? payload.questions
+            .filter((item): item is string => typeof item === "string")
+            .map((item) => item.trim())
+            .filter((item) => item.length > 0)
+        : [];
+
+      const words = Array.isArray(payload?.words)
+        ? payload.words
+            .filter((item): item is string => typeof item === "string")
+            .map((item) => item.trim())
+            .filter((item) => item.length > 0)
+        : [];
+
+      if (questions.length === 0 || words.length === 0) {
+        return rejectWithValue("Ollama returned empty guidance for this topic.");
+      }
+
+      return {
+        topic,
+        questions: questions.slice(0, 4),
+        words: words.slice(0, 10)
+      };
+    } catch {
+      return rejectWithValue("Cannot connect to local Ollama. Make sure Ollama is running.");
+    }
+  },
+  {
+    condition: ({ topic, force }, { getState }) => {
+      if (force) {
+        return true;
+      }
+      const normalizedTopic = topic.trim();
+      if (!normalizedTopic) {
+        return false;
+      }
+      const { app } = getState();
+      if (app.topicGuidanceStatus === "loading" && app.topicGuidanceTopic === normalizedTopic) {
+        return false;
+      }
+      if (app.topicGuidanceTopic === normalizedTopic && app.topicGuidanceStatus === "ready") {
+        return false;
+      }
+      return true;
+    }
+  }
+);
 
 const initialState: AppState = {
   currentScreen: "speak",
@@ -64,7 +226,7 @@ const initialState: AppState = {
   currentRecordingId: null,
   isPlaying: false,
   playbackPosition: 0,
-  topics: ALL_TOPICS.slice(0, 3),
+  topics: [],
   showAddTopicInput: false,
   customTopicDraft: "",
   calendarVisible: false,
@@ -81,12 +243,28 @@ const initialState: AppState = {
   authPendingEmail: "",
   authError: null,
   pendingSaveAfterAuth: false,
-  screenBeforeAuth: "speak"
+  screenBeforeAuth: "speak",
+  questionsStatus: "idle",
+  questionsError: null,
+  questionsDate: null,
+  topicGuidanceQuestions: [],
+  topicGuidanceWords: [],
+  topicGuidanceStatus: "idle",
+  topicGuidanceError: null,
+  topicGuidanceTopic: null
 };
 
 const resetPlayback = (state: AppState): void => {
   state.isPlaying = false;
   state.playbackPosition = 0;
+};
+
+const clearTopicGuidanceState = (state: AppState): void => {
+  state.topicGuidanceQuestions = [];
+  state.topicGuidanceWords = [];
+  state.topicGuidanceStatus = "idle";
+  state.topicGuidanceError = null;
+  state.topicGuidanceTopic = null;
 };
 
 const openAuthFlow = (state: AppState, pendingSaveAfterAuth: boolean): void => {
@@ -131,6 +309,7 @@ const saveRecordingForAuthenticatedUser = (state: AppState): void => {
   state.calendarYear = now.getFullYear();
   state.copyMessage = null;
   state.pendingSaveAfterAuth = false;
+  clearTopicGuidanceState(state);
   resetPlayback(state);
 };
 
@@ -157,8 +336,11 @@ const appSlice = createSlice({
       }
       resetPlayback(state);
     },
-    refreshTopics: (state) => {
-      state.topics = pickRandomTopics();
+    clearQuestionsError: (state) => {
+      state.questionsError = null;
+    },
+    clearTopicGuidanceError: (state) => {
+      state.topicGuidanceError = null;
     },
     startFreeTalk: (state) => {
       state.selectedTopic = null;
@@ -167,6 +349,7 @@ const appSlice = createSlice({
       state.speakState = "recording";
       state.recordingDuration = 0;
       state.copyMessage = null;
+      clearTopicGuidanceState(state);
     },
     selectTopic: (state, action: PayloadAction<string>) => {
       state.selectedTopic = action.payload;
@@ -176,6 +359,9 @@ const appSlice = createSlice({
       state.showAddTopicInput = false;
       state.customTopicDraft = "";
       state.copyMessage = null;
+      if (state.topicGuidanceTopic !== action.payload) {
+        clearTopicGuidanceState(state);
+      }
     },
     toggleQuestions: (state) => {
       state.showQuestions = !state.showQuestions;
@@ -234,6 +420,9 @@ const appSlice = createSlice({
       state.showWords = false;
       state.showAddTopicInput = false;
       state.customTopicDraft = "";
+      if (state.topicGuidanceTopic !== normalized) {
+        clearTopicGuidanceState(state);
+      }
     },
     toggleCalendar: (state) => {
       state.calendarVisible = !state.calendarVisible;
@@ -420,12 +609,52 @@ const appSlice = createSlice({
       state.screenBeforeAuth = "speak";
       resetPlayback(state);
     }
+  },
+  extraReducers: (builder) => {
+    builder
+      .addCase(fetchDailyQuestions.pending, (state) => {
+        state.questionsStatus = "loading";
+        state.questionsError = null;
+      })
+      .addCase(fetchDailyQuestions.fulfilled, (state, action) => {
+        state.topics = action.payload.questions;
+        state.questionsDate = action.payload.dateKey;
+        state.questionsStatus = "ready";
+        state.questionsError = null;
+      })
+      .addCase(fetchDailyQuestions.rejected, (state, action) => {
+        state.questionsStatus = state.topics.length > 0 ? "ready" : "failed";
+        state.questionsError = action.payload ?? "Failed to generate questions.";
+      })
+      .addCase(fetchTopicGuidance.pending, (state, action) => {
+        const topic = action.meta.arg.topic.trim();
+        if (state.topicGuidanceTopic !== topic) {
+          state.topicGuidanceQuestions = [];
+          state.topicGuidanceWords = [];
+        }
+        state.topicGuidanceTopic = topic;
+        state.topicGuidanceStatus = "loading";
+        state.topicGuidanceError = null;
+      })
+      .addCase(fetchTopicGuidance.fulfilled, (state, action) => {
+        state.topicGuidanceTopic = action.payload.topic;
+        state.topicGuidanceQuestions = action.payload.questions;
+        state.topicGuidanceWords = action.payload.words;
+        state.topicGuidanceStatus = "ready";
+        state.topicGuidanceError = null;
+      })
+      .addCase(fetchTopicGuidance.rejected, (state, action) => {
+        state.topicGuidanceStatus =
+          state.topicGuidanceQuestions.length > 0 || state.topicGuidanceWords.length > 0 ? "ready" : "failed";
+        state.topicGuidanceError = action.payload ?? "Failed to generate guidance.";
+      });
   }
 });
 
 export const {
   navigateToTab,
-  refreshTopics,
+  clearQuestionsError,
+  clearTopicGuidanceError,
   startFreeTalk,
   selectTopic,
   toggleQuestions,
