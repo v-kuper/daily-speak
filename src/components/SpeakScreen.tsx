@@ -8,6 +8,7 @@ import {
   clearTopicGuidanceError,
   fetchDailyQuestions,
   fetchTopicGuidance,
+  openAuthForSave,
   reRecord,
   saveRecording,
   selectTopic,
@@ -40,7 +41,9 @@ export default function SpeakScreen() {
     topicGuidanceQuestions,
     topicGuidanceWords,
     topicGuidanceStatus,
-    topicGuidanceError
+    topicGuidanceError,
+    recordingSaveStatus,
+    recordingSaveError
   } = useAppSelector((state) => state.app);
 
   useEffect(() => {
@@ -96,6 +99,8 @@ export default function SpeakScreen() {
   };
 
   if (speakState === "idle") {
+    const shouldShowQuestionsSkeleton = questionsStatus === "loading" && topics.length === 0;
+
     return (
       <section>
         <button className="btn btn-primary btn-large" onClick={() => dispatch(startFreeTalk())}>
@@ -104,19 +109,26 @@ export default function SpeakScreen() {
 
         <div className="section">
           <div className="section-title">Today&apos;s questions</div>
-          {questionsStatus === "loading" && topics.length === 0 && (
-            <div className="section-content">Generating questions with local Ollama...</div>
-          )}
-          {topics.length === 0 && questionsStatus !== "loading" && (
+          {shouldShowQuestionsSkeleton ? (
+            <div className="topics-grid topics-grid-skeleton" aria-hidden="true">
+              {Array.from({ length: 3 }).map((_, index) => (
+                <div key={`topic-skeleton-${index}`} className="topic-skeleton">
+                  <div className="skeleton-line skeleton-line-wide" />
+                  <div className="skeleton-line skeleton-line-medium" />
+                </div>
+              ))}
+            </div>
+          ) : topics.length === 0 && questionsStatus !== "loading" ? (
             <div className="empty-state">No daily questions yet.</div>
+          ) : (
+            <div className="topics-grid">
+              {topics.map((topic) => (
+                <button key={topic} className="topic-btn" onClick={() => dispatch(selectTopic(topic))}>
+                  {topic}
+                </button>
+              ))}
+            </div>
           )}
-          <div className="topics-grid">
-            {topics.map((topic) => (
-              <button key={topic} className="topic-btn" onClick={() => dispatch(selectTopic(topic))}>
-                {topic}
-              </button>
-            ))}
-          </div>
           <button
             className="btn btn-secondary btn-small"
             onClick={onRefreshQuestions}
@@ -158,6 +170,8 @@ export default function SpeakScreen() {
   if (speakState === "readyToRecord") {
     const shouldShowQuestions = showQuestions && topicGuidanceQuestions.length > 0;
     const shouldShowWords = showWords && topicGuidanceWords.length > 0;
+    const shouldShowGuidanceSkeleton =
+      topicGuidanceStatus === "loading" && topicGuidanceQuestions.length === 0 && topicGuidanceWords.length === 0;
 
     return (
       <section>
@@ -168,8 +182,13 @@ export default function SpeakScreen() {
           Start speaking
         </button>
 
-        {topicGuidanceStatus === "loading" && (
-          <div className="section-content">Generating follow-up questions and useful words...</div>
+        {shouldShowGuidanceSkeleton && (
+          <div className="guidance-skeleton" aria-hidden="true">
+            <div className="guidance-skeleton-title skeleton-line skeleton-line-short" />
+            <div className="guidance-skeleton-item skeleton-line skeleton-line-wide" />
+            <div className="guidance-skeleton-item skeleton-line skeleton-line-wide" />
+            <div className="guidance-skeleton-item skeleton-line skeleton-line-medium" />
+          </div>
         )}
 
         {topicGuidanceQuestions.length > 0 && (
@@ -264,10 +283,25 @@ export default function SpeakScreen() {
         <button className="btn btn-secondary" onClick={() => dispatch(reRecord())}>
           Re-record
         </button>
-        <button className="btn btn-primary" onClick={() => dispatch(saveRecording())}>
-          {isAuthenticated ? "Save and continue" : "Sign in to save"}
+        <button
+          className="btn btn-primary"
+          onClick={() => {
+            if (!isAuthenticated) {
+              dispatch(openAuthForSave());
+              return;
+            }
+            void dispatch(saveRecording());
+          }}
+          disabled={recordingSaveStatus === "loading"}
+        >
+          {isAuthenticated
+            ? recordingSaveStatus === "loading"
+              ? "Saving..."
+              : "Save and continue"
+            : "Sign in to save"}
         </button>
       </div>
+      {recordingSaveError && <div className="auth-error top-spaced">{recordingSaveError}</div>}
     </section>
   );
 }

@@ -117,7 +117,7 @@ const parseQuestions = (content: string): ParsedQuestions | null => {
 const createPrompt = (dateKey: string, refreshToken: string | null, interests: string[]): string => {
   const parts = [
     `Generate exactly 3 daily English speaking practice questions for ${dateKey}.`,
-    "Audience: intermediate learner (A1-B1).",
+    "Audience: intermediate learner (A2-B1).",
     "Questions must be short, practical, and suitable for a 1-3 minute spoken answer.",
     'Return only JSON with this exact shape: {"questions":["question 1","question 2","question 3"]}.',
     "Do not add markdown, explanations, numbering, or extra keys."

@@ -21,6 +21,8 @@ The app now uses PostgreSQL for real authentication:
 - user registration (`email + password`)
 - sign-in
 - server-side session storage with HTTP-only cookie
+- persisted user interests
+- persisted recordings history
 
 Set these variables before running the app:
 

@@ -1,5 +1,5 @@
 import { createAsyncThunk, createSlice, type PayloadAction } from "@reduxjs/toolkit";
-import { generateSuggestions, generateTranscript, type Recording } from "../../lib/data";
+import { generateSuggestions, generateTranscript, type Recording, type Suggestion } from "../../lib/data";
 import { toDateKey } from "../../lib/utils";
 
 export type ScreenName = "speak" | "history" | "details" | "share" | "auth" | "profile" | "interests";
@@ -159,6 +159,12 @@ export type AppState = {
   topicGuidanceTopic: string | null;
   topicGuidanceInterestsKey: string;
   selectedInterestIds: string[];
+  userDataStatus: QuestionsStatus;
+  userDataError: string | null;
+  recordingSaveStatus: AuthStatus;
+  recordingSaveError: string | null;
+  interestsSaveStatus: AuthStatus;
+  interestsSaveError: string | null;
 };
 
 const today = new Date();
@@ -213,6 +219,22 @@ type AuthResponse = {
   error?: string;
 };
 
+type UserDataResponse = {
+  interestIds?: unknown;
+  recordings?: unknown;
+  error?: string;
+};
+
+type SaveInterestsResponse = {
+  interestIds?: unknown;
+  error?: string;
+};
+
+type SaveRecordingResponse = {
+  recording?: unknown;
+  error?: string;
+};
+
 const parseAuthEmail = (payload: AuthResponse | null): string | null => {
   const email = payload?.user?.email;
   if (typeof email !== "string") {
@@ -221,6 +243,88 @@ const parseAuthEmail = (payload: AuthResponse | null): string | null => {
 
   const normalized = email.trim().toLowerCase();
   return EMAIL_PATTERN.test(normalized) ? normalized : null;
+};
+
+const normalizeInterestIds = (value: unknown): string[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+
+  for (const item of value) {
+    if (typeof item !== "string") {
+      continue;
+    }
+
+    const cleaned = item.trim();
+    if (!cleaned || !INTEREST_LOOKUP.has(cleaned)) {
+      continue;
+    }
+
+    if (seen.has(cleaned)) {
+      continue;
+    }
+
+    seen.add(cleaned);
+    normalized.push(cleaned);
+
+    if (normalized.length >= MAX_SELECTED_INTERESTS) {
+      break;
+    }
+  }
+
+  return normalized;
+};
+
+const parseSuggestion = (value: unknown): Suggestion | null => {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  const wrong = typeof candidate.wrong === "string" ? candidate.wrong.trim() : "";
+  const right = typeof candidate.right === "string" ? candidate.right.trim() : "";
+  const explanation = typeof candidate.explanation === "string" ? candidate.explanation.trim() : "";
+
+  if (!wrong || !right || !explanation) {
+    return null;
+  }
+
+  return { wrong, right, explanation };
+};
+
+const parseRecording = (value: unknown): Recording | null => {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  const id = typeof candidate.id === "string" ? candidate.id.trim() : "";
+  const topic = typeof candidate.topic === "string" ? candidate.topic.trim() : "";
+  const transcript = typeof candidate.transcript === "string" ? candidate.transcript.trim() : "";
+  const timestampRaw = typeof candidate.timestamp === "string" ? candidate.timestamp : "";
+  const timestamp = new Date(timestampRaw);
+  const duration = Number.parseInt(String(candidate.duration ?? 0), 10);
+  const suggestionsRaw = Array.isArray(candidate.suggestions) ? candidate.suggestions : [];
+  const suggestions = suggestionsRaw
+    .map((item) => parseSuggestion(item))
+    .filter((item): item is Suggestion => item !== null)
+    .slice(0, 20);
+
+  if (!id || !topic || !transcript || Number.isNaN(timestamp.getTime()) || !Number.isFinite(duration) || duration < 0) {
+    return null;
+  }
+
+  return {
+    id,
+    topic,
+    duration: Math.max(0, duration),
+    timestamp: timestamp.toISOString(),
+    transcript,
+    suggestions
+  };
 };
 
 const buildInterestsKey = (interestIds: string[]): string => {
@@ -488,6 +592,130 @@ export const logout = createAsyncThunk("app/logout", async () => {
   }
 });
 
+export const fetchUserData = createAsyncThunk<
+  { interestIds: string[]; recordings: Recording[] },
+  void,
+  { rejectValue: string }
+>("app/fetchUserData", async (_, { rejectWithValue }) => {
+  try {
+    const response = await fetch("/api/user/data", {
+      cache: "no-store"
+    });
+    const payload = (await response.json().catch(() => null)) as UserDataResponse | null;
+
+    if (response.status === 401) {
+      return rejectWithValue("Unauthorized");
+    }
+
+    if (!response.ok) {
+      return rejectWithValue(payload?.error ?? "Failed to load user data.");
+    }
+
+    const interestIds = normalizeInterestIds(payload?.interestIds);
+    const recordingsRaw = Array.isArray(payload?.recordings) ? payload.recordings : [];
+    const recordings = recordingsRaw
+      .map((item) => parseRecording(item))
+      .filter((item): item is Recording => item !== null)
+      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+    return { interestIds, recordings };
+  } catch {
+    return rejectWithValue("Cannot connect to user data service.");
+  }
+});
+
+export const saveInterests = createAsyncThunk<string[], void, { state: { app: AppState }; rejectValue: string }>(
+  "app/saveInterests",
+  async (_, { getState, rejectWithValue }) => {
+    const { selectedInterestIds, isAuthenticated } = getState().app;
+
+    if (!isAuthenticated) {
+      return rejectWithValue("Unauthorized");
+    }
+
+    try {
+      const response = await fetch("/api/user/interests", {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ interestIds: selectedInterestIds })
+      });
+
+      const payload = (await response.json().catch(() => null)) as SaveInterestsResponse | null;
+
+      if (response.status === 401) {
+        return rejectWithValue("Unauthorized");
+      }
+
+      if (!response.ok) {
+        return rejectWithValue(payload?.error ?? "Failed to save interests.");
+      }
+
+      return normalizeInterestIds(payload?.interestIds);
+    } catch {
+      return rejectWithValue("Cannot connect to user data service.");
+    }
+  }
+);
+
+export const saveRecording = createAsyncThunk<Recording, void, { state: { app: AppState }; rejectValue: string }>(
+  "app/saveRecording",
+  async (_, { getState, rejectWithValue }) => {
+    const {
+      isAuthenticated,
+      speakState,
+      selectedTopic,
+      recordingDuration
+    } = getState().app;
+
+    if (speakState !== "recorded") {
+      return rejectWithValue("Recording is not ready to save.");
+    }
+
+    if (!isAuthenticated) {
+      return rejectWithValue("Unauthorized");
+    }
+
+    const topic = selectedTopic ?? "Free talk";
+    const recordingDraft = {
+      topic,
+      duration: recordingDuration,
+      timestamp: new Date().toISOString(),
+      transcript: generateTranscript(topic),
+      suggestions: generateSuggestions()
+    };
+
+    try {
+      const response = await fetch("/api/user/recordings", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ recording: recordingDraft })
+      });
+      const payload = (await response.json().catch(() => null)) as SaveRecordingResponse | null;
+
+      if (response.status === 401) {
+        return rejectWithValue("Unauthorized");
+      }
+
+      if (!response.ok) {
+        return rejectWithValue(payload?.error ?? "Failed to save recording.");
+      }
+
+      const recording = parseRecording(payload?.recording);
+      if (!recording) {
+        return rejectWithValue("Invalid recording payload from server.");
+      }
+
+      return recording;
+    } catch {
+      return rejectWithValue("Cannot connect to user data service.");
+    }
+  }
+);
+
 const initialState: AppState = {
   currentScreen: "speak",
   activeTab: "speak",
@@ -529,7 +757,13 @@ const initialState: AppState = {
   topicGuidanceError: null,
   topicGuidanceTopic: null,
   topicGuidanceInterestsKey: "",
-  selectedInterestIds: []
+  selectedInterestIds: [],
+  userDataStatus: "idle",
+  userDataError: null,
+  recordingSaveStatus: "idle",
+  recordingSaveError: null,
+  interestsSaveStatus: "idle",
+  interestsSaveError: null
 };
 
 const resetPlayback = (state: AppState): void => {
@@ -559,21 +793,10 @@ const openAuthFlow = (state: AppState, pendingSaveAfterAuth: boolean): void => {
   resetPlayback(state);
 };
 
-const saveRecordingForAuthenticatedUser = (state: AppState): void => {
-  const topic = state.selectedTopic ?? "Free talk";
-  const now = new Date();
-  const recording: Recording = {
-    id: `${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-    topic,
-    duration: state.recordingDuration,
-    timestamp: now.toISOString(),
-    transcript: generateTranscript(topic),
-    suggestions: generateSuggestions()
-  };
-
-  state.recordings.unshift(recording);
+const applySavedRecording = (state: AppState, recording: Recording): void => {
+  state.recordings = [recording, ...state.recordings.filter((item) => item.id !== recording.id)];
   state.currentRecordingId = recording.id;
-  state.selectedDate = toDateKey(now);
+  state.selectedDate = toDateKey(new Date(recording.timestamp));
   state.speakState = "idle";
   state.selectedTopic = null;
   state.showQuestions = false;
@@ -583,10 +806,13 @@ const saveRecordingForAuthenticatedUser = (state: AppState): void => {
   state.customTopicDraft = "";
   state.activeTab = "history";
   state.currentScreen = "details";
-  state.calendarMonth = now.getMonth();
-  state.calendarYear = now.getFullYear();
+  const recordingDate = new Date(recording.timestamp);
+  state.calendarMonth = recordingDate.getMonth();
+  state.calendarYear = recordingDate.getFullYear();
   state.copyMessage = null;
   state.pendingSaveAfterAuth = false;
+  state.recordingSaveStatus = "idle";
+  state.recordingSaveError = null;
   clearTopicGuidanceState(state);
   resetPlayback(state);
 };
@@ -598,13 +824,16 @@ const completeAuthSuccess = (state: AppState, email: string): void => {
   state.authError = null;
   state.authStatus = "idle";
   state.authInitialized = true;
-
-  if (state.pendingSaveAfterAuth && state.speakState === "recorded") {
-    saveRecordingForAuthenticatedUser(state);
-    return;
-  }
-
-  state.pendingSaveAfterAuth = false;
+  state.userDataStatus = "idle";
+  state.userDataError = null;
+  state.interestsSaveStatus = "idle";
+  state.interestsSaveError = null;
+  state.recordingSaveStatus = "idle";
+  state.recordingSaveError = null;
+  state.selectedInterestIds = [];
+  state.recordings = [];
+  state.currentRecordingId = null;
+  state.selectedDate = null;
   state.currentScreen = state.screenBeforeAuth;
   state.activeTab = state.screenBeforeAuth;
 };
@@ -628,6 +857,15 @@ const clearAuthenticatedState = (state: AppState): void => {
   state.topics = [];
   state.questionsStatus = "idle";
   state.questionsError = null;
+  state.recordings = [];
+  state.currentRecordingId = null;
+  state.selectedDate = null;
+  state.userDataStatus = "idle";
+  state.userDataError = null;
+  state.recordingSaveStatus = "idle";
+  state.recordingSaveError = null;
+  state.interestsSaveStatus = "idle";
+  state.interestsSaveError = null;
   clearTopicGuidanceState(state);
   resetPlayback(state);
 };
@@ -711,6 +949,7 @@ const appSlice = createSlice({
       state.questionsError = null;
       state.showQuestions = false;
       state.showWords = false;
+      state.interestsSaveError = null;
       clearTopicGuidanceState(state);
     },
     startFreeTalk: (state) => {
@@ -720,6 +959,7 @@ const appSlice = createSlice({
       state.speakState = "recording";
       state.recordingDuration = 0;
       state.copyMessage = null;
+      state.recordingSaveError = null;
       clearTopicGuidanceState(state);
     },
     selectTopic: (state, action: PayloadAction<string>) => {
@@ -730,6 +970,7 @@ const appSlice = createSlice({
       state.showAddTopicInput = false;
       state.customTopicDraft = "";
       state.copyMessage = null;
+      state.recordingSaveError = null;
       if (state.topicGuidanceTopic !== action.payload) {
         clearTopicGuidanceState(state);
       }
@@ -744,6 +985,7 @@ const appSlice = createSlice({
       state.speakState = "recording";
       state.recordingDuration = 0;
       state.copyMessage = null;
+      state.recordingSaveError = null;
     },
     tickRecording: (state) => {
       if (state.speakState === "recording") {
@@ -758,18 +1000,13 @@ const appSlice = createSlice({
     reRecord: (state) => {
       state.recordingDuration = 0;
       state.speakState = state.selectedTopic ? "readyToRecord" : "idle";
+      state.recordingSaveError = null;
     },
-    saveRecording: (state) => {
-      if (state.speakState !== "recorded") {
+    openAuthForSave: (state) => {
+      if (state.isAuthenticated) {
         return;
       }
-
-      if (!state.isAuthenticated) {
-        openAuthFlow(state, true);
-        return;
-      }
-
-      saveRecordingForAuthenticatedUser(state);
+      openAuthFlow(state, true);
     },
     toggleAddTopicInput: (state) => {
       state.showAddTopicInput = !state.showAddTopicInput;
@@ -941,11 +1178,17 @@ const appSlice = createSlice({
         if (email) {
           state.isAuthenticated = true;
           state.userEmail = email;
+          state.userDataStatus = "idle";
+          state.userDataError = null;
           return;
         }
 
         state.isAuthenticated = false;
         state.userEmail = null;
+        state.userDataStatus = "idle";
+        state.userDataError = null;
+        state.selectedInterestIds = [];
+        state.recordings = [];
       })
       .addCase(restoreSession.rejected, (state, action) => {
         state.authStatus = "idle";
@@ -953,6 +1196,10 @@ const appSlice = createSlice({
         state.authError = action.payload ?? null;
         state.isAuthenticated = false;
         state.userEmail = null;
+        state.userDataStatus = "idle";
+        state.userDataError = null;
+        state.selectedInterestIds = [];
+        state.recordings = [];
       })
       .addCase(signIn.pending, (state) => {
         state.authStatus = "loading";
@@ -981,6 +1228,75 @@ const appSlice = createSlice({
       })
       .addCase(logout.rejected, (state) => {
         clearAuthenticatedState(state);
+      })
+      .addCase(fetchUserData.pending, (state) => {
+        state.userDataStatus = "loading";
+        state.userDataError = null;
+      })
+      .addCase(fetchUserData.fulfilled, (state, action) => {
+        state.userDataStatus = "ready";
+        state.userDataError = null;
+        state.selectedInterestIds = action.payload.interestIds;
+        state.recordings = action.payload.recordings;
+      })
+      .addCase(fetchUserData.rejected, (state, action) => {
+        if (action.payload === "Unauthorized") {
+          clearAuthenticatedState(state);
+          return;
+        }
+        state.userDataStatus = "failed";
+        state.userDataError = action.payload ?? "Failed to load user data.";
+      })
+      .addCase(saveInterests.pending, (state) => {
+        state.interestsSaveStatus = "loading";
+        state.interestsSaveError = null;
+      })
+      .addCase(saveInterests.fulfilled, (state) => {
+        state.interestsSaveStatus = "idle";
+        state.interestsSaveError = null;
+      })
+      .addCase(saveInterests.rejected, (state, action) => {
+        state.interestsSaveStatus = "idle";
+        if (action.payload === "Unauthorized") {
+          state.isAuthenticated = false;
+          state.userEmail = null;
+          state.userDataStatus = "idle";
+          state.userDataError = null;
+          state.selectedInterestIds = [];
+          state.recordings = [];
+          state.currentRecordingId = null;
+          state.selectedDate = null;
+          return;
+        }
+        if (action.payload && action.payload !== "Unauthorized") {
+          state.interestsSaveError = action.payload;
+        }
+      })
+      .addCase(saveRecording.pending, (state) => {
+        state.recordingSaveStatus = "loading";
+        state.recordingSaveError = null;
+      })
+      .addCase(saveRecording.fulfilled, (state, action) => {
+        applySavedRecording(state, action.payload);
+      })
+      .addCase(saveRecording.rejected, (state, action) => {
+        state.recordingSaveStatus = "idle";
+        if (action.payload === "Unauthorized") {
+          state.isAuthenticated = false;
+          state.userEmail = null;
+          state.authError = null;
+          state.userDataStatus = "idle";
+          state.userDataError = null;
+          state.selectedInterestIds = [];
+          state.recordings = [];
+          state.currentRecordingId = null;
+          state.selectedDate = null;
+          openAuthFlow(state, true);
+          return;
+        }
+        if (action.payload && action.payload !== "Unauthorized") {
+          state.recordingSaveError = action.payload;
+        }
       })
       .addCase(fetchDailyQuestions.pending, (state) => {
         state.questionsStatus = "loading";
@@ -1041,7 +1357,7 @@ export const {
   tickRecording,
   stopRecording,
   reRecord,
-  saveRecording,
+  openAuthForSave,
   toggleAddTopicInput,
   setCustomTopicDraft,
   useCustomTopic,

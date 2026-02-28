@@ -1,17 +1,33 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import {
   backToProfile,
   INTEREST_OPTIONS,
   MAX_SELECTED_INTERESTS,
+  saveInterests,
   toggleInterest
 } from "../store/slices/appSlice";
 import { useAppDispatch, useAppSelector } from "../store/hooks";
 
 export default function InterestsScreen() {
   const dispatch = useAppDispatch();
-  const { selectedInterestIds } = useAppSelector((state) => state.app);
+  const { selectedInterestIds, interestsSaveStatus, interestsSaveError } = useAppSelector((state) => state.app);
   const selectedCount = selectedInterestIds.length;
+  const hasInitializedRef = useRef(false);
+
+  useEffect(() => {
+    if (!hasInitializedRef.current) {
+      hasInitializedRef.current = true;
+      return;
+    }
+
+    const timerId = window.setTimeout(() => {
+      void dispatch(saveInterests());
+    }, 250);
+
+    return () => window.clearTimeout(timerId);
+  }, [dispatch, selectedInterestIds]);
 
   return (
     <section className="profile-screen">
@@ -45,6 +61,8 @@ export default function InterestsScreen() {
             );
           })}
         </div>
+        {interestsSaveStatus === "loading" && <div className="notice top-spaced">Saving interests...</div>}
+        {interestsSaveError && <div className="auth-error top-spaced">{interestsSaveError}</div>}
       </div>
     </section>
   );

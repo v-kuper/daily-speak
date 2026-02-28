@@ -295,6 +295,53 @@ input {
   margin: 32px 0;
 }
 
+.topics-grid-skeleton {
+  margin-bottom: 20px;
+}
+
+.topic-skeleton {
+  min-height: 80px;
+  padding: 16px;
+  background: #fff;
+  border: 1px solid #e8e8e4;
+  border-radius: 8px;
+}
+
+.skeleton-line {
+  border-radius: 6px;
+  height: 12px;
+  margin-bottom: 10px;
+  background: linear-gradient(90deg, #ecece7 0%, #f5f5f1 45%, #ecece7 100%);
+  background-size: 220% 100%;
+  animation: skeleton-shimmer 1.3s ease-in-out infinite;
+}
+
+.skeleton-line:last-child {
+  margin-bottom: 0;
+}
+
+.skeleton-line-wide {
+  width: 90%;
+}
+
+.skeleton-line-medium {
+  width: 68%;
+}
+
+.skeleton-line-short {
+  width: 45%;
+}
+
+@keyframes skeleton-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+
+  100% {
+    background-position: -200% 0;
+  }
+}
+
 .topic-btn {
   min-height: 80px;
   padding: 16px;
@@ -314,6 +361,29 @@ input {
 
 .collapsible-section {
   margin-bottom: 16px;
+}
+
+.guidance-skeleton {
+  background: #fff;
+  border: 1px solid #e8e8e4;
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.guidance-skeleton-title {
+  margin-bottom: 14px;
+  height: 10px;
+}
+
+.guidance-skeleton-item {
+  height: 38px;
+  border-radius: 6px;
+  margin-bottom: 10px;
+}
+
+.guidance-skeleton-item:last-child {
+  margin-bottom: 0;
 }
 
 .collapsible-header {

@@ -2,7 +2,15 @@
 
 import { useEffect } from "react";
 import { useAppDispatch, useAppSelector } from "../store/hooks";
-import { logout, navigateToTab, openAuth, openProfile, restoreSession } from "../store/slices/appSlice";
+import {
+  fetchUserData,
+  logout,
+  navigateToTab,
+  openAuth,
+  openProfile,
+  restoreSession,
+  saveRecording
+} from "../store/slices/appSlice";
 import AuthScreen from "./AuthScreen";
 import DetailsScreen from "./DetailsScreen";
 import HistoryScreen from "./HistoryScreen";
@@ -13,9 +21,18 @@ import SpeakScreen from "./SpeakScreen";
 
 export default function AppShell() {
   const dispatch = useAppDispatch();
-  const { currentScreen, activeTab, isAuthenticated, userEmail, authInitialized, authStatus } = useAppSelector(
-    (state) => state.app
-  );
+  const {
+    currentScreen,
+    activeTab,
+    isAuthenticated,
+    userEmail,
+    authInitialized,
+    authStatus,
+    userDataStatus,
+    pendingSaveAfterAuth,
+    speakState,
+    recordingSaveStatus
+  } = useAppSelector((state) => state.app);
 
   useEffect(() => {
     if (authInitialized || authStatus === "loading") {
@@ -24,6 +41,22 @@ export default function AppShell() {
 
     void dispatch(restoreSession());
   }, [authInitialized, authStatus, dispatch]);
+
+  useEffect(() => {
+    if (!isAuthenticated || pendingSaveAfterAuth || userDataStatus !== "idle") {
+      return;
+    }
+
+    void dispatch(fetchUserData());
+  }, [dispatch, isAuthenticated, pendingSaveAfterAuth, userDataStatus]);
+
+  useEffect(() => {
+    if (!isAuthenticated || !pendingSaveAfterAuth || speakState !== "recorded" || recordingSaveStatus === "loading") {
+      return;
+    }
+
+    void dispatch(saveRecording());
+  }, [dispatch, isAuthenticated, pendingSaveAfterAuth, speakState, recordingSaveStatus]);
 
   return (
     <div className="app-container">
