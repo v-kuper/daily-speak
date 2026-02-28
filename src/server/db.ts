@@ -68,6 +68,9 @@ ALTER TABLE recordings
 ADD COLUMN IF NOT EXISTS practice_type TEXT NOT NULL DEFAULT 'topic';
 
 ALTER TABLE recordings
+ADD COLUMN IF NOT EXISTS audio_data_url TEXT;
+
+ALTER TABLE recordings
 ADD COLUMN IF NOT EXISTS photo_data_url TEXT;
 
 ALTER TABLE recordings

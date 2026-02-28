@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { mkdir, unlink, writeFile } from "node:fs/promises";
+import path from "node:path";
 import { NextResponse, type NextRequest } from "next/server";
 import { query } from "../../../../src/server/db";
 import { SESSION_COOKIE_NAME, getUserBySessionToken } from "../../../../src/server/auth";
@@ -37,6 +39,7 @@ type CreateRecordingPayload = {
     duration?: unknown;
     timestamp?: unknown;
     practiceType?: unknown;
+    audioDataUrl?: unknown;
     photoDataUrl?: unknown;
     photoObject?: unknown;
   };
@@ -50,6 +53,7 @@ type RecordingRow = {
   transcript: string;
   suggestions: unknown;
   practice_type: PracticeType | string;
+  audio_data_url: string | null;
   photo_data_url: string | null;
   photo_object: string | null;
 };
@@ -82,8 +86,37 @@ class RecordingAnalysisError extends Error {
 }
 
 const PRACTICE_TYPE_SET = new Set<PracticeType>(["free_talk", "topic", "photo_description"]);
+const AUDIO_DATA_URL_PATTERN = /^data:((?:audio|video)\/[a-z0-9.+-]+(?:;[^,]+)*);base64,([A-Za-z0-9+/_=-]+)$/i;
+const AUDIO_FILE_URL_PATTERN = /^\/uploads\/recordings\/[a-z0-9/_-]+\.[a-z0-9]{2,10}$/i;
+const AUDIO_PUBLIC_BASE_URL = "/uploads/recordings";
+const AUDIO_STORAGE_ROOT_DIR = path.join(process.cwd(), "public", "uploads", "recordings");
+const AUDIO_EXTENSION_BY_MIME = new Map<string, string>([
+  ["audio/webm", "webm"],
+  ["video/webm", "webm"],
+  ["audio/mp4", "m4a"],
+  ["audio/x-m4a", "m4a"],
+  ["video/mp4", "m4a"],
+  ["audio/ogg", "ogg"],
+  ["video/ogg", "ogg"],
+  ["audio/wav", "wav"],
+  ["audio/x-wav", "wav"],
+  ["audio/vnd.wave", "wav"],
+  ["audio/mpeg", "mp3"]
+]);
+const MAX_AUDIO_UPLOAD_BYTES = 80 * 1024 * 1024;
 const PHOTO_DATA_URL_PATTERN = /^data:image\/(png|jpeg|jpg|webp|gif);base64,([A-Za-z0-9+/=]+)$/i;
 const MAX_PHOTO_UPLOAD_BYTES = 4 * 1024 * 1024;
+
+type ParsedIncomingAudioDataUrl = {
+  normalizedDataUrl: string;
+  base64: string;
+  extension: string;
+};
+
+type SavedAudioFile = {
+  publicUrl: string;
+  absolutePath: string;
+};
 
 const hashString = (value: string): number => {
   let hash = 0;
@@ -199,6 +232,112 @@ const normalizePracticeType = (value: unknown): PracticeType => {
 
   const normalized = value.trim().toLowerCase() as PracticeType;
   return PRACTICE_TYPE_SET.has(normalized) ? normalized : "topic";
+};
+
+const resolveAudioExtension = (baseMimeType: string): string | null => {
+  const mapped = AUDIO_EXTENSION_BY_MIME.get(baseMimeType);
+  if (mapped) {
+    return mapped;
+  }
+
+  if (!baseMimeType.startsWith("audio/") && !baseMimeType.startsWith("video/")) {
+    return null;
+  }
+
+  const subtypeRaw = baseMimeType.slice("audio/".length).toLowerCase();
+  if (!subtypeRaw) {
+    return null;
+  }
+
+  const normalizedSubtype = subtypeRaw.replace(/^x-/, "");
+  if (normalizedSubtype === "mpeg") {
+    return "mp3";
+  }
+  if (normalizedSubtype === "mp4") {
+    return "m4a";
+  }
+  if (normalizedSubtype === "wave") {
+    return "wav";
+  }
+
+  const cleaned = normalizedSubtype.replace(/[^a-z0-9]+/g, "");
+  if (!cleaned || cleaned.length > 10) {
+    return null;
+  }
+
+  return cleaned;
+};
+
+const parseIncomingAudioDataUrl = (value: unknown): ParsedIncomingAudioDataUrl | null => {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim();
+  const match = normalized.match(AUDIO_DATA_URL_PATTERN);
+  if (!match) {
+    return null;
+  }
+
+  const mediaType = match[1].toLowerCase().replace(/\s+/g, "");
+  const baseMimeType = mediaType.split(";", 1)[0];
+  const extension = resolveAudioExtension(baseMimeType);
+  if (!extension) {
+    return null;
+  }
+  const base64 = match[2].trim().replace(/-/g, "+").replace(/_/g, "/");
+  if (!/^[A-Za-z0-9+/=]+$/.test(base64)) {
+    return null;
+  }
+  const padding = base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0;
+  const bytes = Math.floor((base64.length * 3) / 4) - padding;
+
+  if (!Number.isFinite(bytes) || bytes <= 0 || bytes > MAX_AUDIO_UPLOAD_BYTES) {
+    return null;
+  }
+
+  return {
+    normalizedDataUrl: `data:${mediaType};base64,${base64}`,
+    base64,
+    extension
+  };
+};
+
+const normalizeStoredAudioSource = (value: unknown): string | null => {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim();
+  if (AUDIO_FILE_URL_PATTERN.test(normalized)) {
+    return normalized;
+  }
+
+  const parsed = parseIncomingAudioDataUrl(normalized);
+  return parsed ? parsed.normalizedDataUrl : null;
+};
+
+const sanitizePathSegment = (value: string): string => {
+  const normalized = value.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "_").slice(0, 80);
+  return normalized || "user";
+};
+
+const saveAudioFile = async (userId: string, recordingId: string, audio: ParsedIncomingAudioDataUrl): Promise<SavedAudioFile> => {
+  const userDir = sanitizePathSegment(userId);
+  const fileName = `${recordingId}.${audio.extension}`;
+  const directory = path.join(AUDIO_STORAGE_ROOT_DIR, userDir);
+  const absolutePath = path.join(directory, fileName);
+  const publicUrl = `${AUDIO_PUBLIC_BASE_URL}/${userDir}/${fileName}`;
+  const buffer = Buffer.from(audio.base64, "base64");
+
+  if (buffer.length <= 0 || buffer.length > MAX_AUDIO_UPLOAD_BYTES) {
+    throw new Error("Audio payload is invalid.");
+  }
+
+  await mkdir(directory, { recursive: true });
+  await writeFile(absolutePath, buffer);
+
+  return { publicUrl, absolutePath };
 };
 
 const normalizePhotoObject = (value: unknown): string | null => {
@@ -361,6 +500,8 @@ const generateRecordingAnalysis = async (
 };
 
 export async function POST(request: NextRequest) {
+  let savedAudioAbsolutePath: string | null = null;
+
   try {
     const token = request.cookies.get(SESSION_COOKIE_NAME)?.value;
     const user = await getUserBySessionToken(token);
@@ -375,9 +516,22 @@ export async function POST(request: NextRequest) {
     const practiceType = normalizePracticeType(source?.practiceType);
     let topic = typeof source?.topic === "string" ? source.topic.trim() : "";
     const duration = Number.parseInt(String(source?.duration ?? 0), 10);
+    const rawAudioDataUrl = source?.audioDataUrl;
+    const parsedAudioDataUrl = parseIncomingAudioDataUrl(rawAudioDataUrl);
     const rawPhotoDataUrl = source?.photoDataUrl;
     const photoDataUrl = normalizePhotoDataUrl(rawPhotoDataUrl);
     const photoObject = normalizePhotoObject(source?.photoObject);
+
+    if (typeof rawAudioDataUrl === "string" && !parsedAudioDataUrl) {
+      return NextResponse.json(
+        { error: `Audio must be a valid recording under ${Math.floor(MAX_AUDIO_UPLOAD_BYTES / (1024 * 1024))}MB.` },
+        { status: 400 }
+      );
+    }
+
+    if (!parsedAudioDataUrl) {
+      return NextResponse.json({ error: "Audio recording is required." }, { status: 400 });
+    }
 
     if (typeof rawPhotoDataUrl === "string" && !photoDataUrl) {
       return NextResponse.json(
@@ -427,6 +581,8 @@ export async function POST(request: NextRequest) {
 
     const timestamp = parseTimestamp(source?.timestamp);
     const id = randomUUID();
+    const savedAudio = await saveAudioFile(user.id, id, parsedAudioDataUrl);
+    savedAudioAbsolutePath = savedAudio.absolutePath;
 
     const interestsResult = await query<InterestRow>(
       `SELECT interest_id
@@ -441,9 +597,9 @@ export async function POST(request: NextRequest) {
 
     const insertResult = await query<RecordingRow>(
       `INSERT INTO recordings
-         (id, user_id, topic, duration, timestamp, transcript, suggestions, practice_type, photo_data_url, photo_object)
+         (id, user_id, topic, duration, timestamp, transcript, suggestions, practice_type, audio_data_url, photo_data_url, photo_object)
        VALUES
-         ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10)
+         ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10, $11)
        RETURNING
          id,
          topic,
@@ -452,6 +608,7 @@ export async function POST(request: NextRequest) {
          transcript,
          suggestions,
          practice_type,
+         audio_data_url,
          photo_data_url,
          photo_object`,
       [
@@ -463,10 +620,12 @@ export async function POST(request: NextRequest) {
         analysis.transcript,
         JSON.stringify(analysis.suggestions),
         practiceType,
+        savedAudio.publicUrl,
         practiceType === "photo_description" ? photoDataUrl : null,
         practiceType === "photo_description" ? photoObject : null
       ]
     );
+    savedAudioAbsolutePath = null;
 
     const row = insertResult.rows[0];
     const recording = {
@@ -477,6 +636,7 @@ export async function POST(request: NextRequest) {
       transcript: row.transcript,
       suggestions: normalizeSuggestions(row.suggestions),
       practiceType: normalizePracticeType(row.practice_type),
+      audioDataUrl: normalizeStoredAudioSource(row.audio_data_url),
       photoDataUrl: normalizePhotoDataUrl(row.photo_data_url),
       photoObject: normalizePhotoObject(row.photo_object)
     };
@@ -484,6 +644,10 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ recording, quota }, { status: 201 });
   } catch (error) {
+    if (savedAudioAbsolutePath) {
+      await unlink(savedAudioAbsolutePath).catch(() => undefined);
+    }
+
     if (error instanceof RecordingAnalysisError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }

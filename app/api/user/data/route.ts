@@ -21,11 +21,15 @@ type RecordingRow = {
   transcript: string;
   suggestions: unknown;
   practice_type: PracticeType | string;
+  audio_data_url: string | null;
   photo_data_url: string | null;
   photo_object: string | null;
 };
 
 const PRACTICE_TYPE_SET = new Set<PracticeType>(["free_talk", "topic", "photo_description"]);
+const AUDIO_DATA_URL_PATTERN = /^data:((?:audio|video)\/[a-z0-9.+-]+(?:;[^,]+)*);base64,([A-Za-z0-9+/_=-]+)$/i;
+const AUDIO_FILE_URL_PATTERN = /^\/uploads\/recordings\/[a-z0-9/_-]+\.[a-z0-9]{2,10}$/i;
+const MAX_AUDIO_UPLOAD_BYTES = 80 * 1024 * 1024;
 const PHOTO_DATA_URL_PATTERN = /^data:image\/(png|jpeg|jpg|webp|gif);base64,([A-Za-z0-9+/=]+)$/i;
 
 const normalizePracticeType = (value: unknown): PracticeType => {
@@ -35,6 +39,35 @@ const normalizePracticeType = (value: unknown): PracticeType => {
 
   const normalized = value.trim().toLowerCase() as PracticeType;
   return PRACTICE_TYPE_SET.has(normalized) ? normalized : "topic";
+};
+
+const normalizeAudioDataUrl = (value: unknown): string | null => {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim();
+  if (AUDIO_FILE_URL_PATTERN.test(normalized)) {
+    return normalized;
+  }
+
+  const match = normalized.match(AUDIO_DATA_URL_PATTERN);
+  if (!match) {
+    return null;
+  }
+
+  const mediaType = match[1].toLowerCase().replace(/\s+/g, "");
+  const base64 = match[2].trim().replace(/-/g, "+").replace(/_/g, "/");
+  if (!/^[A-Za-z0-9+/=]+$/.test(base64)) {
+    return null;
+  }
+  const padding = base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0;
+  const bytes = Math.floor((base64.length * 3) / 4) - padding;
+  if (!Number.isFinite(bytes) || bytes <= 0 || bytes > MAX_AUDIO_UPLOAD_BYTES) {
+    return null;
+  }
+
+  return `data:${mediaType};base64,${base64}`;
 };
 
 const normalizePhotoDataUrl = (value: unknown): string | null => {
@@ -111,6 +144,7 @@ export async function GET(request: NextRequest) {
            transcript,
            suggestions,
            practice_type,
+           audio_data_url,
            photo_data_url,
            photo_object
          FROM recordings
@@ -131,6 +165,7 @@ export async function GET(request: NextRequest) {
       transcript: row.transcript,
       suggestions: parseSuggestions(row.suggestions),
       practiceType: normalizePracticeType(row.practice_type),
+      audioDataUrl: normalizeAudioDataUrl(row.audio_data_url),
       photoDataUrl: normalizePhotoDataUrl(row.photo_data_url),
       photoObject: normalizePhotoObject(row.photo_object)
     }));

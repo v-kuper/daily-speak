@@ -19,6 +19,7 @@ export type Recording = {
   transcript: string;
   suggestions: Suggestion[];
   practiceType: PracticeType;
+  audioDataUrl: string | null;
   photoDataUrl: string | null;
   photoObject: string | null;
 };

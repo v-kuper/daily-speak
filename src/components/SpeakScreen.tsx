@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, type ChangeEvent } from "react";
+import { useCallback, useEffect, useRef, type ChangeEvent } from "react";
 import { formatTime, toDateKey } from "../lib/utils";
 import { useAppDispatch, useAppSelector } from "../store/hooks";
 import {
@@ -17,6 +17,8 @@ import {
   saveRecording,
   selectTopic,
   setCustomTopicDraft,
+  setRecordingAudioDataUrl,
+  setRecordingInputError,
   setPhotoForPractice,
   setPhotoObjectDraft,
   setPhotoUploadError,
@@ -32,6 +34,7 @@ import {
 } from "../store/slices/appSlice";
 
 const PHOTO_ACCEPTED_TYPES = new Set(["image/jpeg", "image/jpg", "image/png", "image/webp", "image/gif"]);
+const AUDIO_MIME_CANDIDATES = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"];
 
 const readFileAsDataUrl = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -47,6 +50,53 @@ const readFileAsDataUrl = (file: File): Promise<string> => {
     reader.onerror = () => reject(new Error("Failed to read image file."));
     reader.readAsDataURL(file);
   });
+};
+
+const readBlobAsDataUrl = (blob: Blob): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = typeof reader.result === "string" ? reader.result : "";
+      if (!result) {
+        reject(new Error("Failed to read recorded audio."));
+        return;
+      }
+      resolve(result);
+    };
+    reader.onerror = () => reject(new Error("Failed to read recorded audio."));
+    reader.readAsDataURL(blob);
+  });
+};
+
+const resolvePreferredAudioMimeType = (): string | null => {
+  if (typeof MediaRecorder === "undefined" || typeof MediaRecorder.isTypeSupported !== "function") {
+    return null;
+  }
+
+  for (const candidate of AUDIO_MIME_CANDIDATES) {
+    if (MediaRecorder.isTypeSupported(candidate)) {
+      return candidate;
+    }
+  }
+
+  return null;
+};
+
+const resolveMicrophoneError = (error: unknown): string => {
+  if (error && typeof error === "object" && "name" in error && typeof (error as { name?: unknown }).name === "string") {
+    const name = (error as { name: string }).name;
+    if (name === "NotAllowedError" || name === "PermissionDeniedError") {
+      return "Microphone access denied. Allow microphone permission in your browser settings.";
+    }
+    if (name === "NotFoundError" || name === "DevicesNotFoundError") {
+      return "No microphone found on this device.";
+    }
+    if (name === "NotReadableError" || name === "TrackStartError") {
+      return "Microphone is busy in another app. Close it and try again.";
+    }
+  }
+
+  return "Cannot access microphone. Check browser permissions and device settings.";
 };
 
 type StudyTextSegment = {
@@ -152,6 +202,8 @@ export default function SpeakScreen() {
     weeklyRemainingSeconds,
     maxSessionSeconds,
     recordingPracticeType,
+    pendingRecordingAudioDataUrl,
+    recordingInputError,
     pendingPhotoDataUrl,
     pendingPhotoObjectDraft,
     pendingPhotoError
@@ -174,6 +226,106 @@ export default function SpeakScreen() {
           normalizedWeeklyUsedSeconds
         )} of ${formatTime(normalizedWeeklyLimitSeconds)} used).`
     : null;
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const mediaChunksRef = useRef<Blob[]>([]);
+
+  const releaseMedia = useCallback(() => {
+    if (mediaStreamRef.current) {
+      for (const track of mediaStreamRef.current.getTracks()) {
+        track.stop();
+      }
+      mediaStreamRef.current = null;
+    }
+    mediaRecorderRef.current = null;
+    mediaChunksRef.current = [];
+  }, []);
+
+  const createRecordingFromMicrophone = useCallback(
+    async (onRecordingStarted: () => void) => {
+      dispatch(setRecordingInputError(null));
+      dispatch(setRecordingAudioDataUrl(null));
+
+      if (typeof window === "undefined" || typeof navigator === "undefined") {
+        dispatch(setRecordingInputError("Recording is available only in browser."));
+        return;
+      }
+
+      if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+        dispatch(setRecordingInputError("Your browser does not support microphone recording."));
+        return;
+      }
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const mimeType = resolvePreferredAudioMimeType();
+        const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+
+        mediaStreamRef.current = stream;
+        mediaRecorderRef.current = recorder;
+        mediaChunksRef.current = [];
+
+        recorder.ondataavailable = (event: BlobEvent) => {
+          if (event.data && event.data.size > 0) {
+            mediaChunksRef.current.push(event.data);
+          }
+        };
+
+        recorder.onerror = () => {
+          dispatch(setRecordingInputError("Recording failed. Please try again."));
+        };
+
+        recorder.onstop = () => {
+          const chunks = [...mediaChunksRef.current];
+          const resultingType = recorder.mimeType || "audio/webm";
+          releaseMedia();
+
+          if (chunks.length === 0) {
+            dispatch(setRecordingInputError("No audio captured. Try recording again."));
+            return;
+          }
+
+          const blob = new Blob(chunks, { type: resultingType });
+          void readBlobAsDataUrl(blob)
+            .then((dataUrl) => {
+              dispatch(setRecordingAudioDataUrl(dataUrl));
+            })
+            .catch(() => {
+              dispatch(setRecordingInputError("Failed to process recorded audio."));
+            });
+        };
+
+        recorder.start();
+        onRecordingStarted();
+      } catch (error) {
+        releaseMedia();
+        dispatch(setRecordingInputError(resolveMicrophoneError(error)));
+      }
+    },
+    [dispatch, releaseMedia]
+  );
+
+  const onStartFreeTalk = () => {
+    void createRecordingFromMicrophone(() => {
+      dispatch(startFreeTalk());
+    });
+  };
+
+  const onStartTopicRecording = () => {
+    void createRecordingFromMicrophone(() => {
+      dispatch(startRecording());
+    });
+  };
+
+  const onStopRecording = () => {
+    dispatch(stopRecording());
+    const recorder = mediaRecorderRef.current;
+    if (recorder && recorder.state !== "inactive") {
+      recorder.stop();
+      return;
+    }
+    releaseMedia();
+  };
 
   useEffect(() => {
     if (speakState !== "recording") {
@@ -201,6 +353,31 @@ export default function SpeakScreen() {
       fetchTopicGuidance({ topic: selectedTopic, interestIds: selectedInterestIds, englishLevel: selectedEnglishLevel })
     );
   }, [dispatch, recordingPracticeType, selectedEnglishLevel, selectedTopic, selectedInterestIds]);
+
+  useEffect(() => {
+    if (speakState === "recording") {
+      return;
+    }
+
+    const recorder = mediaRecorderRef.current;
+    if (recorder && recorder.state !== "inactive") {
+      recorder.stop();
+      return;
+    }
+
+    releaseMedia();
+  }, [releaseMedia, speakState]);
+
+  useEffect(() => {
+    return () => {
+      const recorder = mediaRecorderRef.current;
+      if (recorder && recorder.state !== "inactive") {
+        recorder.stop();
+        return;
+      }
+      releaseMedia();
+    };
+  }, [releaseMedia]);
 
   const onRefreshQuestions = () => {
     const dateKey = toDateKey(new Date());
@@ -296,11 +473,12 @@ export default function SpeakScreen() {
           )}
           <button
             className="btn btn-primary btn-large speak-primary-btn"
-            onClick={() => dispatch(startFreeTalk())}
+            onClick={onStartFreeTalk}
             disabled={!hasRecordingBudget}
           >
             Start speaking
           </button>
+          {recordingInputError && <div className="auth-error top-spaced">{recordingInputError}</div>}
         </div>
 
         <div className="speak-card">
@@ -491,11 +669,12 @@ export default function SpeakScreen() {
 
           <button
             className="btn btn-primary btn-large speak-primary-btn"
-            onClick={() => dispatch(startRecording())}
+            onClick={onStartTopicRecording}
             disabled={!hasRecordingBudget || (isPhotoPractice && !pendingPhotoDataUrl)}
           >
             Start speaking
           </button>
+          {recordingInputError && <div className="auth-error top-spaced">{recordingInputError}</div>}
           {pendingPhotoError && <div className="auth-error top-spaced">{pendingPhotoError}</div>}
         </div>
 
@@ -588,9 +767,10 @@ export default function SpeakScreen() {
             <div className="recorded-subtitle">Session limit: {formatTime(Math.max(0, sessionLimitSeconds))}</div>
           )}
 
-          <button className="btn btn-primary btn-large speak-primary-btn" onClick={() => dispatch(stopRecording())}>
+          <button className="btn btn-primary btn-large speak-primary-btn" onClick={onStopRecording}>
             Stop
           </button>
+          {recordingInputError && <div className="auth-error top-spaced">{recordingInputError}</div>}
         </div>
 
         {shouldShowQuestions && (
@@ -645,7 +825,7 @@ export default function SpeakScreen() {
               }
               void dispatch(saveRecording());
             }}
-            disabled={recordingSaveStatus === "loading"}
+            disabled={recordingSaveStatus === "loading" || (isAuthenticated && !pendingRecordingAudioDataUrl)}
           >
             {isAuthenticated
               ? recordingSaveStatus === "loading"
@@ -654,6 +834,10 @@ export default function SpeakScreen() {
               : "Sign in to save"}
           </button>
         </div>
+        {!pendingRecordingAudioDataUrl && !recordingInputError && (
+          <div className="notice top-spaced">Preparing audio, please wait a moment before saving.</div>
+        )}
+        {recordingInputError && <div className="auth-error top-spaced">{recordingInputError}</div>}
         {recordingSaveError && <div className="auth-error top-spaced">{recordingSaveError}</div>}
       </div>
     </section>
