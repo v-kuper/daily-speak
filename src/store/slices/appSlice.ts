@@ -161,6 +161,12 @@ export type AppState = {
   topicGuidanceTopic: string | null;
   topicGuidanceInterestsKey: string;
   topicGuidanceEnglishLevel: EnglishLevel;
+  studyWords: string[];
+  studyText: string;
+  studyStatus: QuestionsStatus;
+  studyError: string | null;
+  studyInterestsKey: string;
+  studyEnglishLevel: EnglishLevel;
   recordingPracticeType: PracticeType;
   pendingPhotoDataUrl: string | null;
   pendingPhotoObjectDraft: string;
@@ -244,6 +250,25 @@ type FetchTopicGuidanceResult = {
 type TopicGuidanceResponse = {
   questions?: unknown;
   words?: unknown;
+  error?: string;
+};
+
+type FetchStudyWordsArgs = {
+  force?: boolean;
+  refreshToken?: string;
+  interestIds?: string[];
+  avoidWords?: string[];
+  englishLevel?: EnglishLevel;
+};
+
+type FetchStudyWordsResult = {
+  words: string[];
+  text: string;
+};
+
+type StudyWordsResponse = {
+  words?: unknown;
+  text?: unknown;
   error?: string;
 };
 
@@ -477,6 +502,38 @@ const parseOllamaModelState = (payload: OllamaModelResponse | null): OllamaModel
     selectedModel,
     availableModels: availableModels.length > 0 ? availableModels : [selectedModel],
     warning
+  };
+};
+
+const parseStudyWordsResponse = (payload: StudyWordsResponse | null): { words: string[]; text: string } | null => {
+  const wordsRaw = Array.isArray(payload?.words) ? payload.words : [];
+  const words = wordsRaw
+    .filter((item): item is string => typeof item === "string")
+    .map((item) =>
+      item
+        .trim()
+        .replace(/^\d+\s*[\)\.\-:]\s*/, "")
+        .replace(/^[-*]\s*/, "")
+        .replace(/^["'`]+/, "")
+        .replace(/["'`]+$/, "")
+        .replace(/[.,;:!?]+$/g, "")
+        .replace(/\s+/g, " ")
+    )
+    .filter((item) => item.length > 0);
+
+  const uniqueWords = Array.from(new Set(words.map((item) => item.toLowerCase()))).map((key) => {
+    const original = words.find((item) => item.toLowerCase() === key);
+    return original ?? key;
+  });
+  const text = typeof payload?.text === "string" ? payload.text.trim().replace(/\r\n/g, "\n").replace(/\n{3,}/g, "\n\n") : "";
+
+  if (uniqueWords.length !== 10 || !text) {
+    return null;
+  }
+
+  return {
+    words: uniqueWords,
+    text
   };
 };
 
@@ -781,6 +838,71 @@ export const fetchTopicGuidance = createAsyncThunk<
       ) {
         return false;
       }
+      return true;
+    }
+  }
+);
+
+export const fetchStudyWords = createAsyncThunk<
+  FetchStudyWordsResult,
+  FetchStudyWordsArgs,
+  { state: { app: AppState }; rejectValue: string }
+>(
+  "app/fetchStudyWords",
+  async ({ refreshToken, interestIds = [], avoidWords = [], englishLevel = DEFAULT_ENGLISH_LEVEL }, { rejectWithValue }) => {
+    try {
+      const params = new URLSearchParams({ level: englishLevel });
+      if (refreshToken) {
+        params.set("refresh", refreshToken);
+      }
+      const interestLabels = resolveInterestLabels(interestIds);
+      interestLabels.forEach((label) => params.append("interest", label));
+      avoidWords
+        .map((item) => item.trim())
+        .filter((item) => item.length > 0)
+        .forEach((item) => params.append("avoidWord", item));
+
+      const response = await fetch(`/api/study-words?${params.toString()}`, {
+        cache: "no-store"
+      });
+      const payload = (await response.json().catch(() => null)) as StudyWordsResponse | null;
+
+      if (!response.ok) {
+        return rejectWithValue(payload?.error ?? "Failed to generate study words.");
+      }
+
+      const parsed = parseStudyWordsResponse(payload);
+      if (!parsed) {
+        return rejectWithValue("Invalid words payload from Ollama.");
+      }
+
+      return parsed;
+    } catch {
+      return rejectWithValue("Cannot connect to local Ollama. Make sure Ollama is running.");
+    }
+  },
+  {
+    condition: ({ force, interestIds = [], englishLevel = DEFAULT_ENGLISH_LEVEL }, { getState }) => {
+      if (force) {
+        return true;
+      }
+
+      const { app } = getState();
+      if (app.studyStatus === "loading") {
+        return false;
+      }
+
+      const interestKey = buildInterestsKey(interestIds);
+      if (
+        app.studyStatus === "ready" &&
+        app.studyWords.length === 10 &&
+        app.studyText &&
+        app.studyInterestsKey === interestKey &&
+        app.studyEnglishLevel === englishLevel
+      ) {
+        return false;
+      }
+
       return true;
     }
   }
@@ -1312,6 +1434,12 @@ const initialState: AppState = {
   topicGuidanceTopic: null,
   topicGuidanceInterestsKey: "",
   topicGuidanceEnglishLevel: DEFAULT_ENGLISH_LEVEL,
+  studyWords: [],
+  studyText: "",
+  studyStatus: "idle",
+  studyError: null,
+  studyInterestsKey: "",
+  studyEnglishLevel: DEFAULT_ENGLISH_LEVEL,
   recordingPracticeType: "topic",
   pendingPhotoDataUrl: null,
   pendingPhotoObjectDraft: "",
@@ -1356,6 +1484,15 @@ const clearTopicGuidanceState = (state: AppState): void => {
   state.topicGuidanceTopic = null;
   state.topicGuidanceInterestsKey = "";
   state.topicGuidanceEnglishLevel = state.selectedEnglishLevel;
+};
+
+const clearStudyWordsState = (state: AppState): void => {
+  state.studyWords = [];
+  state.studyText = "";
+  state.studyStatus = "idle";
+  state.studyError = null;
+  state.studyInterestsKey = "";
+  state.studyEnglishLevel = state.selectedEnglishLevel;
 };
 
 const openAuthFlow = (state: AppState, pendingSaveAfterAuth: boolean): void => {
@@ -1492,6 +1629,7 @@ const completeAuthSuccess = (
   });
   applyRecordingQuotaState(state, buildDefaultRecordingQuota(isSubscriber));
   applyOllamaModelState(state, DEFAULT_OLLAMA_MODEL_STATE);
+  clearStudyWordsState(state);
 };
 
 const clearAuthenticatedState = (state: AppState): void => {
@@ -1542,6 +1680,7 @@ const clearAuthenticatedState = (state: AppState): void => {
   applyRecordingQuotaState(state, DEFAULT_RECORDING_QUOTA);
   applyOllamaModelState(state, DEFAULT_OLLAMA_MODEL_STATE);
   clearTopicGuidanceState(state);
+  clearStudyWordsState(state);
   resetPlayback(state);
 };
 
@@ -1572,6 +1711,9 @@ const appSlice = createSlice({
     },
     clearTopicGuidanceError: (state) => {
       state.topicGuidanceError = null;
+    },
+    clearStudyError: (state) => {
+      state.studyError = null;
     },
     openProfile: (state) => {
       if (!state.isAuthenticated) {
@@ -1626,6 +1768,7 @@ const appSlice = createSlice({
       state.showWords = false;
       state.interestsSaveError = null;
       clearTopicGuidanceState(state);
+      clearStudyWordsState(state);
     },
     setPhotoUploadError: (state, action: PayloadAction<string | null>) => {
       state.pendingPhotoError = action.payload;
@@ -1956,6 +2099,7 @@ const appSlice = createSlice({
           state.englishLevelSaveError = null;
           state.userDataStatus = "idle";
           state.userDataError = null;
+          clearStudyWordsState(state);
           return;
         }
 
@@ -1978,6 +2122,7 @@ const appSlice = createSlice({
         state.selectedInterestIds = [];
         state.recordings = [];
         clearTopicGuidanceState(state);
+        clearStudyWordsState(state);
       })
       .addCase(restoreSession.rejected, (state, action) => {
         state.authStatus = "idle";
@@ -2002,6 +2147,7 @@ const appSlice = createSlice({
         state.selectedInterestIds = [];
         state.recordings = [];
         clearTopicGuidanceState(state);
+        clearStudyWordsState(state);
       })
       .addCase(signIn.pending, (state) => {
         state.authStatus = "loading";
@@ -2043,6 +2189,7 @@ const appSlice = createSlice({
         state.recordings = action.payload.recordings;
         applySubscriptionState(state, action.payload.subscription);
         applyRecordingQuotaState(state, action.payload.quota);
+        clearStudyWordsState(state);
       })
       .addCase(fetchUserData.rejected, (state, action) => {
         if (action.payload === "Unauthorized") {
@@ -2170,6 +2317,7 @@ const appSlice = createSlice({
         state.englishLevelSaveStatus = "idle";
         state.englishLevelSaveError = null;
         state.selectedEnglishLevel = action.payload;
+        clearStudyWordsState(state);
       })
       .addCase(saveEnglishLevel.rejected, (state, action) => {
         state.englishLevelSaveStatus = "idle";
@@ -2178,6 +2326,32 @@ const appSlice = createSlice({
           return;
         }
         state.englishLevelSaveError = action.payload ?? "Failed to save English level.";
+      })
+      .addCase(fetchStudyWords.pending, (state, action) => {
+        const interestKey = buildInterestsKey(action.meta.arg.interestIds ?? []);
+        const englishLevel = action.meta.arg.englishLevel ?? DEFAULT_ENGLISH_LEVEL;
+
+        if (state.studyInterestsKey !== interestKey || state.studyEnglishLevel !== englishLevel) {
+          state.studyWords = [];
+          state.studyText = "";
+        }
+
+        state.studyInterestsKey = interestKey;
+        state.studyEnglishLevel = englishLevel;
+        state.studyStatus = "loading";
+        state.studyError = null;
+      })
+      .addCase(fetchStudyWords.fulfilled, (state, action) => {
+        state.studyWords = action.payload.words;
+        state.studyText = action.payload.text;
+        state.studyInterestsKey = buildInterestsKey(action.meta.arg.interestIds ?? []);
+        state.studyEnglishLevel = action.meta.arg.englishLevel ?? DEFAULT_ENGLISH_LEVEL;
+        state.studyStatus = "ready";
+        state.studyError = null;
+      })
+      .addCase(fetchStudyWords.rejected, (state, action) => {
+        state.studyStatus = state.studyWords.length === 10 && state.studyText ? "ready" : "failed";
+        state.studyError = action.payload ?? "Failed to generate study words.";
       })
       .addCase(fetchDailyQuestions.pending, (state) => {
         state.questionsStatus = "loading";
@@ -2230,6 +2404,7 @@ export const {
   navigateToTab,
   clearQuestionsError,
   clearTopicGuidanceError,
+  clearStudyError,
   setPhotoUploadError,
   setPhotoForPractice,
   clearPhotoForPractice,

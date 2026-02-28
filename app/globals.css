@@ -252,6 +252,54 @@ input {
   padding: 14px;
 }
 
+.study-pack-skeleton {
+  border: 1px solid #e8e8e4;
+  border-radius: 8px;
+  padding: 14px;
+  background: #fcfcfa;
+}
+
+.study-words-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.study-word-chip {
+  padding: 8px 10px;
+  border: 1px solid #e0e0da;
+  border-radius: 999px;
+  background: #f8f8f5;
+  color: #2f2f2b;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.study-text-card {
+  border: 1px solid #e8e8e4;
+  border-radius: 8px;
+  background: #fcfcfa;
+  padding: 14px;
+  color: #30302c;
+  line-height: 1.7;
+  font-size: 14px;
+}
+
+.study-text-card p {
+  margin: 0;
+}
+
+.study-text-card p + p {
+  margin-top: 10px;
+}
+
+.study-word-mark {
+  background: #ffeec8;
+  color: #5b3f0b;
+  border-radius: 4px;
+  padding: 0 2px;
+}
+
 .speak-card .topics-grid,
 .speak-card .topics-grid-skeleton,
 .speak-card .guidance-skeleton {

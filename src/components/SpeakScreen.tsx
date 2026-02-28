@@ -6,8 +6,10 @@ import { useAppDispatch, useAppSelector } from "../store/hooks";
 import {
   clearPhotoForPractice,
   clearQuestionsError,
+  clearStudyError,
   clearTopicGuidanceError,
   fetchDailyQuestions,
+  fetchStudyWords,
   fetchTopicGuidance,
   openAuthForSave,
   PHOTO_PRACTICE_MAX_BYTES,
@@ -47,6 +49,77 @@ const readFileAsDataUrl = (file: File): Promise<string> => {
   });
 };
 
+type StudyTextSegment = {
+  text: string;
+  isStudyWord: boolean;
+};
+
+const escapeRegExp = (value: string): string => {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+};
+
+const buildStudyTextSegments = (text: string, words: string[]): StudyTextSegment[] => {
+  if (!text) {
+    return [];
+  }
+
+  const uniqueWords = Array.from(
+    new Set(
+      words
+        .map((item) => item.trim())
+        .filter((item) => item.length > 0)
+    )
+  );
+  if (uniqueWords.length === 0) {
+    return [{ text, isStudyWord: false }];
+  }
+
+  const pattern = uniqueWords
+    .sort((a, b) => b.length - a.length)
+    .map((item) => escapeRegExp(item))
+    .join("|");
+  if (!pattern) {
+    return [{ text, isStudyWord: false }];
+  }
+
+  const regex = new RegExp(`\\b(?:${pattern})\\b`, "gi");
+  const segments: StudyTextSegment[] = [];
+  let cursor = 0;
+  let match = regex.exec(text);
+
+  while (match) {
+    const start = match.index;
+    const end = start + match[0].length;
+
+    if (start > cursor) {
+      segments.push({
+        text: text.slice(cursor, start),
+        isStudyWord: false
+      });
+    }
+
+    segments.push({
+      text: text.slice(start, end),
+      isStudyWord: true
+    });
+
+    cursor = end;
+    if (regex.lastIndex === start) {
+      regex.lastIndex += 1;
+    }
+    match = regex.exec(text);
+  }
+
+  if (cursor < text.length) {
+    segments.push({
+      text: text.slice(cursor),
+      isStudyWord: false
+    });
+  }
+
+  return segments.length > 0 ? segments : [{ text, isStudyWord: false }];
+};
+
 export default function SpeakScreen() {
   const dispatch = useAppDispatch();
   const {
@@ -67,6 +140,10 @@ export default function SpeakScreen() {
     topicGuidanceWords,
     topicGuidanceStatus,
     topicGuidanceError,
+    studyWords,
+    studyText,
+    studyStatus,
+    studyError,
     recordingSaveStatus,
     recordingSaveError,
     isSubscriber,
@@ -158,6 +235,19 @@ export default function SpeakScreen() {
     );
   };
 
+  const onGenerateStudyWords = () => {
+    dispatch(clearStudyError());
+    void dispatch(
+      fetchStudyWords({
+        force: true,
+        refreshToken: String(Date.now()),
+        interestIds: selectedInterestIds,
+        avoidWords: studyWords,
+        englishLevel: selectedEnglishLevel
+      })
+    );
+  };
+
   const onPhotoSelected = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.currentTarget.value = "";
@@ -187,6 +277,13 @@ export default function SpeakScreen() {
 
   if (speakState === "idle") {
     const shouldShowQuestionsSkeleton = questionsStatus === "loading" && topics.length === 0;
+    const shouldShowStudySkeleton = studyStatus === "loading" && studyWords.length === 0 && !studyText;
+    const studyParagraphs = studyText
+      ? studyText
+          .split(/\n{2,}/)
+          .map((item) => item.trim())
+          .filter((item) => item.length > 0)
+      : [];
 
     return (
       <section className="speak-screen">
@@ -283,6 +380,61 @@ export default function SpeakScreen() {
           </button>
 
           {pendingPhotoError && <div className="auth-error top-spaced">{pendingPhotoError}</div>}
+        </div>
+
+        <div className="speak-card">
+          <div className="speak-section-header">
+            <div className="section-title speak-section-title">Words for study</div>
+            <button className="btn btn-secondary btn-small" onClick={onGenerateStudyWords} disabled={studyStatus === "loading"}>
+              {studyStatus === "loading" ? "Generating..." : studyWords.length === 10 ? "↻ Regenerate" : "Generate"}
+            </button>
+          </div>
+
+          <div className="profile-value">
+            Generate 10 words and a practical context text for level {selectedEnglishLevel.toUpperCase()}.
+          </div>
+
+          {shouldShowStudySkeleton && (
+            <div className="study-pack-skeleton" aria-hidden="true">
+              <div className="skeleton-line skeleton-line-wide" />
+              <div className="skeleton-line skeleton-line-wide" />
+              <div className="skeleton-line skeleton-line-medium" />
+            </div>
+          )}
+
+          {!shouldShowStudySkeleton && studyWords.length > 0 && (
+            <div className="study-words-grid">
+              {studyWords.map((word) => (
+                <div key={word.toLowerCase()} className="study-word-chip">
+                  {word}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {!shouldShowStudySkeleton && studyParagraphs.length > 0 && (
+            <div className="study-text-card">
+              {studyParagraphs.map((paragraph, index) => (
+                <p key={`study-paragraph-${index}`}>
+                  {buildStudyTextSegments(paragraph, studyWords).map((segment, segmentIndex) =>
+                    segment.isStudyWord ? (
+                      <mark key={`study-segment-${index}-${segmentIndex}`} className="study-word-mark">
+                        {segment.text}
+                      </mark>
+                    ) : (
+                      <span key={`study-segment-${index}-${segmentIndex}`}>{segment.text}</span>
+                    )
+                  )}
+                </p>
+              ))}
+            </div>
+          )}
+
+          {!shouldShowStudySkeleton && studyWords.length === 0 && (
+            <div className="empty-state speak-empty-state">Generate vocabulary set to start learning words in context.</div>
+          )}
+
+          {studyError && <div className="auth-error top-spaced">{studyError}</div>}
         </div>
 
         <div className="speak-card">
