@@ -131,3 +131,7 @@ rm -rf .venv tools/whisper/openai-models tools/whisper/cache tools/whisper/pip-c
 - `npm run lint` - run Next.js lint rules
 - `npm run build` - production build
 - `npm run start` - run production server
+
+## Project docs
+
+- Technical debt audit and refactor roadmap: `docs/TECH_DEBT.md`
