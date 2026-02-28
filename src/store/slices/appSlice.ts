@@ -1,5 +1,5 @@
 import { createAsyncThunk, createSlice, type PayloadAction } from "@reduxjs/toolkit";
-import { generateSuggestions, generateTranscript, type Recording, type Suggestion } from "../../lib/data";
+import { type Recording, type Suggestion } from "../../lib/data";
 import { toDateKey } from "../../lib/utils";
 
 export type ScreenName = "speak" | "history" | "details" | "share" | "auth" | "profile" | "interests";
@@ -303,7 +303,7 @@ const parseRecording = (value: unknown): Recording | null => {
   const candidate = value as Record<string, unknown>;
   const id = typeof candidate.id === "string" ? candidate.id.trim() : "";
   const topic = typeof candidate.topic === "string" ? candidate.topic.trim() : "";
-  const transcript = typeof candidate.transcript === "string" ? candidate.transcript.trim() : "";
+  const transcript = typeof candidate.transcript === "string" ? candidate.transcript : "";
   const timestampRaw = typeof candidate.timestamp === "string" ? candidate.timestamp : "";
   const timestamp = new Date(timestampRaw);
   const duration = Number.parseInt(String(candidate.duration ?? 0), 10);
@@ -313,7 +313,7 @@ const parseRecording = (value: unknown): Recording | null => {
     .filter((item): item is Suggestion => item !== null)
     .slice(0, 20);
 
-  if (!id || !topic || !transcript || Number.isNaN(timestamp.getTime()) || !Number.isFinite(duration) || duration < 0) {
+  if (!id || !topic || Number.isNaN(timestamp.getTime()) || !Number.isFinite(duration) || duration < 0) {
     return null;
   }
 
@@ -681,9 +681,7 @@ export const saveRecording = createAsyncThunk<Recording, void, { state: { app: A
     const recordingDraft = {
       topic,
       duration: recordingDuration,
-      timestamp: new Date().toISOString(),
-      transcript: generateTranscript(topic),
-      suggestions: generateSuggestions()
+      timestamp: new Date().toISOString()
     };
 
     try {

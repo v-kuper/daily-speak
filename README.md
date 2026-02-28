@@ -48,6 +48,7 @@ After creating/updating `.env.local`, restart `npm run dev`.
 The app now uses local Ollama to:
 - generate 3 speaking questions for each day
 - generate follow-up questions and useful words for a selected topic
+- generate mock transcript and grammar suggestions when saving a recording
 - personalize generation using selected interests from the Profile screen
 
 Profile flow:

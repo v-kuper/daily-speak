@@ -13,6 +13,8 @@ export default function ShareScreen() {
     () => recordings.find((item) => item.id === currentRecordingId),
     [currentRecordingId, recordings]
   );
+  const hasTranscript = recording?.transcript.trim().length ? true : false;
+  const hasSuggestions = recording?.suggestions.length ? true : false;
 
   if (!recording) {
     return (
@@ -54,24 +56,32 @@ export default function ShareScreen() {
 
       <div className="transcript-section">
         <div className="section-title">Transcript</div>
-        <div className="transcript-text">{recording.transcript}</div>
+        {hasTranscript ? (
+          <div className="transcript-text">{recording.transcript}</div>
+        ) : (
+          <div className="empty-state">Transcript is in progress and will be available soon.</div>
+        )}
       </div>
 
       <div className="suggestions-section">
         <div className="section-title">AI Suggestions</div>
-        {recording.suggestions.map((suggestion) => (
-          <div key={suggestion.wrong} className="suggestion-item">
-            <div className="suggestion-wrong">
-              <span className="suggestion-wrong-icon">❌</span>
-              <span>{suggestion.wrong}</span>
+        {hasSuggestions ? (
+          recording.suggestions.map((suggestion) => (
+            <div key={suggestion.wrong} className="suggestion-item">
+              <div className="suggestion-wrong">
+                <span className="suggestion-wrong-icon">❌</span>
+                <span>{suggestion.wrong}</span>
+              </div>
+              <div className="suggestion-right">
+                <span className="suggestion-right-icon">✅</span>
+                <span>{suggestion.right}</span>
+              </div>
+              <div className="suggestion-explanation">{suggestion.explanation}</div>
             </div>
-            <div className="suggestion-right">
-              <span className="suggestion-right-icon">✅</span>
-              <span>{suggestion.right}</span>
-            </div>
-            <div className="suggestion-explanation">{suggestion.explanation}</div>
-          </div>
-        ))}
+          ))
+        ) : (
+          <div className="empty-state">AI error analysis is in progress and will be available soon.</div>
+        )}
       </div>
     </section>
   );
