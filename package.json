@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "setup:whisper": "bash scripts/setup-whisper-openai-local.sh",
+    "check:whisper": "bash scripts/check-whisper-local.sh"
   },
   "dependencies": {
     "@reduxjs/toolkit": "^2.5.1",

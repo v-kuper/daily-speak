@@ -13,9 +13,9 @@ import {
   DEFAULT_OLLAMA_BASE_URL,
   extractJsonCandidates,
   isThinkingModel,
-  normalizeOllamaContent,
   resolveOllamaModelForUser
 } from "../../../../src/server/ollama";
+import { WhisperTranscriptionError, transcribeAudioWithLocalWhisper } from "../../../../src/server/whisper";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -27,11 +27,6 @@ type RecordingSuggestion = {
 };
 
 type PracticeType = "free_talk" | "topic" | "photo_description";
-
-type RecordingAnalysis = {
-  transcript: string;
-  suggestions: RecordingSuggestion[];
-};
 
 type CreateRecordingPayload = {
   recording?: {
@@ -69,21 +64,11 @@ type OllamaChatResponse = {
 };
 
 type ParsedRecordingPayload = {
-  transcript?: unknown;
   suggestions?: unknown;
   corrections?: unknown;
   mistakes?: unknown;
   errorAnalysis?: unknown;
 };
-
-class RecordingAnalysisError extends Error {
-  status: number;
-
-  constructor(message: string, status: number) {
-    super(message);
-    this.status = status;
-  }
-}
 
 const PRACTICE_TYPE_SET = new Set<PracticeType>(["free_talk", "topic", "photo_description"]);
 const AUDIO_DATA_URL_PATTERN = /^data:((?:audio|video)\/[a-z0-9.+-]+(?:;[^,]+)*);base64,([A-Za-z0-9+/_=-]+)$/i;
@@ -181,35 +166,20 @@ const tryParseJson = (jsonText: string): ParsedRecordingPayload | null => {
   }
 };
 
-const parseRecordingAnalysis = (content: string): RecordingAnalysis | null => {
-  const normalizePayload = (data: ParsedRecordingPayload | null): RecordingAnalysis | null => {
-    if (!data) {
-      return null;
-    }
-
-    const transcript = normalizeTranscript(data.transcript);
-    const suggestions = normalizeSuggestions(data.suggestions ?? data.corrections ?? data.mistakes ?? data.errorAnalysis);
-
-    if (!transcript || suggestions.length === 0) {
-      return null;
-    }
-
-    return {
-      transcript,
-      suggestions: suggestions.slice(0, 5)
-    };
-  };
-
+const parseSuggestionsFromContent = (content: string): RecordingSuggestion[] => {
   for (const candidate of extractJsonCandidates(content)) {
-    const parsed = normalizePayload(tryParseJson(candidate));
-    if (parsed) {
-      return parsed;
+    const parsed = tryParseJson(candidate);
+    if (!parsed) {
+      continue;
+    }
+
+    const suggestions = normalizeSuggestions(parsed.suggestions ?? parsed.corrections ?? parsed.mistakes ?? parsed.errorAnalysis);
+    if (suggestions.length > 0) {
+      return suggestions.slice(0, 5);
     }
   }
 
-  const lineContent = normalizeOllamaContent(content);
-  const lineTranscript = normalizeTranscript(lineContent);
-  return lineTranscript ? { transcript: lineTranscript, suggestions: [] } : null;
+  return [];
 };
 
 const parseTimestamp = (value: unknown): Date => {
@@ -373,38 +343,37 @@ const normalizePhotoDataUrl = (value: unknown): string | null => {
   return `data:image/${mime};base64,${base64}`;
 };
 
-const createPrompt = (
+const createSuggestionsPrompt = (
+  transcript: string,
   topic: string,
-  duration: number,
   interests: string[],
   practiceType: PracticeType,
   photoObject: string | null
 ): string => {
-  const clampedDuration = Math.max(30, Math.min(duration, 600));
-  const targetWords = Math.max(80, Math.min(320, Math.round(clampedDuration * 2.1)));
+  const normalizedTranscript = normalizeTranscript(transcript);
+  const transcriptForPrompt = normalizedTranscript.slice(0, 6000);
 
   const parts = [
     `Topic: \"${topic}\".`,
-    `Recording duration: about ${Math.max(1, duration)} seconds.`,
-    `Write one plausible English learner transcript around ${targetWords} words (B1-B2 level).`,
-    "Then provide exactly 4 grammar-focused corrections based on this transcript.",
-    'Return only JSON with this shape: {"transcript":"...","suggestions":[{"wrong":"...","right":"...","explanation":"..."}]}.',
-    "No markdown, no extra keys, no explanations outside JSON."
+    "You receive an English learner transcript from a speaking practice recording.",
+    "Find up to 4 grammar or word-choice mistakes that clearly appear in the transcript.",
+    'Return only JSON with this exact shape: {"suggestions":[{"wrong":"...","right":"...","explanation":"..."}]}.',
+    "Do not invent mistakes that are not present in the transcript.",
+    "No markdown and no extra keys.",
+    `Transcript: """${transcriptForPrompt}""".`
   ];
 
   if (practiceType === "photo_description") {
-    parts.push("This is a photo description practice.");
-    parts.push("Transcript should sound like the learner is describing what they see in a picture.");
-    parts.push("Include visual details: color, shape, material, position, and possible use.");
+    parts.push("Practice mode: photo description.");
     if (photoObject) {
-      parts.push(`Main object to describe: \"${photoObject}\".`);
+      parts.push(`Main photo object: \"${photoObject}\".`);
     }
   } else if (practiceType === "free_talk") {
-    parts.push("Transcript should sound like spontaneous free talk and personal examples.");
+    parts.push("Practice mode: free talk.");
   }
 
   if (interests.length > 0) {
-    parts.push(`Learner interests: ${interests.join(", ")}. Keep transcript context close to them when possible.`);
+    parts.push(`Learner interests context: ${interests.join(", ")}.`);
   }
 
   return parts.join(" ");
@@ -425,7 +394,7 @@ const buildRequestBody = (
         role: "system",
         content: strictJson
           ? "Return strict valid JSON only. No markdown. No prose."
-          : "You generate realistic speaking-practice transcript mocks and grammar correction items. Follow output JSON format exactly."
+          : "You analyze learner transcripts and output only grammar correction JSON."
       },
       {
         role: "user",
@@ -433,7 +402,7 @@ const buildRequestBody = (
       }
     ],
     options: {
-      temperature: strictJson ? 0.3 : 0.6,
+      temperature: strictJson ? 0.1 : 0.3,
       seed
     }
   };
@@ -445,19 +414,23 @@ const buildRequestBody = (
   return body;
 };
 
-const generateRecordingAnalysis = async (
+const generateRecordingSuggestions = async (
   userId: string,
+  transcript: string,
   topic: string,
-  duration: number,
   interests: string[],
   practiceType: PracticeType,
   photoObject: string | null
-): Promise<RecordingAnalysis> => {
+): Promise<RecordingSuggestion[]> => {
+  if (!transcript) {
+    return [];
+  }
+
   const baseUrl = process.env.OLLAMA_BASE_URL ?? DEFAULT_OLLAMA_BASE_URL;
   const model = await resolveOllamaModelForUser(userId);
   const useJsonFormat = !isThinkingModel(model);
-  const seed = Math.abs((hashString(topic.toLowerCase()) * 131 + duration * 17 + Date.now()) % 2_147_483_647);
-  const prompt = createPrompt(topic, duration, interests, practiceType, photoObject);
+  const seed = Math.abs((hashString(topic.toLowerCase()) * 131 + hashString(transcript) * 17) % 2_147_483_647);
+  const prompt = createSuggestionsPrompt(transcript, topic, interests, practiceType, photoObject);
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const strictJson = attempt > 0;
@@ -472,31 +445,35 @@ const generateRecordingAnalysis = async (
         body: JSON.stringify(buildRequestBody(model, prompt, seed + attempt * 97, strictJson, useJsonFormat)),
         cache: "no-store"
       });
-    } catch {
-      throw new RecordingAnalysisError(
-        "Cannot connect to local Ollama. Make sure Ollama is running for transcript generation.",
-        502
-      );
+    } catch (error) {
+      console.warn("Recording suggestions request failed", error);
+      return [];
     }
 
     if (!response.ok) {
-      const text = await response.text();
-      throw new RecordingAnalysisError(`Ollama request failed (${response.status}): ${text.slice(0, 300)}`, 502);
+      console.warn(`Recording suggestions request failed with status ${response.status}`);
+      return [];
     }
 
-    const payload = (await response.json()) as OllamaChatResponse;
+    let payload: OllamaChatResponse;
+    try {
+      payload = (await response.json()) as OllamaChatResponse;
+    } catch (error) {
+      console.warn("Recording suggestions response is not valid JSON", error);
+      return [];
+    }
     const content = payload.message?.content?.trim();
     if (!content) {
       continue;
     }
 
-    const analysis = parseRecordingAnalysis(content);
-    if (analysis && analysis.transcript) {
-      return analysis;
+    const suggestions = parseSuggestionsFromContent(content);
+    if (suggestions.length > 0) {
+      return suggestions;
     }
   }
 
-  throw new RecordingAnalysisError("Could not parse transcript and suggestions from Ollama response.", 502);
+  return [];
 };
 
 export async function POST(request: NextRequest) {
@@ -593,7 +570,15 @@ export async function POST(request: NextRequest) {
     );
     const interests = interestsResult.rows.map((row) => row.interest_id).slice(0, 10);
 
-    const analysis = await generateRecordingAnalysis(user.id, topic, duration, interests, practiceType, photoObject);
+    const transcript = normalizeTranscript(await transcribeAudioWithLocalWhisper(savedAudio.absolutePath));
+    if (!transcript) {
+      throw new WhisperTranscriptionError(
+        "Whisper returned an empty transcript. Try speaking louder or recording again.",
+        422
+      );
+    }
+
+    const suggestions = await generateRecordingSuggestions(user.id, transcript, topic, interests, practiceType, photoObject);
 
     const insertResult = await query<RecordingRow>(
       `INSERT INTO recordings
@@ -617,8 +602,8 @@ export async function POST(request: NextRequest) {
         topic.slice(0, 300),
         duration,
         timestamp.toISOString(),
-        analysis.transcript,
-        JSON.stringify(analysis.suggestions),
+        transcript,
+        JSON.stringify(suggestions),
         practiceType,
         savedAudio.publicUrl,
         practiceType === "photo_description" ? photoDataUrl : null,
@@ -648,7 +633,7 @@ export async function POST(request: NextRequest) {
       await unlink(savedAudioAbsolutePath).catch(() => undefined);
     }
 
-    if (error instanceof RecordingAnalysisError) {
+    if (error instanceof WhisperTranscriptionError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
 

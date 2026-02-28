@@ -48,7 +48,7 @@ After creating/updating `.env.local`, restart `npm run dev`.
 The app now uses local Ollama to:
 - generate 3 speaking questions for each day
 - generate follow-up questions and useful words for a selected topic
-- generate mock transcript and grammar suggestions when saving a recording
+- generate grammar suggestions for transcripts
 - personalize generation using selected interests from the Profile screen
 
 Profile flow:
@@ -67,6 +67,62 @@ ollama pull gemma3:12b
 ```bash
 export OLLAMA_BASE_URL=http://127.0.0.1:11434
 export OLLAMA_MODEL=gemma3:12b
+```
+
+## Local Whisper setup (recording transcription)
+
+Saved recordings support two local backends:
+- `openai` (Python `openai/whisper`)
+- `cpp` (`whisper.cpp`)
+
+Use `openai/whisper`:
+
+```bash
+npm run setup:whisper
+```
+
+This creates everything inside the project:
+- `.venv` (python + openai-whisper)
+- `tools/whisper/openai-models` (downloaded models)
+- `tools/whisper/cache` (runtime cache)
+- `tools/ffmpeg/bin/ffmpeg` (local ffmpeg symlink)
+
+Project-local env example:
+
+```bash
+WHISPER_BACKEND=openai
+WHISPER_PYTHON_BIN=.venv/bin/python
+WHISPER_OPENAI_MODEL=base.en
+WHISPER_OPENAI_MODEL_DIR=tools/whisper/openai-models
+WHISPER_OPENAI_CACHE_DIR=tools/whisper/cache
+WHISPER_FFMPEG_BIN=tools/ffmpeg/bin/ffmpeg
+WHISPER_LANGUAGE=en
+```
+
+`ffmpeg` is required for webm/m4a decoding. `npm run setup:whisper` installs a project-local copy via `imageio-ffmpeg`.
+Check setup:
+
+```bash
+npm run check:whisper
+```
+
+Use `whisper.cpp`:
+
+```bash
+export WHISPER_BACKEND=cpp
+export WHISPER_BINARY_PATH=/absolute/path/to/whisper-cli
+export WHISPER_MODEL_PATH=/absolute/path/to/ggml-base.en.bin
+export WHISPER_LANGUAGE=en
+export WHISPER_THREADS=4
+```
+
+If `WHISPER_BACKEND` is not set, app tries `cpp` first, then falls back to `openai`.
+Detailed setup notes: `tools/whisper/README.md`.
+
+To remove everything Whisper-related from this project:
+
+```bash
+rm -rf .venv tools/whisper/openai-models tools/whisper/cache tools/whisper/pip-cache tools/ffmpeg/bin
 ```
 
 ## Available scripts
