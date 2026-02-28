@@ -193,6 +193,86 @@ input {
   margin-bottom: 32px;
 }
 
+.speak-screen {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.speak-card {
+  background: #fff;
+  border: 1px solid #e8e8e4;
+  border-radius: 10px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.speak-hero-card {
+  gap: 16px;
+}
+
+.speak-center-card {
+  align-items: stretch;
+}
+
+.speak-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.speak-section-title {
+  margin-bottom: 0;
+}
+
+.speak-heading-tight {
+  margin-bottom: 0;
+}
+
+.speak-primary-btn {
+  margin-bottom: 0;
+}
+
+.speak-empty-state {
+  padding: 24px 14px;
+  border: 1px dashed #e8e8e4;
+  border-radius: 8px;
+  background: #fcfcfa;
+}
+
+.speak-button-group {
+  margin-top: 0;
+}
+
+.speak-question-list {
+  padding: 14px;
+}
+
+.speak-card .topics-grid,
+.speak-card .topics-grid-skeleton,
+.speak-card .guidance-skeleton {
+  margin: 0;
+}
+
+.speak-card .notice,
+.speak-card .auth-error,
+.speak-card .recorded-banner,
+.speak-card .recording-indicator {
+  margin-bottom: 0;
+}
+
+.speak-card .timer {
+  margin: 10px 0;
+}
+
+.speak-card .collapsible-section:last-child {
+  margin-bottom: 0;
+}
+
 .profile-screen {
   max-width: 700px;
 }
@@ -960,6 +1040,14 @@ input {
 
   .main-content {
     padding: 24px 16px;
+  }
+
+  .speak-card {
+    padding: 16px;
+  }
+
+  .speak-section-header .btn {
+    width: 100%;
   }
 
   .topics-grid {
