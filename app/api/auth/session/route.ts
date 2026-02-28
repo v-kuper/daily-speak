@@ -26,7 +26,7 @@ export async function GET(request: NextRequest) {
       return unauthorizedResponse();
     }
 
-    return NextResponse.json({ user: { email: user.email } }, { status: 200 });
+    return NextResponse.json({ user: { email: user.email, isSubscriber: user.isSubscriber } }, { status: 200 });
   } catch (error) {
     console.error("Session route failed", error);
     return NextResponse.json({ error: "Failed to load session." }, { status: 500 });

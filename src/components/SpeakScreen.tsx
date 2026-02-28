@@ -43,8 +43,31 @@ export default function SpeakScreen() {
     topicGuidanceStatus,
     topicGuidanceError,
     recordingSaveStatus,
-    recordingSaveError
+    recordingSaveError,
+    isSubscriber,
+    weeklyLimitSeconds,
+    weeklyUsedSeconds,
+    weeklyRemainingSeconds,
+    maxSessionSeconds
   } = useAppSelector((state) => state.app);
+
+  const normalizedMaxSessionSeconds = Math.max(0, maxSessionSeconds);
+  const normalizedWeeklyLimitSeconds = Math.max(0, weeklyLimitSeconds ?? 0);
+  const normalizedWeeklyUsedSeconds = Math.max(0, weeklyUsedSeconds);
+  const normalizedWeeklyRemainingSeconds = Math.max(0, weeklyRemainingSeconds ?? 0);
+  const sessionLimitSeconds = isSubscriber
+    ? normalizedMaxSessionSeconds
+    : Math.min(normalizedMaxSessionSeconds, normalizedWeeklyRemainingSeconds);
+  const freeLimitReached = isAuthenticated && !isSubscriber && sessionLimitSeconds <= 0;
+  const hasRecordingBudget = !isAuthenticated || sessionLimitSeconds > 0;
+
+  const quotaHint = isAuthenticated
+    ? isSubscriber
+      ? `Subscriber: unlimited per week, up to ${formatTime(normalizedMaxSessionSeconds)} per recording.`
+      : `Free: ${formatTime(normalizedWeeklyRemainingSeconds)} left this week (${formatTime(
+          normalizedWeeklyUsedSeconds
+        )} of ${formatTime(normalizedWeeklyLimitSeconds)} used).`
+    : null;
 
   useEffect(() => {
     if (speakState !== "recording") {
@@ -103,7 +126,14 @@ export default function SpeakScreen() {
 
     return (
       <section>
-        <button className="btn btn-primary btn-large" onClick={() => dispatch(startFreeTalk())}>
+        {quotaHint && <div className="notice">{quotaHint}</div>}
+        {freeLimitReached && <div className="auth-error">Free weekly limit reached. New quota will be available next week.</div>}
+
+        <button
+          className="btn btn-primary btn-large"
+          onClick={() => dispatch(startFreeTalk())}
+          disabled={!hasRecordingBudget}
+        >
           Start speaking
         </button>
 
@@ -178,7 +208,14 @@ export default function SpeakScreen() {
         <div className="heading-sm">Selected question</div>
         <h2 className="heading-xl">{selectedTopic}</h2>
 
-        <button className="btn btn-primary btn-large" onClick={() => dispatch(startRecording())}>
+        {quotaHint && <div className="notice">{quotaHint}</div>}
+        {freeLimitReached && <div className="auth-error">Free weekly limit reached. New quota will be available next week.</div>}
+
+        <button
+          className="btn btn-primary btn-large"
+          onClick={() => dispatch(startRecording())}
+          disabled={!hasRecordingBudget}
+        >
           Start speaking
         </button>
 
@@ -247,6 +284,9 @@ export default function SpeakScreen() {
         </div>
 
         <div className="timer">{formatTime(recordingDuration)}</div>
+        {isAuthenticated && (
+          <div className="recorded-subtitle">Session limit: {formatTime(Math.max(0, sessionLimitSeconds))}</div>
+        )}
 
         {shouldShowQuestions && (
           <div className="section">
@@ -274,6 +314,11 @@ export default function SpeakScreen() {
         <div className="recorded-title">Recording complete</div>
         <div className="recorded-subtitle">Duration: {formatTime(recordingDuration)}</div>
       </div>
+
+      {quotaHint && <div className="notice">{quotaHint}</div>}
+      {isAuthenticated && !isSubscriber && normalizedWeeklyRemainingSeconds <= 0 && (
+        <div className="auth-error">You spent all free minutes for this week. Additional recordings will unlock next week.</div>
+      )}
 
       {!isAuthenticated && (
         <div className="notice">Saving is available only for authorized users. Sign in to continue.</div>

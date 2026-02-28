@@ -29,7 +29,10 @@ export async function POST(request: NextRequest) {
     const user = await registerUser(email, password);
     const session = await createSession(user.id);
 
-    const response = NextResponse.json({ user: { email: user.email } }, { status: 201 });
+    const response = NextResponse.json(
+      { user: { email: user.email, isSubscriber: user.isSubscriber } },
+      { status: 201 }
+    );
     response.cookies.set(SESSION_COOKIE_NAME, session.token, getSessionCookieOptions(session.expiresAt));
     return response;
   } catch (error) {

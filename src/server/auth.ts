@@ -14,11 +14,13 @@ type UserRow = {
   id: string;
   email: string;
   password_hash: string;
+  is_subscriber: boolean;
 };
 
 type SessionUserRow = {
   user_id: string;
   email: string;
+  is_subscriber: boolean;
 };
 
 type PgLikeError = {
@@ -28,6 +30,7 @@ type PgLikeError = {
 export type AuthUser = {
   id: string;
   email: string;
+  isSubscriber: boolean;
 };
 
 export type SessionData = {
@@ -132,12 +135,16 @@ export const registerUser = async (email: string, password: string): Promise<Aut
     throw error;
   }
 
-  return { id, email };
+  return { id, email, isSubscriber: false };
 };
 
 export const loginUser = async (email: string, password: string): Promise<AuthUser> => {
   const result = await query<UserRow>(
-    `SELECT id, email, password_hash
+    `SELECT
+       id,
+       email,
+       password_hash,
+       (is_subscriber AND (subscription_expires_at IS NULL OR subscription_expires_at > NOW())) AS is_subscriber
      FROM users
      WHERE email = $1
      LIMIT 1`,
@@ -151,7 +158,8 @@ export const loginUser = async (email: string, password: string): Promise<AuthUs
 
   return {
     id: user.id,
-    email: user.email
+    email: user.email,
+    isSubscriber: Boolean(user.is_subscriber)
   };
 };
 
@@ -182,7 +190,10 @@ export const getUserBySessionToken = async (token: string | null | undefined): P
 
   const tokenHash = hashSessionToken(token);
   const result = await query<SessionUserRow>(
-    `SELECT s.user_id, u.email
+    `SELECT
+       s.user_id,
+       u.email,
+       (u.is_subscriber AND (u.subscription_expires_at IS NULL OR u.subscription_expires_at > NOW())) AS is_subscriber
      FROM user_sessions s
      JOIN users u ON u.id = s.user_id
      WHERE s.token_hash = $1
@@ -198,7 +209,8 @@ export const getUserBySessionToken = async (token: string | null | undefined): P
 
   return {
     id: row.user_id,
-    email: row.email
+    email: row.email,
+    isSubscriber: Boolean(row.is_subscriber)
   };
 };
 

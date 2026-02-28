@@ -1,6 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { query } from "../../../../src/server/db";
 import { SESSION_COOKIE_NAME, getUserBySessionToken } from "../../../../src/server/auth";
+import { getRecordingQuota } from "../../../../src/server/recordingQuota";
+import { getSubscriptionState } from "../../../../src/server/subscription";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -53,7 +55,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const [interestsResult, recordingsResult] = await Promise.all([
+    const [interestsResult, recordingsResult, subscription] = await Promise.all([
       query<InterestRow>(
         `SELECT interest_id
          FROM user_interests
@@ -67,8 +69,10 @@ export async function GET(request: NextRequest) {
          WHERE user_id = $1
          ORDER BY timestamp DESC`,
         [user.id]
-      )
+      ),
+      getSubscriptionState(user.id)
     ]);
+    const quota = await getRecordingQuota(user.id, { isSubscriber: subscription.isSubscriber });
 
     const interestIds = interestsResult.rows.map((row) => row.interest_id);
     const recordings = recordingsResult.rows.map((row) => ({
@@ -80,7 +84,7 @@ export async function GET(request: NextRequest) {
       suggestions: parseSuggestions(row.suggestions)
     }));
 
-    return NextResponse.json({ interestIds, recordings }, { status: 200 });
+    return NextResponse.json({ interestIds, recordings, quota, subscription }, { status: 200 });
   } catch (error) {
     console.error("User data route failed", error);
     return NextResponse.json({ error: "Failed to load user data." }, { status: 500 });

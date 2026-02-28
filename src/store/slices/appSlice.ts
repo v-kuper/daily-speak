@@ -1,6 +1,6 @@
 import { createAsyncThunk, createSlice, type PayloadAction } from "@reduxjs/toolkit";
 import { type Recording, type Suggestion } from "../../lib/data";
-import { toDateKey } from "../../lib/utils";
+import { formatTime, toDateKey } from "../../lib/utils";
 
 export type ScreenName = "speak" | "history" | "details" | "share" | "auth" | "profile" | "interests";
 export type TabName = "speak" | "history";
@@ -165,12 +165,23 @@ export type AppState = {
   recordingSaveError: string | null;
   interestsSaveStatus: AuthStatus;
   interestsSaveError: string | null;
+  isSubscriber: boolean;
+  weeklyLimitSeconds: number | null;
+  weeklyUsedSeconds: number;
+  weeklyRemainingSeconds: number | null;
+  maxSessionSeconds: number;
+  subscriptionExpiresAt: string | null;
+  subscriptionCancelled: boolean;
+  subscriptionActionStatus: AuthStatus;
+  subscriptionActionError: string | null;
 };
 
 const today = new Date();
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PASSWORD_LENGTH = 8;
 export const MAX_SELECTED_INTERESTS = 10;
+const FREE_WEEKLY_LIMIT_SECONDS = 10 * 60;
+const SESSION_LIMIT_SECONDS = 10 * 60;
 
 const INTEREST_LOOKUP = new Map(INTEREST_OPTIONS.map((item) => [item.id, item]));
 
@@ -212,6 +223,7 @@ type TopicGuidanceResponse = {
 
 type AuthUserPayload = {
   email?: unknown;
+  isSubscriber?: unknown;
 };
 
 type AuthResponse = {
@@ -222,6 +234,8 @@ type AuthResponse = {
 type UserDataResponse = {
   interestIds?: unknown;
   recordings?: unknown;
+  quota?: unknown;
+  subscription?: unknown;
   error?: string;
 };
 
@@ -232,17 +246,151 @@ type SaveInterestsResponse = {
 
 type SaveRecordingResponse = {
   recording?: unknown;
+  quota?: unknown;
   error?: string;
 };
 
-const parseAuthEmail = (payload: AuthResponse | null): string | null => {
+type SubscriptionResponse = {
+  subscription?: unknown;
+  quota?: unknown;
+  error?: string;
+};
+
+type RecordingQuota = {
+  isSubscriber: boolean;
+  weeklyLimitSeconds: number | null;
+  weeklyUsedSeconds: number;
+  weeklyRemainingSeconds: number | null;
+  maxSessionSeconds: number;
+};
+
+type SubscriptionState = {
+  isSubscriber: boolean;
+  subscriptionExpiresAt: string | null;
+  subscriptionCancelled: boolean;
+};
+
+const buildDefaultRecordingQuota = (isSubscriber: boolean): RecordingQuota => {
+  if (isSubscriber) {
+    return {
+      isSubscriber: true,
+      weeklyLimitSeconds: null,
+      weeklyUsedSeconds: 0,
+      weeklyRemainingSeconds: null,
+      maxSessionSeconds: SESSION_LIMIT_SECONDS
+    };
+  }
+
+  return {
+    isSubscriber: false,
+    weeklyLimitSeconds: FREE_WEEKLY_LIMIT_SECONDS,
+    weeklyUsedSeconds: 0,
+    weeklyRemainingSeconds: FREE_WEEKLY_LIMIT_SECONDS,
+    maxSessionSeconds: SESSION_LIMIT_SECONDS
+  };
+};
+
+const DEFAULT_RECORDING_QUOTA: RecordingQuota = buildDefaultRecordingQuota(false);
+const DEFAULT_SUBSCRIPTION_STATE: SubscriptionState = {
+  isSubscriber: false,
+  subscriptionExpiresAt: null,
+  subscriptionCancelled: false
+};
+
+const parseAuthUser = (payload: AuthResponse | null): { email: string; isSubscriber: boolean } | null => {
   const email = payload?.user?.email;
   if (typeof email !== "string") {
     return null;
   }
 
   const normalized = email.trim().toLowerCase();
-  return EMAIL_PATTERN.test(normalized) ? normalized : null;
+  if (!EMAIL_PATTERN.test(normalized)) {
+    return null;
+  }
+
+  return {
+    email: normalized,
+    isSubscriber: Boolean(payload?.user?.isSubscriber)
+  };
+};
+
+const parseRecordingQuota = (value: unknown): RecordingQuota | null => {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+
+  const payload = value as Record<string, unknown>;
+  const isSubscriber = Boolean(payload.isSubscriber);
+  const weeklyUsedSeconds = Number.parseInt(String(payload.weeklyUsedSeconds ?? 0), 10);
+  const maxSessionSeconds = Number.parseInt(String(payload.maxSessionSeconds ?? SESSION_LIMIT_SECONDS), 10);
+  const weeklyLimitRaw = payload.weeklyLimitSeconds;
+  const weeklyRemainingRaw = payload.weeklyRemainingSeconds;
+
+  if (!Number.isFinite(weeklyUsedSeconds) || weeklyUsedSeconds < 0) {
+    return null;
+  }
+
+  if (!Number.isFinite(maxSessionSeconds) || maxSessionSeconds <= 0) {
+    return null;
+  }
+
+  const weeklyLimitSeconds =
+    weeklyLimitRaw === null || typeof weeklyLimitRaw === "undefined"
+      ? null
+      : Number.parseInt(String(weeklyLimitRaw), 10);
+  if (weeklyLimitSeconds !== null && (!Number.isFinite(weeklyLimitSeconds) || weeklyLimitSeconds < 0)) {
+    return null;
+  }
+
+  const weeklyRemainingSeconds =
+    weeklyRemainingRaw === null || typeof weeklyRemainingRaw === "undefined"
+      ? null
+      : Number.parseInt(String(weeklyRemainingRaw), 10);
+  if (weeklyRemainingSeconds !== null && (!Number.isFinite(weeklyRemainingSeconds) || weeklyRemainingSeconds < 0)) {
+    return null;
+  }
+
+  return {
+    isSubscriber,
+    weeklyLimitSeconds,
+    weeklyUsedSeconds,
+    weeklyRemainingSeconds,
+    maxSessionSeconds
+  };
+};
+
+const parseSubscriptionState = (value: unknown): SubscriptionState | null => {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+
+  const payload = value as Record<string, unknown>;
+  const isSubscriber = Boolean(payload.isSubscriber);
+  const subscriptionCancelled = Boolean(payload.subscriptionCancelled);
+  const rawExpiresAt = payload.subscriptionExpiresAt;
+
+  if (rawExpiresAt === null || typeof rawExpiresAt === "undefined") {
+    return {
+      isSubscriber,
+      subscriptionExpiresAt: null,
+      subscriptionCancelled: isSubscriber ? subscriptionCancelled : false
+    };
+  }
+
+  if (typeof rawExpiresAt !== "string") {
+    return null;
+  }
+
+  const parsedDate = new Date(rawExpiresAt);
+  if (Number.isNaN(parsedDate.getTime())) {
+    return null;
+  }
+
+  return {
+    isSubscriber,
+    subscriptionExpiresAt: parsedDate.toISOString(),
+    subscriptionCancelled: isSubscriber ? subscriptionCancelled : false
+  };
 };
 
 const normalizeInterestIds = (value: unknown): string[] => {
@@ -479,7 +627,7 @@ export const fetchTopicGuidance = createAsyncThunk<
 );
 
 export const restoreSession = createAsyncThunk<
-  { email: string | null },
+  { email: string | null; isSubscriber: boolean },
   void,
   { rejectValue: string }
 >("app/restoreSession", async (_, { rejectWithValue }) => {
@@ -490,25 +638,29 @@ export const restoreSession = createAsyncThunk<
     const payload = (await response.json().catch(() => null)) as AuthResponse | null;
 
     if (response.status === 401) {
-      return { email: null };
+      return { email: null, isSubscriber: false };
     }
 
     if (!response.ok) {
       return rejectWithValue(payload?.error ?? "Failed to restore session.");
     }
 
-    const email = parseAuthEmail(payload);
-    if (!email) {
+    const user = parseAuthUser(payload);
+    if (!user) {
       return rejectWithValue("Invalid session payload.");
     }
 
-    return { email };
+    return user;
   } catch {
     return rejectWithValue("Cannot connect to authentication service.");
   }
 });
 
-export const signIn = createAsyncThunk<{ email: string }, void, { state: { app: AppState }; rejectValue: string }>(
+export const signIn = createAsyncThunk<
+  { email: string; isSubscriber: boolean },
+  void,
+  { state: { app: AppState }; rejectValue: string }
+>(
   "app/signIn",
   async (_, { getState, rejectWithValue }) => {
     const { authEmailDraft, authPasswordDraft } = getState().app;
@@ -532,20 +684,24 @@ export const signIn = createAsyncThunk<{ email: string }, void, { state: { app: 
         body: JSON.stringify({ email, password })
       });
       const payload = (await response.json().catch(() => null)) as AuthResponse | null;
-      const parsedEmail = parseAuthEmail(payload);
+      const user = parseAuthUser(payload);
 
-      if (!response.ok || !parsedEmail) {
+      if (!response.ok || !user) {
         return rejectWithValue(payload?.error ?? "Failed to sign in.");
       }
 
-      return { email: parsedEmail };
+      return user;
     } catch {
       return rejectWithValue("Cannot connect to authentication service.");
     }
   }
 );
 
-export const signUp = createAsyncThunk<{ email: string }, void, { state: { app: AppState }; rejectValue: string }>(
+export const signUp = createAsyncThunk<
+  { email: string; isSubscriber: boolean },
+  void,
+  { state: { app: AppState }; rejectValue: string }
+>(
   "app/signUp",
   async (_, { getState, rejectWithValue }) => {
     const { authEmailDraft, authPasswordDraft } = getState().app;
@@ -569,13 +725,13 @@ export const signUp = createAsyncThunk<{ email: string }, void, { state: { app: 
         body: JSON.stringify({ email, password })
       });
       const payload = (await response.json().catch(() => null)) as AuthResponse | null;
-      const parsedEmail = parseAuthEmail(payload);
+      const user = parseAuthUser(payload);
 
-      if (!response.ok || !parsedEmail) {
+      if (!response.ok || !user) {
         return rejectWithValue(payload?.error ?? "Failed to create account.");
       }
 
-      return { email: parsedEmail };
+      return user;
     } catch {
       return rejectWithValue("Cannot connect to authentication service.");
     }
@@ -593,7 +749,7 @@ export const logout = createAsyncThunk("app/logout", async () => {
 });
 
 export const fetchUserData = createAsyncThunk<
-  { interestIds: string[]; recordings: Recording[] },
+  { interestIds: string[]; recordings: Recording[]; quota: RecordingQuota | null; subscription: SubscriptionState | null },
   void,
   { rejectValue: string }
 >("app/fetchUserData", async (_, { rejectWithValue }) => {
@@ -617,8 +773,10 @@ export const fetchUserData = createAsyncThunk<
       .map((item) => parseRecording(item))
       .filter((item): item is Recording => item !== null)
       .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+    const quota = parseRecordingQuota(payload?.quota);
+    const subscription = parseSubscriptionState(payload?.subscription);
 
-    return { interestIds, recordings };
+    return { interestIds, recordings, quota, subscription };
   } catch {
     return rejectWithValue("Cannot connect to user data service.");
   }
@@ -659,14 +817,21 @@ export const saveInterests = createAsyncThunk<string[], void, { state: { app: Ap
   }
 );
 
-export const saveRecording = createAsyncThunk<Recording, void, { state: { app: AppState }; rejectValue: string }>(
+export const saveRecording = createAsyncThunk<
+  { recording: Recording; quota: RecordingQuota | null },
+  void,
+  { state: { app: AppState }; rejectValue: string }
+>(
   "app/saveRecording",
   async (_, { getState, rejectWithValue }) => {
     const {
       isAuthenticated,
       speakState,
       selectedTopic,
-      recordingDuration
+      recordingDuration,
+      isSubscriber,
+      weeklyRemainingSeconds,
+      maxSessionSeconds
     } = getState().app;
 
     if (speakState !== "recorded") {
@@ -678,9 +843,23 @@ export const saveRecording = createAsyncThunk<Recording, void, { state: { app: A
     }
 
     const topic = selectedTopic ?? "Free talk";
+    const normalizedDuration = Math.max(0, Math.floor(recordingDuration));
+    const normalizedMaxSession = Math.max(0, Math.floor(maxSessionSeconds));
+    const normalizedWeeklyRemaining = Math.max(0, Math.floor(weeklyRemainingSeconds ?? 0));
+
+    if (isSubscriber) {
+      if (normalizedDuration > normalizedMaxSession) {
+        return rejectWithValue(`Subscribers can save recordings up to ${formatTime(normalizedMaxSession)} per session.`);
+      }
+    } else if (normalizedDuration > normalizedWeeklyRemaining) {
+      return rejectWithValue(
+        `Weekly free limit exceeded. You have ${formatTime(normalizedWeeklyRemaining)} left this week.`
+      );
+    }
+
     const recordingDraft = {
       topic,
-      duration: recordingDuration,
+      duration: normalizedDuration,
       timestamp: new Date().toISOString()
     };
 
@@ -706,13 +885,84 @@ export const saveRecording = createAsyncThunk<Recording, void, { state: { app: A
       if (!recording) {
         return rejectWithValue("Invalid recording payload from server.");
       }
+      const quota = parseRecordingQuota(payload?.quota);
 
-      return recording;
+      return { recording, quota };
     } catch {
       return rejectWithValue("Cannot connect to user data service.");
     }
   }
 );
+
+export const subscribeMonthly = createAsyncThunk<
+  { subscription: SubscriptionState; quota: RecordingQuota | null },
+  void,
+  { state: { app: AppState }; rejectValue: string }
+>("app/subscribeMonthly", async (_, { getState, rejectWithValue }) => {
+  if (!getState().app.isAuthenticated) {
+    return rejectWithValue("Unauthorized");
+  }
+
+  try {
+    const response = await fetch("/api/user/subscription", {
+      method: "POST"
+    });
+    const payload = (await response.json().catch(() => null)) as SubscriptionResponse | null;
+
+    if (response.status === 401) {
+      return rejectWithValue("Unauthorized");
+    }
+
+    if (!response.ok) {
+      return rejectWithValue(payload?.error ?? "Failed to activate subscription.");
+    }
+
+    const subscription = parseSubscriptionState(payload?.subscription);
+    if (!subscription) {
+      return rejectWithValue("Invalid subscription payload from server.");
+    }
+    const quota = parseRecordingQuota(payload?.quota);
+
+    return { subscription, quota };
+  } catch {
+    return rejectWithValue("Cannot connect to subscription service.");
+  }
+});
+
+export const cancelSubscription = createAsyncThunk<
+  { subscription: SubscriptionState; quota: RecordingQuota | null },
+  void,
+  { state: { app: AppState }; rejectValue: string }
+>("app/cancelSubscription", async (_, { getState, rejectWithValue }) => {
+  if (!getState().app.isAuthenticated) {
+    return rejectWithValue("Unauthorized");
+  }
+
+  try {
+    const response = await fetch("/api/user/subscription", {
+      method: "DELETE"
+    });
+    const payload = (await response.json().catch(() => null)) as SubscriptionResponse | null;
+
+    if (response.status === 401) {
+      return rejectWithValue("Unauthorized");
+    }
+
+    if (!response.ok) {
+      return rejectWithValue(payload?.error ?? "Failed to cancel subscription.");
+    }
+
+    const subscription = parseSubscriptionState(payload?.subscription);
+    if (!subscription) {
+      return rejectWithValue("Invalid subscription payload from server.");
+    }
+    const quota = parseRecordingQuota(payload?.quota);
+
+    return { subscription, quota };
+  } catch {
+    return rejectWithValue("Cannot connect to subscription service.");
+  }
+});
 
 const initialState: AppState = {
   currentScreen: "speak",
@@ -761,7 +1011,16 @@ const initialState: AppState = {
   recordingSaveStatus: "idle",
   recordingSaveError: null,
   interestsSaveStatus: "idle",
-  interestsSaveError: null
+  interestsSaveError: null,
+  isSubscriber: DEFAULT_RECORDING_QUOTA.isSubscriber,
+  weeklyLimitSeconds: DEFAULT_RECORDING_QUOTA.weeklyLimitSeconds,
+  weeklyUsedSeconds: DEFAULT_RECORDING_QUOTA.weeklyUsedSeconds,
+  weeklyRemainingSeconds: DEFAULT_RECORDING_QUOTA.weeklyRemainingSeconds,
+  maxSessionSeconds: DEFAULT_RECORDING_QUOTA.maxSessionSeconds,
+  subscriptionExpiresAt: DEFAULT_SUBSCRIPTION_STATE.subscriptionExpiresAt,
+  subscriptionCancelled: DEFAULT_SUBSCRIPTION_STATE.subscriptionCancelled,
+  subscriptionActionStatus: "idle",
+  subscriptionActionError: null
 };
 
 const resetPlayback = (state: AppState): void => {
@@ -815,9 +1074,48 @@ const applySavedRecording = (state: AppState, recording: Recording): void => {
   resetPlayback(state);
 };
 
-const completeAuthSuccess = (state: AppState, email: string): void => {
+const applySubscriptionState = (state: AppState, subscription: SubscriptionState | null): void => {
+  if (!subscription) {
+    state.subscriptionExpiresAt = null;
+    state.subscriptionCancelled = false;
+    return;
+  }
+
+  state.isSubscriber = subscription.isSubscriber;
+  state.subscriptionExpiresAt = subscription.subscriptionExpiresAt;
+  state.subscriptionCancelled = subscription.isSubscriber ? subscription.subscriptionCancelled : false;
+};
+
+const applyRecordingQuotaState = (state: AppState, quota: RecordingQuota | null): void => {
+  if (!quota) {
+    const fallback = buildDefaultRecordingQuota(state.isSubscriber);
+    state.weeklyLimitSeconds = fallback.weeklyLimitSeconds;
+    state.weeklyUsedSeconds = fallback.weeklyUsedSeconds;
+    state.weeklyRemainingSeconds = fallback.weeklyRemainingSeconds;
+    state.maxSessionSeconds = fallback.maxSessionSeconds;
+    return;
+  }
+
+  state.isSubscriber = quota.isSubscriber;
+  state.weeklyLimitSeconds = quota.weeklyLimitSeconds;
+  state.weeklyUsedSeconds = quota.weeklyUsedSeconds;
+  state.weeklyRemainingSeconds = quota.weeklyRemainingSeconds;
+  state.maxSessionSeconds = quota.maxSessionSeconds;
+};
+
+const resolveCurrentSessionLimit = (state: AppState): number => {
+  if (state.isSubscriber) {
+    return Math.max(0, state.maxSessionSeconds);
+  }
+
+  const weeklyRemaining = Math.max(0, state.weeklyRemainingSeconds ?? 0);
+  return Math.min(Math.max(0, state.maxSessionSeconds), weeklyRemaining);
+};
+
+const completeAuthSuccess = (state: AppState, email: string, isSubscriber: boolean): void => {
   state.isAuthenticated = true;
   state.userEmail = email;
+  state.isSubscriber = isSubscriber;
   state.authPasswordDraft = "";
   state.authError = null;
   state.authStatus = "idle";
@@ -826,6 +1124,8 @@ const completeAuthSuccess = (state: AppState, email: string): void => {
   state.userDataError = null;
   state.interestsSaveStatus = "idle";
   state.interestsSaveError = null;
+  state.subscriptionActionStatus = "idle";
+  state.subscriptionActionError = null;
   state.recordingSaveStatus = "idle";
   state.recordingSaveError = null;
   state.selectedInterestIds = [];
@@ -834,6 +1134,12 @@ const completeAuthSuccess = (state: AppState, email: string): void => {
   state.selectedDate = null;
   state.currentScreen = state.screenBeforeAuth;
   state.activeTab = state.screenBeforeAuth;
+  applySubscriptionState(state, {
+    isSubscriber,
+    subscriptionExpiresAt: null,
+    subscriptionCancelled: false
+  });
+  applyRecordingQuotaState(state, buildDefaultRecordingQuota(isSubscriber));
 };
 
 const clearAuthenticatedState = (state: AppState): void => {
@@ -864,6 +1170,12 @@ const clearAuthenticatedState = (state: AppState): void => {
   state.recordingSaveError = null;
   state.interestsSaveStatus = "idle";
   state.interestsSaveError = null;
+  state.subscriptionActionStatus = "idle";
+  state.subscriptionActionError = null;
+  state.isSubscriber = false;
+  state.subscriptionExpiresAt = DEFAULT_SUBSCRIPTION_STATE.subscriptionExpiresAt;
+  state.subscriptionCancelled = DEFAULT_SUBSCRIPTION_STATE.subscriptionCancelled;
+  applyRecordingQuotaState(state, DEFAULT_RECORDING_QUOTA);
   clearTopicGuidanceState(state);
   resetPlayback(state);
 };
@@ -987,7 +1299,19 @@ const appSlice = createSlice({
     },
     tickRecording: (state) => {
       if (state.speakState === "recording") {
-        state.recordingDuration += 1;
+        const sessionLimit = resolveCurrentSessionLimit(state);
+        if (sessionLimit <= 0) {
+          state.speakState = "recorded";
+          return;
+        }
+
+        if (state.recordingDuration < sessionLimit) {
+          state.recordingDuration += 1;
+        }
+
+        if (state.recordingDuration >= sessionLimit) {
+          state.speakState = "recorded";
+        }
       }
     },
     stopRecording: (state) => {
@@ -1172,10 +1496,18 @@ const appSlice = createSlice({
         state.authStatus = "idle";
         state.authInitialized = true;
         const email = action.payload.email;
+        const isSubscriber = action.payload.isSubscriber;
 
         if (email) {
           state.isAuthenticated = true;
           state.userEmail = email;
+          state.isSubscriber = isSubscriber;
+          applySubscriptionState(state, {
+            isSubscriber,
+            subscriptionExpiresAt: null,
+            subscriptionCancelled: false
+          });
+          applyRecordingQuotaState(state, buildDefaultRecordingQuota(isSubscriber));
           state.userDataStatus = "idle";
           state.userDataError = null;
           return;
@@ -1183,6 +1515,9 @@ const appSlice = createSlice({
 
         state.isAuthenticated = false;
         state.userEmail = null;
+        state.isSubscriber = false;
+        applySubscriptionState(state, DEFAULT_SUBSCRIPTION_STATE);
+        applyRecordingQuotaState(state, DEFAULT_RECORDING_QUOTA);
         state.userDataStatus = "idle";
         state.userDataError = null;
         state.selectedInterestIds = [];
@@ -1194,6 +1529,9 @@ const appSlice = createSlice({
         state.authError = action.payload ?? null;
         state.isAuthenticated = false;
         state.userEmail = null;
+        state.isSubscriber = false;
+        applySubscriptionState(state, DEFAULT_SUBSCRIPTION_STATE);
+        applyRecordingQuotaState(state, DEFAULT_RECORDING_QUOTA);
         state.userDataStatus = "idle";
         state.userDataError = null;
         state.selectedInterestIds = [];
@@ -1204,7 +1542,7 @@ const appSlice = createSlice({
         state.authError = null;
       })
       .addCase(signIn.fulfilled, (state, action) => {
-        completeAuthSuccess(state, action.payload.email);
+        completeAuthSuccess(state, action.payload.email, action.payload.isSubscriber);
       })
       .addCase(signIn.rejected, (state, action) => {
         state.authStatus = "idle";
@@ -1215,7 +1553,7 @@ const appSlice = createSlice({
         state.authError = null;
       })
       .addCase(signUp.fulfilled, (state, action) => {
-        completeAuthSuccess(state, action.payload.email);
+        completeAuthSuccess(state, action.payload.email, action.payload.isSubscriber);
       })
       .addCase(signUp.rejected, (state, action) => {
         state.authStatus = "idle";
@@ -1236,6 +1574,8 @@ const appSlice = createSlice({
         state.userDataError = null;
         state.selectedInterestIds = action.payload.interestIds;
         state.recordings = action.payload.recordings;
+        applySubscriptionState(state, action.payload.subscription);
+        applyRecordingQuotaState(state, action.payload.quota);
       })
       .addCase(fetchUserData.rejected, (state, action) => {
         if (action.payload === "Unauthorized") {
@@ -1256,14 +1596,7 @@ const appSlice = createSlice({
       .addCase(saveInterests.rejected, (state, action) => {
         state.interestsSaveStatus = "idle";
         if (action.payload === "Unauthorized") {
-          state.isAuthenticated = false;
-          state.userEmail = null;
-          state.userDataStatus = "idle";
-          state.userDataError = null;
-          state.selectedInterestIds = [];
-          state.recordings = [];
-          state.currentRecordingId = null;
-          state.selectedDate = null;
+          clearAuthenticatedState(state);
           return;
         }
         if (action.payload && action.payload !== "Unauthorized") {
@@ -1275,26 +1608,55 @@ const appSlice = createSlice({
         state.recordingSaveError = null;
       })
       .addCase(saveRecording.fulfilled, (state, action) => {
-        applySavedRecording(state, action.payload);
+        applySavedRecording(state, action.payload.recording);
+        applyRecordingQuotaState(state, action.payload.quota);
       })
       .addCase(saveRecording.rejected, (state, action) => {
         state.recordingSaveStatus = "idle";
         if (action.payload === "Unauthorized") {
-          state.isAuthenticated = false;
-          state.userEmail = null;
-          state.authError = null;
-          state.userDataStatus = "idle";
-          state.userDataError = null;
-          state.selectedInterestIds = [];
-          state.recordings = [];
-          state.currentRecordingId = null;
-          state.selectedDate = null;
+          clearAuthenticatedState(state);
           openAuthFlow(state, true);
           return;
         }
         if (action.payload && action.payload !== "Unauthorized") {
           state.recordingSaveError = action.payload;
         }
+      })
+      .addCase(subscribeMonthly.pending, (state) => {
+        state.subscriptionActionStatus = "loading";
+        state.subscriptionActionError = null;
+      })
+      .addCase(subscribeMonthly.fulfilled, (state, action) => {
+        state.subscriptionActionStatus = "idle";
+        state.subscriptionActionError = null;
+        applySubscriptionState(state, action.payload.subscription);
+        applyRecordingQuotaState(state, action.payload.quota);
+      })
+      .addCase(subscribeMonthly.rejected, (state, action) => {
+        state.subscriptionActionStatus = "idle";
+        if (action.payload === "Unauthorized") {
+          clearAuthenticatedState(state);
+          return;
+        }
+        state.subscriptionActionError = action.payload ?? "Failed to activate subscription.";
+      })
+      .addCase(cancelSubscription.pending, (state) => {
+        state.subscriptionActionStatus = "loading";
+        state.subscriptionActionError = null;
+      })
+      .addCase(cancelSubscription.fulfilled, (state, action) => {
+        state.subscriptionActionStatus = "idle";
+        state.subscriptionActionError = null;
+        applySubscriptionState(state, action.payload.subscription);
+        applyRecordingQuotaState(state, action.payload.quota);
+      })
+      .addCase(cancelSubscription.rejected, (state, action) => {
+        state.subscriptionActionStatus = "idle";
+        if (action.payload === "Unauthorized") {
+          clearAuthenticatedState(state);
+          return;
+        }
+        state.subscriptionActionError = action.payload ?? "Failed to cancel subscription.";
       })
       .addCase(fetchDailyQuestions.pending, (state) => {
         state.questionsStatus = "loading";

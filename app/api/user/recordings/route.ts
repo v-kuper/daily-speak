@@ -2,6 +2,11 @@ import { randomUUID } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
 import { query } from "../../../../src/server/db";
 import { SESSION_COOKIE_NAME, getUserBySessionToken } from "../../../../src/server/auth";
+import {
+  FREE_WEEKLY_LIMIT_SECONDS,
+  getRecordingQuota,
+  SUBSCRIBER_MAX_SESSION_SECONDS
+} from "../../../../src/server/recordingQuota";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -47,6 +52,14 @@ type OllamaChatResponse = {
   };
 };
 
+type ParsedRecordingPayload = {
+  transcript?: unknown;
+  suggestions?: unknown;
+  corrections?: unknown;
+  mistakes?: unknown;
+  errorAnalysis?: unknown;
+};
+
 class RecordingAnalysisError extends Error {
   status: number;
 
@@ -64,6 +77,13 @@ const hashString = (value: string): number => {
   return Math.abs(hash);
 };
 
+const formatSeconds = (seconds: number): string => {
+  const normalized = Math.max(0, Math.floor(seconds));
+  const minutes = Math.floor(normalized / 60);
+  const restSeconds = normalized % 60;
+  return `${minutes}:${restSeconds.toString().padStart(2, "0")}`;
+};
+
 const normalizeSuggestions = (input: unknown): RecordingSuggestion[] => {
   if (!Array.isArray(input)) {
     return [];
@@ -76,9 +96,12 @@ const normalizeSuggestions = (input: unknown): RecordingSuggestion[] => {
       }
 
       const candidate = item as Record<string, unknown>;
-      const wrong = typeof candidate.wrong === "string" ? candidate.wrong.trim() : "";
-      const right = typeof candidate.right === "string" ? candidate.right.trim() : "";
-      const explanation = typeof candidate.explanation === "string" ? candidate.explanation.trim() : "";
+      const wrongRaw = candidate.wrong ?? candidate.original ?? candidate.mistake ?? candidate.incorrect;
+      const rightRaw = candidate.right ?? candidate.correct ?? candidate.correction ?? candidate.fixed;
+      const explanationRaw = candidate.explanation ?? candidate.reason ?? candidate.note ?? candidate.comment;
+      const wrong = typeof wrongRaw === "string" ? wrongRaw.trim() : "";
+      const right = typeof rightRaw === "string" ? rightRaw.trim() : "";
+      const explanation = typeof explanationRaw === "string" ? explanationRaw.trim() : "";
 
       if (!wrong || !right || !explanation) {
         return null;
@@ -101,27 +124,34 @@ const normalizeTranscript = (value: unknown): string => {
     .slice(0, 20000);
 };
 
+const tryParseJson = (jsonText: string): ParsedRecordingPayload | null => {
+  try {
+    return JSON.parse(jsonText) as ParsedRecordingPayload;
+  } catch {
+    return null;
+  }
+};
+
 const parseRecordingAnalysis = (content: string): RecordingAnalysis | null => {
-  const tryParse = (jsonText: string): RecordingAnalysis | null => {
-    try {
-      const data = JSON.parse(jsonText) as { transcript?: unknown; suggestions?: unknown };
-      const transcript = normalizeTranscript(data.transcript);
-      const suggestions = normalizeSuggestions(data.suggestions);
-
-      if (!transcript || suggestions.length < 3) {
-        return null;
-      }
-
-      return {
-        transcript,
-        suggestions: suggestions.slice(0, 5)
-      };
-    } catch {
+  const normalizePayload = (data: ParsedRecordingPayload | null): RecordingAnalysis | null => {
+    if (!data) {
       return null;
     }
+
+    const transcript = normalizeTranscript(data.transcript);
+    const suggestions = normalizeSuggestions(data.suggestions ?? data.corrections ?? data.mistakes ?? data.errorAnalysis);
+
+    if (!transcript || suggestions.length === 0) {
+      return null;
+    }
+
+    return {
+      transcript,
+      suggestions: suggestions.slice(0, 5)
+    };
   };
 
-  const direct = tryParse(content);
+  const direct = normalizePayload(tryParseJson(content));
   if (direct) {
     return direct;
   }
@@ -131,7 +161,7 @@ const parseRecordingAnalysis = (content: string): RecordingAnalysis | null => {
     return null;
   }
 
-  return tryParse(jsonCandidate[0]);
+  return normalizePayload(tryParseJson(jsonCandidate[0]));
 };
 
 const parseTimestamp = (value: unknown): Date => {
@@ -167,6 +197,35 @@ const createPrompt = (topic: string, duration: number, interests: string[]): str
   return parts.join(" ");
 };
 
+const buildRequestBody = (
+  model: string,
+  prompt: string,
+  seed: number,
+  strictJson: boolean
+): Record<string, unknown> => {
+  return {
+    model,
+    stream: false,
+    format: "json",
+    messages: [
+      {
+        role: "system",
+        content: strictJson
+          ? "Return strict valid JSON only. No markdown. No prose."
+          : "You generate realistic speaking-practice transcript mocks and grammar correction items. Follow output JSON format exactly."
+      },
+      {
+        role: "user",
+        content: prompt
+      }
+    ],
+    options: {
+      temperature: strictJson ? 0.3 : 0.6,
+      seed
+    }
+  };
+};
+
 const generateRecordingAnalysis = async (
   topic: string,
   duration: number,
@@ -175,61 +234,46 @@ const generateRecordingAnalysis = async (
   const baseUrl = process.env.OLLAMA_BASE_URL ?? DEFAULT_OLLAMA_BASE_URL;
   const model = process.env.OLLAMA_MODEL ?? DEFAULT_OLLAMA_MODEL;
   const seed = Math.abs((hashString(topic.toLowerCase()) * 131 + duration * 17 + Date.now()) % 2_147_483_647);
+  const prompt = createPrompt(topic, duration, interests);
 
-  let response: Response;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const strictJson = attempt > 0;
+    let response: Response;
 
-  try {
-    response = await fetch(`${baseUrl}/api/chat`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        model,
-        stream: false,
-        messages: [
-          {
-            role: "system",
-            content:
-              "You generate realistic speaking-practice transcript mocks and grammar correction items. Follow output JSON format exactly."
-          },
-          {
-            role: "user",
-            content: createPrompt(topic, duration, interests)
-          }
-        ],
-        options: {
-          temperature: 0.6,
-          seed
-        }
-      }),
-      cache: "no-store"
-    });
-  } catch {
-    throw new RecordingAnalysisError(
-      "Cannot connect to local Ollama. Make sure Ollama is running for transcript generation.",
-      502
-    );
+    try {
+      response = await fetch(`${baseUrl}/api/chat`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(buildRequestBody(model, prompt, seed + attempt * 97, strictJson)),
+        cache: "no-store"
+      });
+    } catch {
+      throw new RecordingAnalysisError(
+        "Cannot connect to local Ollama. Make sure Ollama is running for transcript generation.",
+        502
+      );
+    }
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new RecordingAnalysisError(`Ollama request failed (${response.status}): ${text.slice(0, 300)}`, 502);
+    }
+
+    const payload = (await response.json()) as OllamaChatResponse;
+    const content = payload.message?.content?.trim();
+    if (!content) {
+      continue;
+    }
+
+    const analysis = parseRecordingAnalysis(content);
+    if (analysis) {
+      return analysis;
+    }
   }
 
-  if (!response.ok) {
-    const text = await response.text();
-    throw new RecordingAnalysisError(`Ollama request failed (${response.status}): ${text.slice(0, 300)}`, 502);
-  }
-
-  const payload = (await response.json()) as OllamaChatResponse;
-  const content = payload.message?.content?.trim();
-
-  if (!content) {
-    throw new RecordingAnalysisError("Ollama returned an empty response for recording analysis.", 502);
-  }
-
-  const analysis = parseRecordingAnalysis(content);
-  if (!analysis) {
-    throw new RecordingAnalysisError("Could not parse transcript and suggestions from Ollama response.", 502);
-  }
-
-  return analysis;
+  throw new RecordingAnalysisError("Could not parse transcript and suggestions from Ollama response.", 502);
 };
 
 export async function POST(request: NextRequest) {
@@ -253,6 +297,28 @@ export async function POST(request: NextRequest) {
 
     if (!Number.isFinite(duration) || duration < 0) {
       return NextResponse.json({ error: "Recording duration is invalid." }, { status: 400 });
+    }
+
+    const quotaBefore = await getRecordingQuota(user.id, { isSubscriber: user.isSubscriber });
+    if (quotaBefore.isSubscriber) {
+      if (duration > SUBSCRIBER_MAX_SESSION_SECONDS) {
+        return NextResponse.json(
+          { error: "Subscribers can save recordings up to 10:00 per session." },
+          { status: 400 }
+        );
+      }
+    } else {
+      const remaining = quotaBefore.weeklyRemainingSeconds ?? 0;
+      if (duration > remaining) {
+        return NextResponse.json(
+          {
+            error: `Weekly free limit exceeded. You have ${formatSeconds(remaining)} left out of ${formatSeconds(
+              FREE_WEEKLY_LIMIT_SECONDS
+            )} this week.`
+          },
+          { status: 403 }
+        );
+      }
     }
 
     const timestamp = parseTimestamp(source?.timestamp);
@@ -293,8 +359,9 @@ export async function POST(request: NextRequest) {
       transcript: row.transcript,
       suggestions: normalizeSuggestions(row.suggestions)
     };
+    const quota = await getRecordingQuota(user.id, { isSubscriber: user.isSubscriber });
 
-    return NextResponse.json({ recording }, { status: 201 });
+    return NextResponse.json({ recording, quota }, { status: 201 });
   } catch (error) {
     if (error instanceof RecordingAnalysisError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
