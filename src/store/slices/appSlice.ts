@@ -2,12 +2,120 @@ import { createAsyncThunk, createSlice, type PayloadAction } from "@reduxjs/tool
 import { generateSuggestions, generateTranscript, type Recording } from "../../lib/data";
 import { toDateKey } from "../../lib/utils";
 
-export type ScreenName = "speak" | "history" | "details" | "share" | "auth";
+export type ScreenName = "speak" | "history" | "details" | "share" | "auth" | "profile" | "interests";
 export type TabName = "speak" | "history";
 export type SpeakMode = "idle" | "readyToRecord" | "recording" | "recorded";
 export type ShareAction = "copy" | "preview";
 export type AuthStep = "email" | "code";
 export type QuestionsStatus = "idle" | "loading" | "ready" | "failed";
+export type InterestOption = {
+  id: string;
+  emoji: string;
+  label: string;
+};
+
+export const INTEREST_OPTIONS: InterestOption[] = [
+  { id: "travel", emoji: "✈️", label: "Travel" },
+  { id: "technology", emoji: "💻", label: "Technology" },
+  { id: "fitness", emoji: "🏃", label: "Fitness" },
+  { id: "business", emoji: "📈", label: "Business" },
+  { id: "music", emoji: "🎵", label: "Music" },
+  { id: "books", emoji: "📚", label: "Books" },
+  { id: "movies", emoji: "🎬", label: "Movies" },
+  { id: "food", emoji: "🍜", label: "Food" },
+  { id: "sport", emoji: "⚽", label: "Sport" },
+  { id: "design", emoji: "🎨", label: "Design" },
+  { id: "career", emoji: "🚀", label: "Career" },
+  { id: "languages", emoji: "🗣️", label: "Languages" },
+  { id: "gaming", emoji: "🎮", label: "Gaming" },
+  { id: "photography", emoji: "📷", label: "Photography" },
+  { id: "cooking", emoji: "👨‍🍳", label: "Cooking" },
+  { id: "psychology", emoji: "🧠", label: "Psychology" },
+  { id: "startups", emoji: "💡", label: "Startups" },
+  { id: "marketing", emoji: "📣", label: "Marketing" },
+  { id: "productivity", emoji: "⏱️", label: "Productivity" },
+  { id: "ai", emoji: "🤖", label: "AI" },
+  { id: "science", emoji: "🔬", label: "Science" },
+  { id: "history", emoji: "🏛️", label: "History" },
+  { id: "nature", emoji: "🌿", label: "Nature" },
+  { id: "hiking", emoji: "🥾", label: "Hiking" },
+  { id: "cycling", emoji: "🚴", label: "Cycling" },
+  { id: "swimming", emoji: "🏊", label: "Swimming" },
+  { id: "yoga", emoji: "🧘", label: "Yoga" },
+  { id: "fashion", emoji: "👗", label: "Fashion" },
+  { id: "art", emoji: "🖼️", label: "Art" },
+  { id: "architecture", emoji: "🏗️", label: "Architecture" },
+  { id: "finance", emoji: "💰", label: "Finance" },
+  { id: "investing", emoji: "📊", label: "Investing" },
+  { id: "crypto", emoji: "₿", label: "Crypto" },
+  { id: "pets", emoji: "🐶", label: "Pets" },
+  { id: "parenting", emoji: "👨‍👩‍👧", label: "Parenting" },
+  { id: "education", emoji: "🎓", label: "Education" },
+  { id: "philosophy", emoji: "📖", label: "Philosophy" },
+  { id: "self-development", emoji: "🌱", label: "Self Development" },
+  { id: "culture", emoji: "🎭", label: "Culture" },
+  { id: "volunteering", emoji: "🤝", label: "Volunteering" },
+  { id: "entrepreneurship", emoji: "🏢", label: "Entrepreneurship" },
+  { id: "public-speaking", emoji: "🎤", label: "Public Speaking" },
+  { id: "remote-work", emoji: "🏠", label: "Remote Work" },
+  { id: "health", emoji: "❤️", label: "Health" },
+  { id: "mindfulness", emoji: "🕊️", label: "Mindfulness" },
+  { id: "news", emoji: "📰", label: "News" },
+  { id: "podcasts", emoji: "🎙️", label: "Podcasts" },
+  { id: "climate", emoji: "🌍", label: "Climate" },
+  { id: "sustainability", emoji: "♻️", label: "Sustainability" },
+  { id: "astronomy", emoji: "🔭", label: "Astronomy" },
+  { id: "space", emoji: "🛰️", label: "Space" },
+  { id: "robotics", emoji: "🦾", label: "Robotics" },
+  { id: "programming", emoji: "⌨️", label: "Programming" },
+  { id: "web-development", emoji: "🌐", label: "Web Development" },
+  { id: "mobile-development", emoji: "📱", label: "Mobile Development" },
+  { id: "cybersecurity", emoji: "🛡️", label: "Cybersecurity" },
+  { id: "data-science", emoji: "📉", label: "Data Science" },
+  { id: "machine-learning", emoji: "🧩", label: "Machine Learning" },
+  { id: "mathematics", emoji: "➗", label: "Mathematics" },
+  { id: "physics", emoji: "⚛️", label: "Physics" },
+  { id: "chemistry", emoji: "🧪", label: "Chemistry" },
+  { id: "biology", emoji: "🧬", label: "Biology" },
+  { id: "medicine", emoji: "🩺", label: "Medicine" },
+  { id: "nutrition", emoji: "🥗", label: "Nutrition" },
+  { id: "mental-health", emoji: "💚", label: "Mental Health" },
+  { id: "journaling", emoji: "📝", label: "Journaling" },
+  { id: "minimalism", emoji: "🧱", label: "Minimalism" },
+  { id: "home-decor", emoji: "🛋️", label: "Home Decor" },
+  { id: "gardening", emoji: "🌻", label: "Gardening" },
+  { id: "diy", emoji: "🛠️", label: "DIY" },
+  { id: "woodworking", emoji: "🪵", label: "Woodworking" },
+  { id: "cars", emoji: "🚗", label: "Cars" },
+  { id: "motorcycles", emoji: "🏍️", label: "Motorcycles" },
+  { id: "aviation", emoji: "🛫", label: "Aviation" },
+  { id: "sailing", emoji: "⛵", label: "Sailing" },
+  { id: "chess", emoji: "♟️", label: "Chess" },
+  { id: "board-games", emoji: "🎲", label: "Board Games" },
+  { id: "card-games", emoji: "🃏", label: "Card Games" },
+  { id: "dance", emoji: "💃", label: "Dance" },
+  { id: "theater", emoji: "🎭", label: "Theater" },
+  { id: "comedy", emoji: "😂", label: "Comedy" },
+  { id: "writing", emoji: "✍️", label: "Writing" },
+  { id: "poetry", emoji: "📜", label: "Poetry" },
+  { id: "language-teaching", emoji: "🧑‍🏫", label: "Language Teaching" },
+  { id: "backpacking", emoji: "🎒", label: "Backpacking" },
+  { id: "luxury-travel", emoji: "🏝️", label: "Luxury Travel" },
+  { id: "coffee", emoji: "☕", label: "Coffee" },
+  { id: "tea", emoji: "🍵", label: "Tea" },
+  { id: "baking", emoji: "🥐", label: "Baking" },
+  { id: "desserts", emoji: "🍰", label: "Desserts" },
+  { id: "street-food", emoji: "🌮", label: "Street Food" },
+  { id: "vegan-living", emoji: "🥦", label: "Vegan Living" },
+  { id: "interior-design", emoji: "🪞", label: "Interior Design" },
+  { id: "real-estate", emoji: "🏘️", label: "Real Estate" },
+  { id: "law", emoji: "⚖️", label: "Law" },
+  { id: "economics", emoji: "🏦", label: "Economics" },
+  { id: "geopolitics", emoji: "🗺️", label: "Geopolitics" },
+  { id: "social-media", emoji: "📲", label: "Social Media" },
+  { id: "content-creation", emoji: "🎥", label: "Content Creation" },
+  { id: "audio-production", emoji: "🎛️", label: "Audio Production" }
+];
 
 export type AppState = {
   currentScreen: ScreenName;
@@ -43,21 +151,28 @@ export type AppState = {
   questionsStatus: QuestionsStatus;
   questionsError: string | null;
   questionsDate: string | null;
+  questionsInterestsKey: string;
   topicGuidanceQuestions: string[];
   topicGuidanceWords: string[];
   topicGuidanceStatus: QuestionsStatus;
   topicGuidanceError: string | null;
   topicGuidanceTopic: string | null;
+  topicGuidanceInterestsKey: string;
+  selectedInterestIds: string[];
 };
 
 const today = new Date();
 const MOCK_AUTH_CODE = "123456";
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+export const MAX_SELECTED_INTERESTS = 10;
+
+const INTEREST_LOOKUP = new Map(INTEREST_OPTIONS.map((item) => [item.id, item]));
 
 type FetchDailyQuestionsArgs = {
   dateKey: string;
   force?: boolean;
   refreshToken?: string;
+  interestIds?: string[];
 };
 
 type FetchDailyQuestionsResult = {
@@ -74,6 +189,7 @@ type FetchTopicGuidanceArgs = {
   topic: string;
   force?: boolean;
   refreshToken?: string;
+  interestIds?: string[];
 };
 
 type FetchTopicGuidanceResult = {
@@ -88,18 +204,32 @@ type TopicGuidanceResponse = {
   error?: string;
 };
 
+const buildInterestsKey = (interestIds: string[]): string => {
+  return [...interestIds].sort().join("|");
+};
+
+const resolveInterestLabels = (interestIds: string[]): string[] => {
+  const labels = interestIds
+    .map((id) => INTEREST_LOOKUP.get(id)?.label)
+    .filter((value): value is string => typeof value === "string");
+
+  return [...new Set(labels)];
+};
+
 export const fetchDailyQuestions = createAsyncThunk<
   FetchDailyQuestionsResult,
   FetchDailyQuestionsArgs,
   { state: { app: AppState }; rejectValue: string }
 >(
   "app/fetchDailyQuestions",
-  async ({ dateKey, refreshToken }, { rejectWithValue }) => {
+  async ({ dateKey, refreshToken, interestIds = [] }, { rejectWithValue }) => {
     try {
       const params = new URLSearchParams({ date: dateKey });
       if (refreshToken) {
         params.set("refresh", refreshToken);
       }
+      const interestLabels = resolveInterestLabels(interestIds);
+      interestLabels.forEach((label) => params.append("interest", label));
 
       const response = await fetch(`/api/daily-questions?${params.toString()}`, {
         cache: "no-store"
@@ -127,7 +257,7 @@ export const fetchDailyQuestions = createAsyncThunk<
     }
   },
   {
-    condition: ({ dateKey, force }, { getState }) => {
+    condition: ({ dateKey, force, interestIds = [] }, { getState }) => {
       if (force) {
         return true;
       }
@@ -135,7 +265,8 @@ export const fetchDailyQuestions = createAsyncThunk<
       if (app.questionsStatus === "loading") {
         return false;
       }
-      if (app.questionsDate === dateKey && app.topics.length === 3) {
+      const interestKey = buildInterestsKey(interestIds);
+      if (app.questionsDate === dateKey && app.questionsInterestsKey === interestKey && app.topics.length === 3) {
         return false;
       }
       return true;
@@ -149,12 +280,14 @@ export const fetchTopicGuidance = createAsyncThunk<
   { state: { app: AppState }; rejectValue: string }
 >(
   "app/fetchTopicGuidance",
-  async ({ topic, refreshToken }, { rejectWithValue }) => {
+  async ({ topic, refreshToken, interestIds = [] }, { rejectWithValue }) => {
     try {
       const params = new URLSearchParams({ topic });
       if (refreshToken) {
         params.set("refresh", refreshToken);
       }
+      const interestLabels = resolveInterestLabels(interestIds);
+      interestLabels.forEach((label) => params.append("interest", label));
 
       const response = await fetch(`/api/topic-guidance?${params.toString()}`, {
         cache: "no-store"
@@ -193,7 +326,7 @@ export const fetchTopicGuidance = createAsyncThunk<
     }
   },
   {
-    condition: ({ topic, force }, { getState }) => {
+    condition: ({ topic, force, interestIds = [] }, { getState }) => {
       if (force) {
         return true;
       }
@@ -202,10 +335,19 @@ export const fetchTopicGuidance = createAsyncThunk<
         return false;
       }
       const { app } = getState();
-      if (app.topicGuidanceStatus === "loading" && app.topicGuidanceTopic === normalizedTopic) {
+      const interestKey = buildInterestsKey(interestIds);
+      if (
+        app.topicGuidanceStatus === "loading" &&
+        app.topicGuidanceTopic === normalizedTopic &&
+        app.topicGuidanceInterestsKey === interestKey
+      ) {
         return false;
       }
-      if (app.topicGuidanceTopic === normalizedTopic && app.topicGuidanceStatus === "ready") {
+      if (
+        app.topicGuidanceTopic === normalizedTopic &&
+        app.topicGuidanceInterestsKey === interestKey &&
+        app.topicGuidanceStatus === "ready"
+      ) {
         return false;
       }
       return true;
@@ -247,11 +389,14 @@ const initialState: AppState = {
   questionsStatus: "idle",
   questionsError: null,
   questionsDate: null,
+  questionsInterestsKey: "",
   topicGuidanceQuestions: [],
   topicGuidanceWords: [],
   topicGuidanceStatus: "idle",
   topicGuidanceError: null,
-  topicGuidanceTopic: null
+  topicGuidanceTopic: null,
+  topicGuidanceInterestsKey: "",
+  selectedInterestIds: []
 };
 
 const resetPlayback = (state: AppState): void => {
@@ -265,6 +410,7 @@ const clearTopicGuidanceState = (state: AppState): void => {
   state.topicGuidanceStatus = "idle";
   state.topicGuidanceError = null;
   state.topicGuidanceTopic = null;
+  state.topicGuidanceInterestsKey = "";
 };
 
 const openAuthFlow = (state: AppState, pendingSaveAfterAuth: boolean): void => {
@@ -318,7 +464,7 @@ const appSlice = createSlice({
   initialState,
   reducers: {
     navigateToTab: (state, action: PayloadAction<TabName>) => {
-      if (action.payload === "history" && !state.isAuthenticated) {
+      if (action.payload !== "speak" && !state.isAuthenticated) {
         return;
       }
       if (state.currentScreen === "auth") {
@@ -341,6 +487,59 @@ const appSlice = createSlice({
     },
     clearTopicGuidanceError: (state) => {
       state.topicGuidanceError = null;
+    },
+    openProfile: (state) => {
+      if (!state.isAuthenticated) {
+        return;
+      }
+      state.currentScreen = "profile";
+      state.shareModalOpen = false;
+      state.copyMessage = null;
+      resetPlayback(state);
+    },
+    openInterests: (state) => {
+      if (!state.isAuthenticated) {
+        return;
+      }
+      state.currentScreen = "interests";
+      state.shareModalOpen = false;
+      state.copyMessage = null;
+      resetPlayback(state);
+    },
+    backToProfile: (state) => {
+      if (!state.isAuthenticated) {
+        state.currentScreen = "speak";
+        state.activeTab = "speak";
+        state.shareModalOpen = false;
+        state.copyMessage = null;
+        resetPlayback(state);
+        return;
+      }
+      state.currentScreen = "profile";
+      state.shareModalOpen = false;
+      state.copyMessage = null;
+      resetPlayback(state);
+    },
+    toggleInterest: (state, action: PayloadAction<string>) => {
+      const interestId = action.payload;
+      if (!INTEREST_LOOKUP.has(interestId)) {
+        return;
+      }
+
+      const currentIndex = state.selectedInterestIds.indexOf(interestId);
+      if (currentIndex >= 0) {
+        state.selectedInterestIds.splice(currentIndex, 1);
+      } else {
+        if (state.selectedInterestIds.length >= MAX_SELECTED_INTERESTS) {
+          return;
+        }
+        state.selectedInterestIds.push(interestId);
+      }
+
+      state.questionsError = null;
+      state.showQuestions = false;
+      state.showWords = false;
+      clearTopicGuidanceState(state);
     },
     startFreeTalk: (state) => {
       state.selectedTopic = null;
@@ -607,6 +806,13 @@ const appSlice = createSlice({
       state.authError = null;
       state.pendingSaveAfterAuth = false;
       state.screenBeforeAuth = "speak";
+      state.selectedInterestIds = [];
+      state.questionsInterestsKey = "";
+      state.questionsDate = null;
+      state.topics = [];
+      state.questionsStatus = "idle";
+      state.questionsError = null;
+      clearTopicGuidanceState(state);
       resetPlayback(state);
     }
   },
@@ -619,6 +825,7 @@ const appSlice = createSlice({
       .addCase(fetchDailyQuestions.fulfilled, (state, action) => {
         state.topics = action.payload.questions;
         state.questionsDate = action.payload.dateKey;
+        state.questionsInterestsKey = buildInterestsKey(action.meta.arg.interestIds ?? []);
         state.questionsStatus = "ready";
         state.questionsError = null;
       })
@@ -628,16 +835,19 @@ const appSlice = createSlice({
       })
       .addCase(fetchTopicGuidance.pending, (state, action) => {
         const topic = action.meta.arg.topic.trim();
-        if (state.topicGuidanceTopic !== topic) {
+        const interestKey = buildInterestsKey(action.meta.arg.interestIds ?? []);
+        if (state.topicGuidanceTopic !== topic || state.topicGuidanceInterestsKey !== interestKey) {
           state.topicGuidanceQuestions = [];
           state.topicGuidanceWords = [];
         }
         state.topicGuidanceTopic = topic;
+        state.topicGuidanceInterestsKey = interestKey;
         state.topicGuidanceStatus = "loading";
         state.topicGuidanceError = null;
       })
       .addCase(fetchTopicGuidance.fulfilled, (state, action) => {
         state.topicGuidanceTopic = action.payload.topic;
+        state.topicGuidanceInterestsKey = buildInterestsKey(action.meta.arg.interestIds ?? []);
         state.topicGuidanceQuestions = action.payload.questions;
         state.topicGuidanceWords = action.payload.words;
         state.topicGuidanceStatus = "ready";
@@ -655,6 +865,10 @@ export const {
   navigateToTab,
   clearQuestionsError,
   clearTopicGuidanceError,
+  openProfile,
+  openInterests,
+  backToProfile,
+  toggleInterest,
   startFreeTalk,
   selectTopic,
   toggleQuestions,

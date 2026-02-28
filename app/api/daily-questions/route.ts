@@ -16,6 +16,34 @@ type ParsedQuestions = {
   questions: string[];
 };
 
+const hashString = (value: string): number => {
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash * 31 + value.charCodeAt(index)) | 0;
+  }
+  return Math.abs(hash);
+};
+
+const normalizeInterests = (items: string[]): string[] => {
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+
+  for (const raw of items) {
+    const value = raw.trim().replace(/\s+/g, " ");
+    if (!value) {
+      continue;
+    }
+    const key = value.toLowerCase();
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    normalized.push(value);
+  }
+
+  return normalized.slice(0, 10);
+};
+
 const normalizeQuestions = (items: string[]): string[] => {
   const unique: string[] = [];
   const seen = new Set<string>();
@@ -86,7 +114,7 @@ const parseQuestions = (content: string): ParsedQuestions | null => {
   return null;
 };
 
-const createPrompt = (dateKey: string, refreshToken: string | null): string => {
+const createPrompt = (dateKey: string, refreshToken: string | null, interests: string[]): string => {
   const parts = [
     `Generate exactly 3 daily English speaking practice questions for ${dateKey}.`,
     "Audience: intermediate learner (A1-B1).",
@@ -94,6 +122,11 @@ const createPrompt = (dateKey: string, refreshToken: string | null): string => {
     'Return only JSON with this exact shape: {"questions":["question 1","question 2","question 3"]}.',
     "Do not add markdown, explanations, numbering, or extra keys."
   ];
+
+  if (interests.length > 0) {
+    parts.push(`User interests: ${interests.join(", ")}.`);
+    parts.push("Personalize each question using these interests.");
+  }
 
   if (refreshToken) {
     parts.push(
@@ -108,6 +141,7 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const dateKey = searchParams.get("date");
   const refreshToken = searchParams.get("refresh");
+  const interests = normalizeInterests(searchParams.getAll("interest"));
 
   if (!dateKey || !DATE_KEY_PATTERN.test(dateKey)) {
     return NextResponse.json({ error: "Query param `date` must be in YYYY-MM-DD format." }, { status: 400 });
@@ -116,9 +150,12 @@ export async function GET(request: Request) {
   const baseUrl = process.env.OLLAMA_BASE_URL ?? DEFAULT_OLLAMA_BASE_URL;
   const model = process.env.OLLAMA_MODEL ?? DEFAULT_OLLAMA_MODEL;
   const dateSeed = Number.parseInt(dateKey.replaceAll("-", ""), 10);
+  const interestsSeed = hashString(interests.join("|").toLowerCase());
   const refreshSeed = refreshToken ? Number.parseInt(refreshToken.replace(/\D/g, ""), 10) : Number.NaN;
   const hasRefreshSeed = Number.isFinite(refreshSeed);
-  const seed = hasRefreshSeed ? Math.abs((dateSeed * 131 + refreshSeed) % 2_147_483_647) : dateSeed;
+  const seed = hasRefreshSeed
+    ? Math.abs((dateSeed * 131 + interestsSeed * 17 + refreshSeed) % 2_147_483_647)
+    : Math.abs((dateSeed * 131 + interestsSeed * 17) % 2_147_483_647);
 
   try {
     const response = await fetch(`${baseUrl}/api/chat`, {
@@ -137,7 +174,7 @@ export async function GET(request: Request) {
           },
           {
             role: "user",
-            content: createPrompt(dateKey, refreshToken)
+            content: createPrompt(dateKey, refreshToken, interests)
           }
         ],
         options: {

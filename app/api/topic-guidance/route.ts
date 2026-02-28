@@ -24,6 +24,26 @@ const hashString = (value: string): number => {
   return Math.abs(hash);
 };
 
+const normalizeInterests = (items: string[]): string[] => {
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+
+  for (const raw of items) {
+    const value = raw.trim().replace(/\s+/g, " ");
+    if (!value) {
+      continue;
+    }
+    const key = value.toLowerCase();
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    normalized.push(value);
+  }
+
+  return normalized.slice(0, 10);
+};
+
 const normalizeQuestions = (items: string[]): string[] => {
   const unique: string[] = [];
   const seen = new Set<string>();
@@ -135,7 +155,7 @@ const parseTopicGuidance = (content: string): TopicGuidance | null => {
   return null;
 };
 
-const createPrompt = (topic: string, refreshToken: string | null): string => {
+const createPrompt = (topic: string, refreshToken: string | null, interests: string[]): string => {
   const parts = [
     `Topic: "${topic}".`,
     "Generate guidance for an English speaking practice session (B1-B2).",
@@ -144,6 +164,11 @@ const createPrompt = (topic: string, refreshToken: string | null): string => {
     'Return only JSON with this exact shape: {"questions":["q1","q2","q3"],"words":["w1","w2","w3","w4","w5","w6","w7","w8"]}.',
     "No markdown, no extra keys, no explanations."
   ];
+
+  if (interests.length > 0) {
+    parts.push(`Learner interests: ${interests.join(", ")}.`);
+    parts.push("Keep questions and useful words relevant to these interests when possible.");
+  }
 
   if (refreshToken) {
     parts.push(`Variation key: ${refreshToken}. Make a different set than previous outputs.`);
@@ -156,6 +181,7 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const topic = searchParams.get("topic")?.trim() ?? "";
   const refreshToken = searchParams.get("refresh");
+  const interests = normalizeInterests(searchParams.getAll("interest"));
 
   if (!topic) {
     return NextResponse.json({ error: "Query param `topic` is required." }, { status: 400 });
@@ -168,8 +194,9 @@ export async function GET(request: Request) {
   const baseUrl = process.env.OLLAMA_BASE_URL ?? DEFAULT_OLLAMA_BASE_URL;
   const model = process.env.OLLAMA_MODEL ?? DEFAULT_OLLAMA_MODEL;
   const baseSeed = hashString(topic.toLowerCase());
+  const interestsSeed = hashString(interests.join("|").toLowerCase());
   const refreshSeed = refreshToken ? hashString(refreshToken) : 0;
-  const seed = Math.abs((baseSeed * 131 + refreshSeed) % 2_147_483_647);
+  const seed = Math.abs((baseSeed * 131 + interestsSeed * 17 + refreshSeed) % 2_147_483_647);
   const temperature = refreshToken ? 0.65 : 0.2;
 
   try {
@@ -189,7 +216,7 @@ export async function GET(request: Request) {
           },
           {
             role: "user",
-            content: createPrompt(topic, refreshToken)
+            content: createPrompt(topic, refreshToken, interests)
           }
         ],
         options: {

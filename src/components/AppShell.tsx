@@ -1,10 +1,12 @@
 "use client";
 
 import { useAppDispatch, useAppSelector } from "../store/hooks";
-import { logout, navigateToTab, openAuth } from "../store/slices/appSlice";
+import { logout, navigateToTab, openAuth, openProfile } from "../store/slices/appSlice";
 import AuthScreen from "./AuthScreen";
 import DetailsScreen from "./DetailsScreen";
 import HistoryScreen from "./HistoryScreen";
+import InterestsScreen from "./InterestsScreen";
+import ProfileScreen from "./ProfileScreen";
 import ShareScreen from "./ShareScreen";
 import SpeakScreen from "./SpeakScreen";
 
@@ -39,9 +41,18 @@ export default function AppShell() {
           </ul>
 
           {isAuthenticated ? (
-            <div className="session-info">
-              <span>{userEmail}</span>
-              <button className="btn btn-secondary btn-small" onClick={() => dispatch(logout())}>
+            <div className="session-info" onClick={() => dispatch(openProfile())} role="presentation">
+              <button type="button" className="session-email-btn" onClick={() => dispatch(openProfile())}>
+                {userEmail}
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary btn-small"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  dispatch(logout());
+                }}
+              >
                 Log out
               </button>
             </div>
@@ -59,6 +70,8 @@ export default function AppShell() {
         {currentScreen === "details" && <DetailsScreen />}
         {currentScreen === "share" && <ShareScreen />}
         {currentScreen === "auth" && <AuthScreen />}
+        {currentScreen === "profile" && <ProfileScreen />}
+        {currentScreen === "interests" && <InterestsScreen />}
       </main>
     </div>
   );

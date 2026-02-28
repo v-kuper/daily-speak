@@ -36,6 +36,7 @@ export default function SpeakScreen() {
     isAuthenticated,
     questionsStatus,
     questionsError,
+    selectedInterestIds,
     topicGuidanceQuestions,
     topicGuidanceWords,
     topicGuidanceStatus,
@@ -56,20 +57,27 @@ export default function SpeakScreen() {
 
   useEffect(() => {
     const dateKey = toDateKey(new Date());
-    void dispatch(fetchDailyQuestions({ dateKey }));
-  }, [dispatch]);
+    void dispatch(fetchDailyQuestions({ dateKey, interestIds: selectedInterestIds }));
+  }, [dispatch, selectedInterestIds]);
 
   useEffect(() => {
     if (!selectedTopic) {
       return;
     }
-    void dispatch(fetchTopicGuidance({ topic: selectedTopic }));
-  }, [dispatch, selectedTopic]);
+    void dispatch(fetchTopicGuidance({ topic: selectedTopic, interestIds: selectedInterestIds }));
+  }, [dispatch, selectedTopic, selectedInterestIds]);
 
   const onRefreshQuestions = () => {
     const dateKey = toDateKey(new Date());
     dispatch(clearQuestionsError());
-    void dispatch(fetchDailyQuestions({ dateKey, force: true, refreshToken: String(Date.now()) }));
+    void dispatch(
+      fetchDailyQuestions({
+        dateKey,
+        force: true,
+        refreshToken: String(Date.now()),
+        interestIds: selectedInterestIds
+      })
+    );
   };
 
   const onRefreshTopicGuidance = () => {
@@ -77,7 +85,14 @@ export default function SpeakScreen() {
       return;
     }
     dispatch(clearTopicGuidanceError());
-    void dispatch(fetchTopicGuidance({ topic: selectedTopic, force: true, refreshToken: String(Date.now()) }));
+    void dispatch(
+      fetchTopicGuidance({
+        topic: selectedTopic,
+        force: true,
+        refreshToken: String(Date.now()),
+        interestIds: selectedInterestIds
+      })
+    );
   };
 
   if (speakState === "idle") {
