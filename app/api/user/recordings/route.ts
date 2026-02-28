@@ -7,12 +7,16 @@ import {
   getRecordingQuota,
   SUBSCRIBER_MAX_SESSION_SECONDS
 } from "../../../../src/server/recordingQuota";
+import {
+  DEFAULT_OLLAMA_BASE_URL,
+  extractJsonCandidates,
+  isThinkingModel,
+  normalizeOllamaContent,
+  resolveOllamaModelForUser
+} from "../../../../src/server/ollama";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-const DEFAULT_OLLAMA_BASE_URL = "http://127.0.0.1:11434";
-const DEFAULT_OLLAMA_MODEL = "gemma3:12b";
 
 type RecordingSuggestion = {
   wrong: string;
@@ -151,17 +155,16 @@ const parseRecordingAnalysis = (content: string): RecordingAnalysis | null => {
     };
   };
 
-  const direct = normalizePayload(tryParseJson(content));
-  if (direct) {
-    return direct;
+  for (const candidate of extractJsonCandidates(content)) {
+    const parsed = normalizePayload(tryParseJson(candidate));
+    if (parsed) {
+      return parsed;
+    }
   }
 
-  const jsonCandidate = content.match(/\{[\s\S]*\}/);
-  if (!jsonCandidate) {
-    return null;
-  }
-
-  return normalizePayload(tryParseJson(jsonCandidate[0]));
+  const lineContent = normalizeOllamaContent(content);
+  const lineTranscript = normalizeTranscript(lineContent);
+  return lineTranscript ? { transcript: lineTranscript, suggestions: [] } : null;
 };
 
 const parseTimestamp = (value: unknown): Date => {
@@ -201,12 +204,12 @@ const buildRequestBody = (
   model: string,
   prompt: string,
   seed: number,
-  strictJson: boolean
+  strictJson: boolean,
+  useJsonFormat: boolean
 ): Record<string, unknown> => {
-  return {
+  const body: Record<string, unknown> = {
     model,
     stream: false,
-    format: "json",
     messages: [
       {
         role: "system",
@@ -224,15 +227,23 @@ const buildRequestBody = (
       seed
     }
   };
+
+  if (useJsonFormat) {
+    body.format = "json";
+  }
+
+  return body;
 };
 
 const generateRecordingAnalysis = async (
+  userId: string,
   topic: string,
   duration: number,
   interests: string[]
 ): Promise<RecordingAnalysis> => {
   const baseUrl = process.env.OLLAMA_BASE_URL ?? DEFAULT_OLLAMA_BASE_URL;
-  const model = process.env.OLLAMA_MODEL ?? DEFAULT_OLLAMA_MODEL;
+  const model = await resolveOllamaModelForUser(userId);
+  const useJsonFormat = !isThinkingModel(model);
   const seed = Math.abs((hashString(topic.toLowerCase()) * 131 + duration * 17 + Date.now()) % 2_147_483_647);
   const prompt = createPrompt(topic, duration, interests);
 
@@ -246,7 +257,7 @@ const generateRecordingAnalysis = async (
         headers: {
           "Content-Type": "application/json"
         },
-        body: JSON.stringify(buildRequestBody(model, prompt, seed + attempt * 97, strictJson)),
+        body: JSON.stringify(buildRequestBody(model, prompt, seed + attempt * 97, strictJson, useJsonFormat)),
         cache: "no-store"
       });
     } catch {
@@ -268,7 +279,7 @@ const generateRecordingAnalysis = async (
     }
 
     const analysis = parseRecordingAnalysis(content);
-    if (analysis) {
+    if (analysis && analysis.transcript) {
       return analysis;
     }
   }
@@ -333,7 +344,7 @@ export async function POST(request: NextRequest) {
     );
     const interests = interestsResult.rows.map((row) => row.interest_id).slice(0, 10);
 
-    const analysis = await generateRecordingAnalysis(topic, duration, interests);
+    const analysis = await generateRecordingAnalysis(user.id, topic, duration, interests);
 
     const insertResult = await query<RecordingRow>(
       `INSERT INTO recordings (id, user_id, topic, duration, timestamp, transcript, suggestions)

@@ -38,6 +38,7 @@ export default function SpeakScreen() {
     questionsStatus,
     questionsError,
     selectedInterestIds,
+    selectedEnglishLevel,
     topicGuidanceQuestions,
     topicGuidanceWords,
     topicGuidanceStatus,
@@ -83,15 +84,17 @@ export default function SpeakScreen() {
 
   useEffect(() => {
     const dateKey = toDateKey(new Date());
-    void dispatch(fetchDailyQuestions({ dateKey, interestIds: selectedInterestIds }));
-  }, [dispatch, selectedInterestIds]);
+    void dispatch(fetchDailyQuestions({ dateKey, interestIds: selectedInterestIds, englishLevel: selectedEnglishLevel }));
+  }, [dispatch, selectedEnglishLevel, selectedInterestIds]);
 
   useEffect(() => {
     if (!selectedTopic) {
       return;
     }
-    void dispatch(fetchTopicGuidance({ topic: selectedTopic, interestIds: selectedInterestIds }));
-  }, [dispatch, selectedTopic, selectedInterestIds]);
+    void dispatch(
+      fetchTopicGuidance({ topic: selectedTopic, interestIds: selectedInterestIds, englishLevel: selectedEnglishLevel })
+    );
+  }, [dispatch, selectedEnglishLevel, selectedTopic, selectedInterestIds]);
 
   const onRefreshQuestions = () => {
     const dateKey = toDateKey(new Date());
@@ -101,7 +104,9 @@ export default function SpeakScreen() {
         dateKey,
         force: true,
         refreshToken: String(Date.now()),
-        interestIds: selectedInterestIds
+        interestIds: selectedInterestIds,
+        avoidQuestions: topics,
+        englishLevel: selectedEnglishLevel
       })
     );
   };
@@ -116,7 +121,10 @@ export default function SpeakScreen() {
         topic: selectedTopic,
         force: true,
         refreshToken: String(Date.now()),
-        interestIds: selectedInterestIds
+        interestIds: selectedInterestIds,
+        avoidQuestions: topicGuidanceQuestions,
+        avoidWords: topicGuidanceWords,
+        englishLevel: selectedEnglishLevel
       })
     );
   };

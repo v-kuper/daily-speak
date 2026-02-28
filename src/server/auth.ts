@@ -1,4 +1,5 @@
 import { createHash, randomBytes, randomUUID, scryptSync, timingSafeEqual } from "node:crypto";
+import { DEFAULT_ENGLISH_LEVEL, normalizeEnglishLevel, type EnglishLevel } from "../lib/englishLevel";
 import { query } from "./db";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -15,12 +16,14 @@ type UserRow = {
   email: string;
   password_hash: string;
   is_subscriber: boolean;
+  english_level: string | null;
 };
 
 type SessionUserRow = {
   user_id: string;
   email: string;
   is_subscriber: boolean;
+  english_level: string | null;
 };
 
 type PgLikeError = {
@@ -31,6 +34,7 @@ export type AuthUser = {
   id: string;
   email: string;
   isSubscriber: boolean;
+  englishLevel: EnglishLevel;
 };
 
 export type SessionData = {
@@ -135,7 +139,12 @@ export const registerUser = async (email: string, password: string): Promise<Aut
     throw error;
   }
 
-  return { id, email, isSubscriber: false };
+  return {
+    id,
+    email,
+    isSubscriber: false,
+    englishLevel: DEFAULT_ENGLISH_LEVEL
+  };
 };
 
 export const loginUser = async (email: string, password: string): Promise<AuthUser> => {
@@ -144,7 +153,8 @@ export const loginUser = async (email: string, password: string): Promise<AuthUs
        id,
        email,
        password_hash,
-       (is_subscriber AND (subscription_expires_at IS NULL OR subscription_expires_at > NOW())) AS is_subscriber
+       (is_subscriber AND (subscription_expires_at IS NULL OR subscription_expires_at > NOW())) AS is_subscriber,
+       english_level
      FROM users
      WHERE email = $1
      LIMIT 1`,
@@ -159,7 +169,8 @@ export const loginUser = async (email: string, password: string): Promise<AuthUs
   return {
     id: user.id,
     email: user.email,
-    isSubscriber: Boolean(user.is_subscriber)
+    isSubscriber: Boolean(user.is_subscriber),
+    englishLevel: normalizeEnglishLevel(user.english_level)
   };
 };
 
@@ -193,7 +204,8 @@ export const getUserBySessionToken = async (token: string | null | undefined): P
     `SELECT
        s.user_id,
        u.email,
-       (u.is_subscriber AND (u.subscription_expires_at IS NULL OR u.subscription_expires_at > NOW())) AS is_subscriber
+       (u.is_subscriber AND (u.subscription_expires_at IS NULL OR u.subscription_expires_at > NOW())) AS is_subscriber,
+       u.english_level
      FROM user_sessions s
      JOIN users u ON u.id = s.user_id
      WHERE s.token_hash = $1
@@ -210,7 +222,8 @@ export const getUserBySessionToken = async (token: string | null | undefined): P
   return {
     id: row.user_id,
     email: row.email,
-    isSubscriber: Boolean(row.is_subscriber)
+    isSubscriber: Boolean(row.is_subscriber),
+    englishLevel: normalizeEnglishLevel(row.english_level)
   };
 };
 

@@ -84,7 +84,16 @@ export async function GET(request: NextRequest) {
       suggestions: parseSuggestions(row.suggestions)
     }));
 
-    return NextResponse.json({ interestIds, recordings, quota, subscription }, { status: 200 });
+    return NextResponse.json(
+      {
+        interestIds,
+        recordings,
+        quota,
+        subscription,
+        englishLevel: user.englishLevel
+      },
+      { status: 200 }
+    );
   } catch (error) {
     console.error("User data route failed", error);
     return NextResponse.json({ error: "Failed to load user data." }, { status: 500 });

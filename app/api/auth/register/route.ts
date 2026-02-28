@@ -30,7 +30,7 @@ export async function POST(request: NextRequest) {
     const session = await createSession(user.id);
 
     const response = NextResponse.json(
-      { user: { email: user.email, isSubscriber: user.isSubscriber } },
+      { user: { email: user.email, isSubscriber: user.isSubscriber, englishLevel: user.englishLevel } },
       { status: 201 }
     );
     response.cookies.set(SESSION_COOKIE_NAME, session.token, getSessionCookieOptions(session.expiresAt));

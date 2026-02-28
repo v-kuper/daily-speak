@@ -1,9 +1,21 @@
-import { NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
+import { SESSION_COOKIE_NAME, getUserBySessionToken } from "../../../src/server/auth";
+import {
+  DEFAULT_ENGLISH_LEVEL,
+  formatEnglishLevel,
+  getEnglishLevelPromptGuidance,
+  normalizeEnglishLevel,
+  type EnglishLevel
+} from "../../../src/lib/englishLevel";
+import {
+  DEFAULT_OLLAMA_BASE_URL,
+  extractJsonCandidates,
+  normalizeOllamaContent,
+  resolveOllamaModelForUser
+} from "../../../src/server/ollama";
 
 export const dynamic = "force-dynamic";
-
-const DEFAULT_OLLAMA_BASE_URL = "http://127.0.0.1:11434";
-const DEFAULT_OLLAMA_MODEL = "gemma3:12b";
+export const runtime = "nodejs";
 
 type OllamaChatResponse = {
   message?: {
@@ -98,6 +110,32 @@ const normalizeWords = (items: string[]): string[] => {
   return unique;
 };
 
+const normalizeAvoidList = (items: string[]): string[] => {
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+
+  for (const item of items) {
+    const cleaned = item.trim().replace(/\s+/g, " ").toLowerCase();
+    if (!cleaned || seen.has(cleaned)) {
+      continue;
+    }
+
+    seen.add(cleaned);
+    normalized.push(cleaned);
+  }
+
+  return normalized;
+};
+
+const hasAnyOverlap = (items: string[], avoidLowerCase: string[]): boolean => {
+  if (avoidLowerCase.length === 0) {
+    return false;
+  }
+
+  const avoidSet = new Set(avoidLowerCase);
+  return items.some((item) => avoidSet.has(item.toLowerCase()));
+};
+
 const parseTopicGuidance = (content: string): TopicGuidance | null => {
   const tryParse = (jsonText: string): TopicGuidance | null => {
     try {
@@ -127,15 +165,14 @@ const parseTopicGuidance = (content: string): TopicGuidance | null => {
     return direct;
   }
 
-  const jsonCandidate = content.match(/\{[\s\S]*\}/);
-  if (jsonCandidate) {
-    const extracted = tryParse(jsonCandidate[0]);
+  for (const candidate of extractJsonCandidates(content)) {
+    const extracted = tryParse(candidate);
     if (extracted) {
       return extracted;
     }
   }
 
-  const lineCandidates = content
+  const lineCandidates = normalizeOllamaContent(content)
     .split("\n")
     .map((line) => line.trim())
     .filter((line) => line.length > 0);
@@ -155,12 +192,25 @@ const parseTopicGuidance = (content: string): TopicGuidance | null => {
   return null;
 };
 
-const createPrompt = (topic: string, refreshToken: string | null, interests: string[]): string => {
+const createPrompt = (
+  topic: string,
+  refreshToken: string | null,
+  englishLevel: EnglishLevel,
+  interests: string[],
+  avoidQuestions: string[],
+  avoidWords: string[]
+): string => {
+  const formattedLevel = formatEnglishLevel(englishLevel);
+  const levelGuidance = getEnglishLevelPromptGuidance(englishLevel);
   const parts = [
     `Topic: "${topic}".`,
-    "Generate guidance for an English speaking practice session (B1-B2).",
+    `Generate guidance for an English speaking practice session for level ${formattedLevel}.`,
+    `Language difficulty: ${levelGuidance}`,
     "Return exactly 3 follow-up questions for speaking practice.",
     "Return exactly 8 useful words or short phrases connected to this topic.",
+    "Useful words must match the learner level and stay understandable for that level.",
+    "All follow-up questions should be distinct in angle and not paraphrases of each other.",
+    "Useful words should be diverse, not near-duplicates.",
     'Return only JSON with this exact shape: {"questions":["q1","q2","q3"],"words":["w1","w2","w3","w4","w5","w6","w7","w8"]}.',
     "No markdown, no extra keys, no explanations."
   ];
@@ -174,14 +224,26 @@ const createPrompt = (topic: string, refreshToken: string | null, interests: str
     parts.push(`Variation key: ${refreshToken}. Make a different set than previous outputs.`);
   }
 
+  if (avoidQuestions.length > 0) {
+    parts.push(`Do not reuse any of these previous follow-up questions: ${avoidQuestions.join(" | ")}.`);
+  }
+
+  if (avoidWords.length > 0) {
+    parts.push(`Do not reuse any of these previous useful words/phrases: ${avoidWords.join(" | ")}.`);
+  }
+
   return parts.join(" ");
 };
 
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const topic = searchParams.get("topic")?.trim() ?? "";
   const refreshToken = searchParams.get("refresh");
   const interests = normalizeInterests(searchParams.getAll("interest"));
+  const avoidQuestionsRaw = normalizeQuestions(searchParams.getAll("avoidQuestion"));
+  const avoidWordsRaw = normalizeWords(searchParams.getAll("avoidWord"));
+  const avoidQuestions = normalizeAvoidList(avoidQuestionsRaw);
+  const avoidWords = normalizeAvoidList(avoidWordsRaw);
 
   if (!topic) {
     return NextResponse.json({ error: "Query param `topic` is required." }, { status: 400 });
@@ -192,64 +254,79 @@ export async function GET(request: Request) {
   }
 
   const baseUrl = process.env.OLLAMA_BASE_URL ?? DEFAULT_OLLAMA_BASE_URL;
-  const model = process.env.OLLAMA_MODEL ?? DEFAULT_OLLAMA_MODEL;
+  const token = request.cookies.get(SESSION_COOKIE_NAME)?.value;
+  const user = await getUserBySessionToken(token);
+  const requestedLevel = normalizeEnglishLevel(searchParams.get("level"), DEFAULT_ENGLISH_LEVEL);
+  const englishLevel = user?.englishLevel ?? requestedLevel;
+  const model = await resolveOllamaModelForUser(user?.id ?? null);
   const baseSeed = hashString(topic.toLowerCase());
   const interestsSeed = hashString(interests.join("|").toLowerCase());
+  const levelSeed = hashString(englishLevel);
   const refreshSeed = refreshToken ? hashString(refreshToken) : 0;
-  const seed = Math.abs((baseSeed * 131 + interestsSeed * 17 + refreshSeed) % 2_147_483_647);
-  const temperature = refreshToken ? 0.65 : 0.2;
+  const seed = Math.abs((baseSeed * 131 + interestsSeed * 17 + levelSeed * 19 + refreshSeed) % 2_147_483_647);
 
   try {
-    const response = await fetch(`${baseUrl}/api/chat`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        model,
-        stream: false,
-        messages: [
-          {
-            role: "system",
-            content:
-              "You generate concise speaking-practice guidance and must follow the output format exactly."
-          },
-          {
-            role: "user",
-            content: createPrompt(topic, refreshToken, interests)
+    const maxAttempts = 3;
+
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      const attemptSeed = Math.abs((seed + (attempt + 1) * 7919) % 2_147_483_647);
+      const response = await fetch(`${baseUrl}/api/chat`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          model,
+          stream: false,
+          messages: [
+            {
+              role: "system",
+              content:
+                "You generate concise speaking-practice guidance and must follow the output format exactly."
+            },
+            {
+              role: "user",
+              content: createPrompt(topic, refreshToken, englishLevel, interests, avoidQuestionsRaw, avoidWordsRaw)
+            }
+          ],
+          options: {
+            temperature: refreshToken ? 0.7 + attempt * 0.08 : 0.2 + attempt * 0.05,
+            seed: attemptSeed
           }
-        ],
-        options: {
-          temperature,
-          seed
-        }
-      }),
-      cache: "no-store"
-    });
+        }),
+        cache: "no-store"
+      });
 
-    if (!response.ok) {
-      const text = await response.text();
-      return NextResponse.json(
-        { error: `Ollama request failed (${response.status}): ${text.slice(0, 300)}` },
-        { status: 502 }
-      );
+      if (!response.ok) {
+        const text = await response.text();
+        return NextResponse.json(
+          { error: `Ollama request failed (${response.status}): ${text.slice(0, 300)}` },
+          { status: 502 }
+        );
+      }
+
+      const payload = (await response.json()) as OllamaChatResponse;
+      const content = payload.message?.content?.trim();
+      if (!content) {
+        continue;
+      }
+
+      const guidance = parseTopicGuidance(content);
+      if (!guidance) {
+        continue;
+      }
+
+      if (hasAnyOverlap(guidance.questions, avoidQuestions) || hasAnyOverlap(guidance.words, avoidWords)) {
+        continue;
+      }
+
+      return NextResponse.json(guidance, { status: 200 });
     }
 
-    const payload = (await response.json()) as OllamaChatResponse;
-    const content = payload.message?.content?.trim();
-    if (!content) {
-      return NextResponse.json({ error: "Ollama returned an empty response." }, { status: 502 });
-    }
-
-    const guidance = parseTopicGuidance(content);
-    if (!guidance) {
-      return NextResponse.json(
-        { error: "Could not parse follow-up questions and useful words from Ollama response." },
-        { status: 502 }
-      );
-    }
-
-    return NextResponse.json(guidance, { status: 200 });
+    return NextResponse.json(
+      { error: "Could not generate sufficiently new guidance. Try regenerate again." },
+      { status: 502 }
+    );
   } catch {
     return NextResponse.json(
       { error: "Cannot connect to local Ollama. Check OLLAMA_BASE_URL and running Ollama service." },

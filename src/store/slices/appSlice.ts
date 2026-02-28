@@ -1,5 +1,6 @@
 import { createAsyncThunk, createSlice, type PayloadAction } from "@reduxjs/toolkit";
 import { type Recording, type Suggestion } from "../../lib/data";
+import { DEFAULT_ENGLISH_LEVEL, normalizeEnglishLevel, parseEnglishLevel, type EnglishLevel } from "../../lib/englishLevel";
 import { formatTime, toDateKey } from "../../lib/utils";
 
 export type ScreenName = "speak" | "history" | "details" | "share" | "auth" | "profile" | "interests";
@@ -152,13 +153,16 @@ export type AppState = {
   questionsError: string | null;
   questionsDate: string | null;
   questionsInterestsKey: string;
+  questionsEnglishLevel: EnglishLevel;
   topicGuidanceQuestions: string[];
   topicGuidanceWords: string[];
   topicGuidanceStatus: QuestionsStatus;
   topicGuidanceError: string | null;
   topicGuidanceTopic: string | null;
   topicGuidanceInterestsKey: string;
+  topicGuidanceEnglishLevel: EnglishLevel;
   selectedInterestIds: string[];
+  selectedEnglishLevel: EnglishLevel;
   userDataStatus: QuestionsStatus;
   userDataError: string | null;
   recordingSaveStatus: AuthStatus;
@@ -174,6 +178,14 @@ export type AppState = {
   subscriptionCancelled: boolean;
   subscriptionActionStatus: AuthStatus;
   subscriptionActionError: string | null;
+  selectedOllamaModel: string;
+  availableOllamaModels: string[];
+  ollamaModelsStatus: QuestionsStatus;
+  ollamaModelsError: string | null;
+  ollamaModelSaveStatus: AuthStatus;
+  ollamaModelSaveError: string | null;
+  englishLevelSaveStatus: AuthStatus;
+  englishLevelSaveError: string | null;
 };
 
 const today = new Date();
@@ -182,6 +194,7 @@ const MIN_PASSWORD_LENGTH = 8;
 export const MAX_SELECTED_INTERESTS = 10;
 const FREE_WEEKLY_LIMIT_SECONDS = 10 * 60;
 const SESSION_LIMIT_SECONDS = 10 * 60;
+const DEFAULT_OLLAMA_MODEL = "gemma3:12b";
 
 const INTEREST_LOOKUP = new Map(INTEREST_OPTIONS.map((item) => [item.id, item]));
 
@@ -190,6 +203,8 @@ type FetchDailyQuestionsArgs = {
   force?: boolean;
   refreshToken?: string;
   interestIds?: string[];
+  avoidQuestions?: string[];
+  englishLevel?: EnglishLevel;
 };
 
 type FetchDailyQuestionsResult = {
@@ -207,6 +222,9 @@ type FetchTopicGuidanceArgs = {
   force?: boolean;
   refreshToken?: string;
   interestIds?: string[];
+  avoidQuestions?: string[];
+  avoidWords?: string[];
+  englishLevel?: EnglishLevel;
 };
 
 type FetchTopicGuidanceResult = {
@@ -224,6 +242,7 @@ type TopicGuidanceResponse = {
 type AuthUserPayload = {
   email?: unknown;
   isSubscriber?: unknown;
+  englishLevel?: unknown;
 };
 
 type AuthResponse = {
@@ -236,6 +255,7 @@ type UserDataResponse = {
   recordings?: unknown;
   quota?: unknown;
   subscription?: unknown;
+  englishLevel?: unknown;
   error?: string;
 };
 
@@ -256,6 +276,18 @@ type SubscriptionResponse = {
   error?: string;
 };
 
+type OllamaModelResponse = {
+  selectedModel?: unknown;
+  availableModels?: unknown;
+  warning?: unknown;
+  error?: string;
+};
+
+type EnglishLevelResponse = {
+  level?: unknown;
+  error?: string;
+};
+
 type RecordingQuota = {
   isSubscriber: boolean;
   weeklyLimitSeconds: number | null;
@@ -268,6 +300,12 @@ type SubscriptionState = {
   isSubscriber: boolean;
   subscriptionExpiresAt: string | null;
   subscriptionCancelled: boolean;
+};
+
+type OllamaModelState = {
+  selectedModel: string;
+  availableModels: string[];
+  warning: string | null;
 };
 
 const buildDefaultRecordingQuota = (isSubscriber: boolean): RecordingQuota => {
@@ -297,7 +335,13 @@ const DEFAULT_SUBSCRIPTION_STATE: SubscriptionState = {
   subscriptionCancelled: false
 };
 
-const parseAuthUser = (payload: AuthResponse | null): { email: string; isSubscriber: boolean } | null => {
+const DEFAULT_OLLAMA_MODEL_STATE: OllamaModelState = {
+  selectedModel: DEFAULT_OLLAMA_MODEL,
+  availableModels: [DEFAULT_OLLAMA_MODEL],
+  warning: null
+};
+
+const parseAuthUser = (payload: AuthResponse | null): { email: string; isSubscriber: boolean; englishLevel: EnglishLevel } | null => {
   const email = payload?.user?.email;
   if (typeof email !== "string") {
     return null;
@@ -310,7 +354,8 @@ const parseAuthUser = (payload: AuthResponse | null): { email: string; isSubscri
 
   return {
     email: normalized,
-    isSubscriber: Boolean(payload?.user?.isSubscriber)
+    isSubscriber: Boolean(payload?.user?.isSubscriber),
+    englishLevel: normalizeEnglishLevel(payload?.user?.englishLevel, DEFAULT_ENGLISH_LEVEL)
   };
 };
 
@@ -390,6 +435,40 @@ const parseSubscriptionState = (value: unknown): SubscriptionState | null => {
     isSubscriber,
     subscriptionExpiresAt: parsedDate.toISOString(),
     subscriptionCancelled: isSubscriber ? subscriptionCancelled : false
+  };
+};
+
+const normalizeModelName = (value: unknown): string | null => {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const cleaned = value.trim();
+  if (!cleaned || cleaned.length > 120) {
+    return null;
+  }
+
+  return cleaned;
+};
+
+const parseOllamaModelState = (payload: OllamaModelResponse | null): OllamaModelState | null => {
+  const selectedModel = normalizeModelName(payload?.selectedModel);
+  if (!selectedModel) {
+    return null;
+  }
+
+  const rawList = Array.isArray(payload?.availableModels) ? payload?.availableModels : [];
+  const list = rawList
+    .map((item) => normalizeModelName(item))
+    .filter((item): item is string => item !== null);
+  const availableModels = Array.from(new Set([selectedModel, ...list]));
+  const warningRaw = payload?.warning;
+  const warning = typeof warningRaw === "string" && warningRaw.trim() ? warningRaw.trim() : null;
+
+  return {
+    selectedModel,
+    availableModels: availableModels.length > 0 ? availableModels : [selectedModel],
+    warning
   };
 };
 
@@ -493,14 +572,17 @@ export const fetchDailyQuestions = createAsyncThunk<
   { state: { app: AppState }; rejectValue: string }
 >(
   "app/fetchDailyQuestions",
-  async ({ dateKey, refreshToken, interestIds = [] }, { rejectWithValue }) => {
+  async ({ dateKey, refreshToken, interestIds = [], avoidQuestions = [], englishLevel = DEFAULT_ENGLISH_LEVEL }, { rejectWithValue }) => {
     try {
-      const params = new URLSearchParams({ date: dateKey });
+      const params = new URLSearchParams({ date: dateKey, level: englishLevel });
       if (refreshToken) {
         params.set("refresh", refreshToken);
       }
       const interestLabels = resolveInterestLabels(interestIds);
       interestLabels.forEach((label) => params.append("interest", label));
+      avoidQuestions
+        .filter((item) => item.trim().length > 0)
+        .forEach((item) => params.append("avoid", item.trim()));
 
       const response = await fetch(`/api/daily-questions?${params.toString()}`, {
         cache: "no-store"
@@ -528,7 +610,7 @@ export const fetchDailyQuestions = createAsyncThunk<
     }
   },
   {
-    condition: ({ dateKey, force, interestIds = [] }, { getState }) => {
+    condition: ({ dateKey, force, interestIds = [], englishLevel = DEFAULT_ENGLISH_LEVEL }, { getState }) => {
       if (force) {
         return true;
       }
@@ -537,7 +619,12 @@ export const fetchDailyQuestions = createAsyncThunk<
         return false;
       }
       const interestKey = buildInterestsKey(interestIds);
-      if (app.questionsDate === dateKey && app.questionsInterestsKey === interestKey && app.topics.length === 3) {
+      if (
+        app.questionsDate === dateKey &&
+        app.questionsInterestsKey === interestKey &&
+        app.questionsEnglishLevel === englishLevel &&
+        app.topics.length === 3
+      ) {
         return false;
       }
       return true;
@@ -551,14 +638,23 @@ export const fetchTopicGuidance = createAsyncThunk<
   { state: { app: AppState }; rejectValue: string }
 >(
   "app/fetchTopicGuidance",
-  async ({ topic, refreshToken, interestIds = [] }, { rejectWithValue }) => {
+  async (
+    { topic, refreshToken, interestIds = [], avoidQuestions = [], avoidWords = [], englishLevel = DEFAULT_ENGLISH_LEVEL },
+    { rejectWithValue }
+  ) => {
     try {
-      const params = new URLSearchParams({ topic });
+      const params = new URLSearchParams({ topic, level: englishLevel });
       if (refreshToken) {
         params.set("refresh", refreshToken);
       }
       const interestLabels = resolveInterestLabels(interestIds);
       interestLabels.forEach((label) => params.append("interest", label));
+      avoidQuestions
+        .filter((item) => item.trim().length > 0)
+        .forEach((item) => params.append("avoidQuestion", item.trim()));
+      avoidWords
+        .filter((item) => item.trim().length > 0)
+        .forEach((item) => params.append("avoidWord", item.trim()));
 
       const response = await fetch(`/api/topic-guidance?${params.toString()}`, {
         cache: "no-store"
@@ -597,7 +693,7 @@ export const fetchTopicGuidance = createAsyncThunk<
     }
   },
   {
-    condition: ({ topic, force, interestIds = [] }, { getState }) => {
+    condition: ({ topic, force, interestIds = [], englishLevel = DEFAULT_ENGLISH_LEVEL }, { getState }) => {
       if (force) {
         return true;
       }
@@ -610,13 +706,15 @@ export const fetchTopicGuidance = createAsyncThunk<
       if (
         app.topicGuidanceStatus === "loading" &&
         app.topicGuidanceTopic === normalizedTopic &&
-        app.topicGuidanceInterestsKey === interestKey
+        app.topicGuidanceInterestsKey === interestKey &&
+        app.topicGuidanceEnglishLevel === englishLevel
       ) {
         return false;
       }
       if (
         app.topicGuidanceTopic === normalizedTopic &&
         app.topicGuidanceInterestsKey === interestKey &&
+        app.topicGuidanceEnglishLevel === englishLevel &&
         app.topicGuidanceStatus === "ready"
       ) {
         return false;
@@ -627,7 +725,7 @@ export const fetchTopicGuidance = createAsyncThunk<
 );
 
 export const restoreSession = createAsyncThunk<
-  { email: string | null; isSubscriber: boolean },
+  { email: string | null; isSubscriber: boolean; englishLevel: EnglishLevel },
   void,
   { rejectValue: string }
 >("app/restoreSession", async (_, { rejectWithValue }) => {
@@ -638,7 +736,7 @@ export const restoreSession = createAsyncThunk<
     const payload = (await response.json().catch(() => null)) as AuthResponse | null;
 
     if (response.status === 401) {
-      return { email: null, isSubscriber: false };
+      return { email: null, isSubscriber: false, englishLevel: DEFAULT_ENGLISH_LEVEL };
     }
 
     if (!response.ok) {
@@ -657,7 +755,7 @@ export const restoreSession = createAsyncThunk<
 });
 
 export const signIn = createAsyncThunk<
-  { email: string; isSubscriber: boolean },
+  { email: string; isSubscriber: boolean; englishLevel: EnglishLevel },
   void,
   { state: { app: AppState }; rejectValue: string }
 >(
@@ -698,7 +796,7 @@ export const signIn = createAsyncThunk<
 );
 
 export const signUp = createAsyncThunk<
-  { email: string; isSubscriber: boolean },
+  { email: string; isSubscriber: boolean; englishLevel: EnglishLevel },
   void,
   { state: { app: AppState }; rejectValue: string }
 >(
@@ -749,7 +847,13 @@ export const logout = createAsyncThunk("app/logout", async () => {
 });
 
 export const fetchUserData = createAsyncThunk<
-  { interestIds: string[]; recordings: Recording[]; quota: RecordingQuota | null; subscription: SubscriptionState | null },
+  {
+    interestIds: string[];
+    recordings: Recording[];
+    quota: RecordingQuota | null;
+    subscription: SubscriptionState | null;
+    englishLevel: EnglishLevel;
+  },
   void,
   { rejectValue: string }
 >("app/fetchUserData", async (_, { rejectWithValue }) => {
@@ -775,8 +879,9 @@ export const fetchUserData = createAsyncThunk<
       .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
     const quota = parseRecordingQuota(payload?.quota);
     const subscription = parseSubscriptionState(payload?.subscription);
+    const englishLevel = normalizeEnglishLevel(payload?.englishLevel, DEFAULT_ENGLISH_LEVEL);
 
-    return { interestIds, recordings, quota, subscription };
+    return { interestIds, recordings, quota, subscription, englishLevel };
   } catch {
     return rejectWithValue("Cannot connect to user data service.");
   }
@@ -964,6 +1069,121 @@ export const cancelSubscription = createAsyncThunk<
   }
 });
 
+export const fetchOllamaModelSettings = createAsyncThunk<
+  OllamaModelState,
+  void,
+  { state: { app: AppState }; rejectValue: string }
+>("app/fetchOllamaModelSettings", async (_, { getState, rejectWithValue }) => {
+  if (!getState().app.isAuthenticated) {
+    return rejectWithValue("Unauthorized");
+  }
+
+  try {
+    const response = await fetch("/api/user/ollama-model", {
+      cache: "no-store"
+    });
+    const payload = (await response.json().catch(() => null)) as OllamaModelResponse | null;
+
+    if (response.status === 401) {
+      return rejectWithValue("Unauthorized");
+    }
+
+    if (!response.ok) {
+      return rejectWithValue(payload?.error ?? "Failed to load Ollama model settings.");
+    }
+
+    const modelState = parseOllamaModelState(payload);
+    if (!modelState) {
+      return rejectWithValue("Invalid Ollama model payload.");
+    }
+
+    return modelState;
+  } catch {
+    return rejectWithValue("Cannot connect to Ollama model service.");
+  }
+});
+
+export const saveOllamaModel = createAsyncThunk<
+  OllamaModelState,
+  string,
+  { state: { app: AppState }; rejectValue: string }
+>("app/saveOllamaModel", async (model, { getState, rejectWithValue }) => {
+  if (!getState().app.isAuthenticated) {
+    return rejectWithValue("Unauthorized");
+  }
+
+  const normalizedModel = normalizeModelName(model);
+  if (!normalizedModel) {
+    return rejectWithValue("Model name is invalid.");
+  }
+
+  try {
+    const response = await fetch("/api/user/ollama-model", {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ model: normalizedModel })
+    });
+    const payload = (await response.json().catch(() => null)) as OllamaModelResponse | null;
+
+    if (response.status === 401) {
+      return rejectWithValue("Unauthorized");
+    }
+
+    if (!response.ok) {
+      return rejectWithValue(payload?.error ?? "Failed to save Ollama model settings.");
+    }
+
+    const modelState = parseOllamaModelState(payload);
+    if (!modelState) {
+      return rejectWithValue("Invalid Ollama model payload.");
+    }
+
+    return modelState;
+  } catch {
+    return rejectWithValue("Cannot connect to Ollama model service.");
+  }
+});
+
+export const saveEnglishLevel = createAsyncThunk<
+  EnglishLevel,
+  EnglishLevel,
+  { state: { app: AppState }; rejectValue: string }
+>("app/saveEnglishLevel", async (level, { getState, rejectWithValue }) => {
+  if (!getState().app.isAuthenticated) {
+    return rejectWithValue("Unauthorized");
+  }
+
+  const normalizedLevel = parseEnglishLevel(level);
+  if (!normalizedLevel) {
+    return rejectWithValue("English level is invalid.");
+  }
+
+  try {
+    const response = await fetch("/api/user/english-level", {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ level: normalizedLevel })
+    });
+    const payload = (await response.json().catch(() => null)) as EnglishLevelResponse | null;
+
+    if (response.status === 401) {
+      return rejectWithValue("Unauthorized");
+    }
+
+    if (!response.ok) {
+      return rejectWithValue(payload?.error ?? "Failed to save English level.");
+    }
+
+    return normalizeEnglishLevel(payload?.level, normalizedLevel);
+  } catch {
+    return rejectWithValue("Cannot connect to English level service.");
+  }
+});
+
 const initialState: AppState = {
   currentScreen: "speak",
   activeTab: "speak",
@@ -999,13 +1219,16 @@ const initialState: AppState = {
   questionsError: null,
   questionsDate: null,
   questionsInterestsKey: "",
+  questionsEnglishLevel: DEFAULT_ENGLISH_LEVEL,
   topicGuidanceQuestions: [],
   topicGuidanceWords: [],
   topicGuidanceStatus: "idle",
   topicGuidanceError: null,
   topicGuidanceTopic: null,
   topicGuidanceInterestsKey: "",
+  topicGuidanceEnglishLevel: DEFAULT_ENGLISH_LEVEL,
   selectedInterestIds: [],
+  selectedEnglishLevel: DEFAULT_ENGLISH_LEVEL,
   userDataStatus: "idle",
   userDataError: null,
   recordingSaveStatus: "idle",
@@ -1020,7 +1243,15 @@ const initialState: AppState = {
   subscriptionExpiresAt: DEFAULT_SUBSCRIPTION_STATE.subscriptionExpiresAt,
   subscriptionCancelled: DEFAULT_SUBSCRIPTION_STATE.subscriptionCancelled,
   subscriptionActionStatus: "idle",
-  subscriptionActionError: null
+  subscriptionActionError: null,
+  selectedOllamaModel: DEFAULT_OLLAMA_MODEL_STATE.selectedModel,
+  availableOllamaModels: DEFAULT_OLLAMA_MODEL_STATE.availableModels,
+  ollamaModelsStatus: "idle",
+  ollamaModelsError: null,
+  ollamaModelSaveStatus: "idle",
+  ollamaModelSaveError: null,
+  englishLevelSaveStatus: "idle",
+  englishLevelSaveError: null
 };
 
 const resetPlayback = (state: AppState): void => {
@@ -1035,6 +1266,7 @@ const clearTopicGuidanceState = (state: AppState): void => {
   state.topicGuidanceError = null;
   state.topicGuidanceTopic = null;
   state.topicGuidanceInterestsKey = "";
+  state.topicGuidanceEnglishLevel = state.selectedEnglishLevel;
 };
 
 const openAuthFlow = (state: AppState, pendingSaveAfterAuth: boolean): void => {
@@ -1086,6 +1318,18 @@ const applySubscriptionState = (state: AppState, subscription: SubscriptionState
   state.subscriptionCancelled = subscription.isSubscriber ? subscription.subscriptionCancelled : false;
 };
 
+const applyOllamaModelState = (state: AppState, modelState: OllamaModelState | null): void => {
+  if (!modelState) {
+    state.selectedOllamaModel = DEFAULT_OLLAMA_MODEL_STATE.selectedModel;
+    state.availableOllamaModels = DEFAULT_OLLAMA_MODEL_STATE.availableModels;
+    return;
+  }
+
+  state.selectedOllamaModel = modelState.selectedModel;
+  state.availableOllamaModels = modelState.availableModels;
+  state.ollamaModelsError = modelState.warning;
+};
+
 const applyRecordingQuotaState = (state: AppState, quota: RecordingQuota | null): void => {
   if (!quota) {
     const fallback = buildDefaultRecordingQuota(state.isSubscriber);
@@ -1112,10 +1356,16 @@ const resolveCurrentSessionLimit = (state: AppState): number => {
   return Math.min(Math.max(0, state.maxSessionSeconds), weeklyRemaining);
 };
 
-const completeAuthSuccess = (state: AppState, email: string, isSubscriber: boolean): void => {
+const completeAuthSuccess = (
+  state: AppState,
+  email: string,
+  isSubscriber: boolean,
+  englishLevel: EnglishLevel
+): void => {
   state.isAuthenticated = true;
   state.userEmail = email;
   state.isSubscriber = isSubscriber;
+  state.selectedEnglishLevel = englishLevel;
   state.authPasswordDraft = "";
   state.authError = null;
   state.authStatus = "idle";
@@ -1126,9 +1376,16 @@ const completeAuthSuccess = (state: AppState, email: string, isSubscriber: boole
   state.interestsSaveError = null;
   state.subscriptionActionStatus = "idle";
   state.subscriptionActionError = null;
+  state.ollamaModelsStatus = "idle";
+  state.ollamaModelsError = null;
+  state.ollamaModelSaveStatus = "idle";
+  state.ollamaModelSaveError = null;
+  state.englishLevelSaveStatus = "idle";
+  state.englishLevelSaveError = null;
   state.recordingSaveStatus = "idle";
   state.recordingSaveError = null;
   state.selectedInterestIds = [];
+  state.questionsEnglishLevel = englishLevel;
   state.recordings = [];
   state.currentRecordingId = null;
   state.selectedDate = null;
@@ -1140,6 +1397,7 @@ const completeAuthSuccess = (state: AppState, email: string, isSubscriber: boole
     subscriptionCancelled: false
   });
   applyRecordingQuotaState(state, buildDefaultRecordingQuota(isSubscriber));
+  applyOllamaModelState(state, DEFAULT_OLLAMA_MODEL_STATE);
 };
 
 const clearAuthenticatedState = (state: AppState): void => {
@@ -1158,9 +1416,11 @@ const clearAuthenticatedState = (state: AppState): void => {
   state.selectedInterestIds = [];
   state.questionsInterestsKey = "";
   state.questionsDate = null;
+  state.questionsEnglishLevel = DEFAULT_ENGLISH_LEVEL;
   state.topics = [];
   state.questionsStatus = "idle";
   state.questionsError = null;
+  state.selectedEnglishLevel = DEFAULT_ENGLISH_LEVEL;
   state.recordings = [];
   state.currentRecordingId = null;
   state.selectedDate = null;
@@ -1172,10 +1432,17 @@ const clearAuthenticatedState = (state: AppState): void => {
   state.interestsSaveError = null;
   state.subscriptionActionStatus = "idle";
   state.subscriptionActionError = null;
+  state.ollamaModelsStatus = "idle";
+  state.ollamaModelsError = null;
+  state.ollamaModelSaveStatus = "idle";
+  state.ollamaModelSaveError = null;
+  state.englishLevelSaveStatus = "idle";
+  state.englishLevelSaveError = null;
   state.isSubscriber = false;
   state.subscriptionExpiresAt = DEFAULT_SUBSCRIPTION_STATE.subscriptionExpiresAt;
   state.subscriptionCancelled = DEFAULT_SUBSCRIPTION_STATE.subscriptionCancelled;
   applyRecordingQuotaState(state, DEFAULT_RECORDING_QUOTA);
+  applyOllamaModelState(state, DEFAULT_OLLAMA_MODEL_STATE);
   clearTopicGuidanceState(state);
   resetPlayback(state);
 };
@@ -1497,17 +1764,27 @@ const appSlice = createSlice({
         state.authInitialized = true;
         const email = action.payload.email;
         const isSubscriber = action.payload.isSubscriber;
+        const englishLevel = action.payload.englishLevel;
 
         if (email) {
           state.isAuthenticated = true;
           state.userEmail = email;
           state.isSubscriber = isSubscriber;
+          state.selectedEnglishLevel = englishLevel;
+          state.questionsEnglishLevel = englishLevel;
           applySubscriptionState(state, {
             isSubscriber,
             subscriptionExpiresAt: null,
             subscriptionCancelled: false
           });
           applyRecordingQuotaState(state, buildDefaultRecordingQuota(isSubscriber));
+          applyOllamaModelState(state, DEFAULT_OLLAMA_MODEL_STATE);
+          state.ollamaModelsStatus = "idle";
+          state.ollamaModelsError = null;
+          state.ollamaModelSaveStatus = "idle";
+          state.ollamaModelSaveError = null;
+          state.englishLevelSaveStatus = "idle";
+          state.englishLevelSaveError = null;
           state.userDataStatus = "idle";
           state.userDataError = null;
           return;
@@ -1516,12 +1793,22 @@ const appSlice = createSlice({
         state.isAuthenticated = false;
         state.userEmail = null;
         state.isSubscriber = false;
+        state.selectedEnglishLevel = DEFAULT_ENGLISH_LEVEL;
+        state.questionsEnglishLevel = DEFAULT_ENGLISH_LEVEL;
         applySubscriptionState(state, DEFAULT_SUBSCRIPTION_STATE);
         applyRecordingQuotaState(state, DEFAULT_RECORDING_QUOTA);
+        applyOllamaModelState(state, DEFAULT_OLLAMA_MODEL_STATE);
+        state.ollamaModelsStatus = "idle";
+        state.ollamaModelsError = null;
+        state.ollamaModelSaveStatus = "idle";
+        state.ollamaModelSaveError = null;
+        state.englishLevelSaveStatus = "idle";
+        state.englishLevelSaveError = null;
         state.userDataStatus = "idle";
         state.userDataError = null;
         state.selectedInterestIds = [];
         state.recordings = [];
+        clearTopicGuidanceState(state);
       })
       .addCase(restoreSession.rejected, (state, action) => {
         state.authStatus = "idle";
@@ -1530,19 +1817,29 @@ const appSlice = createSlice({
         state.isAuthenticated = false;
         state.userEmail = null;
         state.isSubscriber = false;
+        state.selectedEnglishLevel = DEFAULT_ENGLISH_LEVEL;
+        state.questionsEnglishLevel = DEFAULT_ENGLISH_LEVEL;
         applySubscriptionState(state, DEFAULT_SUBSCRIPTION_STATE);
         applyRecordingQuotaState(state, DEFAULT_RECORDING_QUOTA);
+        applyOllamaModelState(state, DEFAULT_OLLAMA_MODEL_STATE);
+        state.ollamaModelsStatus = "idle";
+        state.ollamaModelsError = null;
+        state.ollamaModelSaveStatus = "idle";
+        state.ollamaModelSaveError = null;
+        state.englishLevelSaveStatus = "idle";
+        state.englishLevelSaveError = null;
         state.userDataStatus = "idle";
         state.userDataError = null;
         state.selectedInterestIds = [];
         state.recordings = [];
+        clearTopicGuidanceState(state);
       })
       .addCase(signIn.pending, (state) => {
         state.authStatus = "loading";
         state.authError = null;
       })
       .addCase(signIn.fulfilled, (state, action) => {
-        completeAuthSuccess(state, action.payload.email, action.payload.isSubscriber);
+        completeAuthSuccess(state, action.payload.email, action.payload.isSubscriber, action.payload.englishLevel);
       })
       .addCase(signIn.rejected, (state, action) => {
         state.authStatus = "idle";
@@ -1553,7 +1850,7 @@ const appSlice = createSlice({
         state.authError = null;
       })
       .addCase(signUp.fulfilled, (state, action) => {
-        completeAuthSuccess(state, action.payload.email, action.payload.isSubscriber);
+        completeAuthSuccess(state, action.payload.email, action.payload.isSubscriber, action.payload.englishLevel);
       })
       .addCase(signUp.rejected, (state, action) => {
         state.authStatus = "idle";
@@ -1573,6 +1870,7 @@ const appSlice = createSlice({
         state.userDataStatus = "ready";
         state.userDataError = null;
         state.selectedInterestIds = action.payload.interestIds;
+        state.selectedEnglishLevel = action.payload.englishLevel;
         state.recordings = action.payload.recordings;
         applySubscriptionState(state, action.payload.subscription);
         applyRecordingQuotaState(state, action.payload.quota);
@@ -1658,6 +1956,60 @@ const appSlice = createSlice({
         }
         state.subscriptionActionError = action.payload ?? "Failed to cancel subscription.";
       })
+      .addCase(fetchOllamaModelSettings.pending, (state) => {
+        state.ollamaModelsStatus = "loading";
+        state.ollamaModelsError = null;
+        state.ollamaModelSaveError = null;
+      })
+      .addCase(fetchOllamaModelSettings.fulfilled, (state, action) => {
+        state.ollamaModelsStatus = "ready";
+        state.ollamaModelsError = action.payload.warning;
+        applyOllamaModelState(state, action.payload);
+      })
+      .addCase(fetchOllamaModelSettings.rejected, (state, action) => {
+        state.ollamaModelsStatus = "failed";
+        if (action.payload === "Unauthorized") {
+          clearAuthenticatedState(state);
+          return;
+        }
+        state.ollamaModelsError = action.payload ?? "Failed to load Ollama model settings.";
+      })
+      .addCase(saveOllamaModel.pending, (state) => {
+        state.ollamaModelSaveStatus = "loading";
+        state.ollamaModelSaveError = null;
+      })
+      .addCase(saveOllamaModel.fulfilled, (state, action) => {
+        state.ollamaModelSaveStatus = "idle";
+        state.ollamaModelSaveError = null;
+        state.ollamaModelsStatus = "ready";
+        state.ollamaModelsError = action.payload.warning;
+        applyOllamaModelState(state, action.payload);
+      })
+      .addCase(saveOllamaModel.rejected, (state, action) => {
+        state.ollamaModelSaveStatus = "idle";
+        if (action.payload === "Unauthorized") {
+          clearAuthenticatedState(state);
+          return;
+        }
+        state.ollamaModelSaveError = action.payload ?? "Failed to save Ollama model settings.";
+      })
+      .addCase(saveEnglishLevel.pending, (state) => {
+        state.englishLevelSaveStatus = "loading";
+        state.englishLevelSaveError = null;
+      })
+      .addCase(saveEnglishLevel.fulfilled, (state, action) => {
+        state.englishLevelSaveStatus = "idle";
+        state.englishLevelSaveError = null;
+        state.selectedEnglishLevel = action.payload;
+      })
+      .addCase(saveEnglishLevel.rejected, (state, action) => {
+        state.englishLevelSaveStatus = "idle";
+        if (action.payload === "Unauthorized") {
+          clearAuthenticatedState(state);
+          return;
+        }
+        state.englishLevelSaveError = action.payload ?? "Failed to save English level.";
+      })
       .addCase(fetchDailyQuestions.pending, (state) => {
         state.questionsStatus = "loading";
         state.questionsError = null;
@@ -1666,6 +2018,7 @@ const appSlice = createSlice({
         state.topics = action.payload.questions;
         state.questionsDate = action.payload.dateKey;
         state.questionsInterestsKey = buildInterestsKey(action.meta.arg.interestIds ?? []);
+        state.questionsEnglishLevel = action.meta.arg.englishLevel ?? DEFAULT_ENGLISH_LEVEL;
         state.questionsStatus = "ready";
         state.questionsError = null;
       })
@@ -1676,18 +2029,21 @@ const appSlice = createSlice({
       .addCase(fetchTopicGuidance.pending, (state, action) => {
         const topic = action.meta.arg.topic.trim();
         const interestKey = buildInterestsKey(action.meta.arg.interestIds ?? []);
+        const englishLevel = action.meta.arg.englishLevel ?? DEFAULT_ENGLISH_LEVEL;
         if (state.topicGuidanceTopic !== topic || state.topicGuidanceInterestsKey !== interestKey) {
           state.topicGuidanceQuestions = [];
           state.topicGuidanceWords = [];
         }
         state.topicGuidanceTopic = topic;
         state.topicGuidanceInterestsKey = interestKey;
+        state.topicGuidanceEnglishLevel = englishLevel;
         state.topicGuidanceStatus = "loading";
         state.topicGuidanceError = null;
       })
       .addCase(fetchTopicGuidance.fulfilled, (state, action) => {
         state.topicGuidanceTopic = action.payload.topic;
         state.topicGuidanceInterestsKey = buildInterestsKey(action.meta.arg.interestIds ?? []);
+        state.topicGuidanceEnglishLevel = action.meta.arg.englishLevel ?? DEFAULT_ENGLISH_LEVEL;
         state.topicGuidanceQuestions = action.payload.questions;
         state.topicGuidanceWords = action.payload.words;
         state.topicGuidanceStatus = "ready";
