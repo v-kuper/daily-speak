@@ -100,6 +100,22 @@ input {
   gap: 10px;
   color: #666;
   font-size: 13px;
+  cursor: pointer;
+}
+
+.session-email-btn {
+  background: none;
+  border: none;
+  color: #666;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.session-email-btn:hover {
+  color: #2c2c2c;
 }
 
 .main-content {
@@ -175,6 +191,85 @@ input {
 
 .section {
   margin-bottom: 32px;
+}
+
+.profile-screen {
+  max-width: 700px;
+}
+
+.profile-subtitle {
+  color: #666;
+  font-size: 14px;
+  margin-bottom: 14px;
+}
+
+.profile-card {
+  background: #fff;
+  border: 1px solid #e8e8e4;
+  border-radius: 10px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.profile-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.profile-label {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #888;
+}
+
+.profile-value {
+  font-size: 15px;
+  color: #2c2c2c;
+}
+
+.interest-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.interest-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border: 1px solid #e8e8e4;
+  border-radius: 999px;
+  background: #fff;
+  color: #2c2c2c;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.interest-chip:hover {
+  background: #f5f5f3;
+  border-color: #d0d0c8;
+}
+
+.interest-chip.active {
+  background: #2c2c2c;
+  border-color: #2c2c2c;
+  color: #fff;
+}
+
+.interest-chip:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.interest-chip-emoji {
+  font-size: 14px;
 }
 
 .section-title {

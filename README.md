@@ -20,6 +20,11 @@ Open [http://localhost:3000](http://localhost:3000).
 The app now uses local Ollama to:
 - generate 3 speaking questions for each day
 - generate follow-up questions and useful words for a selected topic
+- personalize generation using selected interests from the Profile screen
+
+Profile flow:
+- click the email in top bar to open Profile
+- click `My interests` to open a separate interest-selection screen
 
 1. Install and run Ollama locally.
 2. Pull a model (default is `gemma3:12b`):
