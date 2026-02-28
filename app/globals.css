@@ -657,6 +657,36 @@ input {
   margin-bottom: 12px;
 }
 
+.photo-upload-btn {
+  position: relative;
+  overflow: hidden;
+  width: fit-content;
+}
+
+.photo-upload-btn input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.photo-practice-preview {
+  width: 100%;
+  max-height: 280px;
+  object-fit: cover;
+  border: 1px solid #e8e8e4;
+  border-radius: 8px;
+  background: #f5f5f3;
+}
+
+.photo-object-input input {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid #e8e8e4;
+  border-radius: 8px;
+  font-size: 14px;
+}
+
 .topic-input-buttons {
   display: flex;
   gap: 12px;
@@ -785,6 +815,18 @@ input {
   gap: 12px;
 }
 
+.recording-main {
+  min-width: 0;
+}
+
+.recording-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
 .recording-time {
   font-weight: 500;
   font-size: 13px;
@@ -798,6 +840,26 @@ input {
 .recording-topic {
   font-size: 13px;
   color: #666;
+}
+
+.recording-practice-tag {
+  display: inline-flex;
+  margin-top: 6px;
+  padding: 3px 8px;
+  border: 1px solid #e0e0da;
+  border-radius: 999px;
+  font-size: 11px;
+  color: #555;
+  background: #f9f9f6;
+}
+
+.recording-thumb {
+  width: 84px;
+  height: 58px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid #deded8;
+  background: #f5f5f3;
 }
 
 .back-btn {
@@ -822,6 +884,29 @@ input {
   border-bottom: 1px solid #e8e8e4;
   font-size: 13px;
   color: #888;
+}
+
+.details-photo-card {
+  margin-bottom: 20px;
+  border: 1px solid #e8e8e4;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.details-photo {
+  width: 100%;
+  max-height: 320px;
+  object-fit: cover;
+  display: block;
+}
+
+.details-photo-caption {
+  font-size: 12px;
+  color: #666;
+  padding: 10px 12px;
+  border-top: 1px solid #e8e8e4;
+  background: #f9f9f6;
 }
 
 .player {
@@ -1116,6 +1201,15 @@ input {
   .details-metadata {
     flex-direction: column;
     gap: 8px;
+  }
+
+  .recording-side {
+    align-items: flex-start;
+  }
+
+  .recording-thumb {
+    width: 72px;
+    height: 50px;
   }
 
   .player-controls {

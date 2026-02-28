@@ -9,6 +9,8 @@ export type Suggestion = {
   explanation: string;
 };
 
+export type PracticeType = "free_talk" | "topic" | "photo_description";
+
 export type Recording = {
   id: string;
   topic: string;
@@ -16,6 +18,9 @@ export type Recording = {
   timestamp: string;
   transcript: string;
   suggestions: Suggestion[];
+  practiceType: PracticeType;
+  photoDataUrl: string | null;
+  photoObject: string | null;
 };
 
 const TOPIC_DATABASE: Record<string, TopicData> = {

@@ -6,6 +6,17 @@ import { formatTime } from "../lib/utils";
 import { useAppDispatch, useAppSelector } from "../store/hooks";
 import { backToHistory } from "../store/slices/appSlice";
 
+const formatPracticeLabel = (value: "free_talk" | "topic" | "photo_description"): string => {
+  switch (value) {
+    case "free_talk":
+      return "Free talk";
+    case "photo_description":
+      return "Photo description";
+    default:
+      return "Topic";
+  }
+};
+
 export default function ShareScreen() {
   const dispatch = useAppDispatch();
   const { recordings, currentRecordingId } = useAppSelector((state) => state.app);
@@ -43,11 +54,19 @@ export default function ShareScreen() {
       </button>
       <h2>Shared Recording</h2>
 
+      {recording.photoDataUrl && (
+        <div className="details-photo-card">
+          <img src={recording.photoDataUrl} alt="Photo from shared recording" className="details-photo" />
+          {recording.photoObject && <div className="details-photo-caption">Object: {recording.photoObject}</div>}
+        </div>
+      )}
+
       <div className="details-metadata">
         <div>
           <strong>{formatTime(recording.duration)}</strong>
         </div>
         <div>{recording.topic}</div>
+        <div>{formatPracticeLabel(recording.practiceType)}</div>
       </div>
 
       <div className="player">

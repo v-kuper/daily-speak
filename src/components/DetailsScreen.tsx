@@ -13,6 +13,17 @@ import {
 } from "../store/slices/appSlice";
 import ShareModal from "./ShareModal";
 
+const formatPracticeLabel = (value: "free_talk" | "topic" | "photo_description"): string => {
+  switch (value) {
+    case "free_talk":
+      return "Free talk";
+    case "photo_description":
+      return "Photo description";
+    default:
+      return "Topic";
+  }
+};
+
 export default function DetailsScreen() {
   const dispatch = useAppDispatch();
   const { recordings, currentRecordingId, isPlaying, playbackPosition, copyMessage } = useAppSelector(
@@ -72,11 +83,19 @@ export default function DetailsScreen() {
 
       {copyMessage && <div className="notice">{copyMessage}</div>}
 
+      {recording.photoDataUrl && (
+        <div className="details-photo-card">
+          <img src={recording.photoDataUrl} alt="Photo from speaking practice" className="details-photo" />
+          {recording.photoObject && <div className="details-photo-caption">Object: {recording.photoObject}</div>}
+        </div>
+      )}
+
       <div className="details-metadata">
         <div>
           <strong>{formatTime(recording.duration)}</strong>
         </div>
         <div>{recording.topic}</div>
+        <div>{formatPracticeLabel(recording.practiceType)}</div>
       </div>
 
       <div className="player">

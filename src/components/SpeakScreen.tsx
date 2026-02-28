@@ -1,19 +1,25 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, type ChangeEvent } from "react";
 import { formatTime, toDateKey } from "../lib/utils";
 import { useAppDispatch, useAppSelector } from "../store/hooks";
 import {
+  clearPhotoForPractice,
   clearQuestionsError,
   clearTopicGuidanceError,
   fetchDailyQuestions,
   fetchTopicGuidance,
   openAuthForSave,
+  PHOTO_PRACTICE_MAX_BYTES,
   reRecord,
   saveRecording,
   selectTopic,
   setCustomTopicDraft,
+  setPhotoForPractice,
+  setPhotoObjectDraft,
+  setPhotoUploadError,
   startFreeTalk,
+  startPhotoDescription,
   startRecording,
   stopRecording,
   tickRecording,
@@ -22,6 +28,24 @@ import {
   toggleWords,
   useCustomTopic
 } from "../store/slices/appSlice";
+
+const PHOTO_ACCEPTED_TYPES = new Set(["image/jpeg", "image/jpg", "image/png", "image/webp", "image/gif"]);
+
+const readFileAsDataUrl = (file: File): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = typeof reader.result === "string" ? reader.result : "";
+      if (!result) {
+        reject(new Error("Failed to read image file."));
+        return;
+      }
+      resolve(result);
+    };
+    reader.onerror = () => reject(new Error("Failed to read image file."));
+    reader.readAsDataURL(file);
+  });
+};
 
 export default function SpeakScreen() {
   const dispatch = useAppDispatch();
@@ -49,7 +73,11 @@ export default function SpeakScreen() {
     weeklyLimitSeconds,
     weeklyUsedSeconds,
     weeklyRemainingSeconds,
-    maxSessionSeconds
+    maxSessionSeconds,
+    recordingPracticeType,
+    pendingPhotoDataUrl,
+    pendingPhotoObjectDraft,
+    pendingPhotoError
   } = useAppSelector((state) => state.app);
 
   const normalizedMaxSessionSeconds = Math.max(0, maxSessionSeconds);
@@ -88,13 +116,14 @@ export default function SpeakScreen() {
   }, [dispatch, selectedEnglishLevel, selectedInterestIds]);
 
   useEffect(() => {
-    if (!selectedTopic) {
+    if (!selectedTopic || recordingPracticeType === "photo_description") {
       return;
     }
+
     void dispatch(
       fetchTopicGuidance({ topic: selectedTopic, interestIds: selectedInterestIds, englishLevel: selectedEnglishLevel })
     );
-  }, [dispatch, selectedEnglishLevel, selectedTopic, selectedInterestIds]);
+  }, [dispatch, recordingPracticeType, selectedEnglishLevel, selectedTopic, selectedInterestIds]);
 
   const onRefreshQuestions = () => {
     const dateKey = toDateKey(new Date());
@@ -112,7 +141,7 @@ export default function SpeakScreen() {
   };
 
   const onRefreshTopicGuidance = () => {
-    if (!selectedTopic) {
+    if (!selectedTopic || recordingPracticeType === "photo_description") {
       return;
     }
     dispatch(clearTopicGuidanceError());
@@ -127,6 +156,33 @@ export default function SpeakScreen() {
         englishLevel: selectedEnglishLevel
       })
     );
+  };
+
+  const onPhotoSelected = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.currentTarget.value = "";
+
+    if (!file) {
+      return;
+    }
+
+    if (!PHOTO_ACCEPTED_TYPES.has(file.type.toLowerCase())) {
+      dispatch(setPhotoUploadError("Supported formats: JPG, PNG, WEBP, GIF."));
+      return;
+    }
+
+    if (file.size > PHOTO_PRACTICE_MAX_BYTES) {
+      dispatch(setPhotoUploadError(`Photo must be under ${Math.floor(PHOTO_PRACTICE_MAX_BYTES / (1024 * 1024))}MB.`));
+      return;
+    }
+
+    void readFileAsDataUrl(file)
+      .then((dataUrl) => {
+        dispatch(setPhotoForPractice(dataUrl));
+      })
+      .catch(() => {
+        dispatch(setPhotoUploadError("Failed to read selected photo."));
+      });
   };
 
   if (speakState === "idle") {
@@ -188,6 +244,49 @@ export default function SpeakScreen() {
 
         <div className="speak-card">
           <div className="speak-section-header">
+            <div className="section-title speak-section-title">Photo description</div>
+            {pendingPhotoDataUrl && (
+              <button className="btn btn-secondary btn-small" onClick={() => dispatch(clearPhotoForPractice())}>
+                Remove photo
+              </button>
+            )}
+          </div>
+
+          <div className="profile-value">Upload an image and practice describing what you see.</div>
+
+          <label className="btn btn-secondary btn-small photo-upload-btn">
+            Upload photo
+            <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" onChange={onPhotoSelected} />
+          </label>
+
+          {pendingPhotoDataUrl ? (
+            <img src={pendingPhotoDataUrl} alt="Selected for speaking practice" className="photo-practice-preview" />
+          ) : (
+            <div className="empty-state speak-empty-state">No photo selected yet.</div>
+          )}
+
+          <div className="photo-object-input">
+            <input
+              type="text"
+              placeholder="Optional object name (example: red bicycle)"
+              value={pendingPhotoObjectDraft}
+              onChange={(event) => dispatch(setPhotoObjectDraft(event.target.value))}
+            />
+          </div>
+
+          <button
+            className="btn btn-primary"
+            onClick={() => dispatch(startPhotoDescription())}
+            disabled={!pendingPhotoDataUrl || !hasRecordingBudget}
+          >
+            Start photo session
+          </button>
+
+          {pendingPhotoError && <div className="auth-error top-spaced">{pendingPhotoError}</div>}
+        </div>
+
+        <div className="speak-card">
+          <div className="speak-section-header">
             <div className="section-title speak-section-title">Custom topic</div>
             <button className="btn btn-secondary btn-small" onClick={() => dispatch(toggleAddTopicInput())}>
               {showAddTopicInput ? "Hide" : "+ Add topic"}
@@ -218,15 +317,19 @@ export default function SpeakScreen() {
   }
 
   if (speakState === "readyToRecord") {
-    const shouldShowQuestions = showQuestions && topicGuidanceQuestions.length > 0;
-    const shouldShowWords = showWords && topicGuidanceWords.length > 0;
+    const isPhotoPractice = recordingPracticeType === "photo_description";
+    const shouldShowQuestions = !isPhotoPractice && showQuestions && topicGuidanceQuestions.length > 0;
+    const shouldShowWords = !isPhotoPractice && showWords && topicGuidanceWords.length > 0;
     const shouldShowGuidanceSkeleton =
-      topicGuidanceStatus === "loading" && topicGuidanceQuestions.length === 0 && topicGuidanceWords.length === 0;
+      !isPhotoPractice && topicGuidanceStatus === "loading" && topicGuidanceQuestions.length === 0 && topicGuidanceWords.length === 0;
 
     return (
       <section className="speak-screen">
         <div className="speak-card speak-hero-card">
           <div className="heading-sm">Selected question</div>
+          {isPhotoPractice && pendingPhotoDataUrl && (
+            <img src={pendingPhotoDataUrl} alt="Photo to describe" className="photo-practice-preview" />
+          )}
           <h2 className="heading-xl speak-heading-tight">{selectedTopic}</h2>
 
           {quotaHint && <div className="notice">{quotaHint}</div>}
@@ -237,73 +340,84 @@ export default function SpeakScreen() {
           <button
             className="btn btn-primary btn-large speak-primary-btn"
             onClick={() => dispatch(startRecording())}
-            disabled={!hasRecordingBudget}
+            disabled={!hasRecordingBudget || (isPhotoPractice && !pendingPhotoDataUrl)}
           >
             Start speaking
           </button>
+          {pendingPhotoError && <div className="auth-error top-spaced">{pendingPhotoError}</div>}
         </div>
 
-        <div className="speak-card">
-          <div className="speak-section-header">
-            <div className="section-title speak-section-title">Topic guidance</div>
-            <button
-              className="btn btn-secondary btn-small"
-              onClick={onRefreshTopicGuidance}
-              disabled={topicGuidanceStatus === "loading"}
-            >
-              {topicGuidanceStatus === "loading" ? "Generating..." : "↻ Regenerate"}
-            </button>
+        {isPhotoPractice ? (
+          <div className="speak-card">
+            <div className="section-title speak-section-title">Photo focus</div>
+            <div className="question-item">Describe the object and what details you notice.</div>
+            <div className="question-item">Mention color, shape, material, and where it is located.</div>
+            <div className="question-item">Say how this object could be used in real life.</div>
           </div>
-
-          {shouldShowGuidanceSkeleton && (
-            <div className="guidance-skeleton" aria-hidden="true">
-              <div className="guidance-skeleton-title skeleton-line skeleton-line-short" />
-              <div className="guidance-skeleton-item skeleton-line skeleton-line-wide" />
-              <div className="guidance-skeleton-item skeleton-line skeleton-line-wide" />
-              <div className="guidance-skeleton-item skeleton-line skeleton-line-medium" />
-            </div>
-          )}
-
-          {topicGuidanceQuestions.length > 0 && (
-            <div className="collapsible-section">
-              <button className="collapsible-header" onClick={() => dispatch(toggleQuestions())}>
-                <span>Follow-up questions</span>
-                <span className={`toggle-arrow ${showQuestions ? "open" : ""}`}>↓</span>
+        ) : (
+          <div className="speak-card">
+            <div className="speak-section-header">
+              <div className="section-title speak-section-title">Topic guidance</div>
+              <button
+                className="btn btn-secondary btn-small"
+                onClick={onRefreshTopicGuidance}
+                disabled={topicGuidanceStatus === "loading"}
+              >
+                {topicGuidanceStatus === "loading" ? "Generating..." : "↻ Regenerate"}
               </button>
-              <div className={`collapsible-content ${shouldShowQuestions ? "open" : ""}`}>
-                {topicGuidanceQuestions.map((question) => (
-                  <div key={question} className="question-item">
-                    {question}
-                  </div>
-                ))}
-              </div>
             </div>
-          )}
 
-          {topicGuidanceWords.length > 0 && (
-            <div className="collapsible-section">
-              <button className="collapsible-header" onClick={() => dispatch(toggleWords())}>
-                <span>Useful words</span>
-                <span className={`toggle-arrow ${showWords ? "open" : ""}`}>↓</span>
-              </button>
-              <div className={`collapsible-content ${shouldShowWords ? "open" : ""}`}>
-                {topicGuidanceWords.map((word) => (
-                  <div key={word} className="word-item">
-                    {word}
-                  </div>
-                ))}
+            {shouldShowGuidanceSkeleton && (
+              <div className="guidance-skeleton" aria-hidden="true">
+                <div className="guidance-skeleton-title skeleton-line skeleton-line-short" />
+                <div className="guidance-skeleton-item skeleton-line skeleton-line-wide" />
+                <div className="guidance-skeleton-item skeleton-line skeleton-line-wide" />
+                <div className="guidance-skeleton-item skeleton-line skeleton-line-medium" />
               </div>
-            </div>
-          )}
+            )}
 
-          {topicGuidanceError && <div className="auth-error top-spaced">{topicGuidanceError}</div>}
-        </div>
+            {topicGuidanceQuestions.length > 0 && (
+              <div className="collapsible-section">
+                <button className="collapsible-header" onClick={() => dispatch(toggleQuestions())}>
+                  <span>Follow-up questions</span>
+                  <span className={`toggle-arrow ${showQuestions ? "open" : ""}`}>↓</span>
+                </button>
+                <div className={`collapsible-content ${shouldShowQuestions ? "open" : ""}`}>
+                  {topicGuidanceQuestions.map((question) => (
+                    <div key={question} className="question-item">
+                      {question}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {topicGuidanceWords.length > 0 && (
+              <div className="collapsible-section">
+                <button className="collapsible-header" onClick={() => dispatch(toggleWords())}>
+                  <span>Useful words</span>
+                  <span className={`toggle-arrow ${showWords ? "open" : ""}`}>↓</span>
+                </button>
+                <div className={`collapsible-content ${shouldShowWords ? "open" : ""}`}>
+                  {topicGuidanceWords.map((word) => (
+                    <div key={word} className="word-item">
+                      {word}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {topicGuidanceError && <div className="auth-error top-spaced">{topicGuidanceError}</div>}
+          </div>
+        )}
       </section>
     );
   }
 
   if (speakState === "recording") {
-    const shouldShowQuestions = showQuestions && topicGuidanceQuestions.length > 0;
+    const isPhotoPractice = recordingPracticeType === "photo_description";
+    const shouldShowQuestions = !isPhotoPractice && showQuestions && topicGuidanceQuestions.length > 0;
 
     return (
       <section className="speak-screen">
@@ -312,6 +426,10 @@ export default function SpeakScreen() {
             <div className="recording-dot" />
             <span>{selectedTopic ?? "Free talk"}</span>
           </div>
+
+          {isPhotoPractice && pendingPhotoDataUrl && (
+            <img src={pendingPhotoDataUrl} alt="Photo being described" className="photo-practice-preview" />
+          )}
 
           <div className="timer">{formatTime(recordingDuration)}</div>
           {isAuthenticated && (
@@ -335,18 +453,23 @@ export default function SpeakScreen() {
             </div>
           </div>
         )}
-
       </section>
     );
   }
+
+  const isPhotoPractice = recordingPracticeType === "photo_description";
 
   return (
     <section className="speak-screen">
       <div className="speak-card speak-center-card">
         <div className="recorded-banner">
-          <div className="recorded-title">Recording complete</div>
+          <div className="recorded-title">{isPhotoPractice ? "Photo session complete" : "Recording complete"}</div>
           <div className="recorded-subtitle">Duration: {formatTime(recordingDuration)}</div>
         </div>
+
+        {isPhotoPractice && pendingPhotoDataUrl && (
+          <img src={pendingPhotoDataUrl} alt="Photo from completed session" className="photo-practice-preview" />
+        )}
 
         {quotaHint && <div className="notice">{quotaHint}</div>}
         {isAuthenticated && !isSubscriber && normalizedWeeklyRemainingSeconds <= 0 && (

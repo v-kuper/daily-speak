@@ -11,6 +11,8 @@ type InterestRow = {
   interest_id: string;
 };
 
+type PracticeType = "free_talk" | "topic" | "photo_description";
+
 type RecordingRow = {
   id: string;
   topic: string;
@@ -18,6 +20,43 @@ type RecordingRow = {
   timestamp: string;
   transcript: string;
   suggestions: unknown;
+  practice_type: PracticeType | string;
+  photo_data_url: string | null;
+  photo_object: string | null;
+};
+
+const PRACTICE_TYPE_SET = new Set<PracticeType>(["free_talk", "topic", "photo_description"]);
+const PHOTO_DATA_URL_PATTERN = /^data:image\/(png|jpeg|jpg|webp|gif);base64,([A-Za-z0-9+/=]+)$/i;
+
+const normalizePracticeType = (value: unknown): PracticeType => {
+  if (typeof value !== "string") {
+    return "topic";
+  }
+
+  const normalized = value.trim().toLowerCase() as PracticeType;
+  return PRACTICE_TYPE_SET.has(normalized) ? normalized : "topic";
+};
+
+const normalizePhotoDataUrl = (value: unknown): string | null => {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim();
+  if (!PHOTO_DATA_URL_PATTERN.test(normalized)) {
+    return null;
+  }
+
+  return normalized;
+};
+
+const normalizePhotoObject = (value: unknown): string | null => {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim().replace(/\s+/g, " ").slice(0, 120);
+  return normalized || null;
 };
 
 const parseSuggestions = (input: unknown): Array<{ wrong: string; right: string; explanation: string }> => {
@@ -64,7 +103,16 @@ export async function GET(request: NextRequest) {
         [user.id]
       ),
       query<RecordingRow>(
-        `SELECT id, topic, duration, timestamp, transcript, suggestions
+        `SELECT
+           id,
+           topic,
+           duration,
+           timestamp,
+           transcript,
+           suggestions,
+           practice_type,
+           photo_data_url,
+           photo_object
          FROM recordings
          WHERE user_id = $1
          ORDER BY timestamp DESC`,
@@ -81,7 +129,10 @@ export async function GET(request: NextRequest) {
       duration: Math.max(0, Number(row.duration) || 0),
       timestamp: new Date(row.timestamp).toISOString(),
       transcript: row.transcript,
-      suggestions: parseSuggestions(row.suggestions)
+      suggestions: parseSuggestions(row.suggestions),
+      practiceType: normalizePracticeType(row.practice_type),
+      photoDataUrl: normalizePhotoDataUrl(row.photo_data_url),
+      photoObject: normalizePhotoObject(row.photo_object)
     }));
 
     return NextResponse.json(

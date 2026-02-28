@@ -24,6 +24,8 @@ type RecordingSuggestion = {
   explanation: string;
 };
 
+type PracticeType = "free_talk" | "topic" | "photo_description";
+
 type RecordingAnalysis = {
   transcript: string;
   suggestions: RecordingSuggestion[];
@@ -34,6 +36,9 @@ type CreateRecordingPayload = {
     topic?: unknown;
     duration?: unknown;
     timestamp?: unknown;
+    practiceType?: unknown;
+    photoDataUrl?: unknown;
+    photoObject?: unknown;
   };
 };
 
@@ -44,6 +49,9 @@ type RecordingRow = {
   timestamp: string;
   transcript: string;
   suggestions: unknown;
+  practice_type: PracticeType | string;
+  photo_data_url: string | null;
+  photo_object: string | null;
 };
 
 type InterestRow = {
@@ -72,6 +80,10 @@ class RecordingAnalysisError extends Error {
     this.status = status;
   }
 }
+
+const PRACTICE_TYPE_SET = new Set<PracticeType>(["free_talk", "topic", "photo_description"]);
+const PHOTO_DATA_URL_PATTERN = /^data:image\/(png|jpeg|jpg|webp|gif);base64,([A-Za-z0-9+/=]+)$/i;
+const MAX_PHOTO_UPLOAD_BYTES = 4 * 1024 * 1024;
 
 const hashString = (value: string): number => {
   let hash = 0;
@@ -180,7 +192,55 @@ const parseTimestamp = (value: unknown): Date => {
   return parsed;
 };
 
-const createPrompt = (topic: string, duration: number, interests: string[]): string => {
+const normalizePracticeType = (value: unknown): PracticeType => {
+  if (typeof value !== "string") {
+    return "topic";
+  }
+
+  const normalized = value.trim().toLowerCase() as PracticeType;
+  return PRACTICE_TYPE_SET.has(normalized) ? normalized : "topic";
+};
+
+const normalizePhotoObject = (value: unknown): string | null => {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim().replace(/\s+/g, " ").slice(0, 120);
+  return normalized || null;
+};
+
+const normalizePhotoDataUrl = (value: unknown): string | null => {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim();
+  const match = normalized.match(PHOTO_DATA_URL_PATTERN);
+  if (!match) {
+    return null;
+  }
+
+  const mimeRaw = match[1].toLowerCase();
+  const mime = mimeRaw === "jpg" ? "jpeg" : mimeRaw;
+  const base64 = match[2].trim();
+  const padding = base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0;
+  const bytes = Math.floor((base64.length * 3) / 4) - padding;
+
+  if (!Number.isFinite(bytes) || bytes <= 0 || bytes > MAX_PHOTO_UPLOAD_BYTES) {
+    return null;
+  }
+
+  return `data:image/${mime};base64,${base64}`;
+};
+
+const createPrompt = (
+  topic: string,
+  duration: number,
+  interests: string[],
+  practiceType: PracticeType,
+  photoObject: string | null
+): string => {
   const clampedDuration = Math.max(30, Math.min(duration, 600));
   const targetWords = Math.max(80, Math.min(320, Math.round(clampedDuration * 2.1)));
 
@@ -192,6 +252,17 @@ const createPrompt = (topic: string, duration: number, interests: string[]): str
     'Return only JSON with this shape: {"transcript":"...","suggestions":[{"wrong":"...","right":"...","explanation":"..."}]}.',
     "No markdown, no extra keys, no explanations outside JSON."
   ];
+
+  if (practiceType === "photo_description") {
+    parts.push("This is a photo description practice.");
+    parts.push("Transcript should sound like the learner is describing what they see in a picture.");
+    parts.push("Include visual details: color, shape, material, position, and possible use.");
+    if (photoObject) {
+      parts.push(`Main object to describe: \"${photoObject}\".`);
+    }
+  } else if (practiceType === "free_talk") {
+    parts.push("Transcript should sound like spontaneous free talk and personal examples.");
+  }
 
   if (interests.length > 0) {
     parts.push(`Learner interests: ${interests.join(", ")}. Keep transcript context close to them when possible.`);
@@ -239,13 +310,15 @@ const generateRecordingAnalysis = async (
   userId: string,
   topic: string,
   duration: number,
-  interests: string[]
+  interests: string[],
+  practiceType: PracticeType,
+  photoObject: string | null
 ): Promise<RecordingAnalysis> => {
   const baseUrl = process.env.OLLAMA_BASE_URL ?? DEFAULT_OLLAMA_BASE_URL;
   const model = await resolveOllamaModelForUser(userId);
   const useJsonFormat = !isThinkingModel(model);
   const seed = Math.abs((hashString(topic.toLowerCase()) * 131 + duration * 17 + Date.now()) % 2_147_483_647);
-  const prompt = createPrompt(topic, duration, interests);
+  const prompt = createPrompt(topic, duration, interests, practiceType, photoObject);
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const strictJson = attempt > 0;
@@ -299,8 +372,28 @@ export async function POST(request: NextRequest) {
     const payload = (await request.json().catch(() => null)) as CreateRecordingPayload | null;
     const source = payload?.recording;
 
-    const topic = typeof source?.topic === "string" ? source.topic.trim() : "";
+    const practiceType = normalizePracticeType(source?.practiceType);
+    let topic = typeof source?.topic === "string" ? source.topic.trim() : "";
     const duration = Number.parseInt(String(source?.duration ?? 0), 10);
+    const rawPhotoDataUrl = source?.photoDataUrl;
+    const photoDataUrl = normalizePhotoDataUrl(rawPhotoDataUrl);
+    const photoObject = normalizePhotoObject(source?.photoObject);
+
+    if (typeof rawPhotoDataUrl === "string" && !photoDataUrl) {
+      return NextResponse.json(
+        { error: `Photo must be a valid image under ${Math.floor(MAX_PHOTO_UPLOAD_BYTES / (1024 * 1024))}MB.` },
+        { status: 400 }
+      );
+    }
+
+    if (practiceType === "photo_description") {
+      if (!photoDataUrl) {
+        return NextResponse.json({ error: "Photo is required for photo description practice." }, { status: 400 });
+      }
+      if (!topic) {
+        topic = "Photo description";
+      }
+    }
 
     if (!topic) {
       return NextResponse.json({ error: "Recording topic is required." }, { status: 400 });
@@ -344,12 +437,23 @@ export async function POST(request: NextRequest) {
     );
     const interests = interestsResult.rows.map((row) => row.interest_id).slice(0, 10);
 
-    const analysis = await generateRecordingAnalysis(user.id, topic, duration, interests);
+    const analysis = await generateRecordingAnalysis(user.id, topic, duration, interests, practiceType, photoObject);
 
     const insertResult = await query<RecordingRow>(
-      `INSERT INTO recordings (id, user_id, topic, duration, timestamp, transcript, suggestions)
-       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
-       RETURNING id, topic, duration, timestamp, transcript, suggestions`,
+      `INSERT INTO recordings
+         (id, user_id, topic, duration, timestamp, transcript, suggestions, practice_type, photo_data_url, photo_object)
+       VALUES
+         ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10)
+       RETURNING
+         id,
+         topic,
+         duration,
+         timestamp,
+         transcript,
+         suggestions,
+         practice_type,
+         photo_data_url,
+         photo_object`,
       [
         id,
         user.id,
@@ -357,7 +461,10 @@ export async function POST(request: NextRequest) {
         duration,
         timestamp.toISOString(),
         analysis.transcript,
-        JSON.stringify(analysis.suggestions)
+        JSON.stringify(analysis.suggestions),
+        practiceType,
+        practiceType === "photo_description" ? photoDataUrl : null,
+        practiceType === "photo_description" ? photoObject : null
       ]
     );
 
@@ -368,7 +475,10 @@ export async function POST(request: NextRequest) {
       duration: Math.max(0, Number(row.duration) || 0),
       timestamp: new Date(row.timestamp).toISOString(),
       transcript: row.transcript,
-      suggestions: normalizeSuggestions(row.suggestions)
+      suggestions: normalizeSuggestions(row.suggestions),
+      practiceType: normalizePracticeType(row.practice_type),
+      photoDataUrl: normalizePhotoDataUrl(row.photo_data_url),
+      photoObject: normalizePhotoObject(row.photo_object)
     };
     const quota = await getRecordingQuota(user.id, { isSubscriber: user.isSubscriber });
 

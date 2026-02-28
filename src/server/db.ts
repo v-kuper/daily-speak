@@ -64,6 +64,15 @@ CREATE TABLE IF NOT EXISTS recordings (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+ALTER TABLE recordings
+ADD COLUMN IF NOT EXISTS practice_type TEXT NOT NULL DEFAULT 'topic';
+
+ALTER TABLE recordings
+ADD COLUMN IF NOT EXISTS photo_data_url TEXT;
+
+ALTER TABLE recordings
+ADD COLUMN IF NOT EXISTS photo_object TEXT;
+
 CREATE INDEX IF NOT EXISTS recordings_user_id_timestamp_idx ON recordings (user_id, timestamp DESC);
 `;
 

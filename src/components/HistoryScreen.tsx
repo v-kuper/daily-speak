@@ -19,6 +19,17 @@ const dateKeyFromParts = (year: number, month: number, day: number): string => {
   return `${year}-${mm}-${dd}`;
 };
 
+const formatPracticeLabel = (value: "free_talk" | "topic" | "photo_description"): string => {
+  switch (value) {
+    case "free_talk":
+      return "Free talk";
+    case "photo_description":
+      return "Photo description";
+    default:
+      return "Topic";
+  }
+};
+
 export default function HistoryScreen() {
   const dispatch = useAppDispatch();
   const { recordings, selectedDate, calendarVisible, calendarMonth, calendarYear } = useAppSelector(
@@ -97,17 +108,19 @@ export default function HistoryScreen() {
         <div className="empty-state">No recordings on this day.</div>
       ) : (
         visibleRecordings.map((recording) => (
-          <button
-            key={recording.id}
-            className="recording-card"
-            onClick={() => dispatch(openDetails(recording.id))}
-          >
+          <button key={recording.id} className="recording-card" onClick={() => dispatch(openDetails(recording.id))}>
             <div className="recording-card-header">
-              <div>
+              <div className="recording-main">
                 <div className="recording-time">{formatTimeOfDay(recording.timestamp)}</div>
                 <div className="recording-topic">{recording.topic}</div>
+                <div className="recording-practice-tag">{formatPracticeLabel(recording.practiceType)}</div>
               </div>
-              <div className="recording-duration">{formatTime(recording.duration)}</div>
+              <div className="recording-side">
+                <div className="recording-duration">{formatTime(recording.duration)}</div>
+                {recording.photoDataUrl && (
+                  <img src={recording.photoDataUrl} alt="Photo from recording" className="recording-thumb" />
+                )}
+              </div>
             </div>
           </button>
         ))

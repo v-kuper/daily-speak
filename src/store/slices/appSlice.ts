@@ -1,5 +1,5 @@
 import { createAsyncThunk, createSlice, type PayloadAction } from "@reduxjs/toolkit";
-import { type Recording, type Suggestion } from "../../lib/data";
+import { type PracticeType, type Recording, type Suggestion } from "../../lib/data";
 import { DEFAULT_ENGLISH_LEVEL, normalizeEnglishLevel, parseEnglishLevel, type EnglishLevel } from "../../lib/englishLevel";
 import { formatTime, toDateKey } from "../../lib/utils";
 
@@ -161,6 +161,10 @@ export type AppState = {
   topicGuidanceTopic: string | null;
   topicGuidanceInterestsKey: string;
   topicGuidanceEnglishLevel: EnglishLevel;
+  recordingPracticeType: PracticeType;
+  pendingPhotoDataUrl: string | null;
+  pendingPhotoObjectDraft: string;
+  pendingPhotoError: string | null;
   selectedInterestIds: string[];
   selectedEnglishLevel: EnglishLevel;
   userDataStatus: QuestionsStatus;
@@ -195,6 +199,10 @@ export const MAX_SELECTED_INTERESTS = 10;
 const FREE_WEEKLY_LIMIT_SECONDS = 10 * 60;
 const SESSION_LIMIT_SECONDS = 10 * 60;
 const DEFAULT_OLLAMA_MODEL = "gemma3:12b";
+const PHOTO_PRACTICE_MAX_OBJECT_LENGTH = 120;
+export const PHOTO_PRACTICE_MAX_BYTES = 4 * 1024 * 1024;
+const PHOTO_DATA_URL_PATTERN = /^data:image\/(png|jpeg|jpg|webp|gif);base64,([A-Za-z0-9+/=]+)$/i;
+const PRACTICE_TYPE_SET = new Set<PracticeType>(["free_talk", "topic", "photo_description"]);
 
 const INTEREST_LOOKUP = new Map(INTEREST_OPTIONS.map((item) => [item.id, item]));
 
@@ -522,6 +530,54 @@ const parseSuggestion = (value: unknown): Suggestion | null => {
   return { wrong, right, explanation };
 };
 
+const parsePracticeType = (value: unknown, topic: string, hasPhoto: boolean): PracticeType => {
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase() as PracticeType;
+    if (PRACTICE_TYPE_SET.has(normalized)) {
+      return normalized;
+    }
+  }
+
+  if (hasPhoto) {
+    return "photo_description";
+  }
+
+  if (topic.toLowerCase() === "free talk") {
+    return "free_talk";
+  }
+
+  return "topic";
+};
+
+const normalizePhotoDataUrl = (value: unknown): string | null => {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim();
+  if (!PHOTO_DATA_URL_PATTERN.test(normalized)) {
+    return null;
+  }
+
+  const payload = normalized.split(",", 2)[1] ?? "";
+  const padding = payload.endsWith("==") ? 2 : payload.endsWith("=") ? 1 : 0;
+  const bytes = Math.floor((payload.length * 3) / 4) - padding;
+  if (!Number.isFinite(bytes) || bytes <= 0 || bytes > PHOTO_PRACTICE_MAX_BYTES) {
+    return null;
+  }
+
+  return normalized;
+};
+
+const normalizePhotoObject = (value: unknown): string | null => {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim().replace(/\s+/g, " ").slice(0, PHOTO_PRACTICE_MAX_OBJECT_LENGTH);
+  return normalized || null;
+};
+
 const parseRecording = (value: unknown): Recording | null => {
   if (typeof value !== "object" || value === null) {
     return null;
@@ -539,6 +595,9 @@ const parseRecording = (value: unknown): Recording | null => {
     .map((item) => parseSuggestion(item))
     .filter((item): item is Suggestion => item !== null)
     .slice(0, 20);
+  const photoDataUrl = normalizePhotoDataUrl(candidate.photoDataUrl);
+  const photoObject = normalizePhotoObject(candidate.photoObject);
+  const practiceType = parsePracticeType(candidate.practiceType, topic, Boolean(photoDataUrl));
 
   if (!id || !topic || Number.isNaN(timestamp.getTime()) || !Number.isFinite(duration) || duration < 0) {
     return null;
@@ -550,7 +609,10 @@ const parseRecording = (value: unknown): Recording | null => {
     duration: Math.max(0, duration),
     timestamp: timestamp.toISOString(),
     transcript,
-    suggestions
+    suggestions,
+    practiceType,
+    photoDataUrl,
+    photoObject
   };
 };
 
@@ -933,6 +995,9 @@ export const saveRecording = createAsyncThunk<
       isAuthenticated,
       speakState,
       selectedTopic,
+      recordingPracticeType,
+      pendingPhotoDataUrl,
+      pendingPhotoObjectDraft,
       recordingDuration,
       isSubscriber,
       weeklyRemainingSeconds,
@@ -947,7 +1012,6 @@ export const saveRecording = createAsyncThunk<
       return rejectWithValue("Unauthorized");
     }
 
-    const topic = selectedTopic ?? "Free talk";
     const normalizedDuration = Math.max(0, Math.floor(recordingDuration));
     const normalizedMaxSession = Math.max(0, Math.floor(maxSessionSeconds));
     const normalizedWeeklyRemaining = Math.max(0, Math.floor(weeklyRemainingSeconds ?? 0));
@@ -962,10 +1026,31 @@ export const saveRecording = createAsyncThunk<
       );
     }
 
+    const normalizedPhotoObject = pendingPhotoObjectDraft
+      .trim()
+      .replace(/\s+/g, " ")
+      .slice(0, PHOTO_PRACTICE_MAX_OBJECT_LENGTH);
+    const photoObject = normalizedPhotoObject || null;
+    const photoDataUrl = recordingPracticeType === "photo_description" ? pendingPhotoDataUrl : null;
+
+    if (recordingPracticeType === "photo_description" && !photoDataUrl) {
+      return rejectWithValue("Upload a photo before saving this practice.");
+    }
+
+    const topic =
+      recordingPracticeType === "photo_description"
+        ? photoObject
+          ? `Photo description: ${photoObject}`
+          : "Photo description"
+        : selectedTopic ?? "Free talk";
+
     const recordingDraft = {
       topic,
       duration: normalizedDuration,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      practiceType: recordingPracticeType,
+      photoDataUrl,
+      photoObject
     };
 
     try {
@@ -1227,6 +1312,10 @@ const initialState: AppState = {
   topicGuidanceTopic: null,
   topicGuidanceInterestsKey: "",
   topicGuidanceEnglishLevel: DEFAULT_ENGLISH_LEVEL,
+  recordingPracticeType: "topic",
+  pendingPhotoDataUrl: null,
+  pendingPhotoObjectDraft: "",
+  pendingPhotoError: null,
   selectedInterestIds: [],
   selectedEnglishLevel: DEFAULT_ENGLISH_LEVEL,
   userDataStatus: "idle",
@@ -1302,6 +1391,10 @@ const applySavedRecording = (state: AppState, recording: Recording): void => {
   state.pendingSaveAfterAuth = false;
   state.recordingSaveStatus = "idle";
   state.recordingSaveError = null;
+  state.recordingPracticeType = "topic";
+  state.pendingPhotoDataUrl = null;
+  state.pendingPhotoObjectDraft = "";
+  state.pendingPhotoError = null;
   clearTopicGuidanceState(state);
   resetPlayback(state);
 };
@@ -1384,6 +1477,7 @@ const completeAuthSuccess = (
   state.englishLevelSaveError = null;
   state.recordingSaveStatus = "idle";
   state.recordingSaveError = null;
+  state.pendingPhotoError = null;
   state.selectedInterestIds = [];
   state.questionsEnglishLevel = englishLevel;
   state.recordings = [];
@@ -1420,6 +1514,10 @@ const clearAuthenticatedState = (state: AppState): void => {
   state.topics = [];
   state.questionsStatus = "idle";
   state.questionsError = null;
+  state.recordingPracticeType = "topic";
+  state.pendingPhotoDataUrl = null;
+  state.pendingPhotoObjectDraft = "";
+  state.pendingPhotoError = null;
   state.selectedEnglishLevel = DEFAULT_ENGLISH_LEVEL;
   state.recordings = [];
   state.currentRecordingId = null;
@@ -1529,6 +1627,69 @@ const appSlice = createSlice({
       state.interestsSaveError = null;
       clearTopicGuidanceState(state);
     },
+    setPhotoUploadError: (state, action: PayloadAction<string | null>) => {
+      state.pendingPhotoError = action.payload;
+    },
+    setPhotoForPractice: (state, action: PayloadAction<string>) => {
+      const normalized = action.payload.trim();
+      if (!PHOTO_DATA_URL_PATTERN.test(normalized)) {
+        state.pendingPhotoError = "Upload a valid image file.";
+        return;
+      }
+
+      const payload = normalized.split(",", 2)[1] ?? "";
+      const padding = payload.endsWith("==") ? 2 : payload.endsWith("=") ? 1 : 0;
+      const bytes = Math.floor((payload.length * 3) / 4) - padding;
+      if (!Number.isFinite(bytes) || bytes <= 0 || bytes > PHOTO_PRACTICE_MAX_BYTES) {
+        state.pendingPhotoError = `Photo must be under ${Math.floor(PHOTO_PRACTICE_MAX_BYTES / (1024 * 1024))}MB.`;
+        return;
+      }
+
+      state.pendingPhotoDataUrl = normalized;
+      state.pendingPhotoError = null;
+    },
+    clearPhotoForPractice: (state) => {
+      const shouldResetSession = state.recordingPracticeType === "photo_description";
+      state.pendingPhotoDataUrl = null;
+      state.pendingPhotoObjectDraft = "";
+      state.pendingPhotoError = null;
+      if (shouldResetSession) {
+        state.selectedTopic = null;
+        state.speakState = "idle";
+        state.recordingDuration = 0;
+        state.showQuestions = false;
+        state.showWords = false;
+        state.recordingPracticeType = "topic";
+        clearTopicGuidanceState(state);
+      }
+    },
+    setPhotoObjectDraft: (state, action: PayloadAction<string>) => {
+      state.pendingPhotoObjectDraft = action.payload.slice(0, PHOTO_PRACTICE_MAX_OBJECT_LENGTH);
+      state.pendingPhotoError = null;
+    },
+    startPhotoDescription: (state) => {
+      if (!state.pendingPhotoDataUrl) {
+        state.pendingPhotoError = "Upload a photo first.";
+        return;
+      }
+
+      const normalizedObject = state.pendingPhotoObjectDraft
+        .trim()
+        .replace(/\s+/g, " ")
+        .slice(0, PHOTO_PRACTICE_MAX_OBJECT_LENGTH);
+      state.pendingPhotoObjectDraft = normalizedObject;
+      state.recordingPracticeType = "photo_description";
+      state.selectedTopic = normalizedObject ? `Photo description: ${normalizedObject}` : "Photo description";
+      state.speakState = "readyToRecord";
+      state.showQuestions = false;
+      state.showWords = false;
+      state.showAddTopicInput = false;
+      state.customTopicDraft = "";
+      state.copyMessage = null;
+      state.recordingSaveError = null;
+      state.pendingPhotoError = null;
+      clearTopicGuidanceState(state);
+    },
     startFreeTalk: (state) => {
       state.selectedTopic = null;
       state.showQuestions = false;
@@ -1537,6 +1698,8 @@ const appSlice = createSlice({
       state.recordingDuration = 0;
       state.copyMessage = null;
       state.recordingSaveError = null;
+      state.recordingPracticeType = "free_talk";
+      state.pendingPhotoError = null;
       clearTopicGuidanceState(state);
     },
     selectTopic: (state, action: PayloadAction<string>) => {
@@ -1548,6 +1711,8 @@ const appSlice = createSlice({
       state.customTopicDraft = "";
       state.copyMessage = null;
       state.recordingSaveError = null;
+      state.recordingPracticeType = "topic";
+      state.pendingPhotoError = null;
       if (state.topicGuidanceTopic !== action.payload) {
         clearTopicGuidanceState(state);
       }
@@ -1563,6 +1728,7 @@ const appSlice = createSlice({
       state.recordingDuration = 0;
       state.copyMessage = null;
       state.recordingSaveError = null;
+      state.pendingPhotoError = null;
     },
     tickRecording: (state) => {
       if (state.speakState === "recording") {
@@ -1590,6 +1756,7 @@ const appSlice = createSlice({
       state.recordingDuration = 0;
       state.speakState = state.selectedTopic ? "readyToRecord" : "idle";
       state.recordingSaveError = null;
+      state.pendingPhotoError = null;
     },
     openAuthForSave: (state) => {
       if (state.isAuthenticated) {
@@ -1617,6 +1784,8 @@ const appSlice = createSlice({
       state.showWords = false;
       state.showAddTopicInput = false;
       state.customTopicDraft = "";
+      state.recordingPracticeType = "topic";
+      state.pendingPhotoError = null;
       if (state.topicGuidanceTopic !== normalized) {
         clearTopicGuidanceState(state);
       }
@@ -2061,6 +2230,11 @@ export const {
   navigateToTab,
   clearQuestionsError,
   clearTopicGuidanceError,
+  setPhotoUploadError,
+  setPhotoForPractice,
+  clearPhotoForPractice,
+  setPhotoObjectDraft,
+  startPhotoDescription,
   openProfile,
   openInterests,
   backToProfile,
