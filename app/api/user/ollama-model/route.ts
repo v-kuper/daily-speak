@@ -8,6 +8,7 @@ import {
   mergeModelList,
   saveUserPreferredOllamaModel
 } from "../../../../src/server/ollama";
+import { createRouteLogger, elapsedMs, toErrorMeta } from "../../../../src/server/logger";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -21,19 +22,32 @@ const resolveAuthorizedUser = async (request: NextRequest) => {
   return getUserBySessionToken(token);
 };
 
-const buildModelState = async (userId: string) => {
+const buildModelState = async (
+  userId: string,
+  logger?: ReturnType<typeof createRouteLogger>
+) => {
   const baseUrl = process.env.OLLAMA_BASE_URL ?? DEFAULT_OLLAMA_BASE_URL;
   const defaultModel = getDefaultOllamaModel();
   const selectedModel = (await getUserPreferredOllamaModel(userId)) ?? defaultModel;
 
   try {
     const availableModels = await fetchLocalOllamaModels(baseUrl);
+    logger?.debug("models.refreshed", {
+      baseUrl,
+      selectedModel,
+      availableCount: availableModels.length
+    });
     return {
       selectedModel,
       availableModels: mergeModelList([selectedModel], availableModels, [defaultModel]),
       warning: null
     };
-  } catch {
+  } catch (error) {
+    logger?.warn("models.refresh_failed", {
+      baseUrl,
+      selectedModel,
+      ...toErrorMeta(error)
+    });
     return {
       selectedModel,
       availableModels: mergeModelList([selectedModel], [defaultModel]),
@@ -43,24 +57,37 @@ const buildModelState = async (userId: string) => {
 };
 
 export async function GET(request: NextRequest) {
+  const logger = createRouteLogger("api.user.ollama-model.get", request);
+  const startedAt = Date.now();
   try {
     const user = await resolveAuthorizedUser(request);
     if (!user) {
+      logger.info("request.unauthorized", { status: 401, durationMs: elapsedMs(startedAt) });
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const modelState = await buildModelState(user.id);
+    const modelState = await buildModelState(user.id, logger);
+    logger.info("request.success", {
+      status: 200,
+      durationMs: elapsedMs(startedAt),
+      userId: user.id,
+      selectedModel: modelState.selectedModel,
+      availableCount: modelState.availableModels.length
+    });
     return NextResponse.json(modelState, { status: 200 });
   } catch (error) {
-    console.error("User Ollama model route failed", error);
+    logger.error("request.failed", { status: 500, durationMs: elapsedMs(startedAt), ...toErrorMeta(error) });
     return NextResponse.json({ error: "Failed to load Ollama model settings." }, { status: 500 });
   }
 }
 
 export async function PUT(request: NextRequest) {
+  const logger = createRouteLogger("api.user.ollama-model.put", request);
+  const startedAt = Date.now();
   try {
     const user = await resolveAuthorizedUser(request);
     if (!user) {
+      logger.info("request.unauthorized", { status: 401, durationMs: elapsedMs(startedAt) });
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -68,14 +95,22 @@ export async function PUT(request: NextRequest) {
     const model = typeof payload?.model === "string" ? payload.model : "";
     await saveUserPreferredOllamaModel(user.id, model);
 
-    const modelState = await buildModelState(user.id);
+    const modelState = await buildModelState(user.id, logger);
+    logger.info("request.success", {
+      status: 200,
+      durationMs: elapsedMs(startedAt),
+      userId: user.id,
+      selectedModel: modelState.selectedModel,
+      availableCount: modelState.availableModels.length
+    });
     return NextResponse.json(modelState, { status: 200 });
   } catch (error) {
     if (error instanceof Error && error.message === "Model name is invalid.") {
+      logger.warn("request.rejected", { status: 400, durationMs: elapsedMs(startedAt), reason: error.message });
       return NextResponse.json({ error: "Model name is invalid." }, { status: 400 });
     }
 
-    console.error("User Ollama model update route failed", error);
+    logger.error("request.failed", { status: 500, durationMs: elapsedMs(startedAt), ...toErrorMeta(error) });
     return NextResponse.json({ error: "Failed to save Ollama model settings." }, { status: 500 });
   }
 }

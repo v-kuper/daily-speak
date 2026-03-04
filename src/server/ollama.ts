@@ -17,7 +17,12 @@ type OllamaTagsResponse = {
 };
 
 const THINKING_MODEL_HINTS = [
+  "qwen3",
+  "qwen",
   "deepseek-r1",
+  "deepseek-v3.1",
+  "deepseek-v3",
+  "gpt-oss",
   "r1",
   "qwq",
   "reason",
@@ -133,6 +138,39 @@ export const mergeModelList = (...lists: string[][]): string[] => {
 export const isThinkingModel = (model: string): boolean => {
   const normalized = model.trim().toLowerCase();
   return THINKING_MODEL_HINTS.some((hint) => normalized.includes(hint));
+};
+
+export const getOllamaThinkOption = (model: string): boolean | "low" => {
+  const normalized = model.trim().toLowerCase();
+  if (normalized.includes("gpt-oss")) {
+    return "low";
+  }
+
+  return false;
+};
+
+type OllamaContentCarrier = {
+  message?: {
+    content?: unknown;
+  };
+  response?: unknown;
+};
+
+const asContentText = (value: unknown): string => {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  return value.trim();
+};
+
+export const extractOllamaMessageContent = (payload: OllamaContentCarrier): string => {
+  const messageContent = asContentText(payload?.message?.content);
+  if (messageContent) {
+    return messageContent;
+  }
+
+  return asContentText(payload?.response);
 };
 
 const stripThinkingBlocks = (value: string): string => {

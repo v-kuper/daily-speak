@@ -3,6 +3,7 @@ import { query } from "../../../../src/server/db";
 import { SESSION_COOKIE_NAME, getUserBySessionToken } from "../../../../src/server/auth";
 import { getRecordingQuota } from "../../../../src/server/recordingQuota";
 import { getSubscriptionState } from "../../../../src/server/subscription";
+import { createRouteLogger, elapsedMs, toErrorMeta } from "../../../../src/server/logger";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -119,11 +120,14 @@ const parseSuggestions = (input: unknown): Array<{ wrong: string; right: string;
 };
 
 export async function GET(request: NextRequest) {
+  const logger = createRouteLogger("api.user.data.get", request);
+  const startedAt = Date.now();
   try {
     const token = request.cookies.get(SESSION_COOKIE_NAME)?.value;
     const user = await getUserBySessionToken(token);
 
     if (!user) {
+      logger.info("request.unauthorized", { status: 401, durationMs: elapsedMs(startedAt) });
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -170,6 +174,14 @@ export async function GET(request: NextRequest) {
       photoObject: normalizePhotoObject(row.photo_object)
     }));
 
+    logger.info("request.success", {
+      status: 200,
+      durationMs: elapsedMs(startedAt),
+      userId: user.id,
+      interestsCount: interestIds.length,
+      recordingsCount: recordings.length
+    });
+
     return NextResponse.json(
       {
         interestIds,
@@ -181,7 +193,7 @@ export async function GET(request: NextRequest) {
       { status: 200 }
     );
   } catch (error) {
-    console.error("User data route failed", error);
+    logger.error("request.failed", { status: 500, durationMs: elapsedMs(startedAt), ...toErrorMeta(error) });
     return NextResponse.json({ error: "Failed to load user data." }, { status: 500 });
   }
 }

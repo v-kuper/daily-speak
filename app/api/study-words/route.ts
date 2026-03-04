@@ -9,10 +9,13 @@ import {
 } from "../../../src/lib/englishLevel";
 import {
   DEFAULT_OLLAMA_BASE_URL,
+  extractOllamaMessageContent,
   extractJsonCandidates,
+  getOllamaThinkOption,
   normalizeOllamaContent,
   resolveOllamaModelForUser
 } from "../../../src/server/ollama";
+import { createRouteLogger, elapsedMs, toErrorMeta } from "../../../src/server/logger";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -21,6 +24,7 @@ type OllamaChatResponse = {
   message?: {
     content?: string;
   };
+  response?: string;
 };
 
 type StudyPack = {
@@ -275,6 +279,8 @@ const createPrompt = (
 };
 
 export async function GET(request: NextRequest) {
+  const logger = createRouteLogger("api.study-words.get", request);
+  const startedAt = Date.now();
   const { searchParams } = new URL(request.url);
   const refreshToken = searchParams.get("refresh");
   const interests = normalizeInterests(searchParams.getAll("interest"));
@@ -295,8 +301,17 @@ export async function GET(request: NextRequest) {
       2_147_483_647
   );
 
+  logger.info("request.start", {
+    model,
+    englishLevel,
+    interestsCount: interests.length,
+    avoidWordsCount: avoidWords.length,
+    hasRefreshToken: Boolean(refreshToken)
+  });
+
   try {
     for (let attempt = 0; attempt < 3; attempt += 1) {
+      const attemptNumber = attempt + 1;
       const attemptSeed = Math.abs((seed + (attempt + 1) * 9157) % 2_147_483_647);
       const response = await fetch(`${baseUrl}/api/chat`, {
         method: "POST",
@@ -306,6 +321,7 @@ export async function GET(request: NextRequest) {
         body: JSON.stringify({
           model,
           stream: false,
+          think: getOllamaThinkOption(model),
           messages: [
             {
               role: "system",
@@ -326,6 +342,13 @@ export async function GET(request: NextRequest) {
 
       if (!response.ok) {
         const text = await response.text();
+        logger.warn("ollama.request_failed", {
+          status: response.status,
+          durationMs: elapsedMs(startedAt),
+          model,
+          attempt: attemptNumber,
+          bodyPreview: text.slice(0, 200)
+        });
         return NextResponse.json(
           { error: `Ollama request failed (${response.status}): ${text.slice(0, 300)}` },
           { status: 502 }
@@ -333,24 +356,40 @@ export async function GET(request: NextRequest) {
       }
 
       const payload = (await response.json()) as OllamaChatResponse;
-      const content = payload.message?.content?.trim();
+      const content = extractOllamaMessageContent(payload);
       if (!content) {
+        logger.debug("ollama.empty_content", { attempt: attemptNumber, model });
         continue;
       }
 
       const parsed = parseStudyPack(content, avoidWords);
       if (!parsed) {
+        logger.debug("ollama.parse_failed", { attempt: attemptNumber, model, contentLength: content.length });
         continue;
       }
 
+      logger.info("request.success", {
+        status: 200,
+        durationMs: elapsedMs(startedAt),
+        model,
+        attempt: attemptNumber,
+        wordsCount: parsed.words.length
+      });
       return NextResponse.json(parsed, { status: 200 });
     }
 
+    logger.warn("request.failed", {
+      status: 502,
+      durationMs: elapsedMs(startedAt),
+      model,
+      reason: "no_valid_generation"
+    });
     return NextResponse.json(
       { error: "Could not generate a valid words pack. Try regenerate." },
       { status: 502 }
     );
-  } catch {
+  } catch (error) {
+    logger.error("request.failed", { status: 502, durationMs: elapsedMs(startedAt), model, ...toErrorMeta(error) });
     return NextResponse.json(
       { error: "Cannot connect to local Ollama. Check OLLAMA_BASE_URL and running Ollama service." },
       { status: 502 }

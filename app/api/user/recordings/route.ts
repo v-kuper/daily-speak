@@ -11,10 +11,13 @@ import {
 } from "../../../../src/server/recordingQuota";
 import {
   DEFAULT_OLLAMA_BASE_URL,
+  extractOllamaMessageContent,
   extractJsonCandidates,
+  getOllamaThinkOption,
   isThinkingModel,
   resolveOllamaModelForUser
 } from "../../../../src/server/ollama";
+import { createRouteLogger, elapsedMs, toErrorMeta } from "../../../../src/server/logger";
 import { WhisperTranscriptionError, transcribeAudioWithLocalWhisper } from "../../../../src/server/whisper";
 
 export const runtime = "nodejs";
@@ -61,6 +64,7 @@ type OllamaChatResponse = {
   message?: {
     content?: string;
   };
+  response?: string;
 };
 
 type ParsedRecordingPayload = {
@@ -389,6 +393,7 @@ const buildRequestBody = (
   const body: Record<string, unknown> = {
     model,
     stream: false,
+    think: getOllamaThinkOption(model),
     messages: [
       {
         role: "system",
@@ -420,7 +425,8 @@ const generateRecordingSuggestions = async (
   topic: string,
   interests: string[],
   practiceType: PracticeType,
-  photoObject: string | null
+  photoObject: string | null,
+  logger?: ReturnType<typeof createRouteLogger>
 ): Promise<RecordingSuggestion[]> => {
   if (!transcript) {
     return [];
@@ -446,12 +452,12 @@ const generateRecordingSuggestions = async (
         cache: "no-store"
       });
     } catch (error) {
-      console.warn("Recording suggestions request failed", error);
+      logger?.warn("ollama.suggestions_request_failed", { model, attempt: attempt + 1, ...toErrorMeta(error) });
       return [];
     }
 
     if (!response.ok) {
-      console.warn(`Recording suggestions request failed with status ${response.status}`);
+      logger?.warn("ollama.suggestions_request_failed", { model, attempt: attempt + 1, status: response.status });
       return [];
     }
 
@@ -459,24 +465,29 @@ const generateRecordingSuggestions = async (
     try {
       payload = (await response.json()) as OllamaChatResponse;
     } catch (error) {
-      console.warn("Recording suggestions response is not valid JSON", error);
+      logger?.warn("ollama.suggestions_invalid_json", { model, attempt: attempt + 1, ...toErrorMeta(error) });
       return [];
     }
-    const content = payload.message?.content?.trim();
+    const content = extractOllamaMessageContent(payload);
     if (!content) {
+      logger?.debug("ollama.suggestions_empty_content", { model, attempt: attempt + 1 });
       continue;
     }
 
     const suggestions = parseSuggestionsFromContent(content);
     if (suggestions.length > 0) {
+      logger?.debug("ollama.suggestions_success", { model, attempt: attempt + 1, suggestionsCount: suggestions.length });
       return suggestions;
     }
+    logger?.debug("ollama.suggestions_parse_failed", { model, attempt: attempt + 1, contentLength: content.length });
   }
 
   return [];
 };
 
 export async function POST(request: NextRequest) {
+  const logger = createRouteLogger("api.user.recordings.post", request);
+  const startedAt = Date.now();
   let savedAudioAbsolutePath: string | null = null;
 
   try {
@@ -484,6 +495,7 @@ export async function POST(request: NextRequest) {
     const user = await getUserBySessionToken(token);
 
     if (!user) {
+      logger.info("request.unauthorized", { status: 401, durationMs: elapsedMs(startedAt) });
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -499,7 +511,17 @@ export async function POST(request: NextRequest) {
     const photoDataUrl = normalizePhotoDataUrl(rawPhotoDataUrl);
     const photoObject = normalizePhotoObject(source?.photoObject);
 
+    logger.info("request.start", {
+      userId: user.id,
+      practiceType,
+      duration,
+      hasAudioDataUrl: typeof rawAudioDataUrl === "string",
+      hasPhotoDataUrl: typeof rawPhotoDataUrl === "string",
+      hasPhotoObject: Boolean(photoObject)
+    });
+
     if (typeof rawAudioDataUrl === "string" && !parsedAudioDataUrl) {
+      logger.warn("request.rejected", { status: 400, durationMs: elapsedMs(startedAt), reason: "invalid_audio_payload" });
       return NextResponse.json(
         { error: `Audio must be a valid recording under ${Math.floor(MAX_AUDIO_UPLOAD_BYTES / (1024 * 1024))}MB.` },
         { status: 400 }
@@ -507,10 +529,12 @@ export async function POST(request: NextRequest) {
     }
 
     if (!parsedAudioDataUrl) {
+      logger.warn("request.rejected", { status: 400, durationMs: elapsedMs(startedAt), reason: "missing_audio" });
       return NextResponse.json({ error: "Audio recording is required." }, { status: 400 });
     }
 
     if (typeof rawPhotoDataUrl === "string" && !photoDataUrl) {
+      logger.warn("request.rejected", { status: 400, durationMs: elapsedMs(startedAt), reason: "invalid_photo_payload" });
       return NextResponse.json(
         { error: `Photo must be a valid image under ${Math.floor(MAX_PHOTO_UPLOAD_BYTES / (1024 * 1024))}MB.` },
         { status: 400 }
@@ -519,6 +543,7 @@ export async function POST(request: NextRequest) {
 
     if (practiceType === "photo_description") {
       if (!photoDataUrl) {
+        logger.warn("request.rejected", { status: 400, durationMs: elapsedMs(startedAt), reason: "missing_photo" });
         return NextResponse.json({ error: "Photo is required for photo description practice." }, { status: 400 });
       }
       if (!topic) {
@@ -527,16 +552,19 @@ export async function POST(request: NextRequest) {
     }
 
     if (!topic) {
+      logger.warn("request.rejected", { status: 400, durationMs: elapsedMs(startedAt), reason: "missing_topic" });
       return NextResponse.json({ error: "Recording topic is required." }, { status: 400 });
     }
 
     if (!Number.isFinite(duration) || duration < 0) {
+      logger.warn("request.rejected", { status: 400, durationMs: elapsedMs(startedAt), reason: "invalid_duration" });
       return NextResponse.json({ error: "Recording duration is invalid." }, { status: 400 });
     }
 
     const quotaBefore = await getRecordingQuota(user.id, { isSubscriber: user.isSubscriber });
     if (quotaBefore.isSubscriber) {
       if (duration > SUBSCRIBER_MAX_SESSION_SECONDS) {
+        logger.warn("request.rejected", { status: 400, durationMs: elapsedMs(startedAt), reason: "subscriber_session_limit" });
         return NextResponse.json(
           { error: "Subscribers can save recordings up to 10:00 per session." },
           { status: 400 }
@@ -545,6 +573,7 @@ export async function POST(request: NextRequest) {
     } else {
       const remaining = quotaBefore.weeklyRemainingSeconds ?? 0;
       if (duration > remaining) {
+        logger.warn("request.rejected", { status: 403, durationMs: elapsedMs(startedAt), reason: "weekly_quota_exceeded" });
         return NextResponse.json(
           {
             error: `Weekly free limit exceeded. You have ${formatSeconds(remaining)} left out of ${formatSeconds(
@@ -560,6 +589,7 @@ export async function POST(request: NextRequest) {
     const id = randomUUID();
     const savedAudio = await saveAudioFile(user.id, id, parsedAudioDataUrl);
     savedAudioAbsolutePath = savedAudio.absolutePath;
+    logger.info("audio.saved", { userId: user.id, recordingId: id, audioUrl: savedAudio.publicUrl });
 
     const interestsResult = await query<InterestRow>(
       `SELECT interest_id
@@ -577,8 +607,9 @@ export async function POST(request: NextRequest) {
         422
       );
     }
+    logger.info("transcription.success", { userId: user.id, recordingId: id, transcriptLength: transcript.length });
 
-    const suggestions = await generateRecordingSuggestions(user.id, transcript, topic, interests, practiceType, photoObject);
+    const suggestions = await generateRecordingSuggestions(user.id, transcript, topic, interests, practiceType, photoObject, logger);
 
     const insertResult = await query<RecordingRow>(
       `INSERT INTO recordings
@@ -627,17 +658,31 @@ export async function POST(request: NextRequest) {
     };
     const quota = await getRecordingQuota(user.id, { isSubscriber: user.isSubscriber });
 
+    logger.info("request.success", {
+      status: 201,
+      durationMs: elapsedMs(startedAt),
+      userId: user.id,
+      recordingId: recording.id,
+      suggestionsCount: recording.suggestions.length
+    });
+
     return NextResponse.json({ recording, quota }, { status: 201 });
   } catch (error) {
     if (savedAudioAbsolutePath) {
       await unlink(savedAudioAbsolutePath).catch(() => undefined);
+      logger.warn("audio.cleanup", { durationMs: elapsedMs(startedAt), removedPath: savedAudioAbsolutePath });
     }
 
     if (error instanceof WhisperTranscriptionError) {
+      logger.warn("request.rejected", {
+        status: error.status,
+        durationMs: elapsedMs(startedAt),
+        reason: error.message
+      });
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
 
-    console.error("User recordings route failed", error);
+    logger.error("request.failed", { status: 500, durationMs: elapsedMs(startedAt), ...toErrorMeta(error) });
     return NextResponse.json({ error: "Failed to save recording." }, { status: 500 });
   }
 }

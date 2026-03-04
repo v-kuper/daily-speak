@@ -7,6 +7,7 @@ import {
   registerUser,
   validateCredentials
 } from "../../../../src/server/auth";
+import { createRouteLogger, elapsedMs, toErrorMeta } from "../../../../src/server/logger";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,6 +24,8 @@ const parseCredentials = (payload: CredentialsPayload | null): { email: string; 
 };
 
 export async function POST(request: NextRequest) {
+  const logger = createRouteLogger("api.auth.register", request);
+  const startedAt = Date.now();
   try {
     const payload = (await request.json().catch(() => null)) as CredentialsPayload | null;
     const { email, password } = parseCredentials(payload);
@@ -34,13 +37,15 @@ export async function POST(request: NextRequest) {
       { status: 201 }
     );
     response.cookies.set(SESSION_COOKIE_NAME, session.token, getSessionCookieOptions(session.expiresAt));
+    logger.info("request.success", { status: 201, durationMs: elapsedMs(startedAt), userId: user.id });
     return response;
   } catch (error) {
     if (error instanceof AuthError) {
+      logger.warn("request.rejected", { status: error.status, durationMs: elapsedMs(startedAt), reason: error.message });
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
 
-    console.error("Register route failed", error);
+    logger.error("request.failed", { status: 500, durationMs: elapsedMs(startedAt), ...toErrorMeta(error) });
     return NextResponse.json({ error: "Failed to register user." }, { status: 500 });
   }
 }

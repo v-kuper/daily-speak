@@ -135,6 +135,25 @@ rm -rf .venv tools/whisper/openai-models tools/whisper/cache tools/whisper/pip-c
 - `npm run build` - production build
 - `npm run start` - run production server
 
+## Server logs
+
+API routes now use a structured logger with:
+- timestamp
+- log level
+- route scope
+- request id
+- compact JSON metadata (status, duration, model, attempt, etc.)
+
+Log level can be configured with:
+
+```bash
+export SERVER_LOG_LEVEL=debug # debug | info | warn | error
+```
+
+Defaults:
+- `development` -> `debug`
+- `production` -> `info`
+
 ## Project docs
 
 - Technical debt audit and refactor roadmap: `docs/TECH_DEBT.md`

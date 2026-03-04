@@ -9,10 +9,13 @@ import {
 } from "../../../src/lib/englishLevel";
 import {
   DEFAULT_OLLAMA_BASE_URL,
+  extractOllamaMessageContent,
   extractJsonCandidates,
+  getOllamaThinkOption,
   normalizeOllamaContent,
   resolveOllamaModelForUser
 } from "../../../src/server/ollama";
+import { createRouteLogger, elapsedMs, toErrorMeta } from "../../../src/server/logger";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -21,6 +24,7 @@ type OllamaChatResponse = {
   message?: {
     content?: string;
   };
+  response?: string;
 };
 
 type TopicGuidance = {
@@ -236,6 +240,8 @@ const createPrompt = (
 };
 
 export async function GET(request: NextRequest) {
+  const logger = createRouteLogger("api.topic-guidance.get", request);
+  const startedAt = Date.now();
   const { searchParams } = new URL(request.url);
   const topic = searchParams.get("topic")?.trim() ?? "";
   const refreshToken = searchParams.get("refresh");
@@ -246,10 +252,12 @@ export async function GET(request: NextRequest) {
   const avoidWords = normalizeAvoidList(avoidWordsRaw);
 
   if (!topic) {
+    logger.warn("request.rejected", { status: 400, durationMs: elapsedMs(startedAt), reason: "missing_topic" });
     return NextResponse.json({ error: "Query param `topic` is required." }, { status: 400 });
   }
 
   if (topic.length > 300) {
+    logger.warn("request.rejected", { status: 400, durationMs: elapsedMs(startedAt), reason: "topic_too_long" });
     return NextResponse.json({ error: "Topic is too long." }, { status: 400 });
   }
 
@@ -265,10 +273,20 @@ export async function GET(request: NextRequest) {
   const refreshSeed = refreshToken ? hashString(refreshToken) : 0;
   const seed = Math.abs((baseSeed * 131 + interestsSeed * 17 + levelSeed * 19 + refreshSeed) % 2_147_483_647);
 
+  logger.info("request.start", {
+    model,
+    englishLevel,
+    interestsCount: interests.length,
+    avoidQuestionsCount: avoidQuestionsRaw.length,
+    avoidWordsCount: avoidWordsRaw.length,
+    hasRefreshToken: Boolean(refreshToken)
+  });
+
   try {
     const maxAttempts = 3;
 
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      const attemptNumber = attempt + 1;
       const attemptSeed = Math.abs((seed + (attempt + 1) * 7919) % 2_147_483_647);
       const response = await fetch(`${baseUrl}/api/chat`, {
         method: "POST",
@@ -278,6 +296,7 @@ export async function GET(request: NextRequest) {
         body: JSON.stringify({
           model,
           stream: false,
+          think: getOllamaThinkOption(model),
           messages: [
             {
               role: "system",
@@ -299,6 +318,13 @@ export async function GET(request: NextRequest) {
 
       if (!response.ok) {
         const text = await response.text();
+        logger.warn("ollama.request_failed", {
+          status: response.status,
+          durationMs: elapsedMs(startedAt),
+          model,
+          attempt: attemptNumber,
+          bodyPreview: text.slice(0, 200)
+        });
         return NextResponse.json(
           { error: `Ollama request failed (${response.status}): ${text.slice(0, 300)}` },
           { status: 502 }
@@ -306,28 +332,46 @@ export async function GET(request: NextRequest) {
       }
 
       const payload = (await response.json()) as OllamaChatResponse;
-      const content = payload.message?.content?.trim();
+      const content = extractOllamaMessageContent(payload);
       if (!content) {
+        logger.debug("ollama.empty_content", { attempt: attemptNumber, model });
         continue;
       }
 
       const guidance = parseTopicGuidance(content);
       if (!guidance) {
+        logger.debug("ollama.parse_failed", { attempt: attemptNumber, model, contentLength: content.length });
         continue;
       }
 
       if (hasAnyOverlap(guidance.questions, avoidQuestions) || hasAnyOverlap(guidance.words, avoidWords)) {
+        logger.debug("ollama.overlap_detected", { attempt: attemptNumber, model });
         continue;
       }
 
+      logger.info("request.success", {
+        status: 200,
+        durationMs: elapsedMs(startedAt),
+        model,
+        attempt: attemptNumber,
+        questionsCount: guidance.questions.length,
+        wordsCount: guidance.words.length
+      });
       return NextResponse.json(guidance, { status: 200 });
     }
 
+    logger.warn("request.failed", {
+      status: 502,
+      durationMs: elapsedMs(startedAt),
+      model,
+      reason: "no_valid_generation"
+    });
     return NextResponse.json(
       { error: "Could not generate sufficiently new guidance. Try regenerate again." },
       { status: 502 }
     );
-  } catch {
+  } catch (error) {
+    logger.error("request.failed", { status: 502, durationMs: elapsedMs(startedAt), model, ...toErrorMeta(error) });
     return NextResponse.json(
       { error: "Cannot connect to local Ollama. Check OLLAMA_BASE_URL and running Ollama service." },
       { status: 502 }

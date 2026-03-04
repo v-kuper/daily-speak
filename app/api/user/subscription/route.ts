@@ -3,6 +3,7 @@ import { SESSION_COOKIE_NAME, getUserBySessionToken } from "../../../../src/serv
 import { query } from "../../../../src/server/db";
 import { getRecordingQuota } from "../../../../src/server/recordingQuota";
 import { getSubscriptionState } from "../../../../src/server/subscription";
+import { createRouteLogger, elapsedMs, toErrorMeta } from "../../../../src/server/logger";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,25 +14,37 @@ const getAuthorizedUser = async (request: NextRequest) => {
 };
 
 export async function GET(request: NextRequest) {
+  const logger = createRouteLogger("api.user.subscription.get", request);
+  const startedAt = Date.now();
   try {
     const user = await getAuthorizedUser(request);
     if (!user) {
+      logger.info("request.unauthorized", { status: 401, durationMs: elapsedMs(startedAt) });
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     const subscription = await getSubscriptionState(user.id);
     const quota = await getRecordingQuota(user.id, { isSubscriber: subscription.isSubscriber });
+    logger.info("request.success", {
+      status: 200,
+      durationMs: elapsedMs(startedAt),
+      userId: user.id,
+      isSubscriber: subscription.isSubscriber
+    });
     return NextResponse.json({ subscription, quota }, { status: 200 });
   } catch (error) {
-    console.error("User subscription route failed", error);
+    logger.error("request.failed", { status: 500, durationMs: elapsedMs(startedAt), ...toErrorMeta(error) });
     return NextResponse.json({ error: "Failed to load subscription." }, { status: 500 });
   }
 }
 
 export async function POST(request: NextRequest) {
+  const logger = createRouteLogger("api.user.subscription.post", request);
+  const startedAt = Date.now();
   try {
     const user = await getAuthorizedUser(request);
     if (!user) {
+      logger.info("request.unauthorized", { status: 401, durationMs: elapsedMs(startedAt) });
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -51,17 +64,26 @@ export async function POST(request: NextRequest) {
 
     const subscription = await getSubscriptionState(user.id);
     const quota = await getRecordingQuota(user.id, { isSubscriber: subscription.isSubscriber });
+    logger.info("request.success", {
+      status: 200,
+      durationMs: elapsedMs(startedAt),
+      userId: user.id,
+      subscriptionExpiresAt: subscription.subscriptionExpiresAt
+    });
     return NextResponse.json({ subscription, quota }, { status: 200 });
   } catch (error) {
-    console.error("User subscription create route failed", error);
+    logger.error("request.failed", { status: 500, durationMs: elapsedMs(startedAt), ...toErrorMeta(error) });
     return NextResponse.json({ error: "Failed to activate subscription." }, { status: 500 });
   }
 }
 
 export async function DELETE(request: NextRequest) {
+  const logger = createRouteLogger("api.user.subscription.delete", request);
+  const startedAt = Date.now();
   try {
     const user = await getAuthorizedUser(request);
     if (!user) {
+      logger.info("request.unauthorized", { status: 401, durationMs: elapsedMs(startedAt) });
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -77,14 +99,21 @@ export async function DELETE(request: NextRequest) {
     );
 
     if ((cancelResult.rowCount ?? 0) === 0) {
+      logger.warn("request.rejected", { status: 400, durationMs: elapsedMs(startedAt), userId: user.id, reason: "no_active_subscription" });
       return NextResponse.json({ error: "No active subscription to cancel." }, { status: 400 });
     }
 
     const subscription = await getSubscriptionState(user.id);
     const quota = await getRecordingQuota(user.id, { isSubscriber: subscription.isSubscriber });
+    logger.info("request.success", {
+      status: 200,
+      durationMs: elapsedMs(startedAt),
+      userId: user.id,
+      subscriptionCancelled: subscription.subscriptionCancelled
+    });
     return NextResponse.json({ subscription, quota }, { status: 200 });
   } catch (error) {
-    console.error("User subscription cancel route failed", error);
+    logger.error("request.failed", { status: 500, durationMs: elapsedMs(startedAt), ...toErrorMeta(error) });
     return NextResponse.json({ error: "Failed to cancel subscription." }, { status: 500 });
   }
 }
