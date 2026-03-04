@@ -30,7 +30,7 @@ import {
   toggleAddTopicInput,
   toggleQuestions,
   toggleWords,
-  useCustomTopic
+  useCustomTopic as applyCustomTopic
 } from "../store/slices/appSlice";
 
 const PHOTO_ACCEPTED_TYPES = new Set(["image/jpeg", "image/jpg", "image/png", "image/webp", "image/gif"]);
@@ -635,7 +635,7 @@ export default function SpeakScreen() {
                 <button className="btn btn-secondary" onClick={() => dispatch(toggleAddTopicInput())}>
                   Cancel
                 </button>
-                <button className="btn btn-primary" onClick={() => dispatch(useCustomTopic())}>
+                <button className="btn btn-primary" onClick={() => dispatch(applyCustomTopic())}>
                   Use this topic
                 </button>
               </div>

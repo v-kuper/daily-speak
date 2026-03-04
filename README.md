@@ -128,7 +128,10 @@ rm -rf .venv tools/whisper/openai-models tools/whisper/cache tools/whisper/pip-c
 ## Available scripts
 
 - `npm run dev` - start dev server
-- `npm run lint` - run Next.js lint rules
+- `npm run typecheck` - run TypeScript type checks
+- `npm run lint` - run ESLint
+- `npm run test:smoke` - run API smoke checks
+- `npm run quality` - run typecheck + lint + smoke checks
 - `npm run build` - production build
 - `npm run start` - run production server
 

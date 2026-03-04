@@ -6,7 +6,10 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test:smoke": "node scripts/smoke-api.mjs",
+    "quality": "npm run typecheck && npm run lint && npm run test:smoke",
     "setup:whisper": "bash scripts/setup-whisper-openai-local.sh",
     "check:whisper": "bash scripts/check-whisper-local.sh"
   },
