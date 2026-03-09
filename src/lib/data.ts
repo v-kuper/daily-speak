@@ -24,6 +24,32 @@ export type Recording = {
   photoObject: string | null;
 };
 
+export type FeedPost = {
+  id: string;
+  sourceRecordingId: string;
+  topic: string;
+  duration: number;
+  transcript: string;
+  practiceType: PracticeType;
+  audioDataUrl: string | null;
+  photoDataUrl: string | null;
+  photoObject: string | null;
+  sourceTimestamp: string;
+  createdAt: string;
+  authorMaskedEmail: string;
+  replyCount: number;
+};
+
+export type FeedReply = {
+  id: string;
+  postId: string;
+  duration: number;
+  audioDataUrl: string | null;
+  timestamp: string;
+  createdAt: string;
+  authorMaskedEmail: string;
+};
+
 const TOPIC_DATABASE: Record<string, TopicData> = {
   "Free talk": {
     questions: [],

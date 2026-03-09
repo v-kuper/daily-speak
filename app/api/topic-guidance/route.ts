@@ -19,6 +19,8 @@ import { createRouteLogger, elapsedMs, toErrorMeta } from "../../../src/server/l
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+const TOPIC_GUIDANCE_QUESTIONS_COUNT = 10;
+const TOPIC_GUIDANCE_WORDS_COUNT = 8;
 
 type OllamaChatResponse = {
   message?: {
@@ -151,10 +153,10 @@ const parseTopicGuidance = (content: string): TopicGuidance | null => {
         ? normalizeWords(data.words.filter((item): item is string => typeof item === "string"))
         : [];
 
-      if (questions.length >= 3 && words.length >= 5) {
+      if (questions.length >= TOPIC_GUIDANCE_QUESTIONS_COUNT && words.length >= 5) {
         return {
-          questions: questions.slice(0, 3),
-          words: words.slice(0, 8)
+          questions: questions.slice(0, TOPIC_GUIDANCE_QUESTIONS_COUNT),
+          words: words.slice(0, TOPIC_GUIDANCE_WORDS_COUNT)
         };
       }
     } catch {
@@ -186,10 +188,10 @@ const parseTopicGuidance = (content: string): TopicGuidance | null => {
   );
   const wordLines = normalizeWords(lineCandidates.filter((line) => !line.includes("?")));
 
-  if (questionLines.length >= 3 && wordLines.length >= 5) {
+  if (questionLines.length >= TOPIC_GUIDANCE_QUESTIONS_COUNT && wordLines.length >= 5) {
     return {
-      questions: questionLines.slice(0, 3),
-      words: wordLines.slice(0, 8)
+      questions: questionLines.slice(0, TOPIC_GUIDANCE_QUESTIONS_COUNT),
+      words: wordLines.slice(0, TOPIC_GUIDANCE_WORDS_COUNT)
     };
   }
 
@@ -210,12 +212,12 @@ const createPrompt = (
     `Topic: "${topic}".`,
     `Generate guidance for an English speaking practice session for level ${formattedLevel}.`,
     `Language difficulty: ${levelGuidance}`,
-    "Return exactly 3 follow-up questions for speaking practice.",
-    "Return exactly 8 useful words or short phrases connected to this topic.",
+    `Return exactly ${TOPIC_GUIDANCE_QUESTIONS_COUNT} follow-up questions for speaking practice.`,
+    `Return exactly ${TOPIC_GUIDANCE_WORDS_COUNT} useful words or short phrases connected to this topic.`,
     "Useful words must match the learner level and stay understandable for that level.",
     "All follow-up questions should be distinct in angle and not paraphrases of each other.",
     "Useful words should be diverse, not near-duplicates.",
-    'Return only JSON with this exact shape: {"questions":["q1","q2","q3"],"words":["w1","w2","w3","w4","w5","w6","w7","w8"]}.',
+    'Return only JSON with this exact shape: {"questions":["q1","q2","q3","q4","q5","q6","q7","q8","q9","q10"],"words":["w1","w2","w3","w4","w5","w6","w7","w8"]}.',
     "No markdown, no extra keys, no explanations."
   ];
 

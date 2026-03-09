@@ -851,6 +851,124 @@ input {
   text-align: left;
 }
 
+.feed-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.feed-card {
+  width: 100%;
+  background: #fff;
+  border: 1px solid #e8e8e4;
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 12px;
+  text-align: left;
+}
+
+.feed-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.feed-card-main {
+  min-width: 0;
+}
+
+.feed-card-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.feed-card-author {
+  font-size: 12px;
+  color: #777;
+}
+
+.feed-card-topic {
+  font-size: 14px;
+  color: #333;
+  margin-top: 2px;
+  margin-bottom: 8px;
+}
+
+.feed-card-time {
+  font-size: 12px;
+  color: #888;
+}
+
+.feed-replies-count {
+  font-size: 12px;
+  color: #666;
+}
+
+.feed-thread-post {
+  margin-bottom: 24px;
+}
+
+.feed-thread-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.feed-replies-section {
+  margin-bottom: 24px;
+}
+
+.feed-reply-card {
+  border: 1px solid #e8e8e4;
+  border-radius: 8px;
+  background: #fff;
+  padding: 14px;
+  margin-bottom: 10px;
+}
+
+.feed-reply-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.feed-reply-composer {
+  border: 1px solid #e8e8e4;
+  border-radius: 8px;
+  padding: 16px;
+  background: #fff;
+}
+
+.feed-audio {
+  width: 100%;
+}
+
+.feed-player {
+  margin-bottom: 12px;
+}
+
+.feed-post-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.feed-transcript-accordion {
+  border-top: 1px solid #ecece7;
+  margin-top: 8px;
+  padding-top: 10px;
+}
+
 .recording-card:hover {
   border-color: #d0d0c8;
   background: #f5f5f3;

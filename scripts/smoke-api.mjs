@@ -52,6 +52,32 @@ const expectedChecks = [
     path: "/api/user/recordings",
     body: { recording: {} },
     expectedStatus: 401
+  },
+  {
+    name: "feed/posts unauthorized",
+    method: "GET",
+    path: "/api/feed/posts",
+    expectedStatus: 401
+  },
+  {
+    name: "feed/posts publish unauthorized",
+    method: "POST",
+    path: "/api/feed/posts",
+    body: { recordingId: "demo" },
+    expectedStatus: 401
+  },
+  {
+    name: "feed/post thread unauthorized",
+    method: "GET",
+    path: "/api/feed/posts/demo-post",
+    expectedStatus: 401
+  },
+  {
+    name: "feed/post reply unauthorized",
+    method: "POST",
+    path: "/api/feed/posts/demo-post/replies",
+    body: { duration: 10, audioDataUrl: "data:audio/webm;base64,AAAA" },
+    expectedStatus: 401
   }
 ];
 

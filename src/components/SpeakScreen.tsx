@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, type ChangeEvent } from "react";
 import { formatTime, toDateKey } from "../lib/utils";
 import { useAppDispatch, useAppSelector } from "../store/hooks";
 import {
+  backToQuestionsList,
   clearPhotoForPractice,
   clearQuestionsError,
   clearStudyError,
@@ -656,6 +657,9 @@ export default function SpeakScreen() {
     return (
       <section className="speak-screen">
         <div className="speak-card speak-hero-card">
+          <button className="btn btn-secondary btn-small" onClick={() => dispatch(backToQuestionsList())}>
+            ← Back to questions
+          </button>
           <div className="heading-sm">Selected question</div>
           {isPhotoPractice && pendingPhotoDataUrl && (
             <img src={pendingPhotoDataUrl} alt="Photo to describe" className="photo-practice-preview" />

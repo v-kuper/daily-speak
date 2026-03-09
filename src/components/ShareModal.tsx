@@ -1,47 +1,34 @@
 "use client";
 
-import { buildShareLink } from "../lib/utils";
 import { useAppDispatch, useAppSelector } from "../store/hooks";
 import {
   closeShareModal,
-  openSharePreview,
-  setCopyMessage,
-  setShareAction
+  publishRecordingToFeed,
+  setCopyMessage
 } from "../store/slices/appSlice";
 
 export default function ShareModal() {
   const dispatch = useAppDispatch();
-  const { shareModalOpen, shareAction, currentRecordingId } = useAppSelector((state) => state.app);
+  const { shareModalOpen, currentRecordingId, feedPublishStatus, feedPublishError } = useAppSelector((state) => state.app);
 
   if (!shareModalOpen) {
     return null;
   }
 
-  const onConfirm = async () => {
+  const onConfirm = () => {
     if (!currentRecordingId) {
       dispatch(closeShareModal());
       return;
     }
 
-    if (shareAction === "preview") {
-      dispatch(openSharePreview());
-      return;
-    }
-
-    const link = buildShareLink(currentRecordingId);
-
-    try {
-      await navigator.clipboard.writeText(link);
-    } catch {
-      // Clipboard might be unavailable in restricted contexts.
-    }
-
-    dispatch(closeShareModal());
-    dispatch(setCopyMessage(`Link copied: ${link}`));
-
-    window.setTimeout(() => {
-      dispatch(setCopyMessage(null));
-    }, 3500);
+    void dispatch(publishRecordingToFeed())
+      .unwrap()
+      .then(() => {
+        window.setTimeout(() => {
+          dispatch(setCopyMessage(null));
+        }, 3500);
+      })
+      .catch(() => undefined);
   };
 
   return (
@@ -50,39 +37,28 @@ export default function ShareModal() {
       role="presentation"
       onClick={(event) => {
         if (event.target === event.currentTarget) {
+          if (feedPublishStatus === "loading") {
+            return;
+          }
           dispatch(closeShareModal());
         }
       }}
     >
-      <div className="modal-content" role="dialog" aria-modal="true" aria-label="Share recording">
-        <div className="modal-title">Share Recording</div>
-
-        <label className="share-option">
-          <input
-            type="radio"
-            name="share-action"
-            checked={shareAction === "copy"}
-            onChange={() => dispatch(setShareAction("copy"))}
-          />
-          <span>Copy link</span>
-        </label>
-
-        <label className="share-option">
-          <input
-            type="radio"
-            name="share-action"
-            checked={shareAction === "preview"}
-            onChange={() => dispatch(setShareAction("preview"))}
-          />
-          <span>Open share preview</span>
-        </label>
+      <div className="modal-content" role="dialog" aria-modal="true" aria-label="Publish recording">
+        <div className="modal-title">Publish To Feed</div>
+        <p>This will post this recording to the public feed for all signed-in users.</p>
+        {feedPublishError && <div className="auth-error top-spaced">{feedPublishError}</div>}
 
         <div className="modal-buttons">
-          <button className="btn btn-secondary" onClick={() => dispatch(closeShareModal())}>
+          <button
+            className="btn btn-secondary"
+            onClick={() => dispatch(closeShareModal())}
+            disabled={feedPublishStatus === "loading"}
+          >
             Cancel
           </button>
-          <button className="btn btn-primary" onClick={() => void onConfirm()}>
-            Confirm
+          <button className="btn btn-primary" onClick={onConfirm} disabled={feedPublishStatus === "loading"}>
+            {feedPublishStatus === "loading" ? "Publishing..." : "Publish"}
           </button>
         </div>
       </div>

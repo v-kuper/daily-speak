@@ -74,6 +74,39 @@ ALTER TABLE recordings
 ADD COLUMN IF NOT EXISTS photo_object TEXT;
 
 CREATE INDEX IF NOT EXISTS recordings_user_id_timestamp_idx ON recordings (user_id, timestamp DESC);
+
+CREATE TABLE IF NOT EXISTS feed_posts (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  source_recording_id TEXT NOT NULL,
+  topic TEXT NOT NULL,
+  duration INTEGER NOT NULL,
+  practice_type TEXT NOT NULL DEFAULT 'topic',
+  audio_data_url TEXT,
+  photo_data_url TEXT,
+  photo_object TEXT,
+  transcript TEXT NOT NULL,
+  source_timestamp TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS feed_posts_user_source_recording_uidx
+  ON feed_posts (user_id, source_recording_id);
+CREATE INDEX IF NOT EXISTS feed_posts_created_at_idx
+  ON feed_posts (created_at DESC);
+
+CREATE TABLE IF NOT EXISTS feed_replies (
+  id TEXT PRIMARY KEY,
+  post_id TEXT NOT NULL REFERENCES feed_posts(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  duration INTEGER NOT NULL,
+  audio_data_url TEXT,
+  timestamp TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS feed_replies_post_created_idx
+  ON feed_replies (post_id, created_at ASC);
 `;
 
 const SCHEMA_HASH = createHash("sha256").update(SCHEMA_SQL).digest("hex");

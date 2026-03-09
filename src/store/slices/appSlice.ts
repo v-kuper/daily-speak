@@ -1,10 +1,10 @@
 import { createAsyncThunk, createSlice, type PayloadAction } from "@reduxjs/toolkit";
-import { type PracticeType, type Recording, type Suggestion } from "../../lib/data";
+import { type FeedPost, type FeedReply, type PracticeType, type Recording, type Suggestion } from "../../lib/data";
 import { DEFAULT_ENGLISH_LEVEL, normalizeEnglishLevel, parseEnglishLevel, type EnglishLevel } from "../../lib/englishLevel";
 import { formatTime, toDateKey } from "../../lib/utils";
 
-export type ScreenName = "speak" | "history" | "details" | "share" | "auth" | "profile" | "interests";
-export type TabName = "speak" | "history";
+export type ScreenName = "speak" | "history" | "feed" | "feedThread" | "details" | "share" | "auth" | "profile" | "interests";
+export type TabName = "speak" | "history" | "feed";
 export type SpeakMode = "idle" | "readyToRecord" | "recording" | "recorded";
 export type ShareAction = "copy" | "preview";
 export type AuthStatus = "idle" | "loading";
@@ -127,6 +127,14 @@ export type AppState = {
   showWords: boolean;
   recordingDuration: number;
   recordings: Recording[];
+  feedPosts: FeedPost[];
+  feedPostsStatus: QuestionsStatus;
+  feedPostsError: string | null;
+  feedThreadStatus: QuestionsStatus;
+  feedThreadError: string | null;
+  currentFeedPostId: string | null;
+  currentFeedPost: FeedPost | null;
+  currentFeedReplies: FeedReply[];
   selectedDate: string | null;
   currentRecordingId: string | null;
   isPlaying: boolean;
@@ -198,6 +206,10 @@ export type AppState = {
   ollamaModelSaveError: string | null;
   englishLevelSaveStatus: AuthStatus;
   englishLevelSaveError: string | null;
+  feedPublishStatus: AuthStatus;
+  feedPublishError: string | null;
+  feedReplyStatus: AuthStatus;
+  feedReplyError: string | null;
 };
 
 const today = new Date();
@@ -207,10 +219,13 @@ export const MAX_SELECTED_INTERESTS = 10;
 const FREE_WEEKLY_LIMIT_SECONDS = 10 * 60;
 const SESSION_LIMIT_SECONDS = 10 * 60;
 const DEFAULT_OLLAMA_MODEL = "gemma3:12b";
+const MIN_DAILY_QUESTIONS = 3;
+const MIN_TOPIC_GUIDANCE_QUESTIONS = 10;
 const PHOTO_PRACTICE_MAX_OBJECT_LENGTH = 120;
 const MAX_RECORDING_AUDIO_BYTES = 80 * 1024 * 1024;
 const AUDIO_DATA_URL_PATTERN = /^data:((?:audio|video)\/[a-z0-9.+-]+(?:;[^,]+)*);base64,([A-Za-z0-9+/_=-]+)$/i;
 const AUDIO_FILE_URL_PATTERN = /^\/uploads\/recordings\/[a-z0-9/_-]+\.[a-z0-9]{2,10}$/i;
+const ANY_AUDIO_FILE_URL_PATTERN = /^\/uploads\/[a-z0-9/_-]+\.[a-z0-9]{2,10}$/i;
 export const PHOTO_PRACTICE_MAX_BYTES = 4 * 1024 * 1024;
 const PHOTO_DATA_URL_PATTERN = /^data:image\/(png|jpeg|jpg|webp|gif);base64,([A-Za-z0-9+/=]+)$/i;
 const PRACTICE_TYPE_SET = new Set<PracticeType>(["free_talk", "topic", "photo_description"]);
@@ -304,6 +319,28 @@ type SaveInterestsResponse = {
 
 type SaveRecordingResponse = {
   recording?: unknown;
+  quota?: unknown;
+  error?: string;
+};
+
+type FeedPostsResponse = {
+  posts?: unknown;
+  error?: string;
+};
+
+type FeedThreadResponse = {
+  post?: unknown;
+  replies?: unknown;
+  error?: string;
+};
+
+type PublishFeedPostResponse = {
+  post?: unknown;
+  error?: string;
+};
+
+type CreateFeedReplyResponse = {
+  reply?: unknown;
   quota?: unknown;
   error?: string;
 };
@@ -709,6 +746,112 @@ const parseRecording = (value: unknown): Recording | null => {
   };
 };
 
+const normalizeFeedAudioDataUrl = (value: unknown): string | null => {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim();
+  if (ANY_AUDIO_FILE_URL_PATTERN.test(normalized)) {
+    return normalized;
+  }
+
+  return normalizeAudioDataUrl(normalized);
+};
+
+const parseFeedPost = (value: unknown): FeedPost | null => {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  const id = typeof candidate.id === "string" ? candidate.id.trim() : "";
+  const sourceRecordingId = typeof candidate.sourceRecordingId === "string" ? candidate.sourceRecordingId.trim() : "";
+  const topic = typeof candidate.topic === "string" ? candidate.topic.trim() : "";
+  const transcript = typeof candidate.transcript === "string" ? candidate.transcript : "";
+  const sourceTimestampRaw = typeof candidate.sourceTimestamp === "string" ? candidate.sourceTimestamp : "";
+  const createdAtRaw = typeof candidate.createdAt === "string" ? candidate.createdAt : "";
+  const authorMaskedEmail = typeof candidate.authorMaskedEmail === "string" ? candidate.authorMaskedEmail.trim() : "";
+  const sourceTimestamp = new Date(sourceTimestampRaw);
+  const createdAt = new Date(createdAtRaw);
+  const duration = Number.parseInt(String(candidate.duration ?? 0), 10);
+  const replyCount = Number.parseInt(String(candidate.replyCount ?? 0), 10);
+  const audioDataUrl = normalizeFeedAudioDataUrl(candidate.audioDataUrl);
+  const photoDataUrl = normalizePhotoDataUrl(candidate.photoDataUrl);
+  const photoObject = normalizePhotoObject(candidate.photoObject);
+  const practiceType = parsePracticeType(candidate.practiceType, topic, Boolean(photoDataUrl));
+
+  if (
+    !id ||
+    !sourceRecordingId ||
+    !topic ||
+    !authorMaskedEmail ||
+    Number.isNaN(sourceTimestamp.getTime()) ||
+    Number.isNaN(createdAt.getTime()) ||
+    !Number.isFinite(duration) ||
+    duration < 0 ||
+    !Number.isFinite(replyCount) ||
+    replyCount < 0
+  ) {
+    return null;
+  }
+
+  return {
+    id,
+    sourceRecordingId,
+    topic,
+    duration: Math.max(0, duration),
+    transcript,
+    practiceType,
+    audioDataUrl,
+    photoDataUrl,
+    photoObject,
+    sourceTimestamp: sourceTimestamp.toISOString(),
+    createdAt: createdAt.toISOString(),
+    authorMaskedEmail,
+    replyCount: Math.max(0, replyCount)
+  };
+};
+
+const parseFeedReply = (value: unknown): FeedReply | null => {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  const id = typeof candidate.id === "string" ? candidate.id.trim() : "";
+  const postId = typeof candidate.postId === "string" ? candidate.postId.trim() : "";
+  const authorMaskedEmail = typeof candidate.authorMaskedEmail === "string" ? candidate.authorMaskedEmail.trim() : "";
+  const timestampRaw = typeof candidate.timestamp === "string" ? candidate.timestamp : "";
+  const createdAtRaw = typeof candidate.createdAt === "string" ? candidate.createdAt : "";
+  const timestamp = new Date(timestampRaw);
+  const createdAt = new Date(createdAtRaw);
+  const duration = Number.parseInt(String(candidate.duration ?? 0), 10);
+  const audioDataUrl = normalizeFeedAudioDataUrl(candidate.audioDataUrl);
+
+  if (
+    !id ||
+    !postId ||
+    !authorMaskedEmail ||
+    Number.isNaN(timestamp.getTime()) ||
+    Number.isNaN(createdAt.getTime()) ||
+    !Number.isFinite(duration) ||
+    duration < 0
+  ) {
+    return null;
+  }
+
+  return {
+    id,
+    postId,
+    duration: Math.max(0, duration),
+    audioDataUrl,
+    timestamp: timestamp.toISOString(),
+    createdAt: createdAt.toISOString(),
+    authorMaskedEmail
+  };
+};
+
 const buildInterestsKey = (interestIds: string[]): string => {
   return [...interestIds].sort().join("|");
 };
@@ -755,8 +898,8 @@ export const fetchDailyQuestions = createAsyncThunk<
             .filter((item) => item.length > 0)
         : [];
 
-      if (questions.length !== 3) {
-        return rejectWithValue("Ollama must return exactly 3 questions.");
+      if (questions.length !== MIN_DAILY_QUESTIONS) {
+        return rejectWithValue(`Ollama must return exactly ${MIN_DAILY_QUESTIONS} questions.`);
       }
 
       return { dateKey, questions };
@@ -778,7 +921,7 @@ export const fetchDailyQuestions = createAsyncThunk<
         app.questionsDate === dateKey &&
         app.questionsInterestsKey === interestKey &&
         app.questionsEnglishLevel === englishLevel &&
-        app.topics.length === 3
+        app.topics.length === MIN_DAILY_QUESTIONS
       ) {
         return false;
       }
@@ -834,13 +977,15 @@ export const fetchTopicGuidance = createAsyncThunk<
             .filter((item) => item.length > 0)
         : [];
 
-      if (questions.length === 0 || words.length === 0) {
-        return rejectWithValue("Ollama returned empty guidance for this topic.");
+      if (questions.length < MIN_TOPIC_GUIDANCE_QUESTIONS || words.length === 0) {
+        return rejectWithValue(
+          `Ollama must return at least ${MIN_TOPIC_GUIDANCE_QUESTIONS} follow-up questions for this topic.`
+        );
       }
 
       return {
         topic,
-        questions: questions.slice(0, 4),
+        questions: questions.slice(0, MIN_TOPIC_GUIDANCE_QUESTIONS),
         words: words.slice(0, 10)
       };
     } catch {
@@ -870,7 +1015,9 @@ export const fetchTopicGuidance = createAsyncThunk<
         app.topicGuidanceTopic === normalizedTopic &&
         app.topicGuidanceInterestsKey === interestKey &&
         app.topicGuidanceEnglishLevel === englishLevel &&
-        app.topicGuidanceStatus === "ready"
+        app.topicGuidanceStatus === "ready" &&
+        app.topicGuidanceQuestions.length >= MIN_TOPIC_GUIDANCE_QUESTIONS &&
+        app.topicGuidanceWords.length > 0
       ) {
         return false;
       }
@@ -1249,6 +1396,179 @@ export const saveRecording = createAsyncThunk<
   }
 );
 
+export const fetchFeedPosts = createAsyncThunk<FeedPost[], void, { rejectValue: string }>(
+  "app/fetchFeedPosts",
+  async (_, { rejectWithValue }) => {
+    try {
+      const response = await fetch("/api/feed/posts", {
+        cache: "no-store"
+      });
+      const payload = (await response.json().catch(() => null)) as FeedPostsResponse | null;
+
+      if (response.status === 401) {
+        return rejectWithValue("Unauthorized");
+      }
+
+      if (!response.ok) {
+        return rejectWithValue(payload?.error ?? "Failed to load feed posts.");
+      }
+
+      const postsRaw = Array.isArray(payload?.posts) ? payload.posts : [];
+      const posts = postsRaw
+        .map((item) => parseFeedPost(item))
+        .filter((item): item is FeedPost => item !== null)
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+      return posts;
+    } catch {
+      return rejectWithValue("Cannot connect to feed service.");
+    }
+  }
+);
+
+export const fetchFeedThread = createAsyncThunk<
+  { post: FeedPost; replies: FeedReply[] },
+  string,
+  { rejectValue: string }
+>("app/fetchFeedThread", async (postId, { rejectWithValue }) => {
+  const normalizedPostId = postId.trim();
+  if (!normalizedPostId) {
+    return rejectWithValue("Feed post is missing.");
+  }
+
+  try {
+    const response = await fetch(`/api/feed/posts/${encodeURIComponent(normalizedPostId)}`, {
+      cache: "no-store"
+    });
+    const payload = (await response.json().catch(() => null)) as FeedThreadResponse | null;
+
+    if (response.status === 401) {
+      return rejectWithValue("Unauthorized");
+    }
+
+    if (!response.ok) {
+      return rejectWithValue(payload?.error ?? "Failed to load feed thread.");
+    }
+
+    const post = parseFeedPost(payload?.post);
+    if (!post) {
+      return rejectWithValue("Invalid feed post payload.");
+    }
+
+    const repliesRaw = Array.isArray(payload?.replies) ? payload.replies : [];
+    const replies = repliesRaw
+      .map((item) => parseFeedReply(item))
+      .filter((item): item is FeedReply => item !== null)
+      .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+
+    return { post, replies };
+  } catch {
+    return rejectWithValue("Cannot connect to feed service.");
+  }
+});
+
+export const publishRecordingToFeed = createAsyncThunk<
+  FeedPost,
+  void,
+  { state: { app: AppState }; rejectValue: string }
+>("app/publishRecordingToFeed", async (_, { getState, rejectWithValue }) => {
+  const { isAuthenticated, currentRecordingId } = getState().app;
+
+  if (!isAuthenticated) {
+    return rejectWithValue("Unauthorized");
+  }
+
+  if (!currentRecordingId) {
+    return rejectWithValue("Recording not found.");
+  }
+
+  try {
+    const response = await fetch("/api/feed/posts", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ recordingId: currentRecordingId })
+    });
+    const payload = (await response.json().catch(() => null)) as PublishFeedPostResponse | null;
+
+    if (response.status === 401) {
+      return rejectWithValue("Unauthorized");
+    }
+
+    if (!response.ok) {
+      return rejectWithValue(payload?.error ?? "Failed to publish recording.");
+    }
+
+    const post = parseFeedPost(payload?.post);
+    if (!post) {
+      return rejectWithValue("Invalid feed post payload.");
+    }
+
+    return post;
+  } catch {
+    return rejectWithValue("Cannot connect to feed service.");
+  }
+});
+
+export const createFeedReply = createAsyncThunk<
+  { reply: FeedReply; quota: RecordingQuota | null },
+  { postId: string; duration: number; audioDataUrl: string },
+  { state: { app: AppState }; rejectValue: string }
+>("app/createFeedReply", async ({ postId, duration, audioDataUrl }, { getState, rejectWithValue }) => {
+  if (!getState().app.isAuthenticated) {
+    return rejectWithValue("Unauthorized");
+  }
+
+  const normalizedPostId = postId.trim();
+  if (!normalizedPostId) {
+    return rejectWithValue("Feed post is missing.");
+  }
+
+  const normalizedDuration = Math.max(0, Math.floor(duration));
+  if (!normalizedDuration) {
+    return rejectWithValue("Reply duration is invalid.");
+  }
+
+  const normalizedAudioDataUrl = normalizeAudioDataUrl(audioDataUrl);
+  if (!normalizedAudioDataUrl) {
+    return rejectWithValue("Voice reply is required.");
+  }
+
+  try {
+    const response = await fetch(`/api/feed/posts/${encodeURIComponent(normalizedPostId)}/replies`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        duration: normalizedDuration,
+        audioDataUrl: normalizedAudioDataUrl,
+        timestamp: new Date().toISOString()
+      })
+    });
+    const payload = (await response.json().catch(() => null)) as CreateFeedReplyResponse | null;
+
+    if (response.status === 401) {
+      return rejectWithValue("Unauthorized");
+    }
+
+    if (!response.ok) {
+      return rejectWithValue(payload?.error ?? "Failed to save voice reply.");
+    }
+
+    const reply = parseFeedReply(payload?.reply);
+    if (!reply) {
+      return rejectWithValue("Invalid feed reply payload.");
+    }
+    const quota = parseRecordingQuota(payload?.quota);
+
+    return { reply, quota };
+  } catch {
+    return rejectWithValue("Cannot connect to feed service.");
+  }
+});
+
 export const subscribeMonthly = createAsyncThunk<
   { subscription: SubscriptionState; quota: RecordingQuota | null },
   void,
@@ -1443,6 +1763,14 @@ const initialState: AppState = {
   showWords: false,
   recordingDuration: 0,
   recordings: [],
+  feedPosts: [],
+  feedPostsStatus: "idle",
+  feedPostsError: null,
+  feedThreadStatus: "idle",
+  feedThreadError: null,
+  currentFeedPostId: null,
+  currentFeedPost: null,
+  currentFeedReplies: [],
   selectedDate: null,
   currentRecordingId: null,
   isPlaying: false,
@@ -1513,7 +1841,11 @@ const initialState: AppState = {
   ollamaModelSaveStatus: "idle",
   ollamaModelSaveError: null,
   englishLevelSaveStatus: "idle",
-  englishLevelSaveError: null
+  englishLevelSaveError: null,
+  feedPublishStatus: "idle",
+  feedPublishError: null,
+  feedReplyStatus: "idle",
+  feedReplyError: null
 };
 
 const resetPlayback = (state: AppState): void => {
@@ -1540,6 +1872,25 @@ const clearStudyWordsState = (state: AppState): void => {
   state.studyEnglishLevel = state.selectedEnglishLevel;
 };
 
+const clearFeedThreadState = (state: AppState): void => {
+  state.currentFeedPostId = null;
+  state.currentFeedPost = null;
+  state.currentFeedReplies = [];
+  state.feedThreadStatus = "idle";
+  state.feedThreadError = null;
+  state.feedReplyStatus = "idle";
+  state.feedReplyError = null;
+};
+
+const clearFeedState = (state: AppState): void => {
+  state.feedPosts = [];
+  state.feedPostsStatus = "idle";
+  state.feedPostsError = null;
+  state.feedPublishStatus = "idle";
+  state.feedPublishError = null;
+  clearFeedThreadState(state);
+};
+
 const openAuthFlow = (state: AppState, pendingSaveAfterAuth: boolean): void => {
   state.screenBeforeAuth = state.activeTab;
   state.currentScreen = "auth";
@@ -1549,6 +1900,7 @@ const openAuthFlow = (state: AppState, pendingSaveAfterAuth: boolean): void => {
   state.authStatus = "idle";
   state.pendingSaveAfterAuth = pendingSaveAfterAuth;
   state.shareModalOpen = false;
+  clearFeedThreadState(state);
   state.copyMessage = null;
   resetPlayback(state);
 };
@@ -1573,6 +1925,8 @@ const applySavedRecording = (state: AppState, recording: Recording): void => {
   state.pendingSaveAfterAuth = false;
   state.recordingSaveStatus = "idle";
   state.recordingSaveError = null;
+  state.feedPublishStatus = "idle";
+  state.feedPublishError = null;
   state.recordingPracticeType = "topic";
   state.pendingRecordingAudioDataUrl = null;
   state.recordingInputError = null;
@@ -1581,6 +1935,11 @@ const applySavedRecording = (state: AppState, recording: Recording): void => {
   state.pendingPhotoError = null;
   clearTopicGuidanceState(state);
   resetPlayback(state);
+};
+
+const upsertFeedPost = (state: AppState, post: FeedPost): void => {
+  const nextPosts = [post, ...state.feedPosts.filter((item) => item.id !== post.id)];
+  state.feedPosts = nextPosts.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 };
 
 const applySubscriptionState = (state: AppState, subscription: SubscriptionState | null): void => {
@@ -1661,12 +2020,15 @@ const completeAuthSuccess = (
   state.englishLevelSaveError = null;
   state.recordingSaveStatus = "idle";
   state.recordingSaveError = null;
+  state.feedPublishStatus = "idle";
+  state.feedPublishError = null;
   state.pendingRecordingAudioDataUrl = null;
   state.recordingInputError = null;
   state.pendingPhotoError = null;
   state.selectedInterestIds = [];
   state.questionsEnglishLevel = englishLevel;
   state.recordings = [];
+  clearFeedState(state);
   state.currentRecordingId = null;
   state.selectedDate = null;
   state.currentScreen = state.screenBeforeAuth;
@@ -1709,6 +2071,7 @@ const clearAuthenticatedState = (state: AppState): void => {
   state.pendingPhotoError = null;
   state.selectedEnglishLevel = DEFAULT_ENGLISH_LEVEL;
   state.recordings = [];
+  clearFeedState(state);
   state.currentRecordingId = null;
   state.selectedDate = null;
   state.userDataStatus = "idle";
@@ -1752,6 +2115,9 @@ const appSlice = createSlice({
       state.activeTab = action.payload;
       state.currentScreen = action.payload;
       state.shareModalOpen = false;
+      if (action.payload !== "feed") {
+        clearFeedThreadState(state);
+      }
       if (action.payload === "speak") {
         state.copyMessage = null;
       }
@@ -1771,6 +2137,7 @@ const appSlice = createSlice({
         return;
       }
       state.currentScreen = "profile";
+      clearFeedThreadState(state);
       state.shareModalOpen = false;
       state.copyMessage = null;
       resetPlayback(state);
@@ -1780,6 +2147,7 @@ const appSlice = createSlice({
         return;
       }
       state.currentScreen = "interests";
+      clearFeedThreadState(state);
       state.shareModalOpen = false;
       state.copyMessage = null;
       resetPlayback(state);
@@ -1789,11 +2157,13 @@ const appSlice = createSlice({
         state.currentScreen = "speak";
         state.activeTab = "speak";
         state.shareModalOpen = false;
+        clearFeedThreadState(state);
         state.copyMessage = null;
         resetPlayback(state);
         return;
       }
       state.currentScreen = "profile";
+      clearFeedThreadState(state);
       state.shareModalOpen = false;
       state.copyMessage = null;
       resetPlayback(state);
@@ -1978,6 +2348,20 @@ const appSlice = createSlice({
       state.recordingInputError = null;
       state.pendingPhotoError = null;
     },
+    backToQuestionsList: (state) => {
+      state.selectedTopic = null;
+      state.speakState = "idle";
+      state.recordingDuration = 0;
+      state.showQuestions = false;
+      state.showWords = false;
+      state.showAddTopicInput = false;
+      state.customTopicDraft = "";
+      state.recordingSaveError = null;
+      state.pendingRecordingAudioDataUrl = null;
+      state.recordingInputError = null;
+      state.pendingPhotoError = null;
+      state.recordingPracticeType = "topic";
+    },
     openAuthForSave: (state) => {
       if (state.isAuthenticated) {
         return;
@@ -2044,7 +2428,38 @@ const appSlice = createSlice({
       state.currentRecordingId = action.payload;
       state.activeTab = "history";
       state.currentScreen = "details";
+      clearFeedThreadState(state);
       state.copyMessage = null;
+      resetPlayback(state);
+    },
+    openFeedThread: (state, action: PayloadAction<string>) => {
+      if (!state.isAuthenticated) {
+        return;
+      }
+      state.currentFeedPostId = action.payload;
+      state.currentScreen = "feedThread";
+      state.activeTab = "feed";
+      state.shareModalOpen = false;
+      state.copyMessage = null;
+      state.feedThreadError = null;
+      state.feedReplyError = null;
+      resetPlayback(state);
+    },
+    backToFeed: (state) => {
+      if (!state.isAuthenticated) {
+        state.activeTab = "speak";
+        state.currentScreen = "speak";
+        state.shareModalOpen = false;
+        state.copyMessage = null;
+        clearFeedThreadState(state);
+        resetPlayback(state);
+        return;
+      }
+      state.activeTab = "feed";
+      state.currentScreen = "feed";
+      state.shareModalOpen = false;
+      state.copyMessage = null;
+      clearFeedThreadState(state);
       resetPlayback(state);
     },
     backToHistory: (state) => {
@@ -2052,6 +2467,7 @@ const appSlice = createSlice({
         state.activeTab = "speak";
         state.currentScreen = "speak";
         state.shareModalOpen = false;
+        clearFeedThreadState(state);
         state.copyMessage = null;
         resetPlayback(state);
         return;
@@ -2059,6 +2475,7 @@ const appSlice = createSlice({
       state.activeTab = "history";
       state.currentScreen = "history";
       state.shareModalOpen = false;
+      clearFeedThreadState(state);
       state.copyMessage = null;
       resetPlayback(state);
     },
@@ -2103,6 +2520,8 @@ const appSlice = createSlice({
         return;
       }
       state.shareModalOpen = true;
+      state.feedPublishStatus = "idle";
+      state.feedPublishError = null;
       state.copyMessage = null;
     },
     closeShareModal: (state) => {
@@ -2181,6 +2600,7 @@ const appSlice = createSlice({
           state.englishLevelSaveError = null;
           state.userDataStatus = "idle";
           state.userDataError = null;
+          clearFeedState(state);
           clearStudyWordsState(state);
           return;
         }
@@ -2203,6 +2623,7 @@ const appSlice = createSlice({
         state.userDataError = null;
         state.selectedInterestIds = [];
         state.recordings = [];
+        clearFeedState(state);
         clearTopicGuidanceState(state);
         clearStudyWordsState(state);
       })
@@ -2228,6 +2649,7 @@ const appSlice = createSlice({
         state.userDataError = null;
         state.selectedInterestIds = [];
         state.recordings = [];
+        clearFeedState(state);
         clearTopicGuidanceState(state);
         clearStudyWordsState(state);
       })
@@ -2317,6 +2739,98 @@ const appSlice = createSlice({
         if (action.payload && action.payload !== "Unauthorized") {
           state.recordingSaveError = action.payload;
         }
+      })
+      .addCase(fetchFeedPosts.pending, (state) => {
+        state.feedPostsStatus = "loading";
+        state.feedPostsError = null;
+      })
+      .addCase(fetchFeedPosts.fulfilled, (state, action) => {
+        state.feedPostsStatus = "ready";
+        state.feedPostsError = null;
+        state.feedPosts = action.payload;
+      })
+      .addCase(fetchFeedPosts.rejected, (state, action) => {
+        if (action.payload === "Unauthorized") {
+          clearAuthenticatedState(state);
+          return;
+        }
+        state.feedPostsStatus = state.feedPosts.length > 0 ? "ready" : "failed";
+        state.feedPostsError = action.payload ?? "Failed to load feed posts.";
+      })
+      .addCase(fetchFeedThread.pending, (state, action) => {
+        state.feedThreadStatus = "loading";
+        state.feedThreadError = null;
+        state.feedReplyError = null;
+        state.currentFeedPostId = action.meta.arg;
+      })
+      .addCase(fetchFeedThread.fulfilled, (state, action) => {
+        state.feedThreadStatus = "ready";
+        state.feedThreadError = null;
+        state.currentFeedPostId = action.payload.post.id;
+        state.currentFeedPost = action.payload.post;
+        state.currentFeedReplies = action.payload.replies;
+        upsertFeedPost(state, action.payload.post);
+      })
+      .addCase(fetchFeedThread.rejected, (state, action) => {
+        if (action.payload === "Unauthorized") {
+          clearAuthenticatedState(state);
+          return;
+        }
+        state.feedThreadStatus = state.currentFeedPost ? "ready" : "failed";
+        state.feedThreadError = action.payload ?? "Failed to load feed thread.";
+      })
+      .addCase(publishRecordingToFeed.pending, (state) => {
+        state.feedPublishStatus = "loading";
+        state.feedPublishError = null;
+      })
+      .addCase(publishRecordingToFeed.fulfilled, (state, action) => {
+        state.feedPublishStatus = "idle";
+        state.feedPublishError = null;
+        state.shareModalOpen = false;
+        state.copyMessage = "Recording published to Feed.";
+        upsertFeedPost(state, action.payload);
+      })
+      .addCase(publishRecordingToFeed.rejected, (state, action) => {
+        state.feedPublishStatus = "idle";
+        if (action.payload === "Unauthorized") {
+          clearAuthenticatedState(state);
+          return;
+        }
+        state.feedPublishError = action.payload ?? "Failed to publish recording.";
+      })
+      .addCase(createFeedReply.pending, (state) => {
+        state.feedReplyStatus = "loading";
+        state.feedReplyError = null;
+      })
+      .addCase(createFeedReply.fulfilled, (state, action) => {
+        state.feedReplyStatus = "idle";
+        state.feedReplyError = null;
+        applyRecordingQuotaState(state, action.payload.quota);
+
+        if (state.currentFeedPostId === action.payload.reply.postId) {
+          state.currentFeedReplies = [...state.currentFeedReplies, action.payload.reply].sort(
+            (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+          );
+        }
+
+        if (state.currentFeedPost?.id === action.payload.reply.postId) {
+          state.currentFeedPost = {
+            ...state.currentFeedPost,
+            replyCount: state.currentFeedPost.replyCount + 1
+          };
+        }
+
+        state.feedPosts = state.feedPosts.map((item) =>
+          item.id === action.payload.reply.postId ? { ...item, replyCount: item.replyCount + 1 } : item
+        );
+      })
+      .addCase(createFeedReply.rejected, (state, action) => {
+        state.feedReplyStatus = "idle";
+        if (action.payload === "Unauthorized") {
+          clearAuthenticatedState(state);
+          return;
+        }
+        state.feedReplyError = action.payload ?? "Failed to save voice reply.";
       })
       .addCase(subscribeMonthly.pending, (state) => {
         state.subscriptionActionStatus = "loading";
@@ -2506,6 +3020,7 @@ export const {
   tickRecording,
   stopRecording,
   reRecord,
+  backToQuestionsList,
   openAuthForSave,
   toggleAddTopicInput,
   setCustomTopicDraft,
@@ -2516,6 +3031,8 @@ export const {
   previousMonth,
   nextMonth,
   openDetails,
+  openFeedThread,
+  backToFeed,
   backToHistory,
   togglePlayback,
   setPlaybackPlaying,

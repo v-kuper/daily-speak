@@ -21,6 +21,7 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 const DATE_KEY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const DAILY_QUESTIONS_COUNT = 3;
 
 type OllamaChatResponse = {
   message?: {
@@ -61,7 +62,7 @@ const normalizeInterests = (items: string[]): string[] => {
   return normalized.slice(0, 10);
 };
 
-const normalizeQuestions = (items: string[]): string[] => {
+const normalizeQuestions = (items: string[], limit = DAILY_QUESTIONS_COUNT): string[] => {
   const unique: string[] = [];
   const seen = new Set<string>();
 
@@ -84,7 +85,7 @@ const normalizeQuestions = (items: string[]): string[] => {
     unique.push(cleaned.endsWith("?") ? cleaned : `${cleaned}?`);
   }
 
-  return unique.slice(0, 3);
+  return unique.slice(0, limit);
 };
 
 const normalizeAvoidQuestions = (items: string[]): string[] => {
@@ -110,7 +111,7 @@ const parseQuestions = (content: string): ParsedQuestions | null => {
       }
 
       const normalized = normalizeQuestions(data.questions.filter((item): item is string => typeof item === "string"));
-      if (normalized.length !== 3) {
+      if (normalized.length !== DAILY_QUESTIONS_COUNT) {
         return null;
       }
 
@@ -132,7 +133,7 @@ const parseQuestions = (content: string): ParsedQuestions | null => {
     .map((line) => line.trim())
     .filter((line) => line.length > 0);
   const normalized = normalizeQuestions(lineCandidates);
-  if (normalized.length === 3) {
+  if (normalized.length === DAILY_QUESTIONS_COUNT) {
     return { questions: normalized };
   }
 
@@ -149,13 +150,13 @@ const createPrompt = (
   const formattedLevel = formatEnglishLevel(englishLevel);
   const levelGuidance = getEnglishLevelPromptGuidance(englishLevel);
   const parts = [
-    `Generate exactly 3 daily English speaking practice questions for ${dateKey}.`,
+    `Generate exactly ${DAILY_QUESTIONS_COUNT} daily English speaking practice questions for ${dateKey}.`,
     `Audience: English learner level ${formattedLevel}.`,
     `Language difficulty: ${levelGuidance}`,
     "Questions must be short, practical, and suitable for a 1-3 minute spoken answer.",
     "Each question must be clearly tied to a concrete theme, not a generic life question.",
     "The theme should be explicit in the wording of each question.",
-    "All 3 questions must be semantically different from each other.",
+    `All ${DAILY_QUESTIONS_COUNT} questions must be semantically different from each other.`,
     'Return only JSON with this exact shape: {"questions":["question 1","question 2","question 3"]}.',
     "Do not add markdown, explanations, numbering, or extra keys."
   ];
@@ -163,7 +164,7 @@ const createPrompt = (
   if (interests.length > 0) {
     parts.push(`User interests (use as themes): ${interests.join(", ")}.`);
     parts.push("Each question must map to one of these interests and mention that theme explicitly.");
-    parts.push("Use different interests across the 3 questions when possible.");
+    parts.push(`Use different interests across the ${DAILY_QUESTIONS_COUNT} questions when possible.`);
     parts.push("Do not generate off-topic or generic questions unrelated to the listed interests.");
   }
 
