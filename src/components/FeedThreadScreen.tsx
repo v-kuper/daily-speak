@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { formatTime } from "../lib/utils";
 import { useAppDispatch, useAppSelector } from "../store/hooks";
-import { backToFeed, createFeedReply, fetchFeedThread } from "../store/slices/appSlice";
+import { backToFeed, createFeedReply, fetchFeedThread, reactToFeedPost, reactToFeedReply } from "../store/slices/appSlice";
+import FeedReactionBar from "./FeedReactionBar";
 
 type ReplyRecordState = "idle" | "recording" | "recorded";
 
@@ -66,6 +67,8 @@ export default function FeedThreadScreen() {
     feedThreadError,
     feedReplyStatus,
     feedReplyError,
+    feedReactionStatus,
+    feedReactionError,
     isSubscriber,
     weeklyRemainingSeconds,
     maxSessionSeconds
@@ -274,6 +277,13 @@ export default function FeedThreadScreen() {
               {showPostTranscript ? "Hide text" : "Show text"}
             </button>
           </div>
+          <FeedReactionBar
+            reactions={currentFeedPost.reactions}
+            disabled={feedReactionStatus === "loading"}
+            onReact={(reaction) => {
+              void dispatch(reactToFeedPost({ postId: currentFeedPost.id, reaction }));
+            }}
+          />
           {showPostTranscript && (
             <div className="feed-transcript-accordion">
               <div className="section-title">Transcript</div>
@@ -300,6 +310,13 @@ export default function FeedThreadScreen() {
               ) : (
                 <div className="empty-state">Audio is unavailable for this reply.</div>
               )}
+              <FeedReactionBar
+                reactions={reply.reactions}
+                disabled={feedReactionStatus === "loading"}
+                onReact={(reaction) => {
+                  void dispatch(reactToFeedReply({ replyId: reply.id, reaction }));
+                }}
+              />
             </div>
           ))
         )}
@@ -337,7 +354,9 @@ export default function FeedThreadScreen() {
           </button>
         </div>
 
-        {(replyError || feedReplyError) && <div className="auth-error top-spaced">{replyError ?? feedReplyError}</div>}
+        {(replyError || feedReplyError || feedReactionError) && (
+          <div className="auth-error top-spaced">{replyError ?? feedReplyError ?? feedReactionError}</div>
+        )}
       </div>
     </section>
   );

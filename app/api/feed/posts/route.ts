@@ -2,6 +2,11 @@ import { randomUUID } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
 import { query } from "../../../../src/server/db";
 import { SESSION_COOKIE_NAME, getUserBySessionToken } from "../../../../src/server/auth";
+import {
+  buildEmptyFeedReactionSummary,
+  getFeedPostReactionSummaries,
+  type FeedReactionSummary
+} from "../../../../src/server/feedReactions";
 import { createRouteLogger, elapsedMs, toErrorMeta } from "../../../../src/server/logger";
 
 export const runtime = "nodejs";
@@ -140,7 +145,7 @@ const maskEmail = (value: string): string => {
   return `${local.slice(0, 2)}***@${domain}`;
 };
 
-const toFeedPost = (row: FeedPostRow) => {
+const toFeedPost = (row: FeedPostRow, reactions: FeedReactionSummary) => {
   return {
     id: row.id,
     sourceRecordingId: row.source_recording_id,
@@ -154,7 +159,8 @@ const toFeedPost = (row: FeedPostRow) => {
     sourceTimestamp: new Date(row.source_timestamp).toISOString(),
     createdAt: new Date(row.created_at).toISOString(),
     authorMaskedEmail: maskEmail(row.author_email),
-    replyCount: toReplyCount(row.reply_count)
+    replyCount: toReplyCount(row.reply_count),
+    reactions
   };
 };
 
@@ -220,7 +226,9 @@ export async function GET(request: NextRequest) {
        LIMIT 120`
     );
 
-    const posts = result.rows.map((row) => toFeedPost(row));
+    const postIds = result.rows.map((row) => row.id);
+    const reactionMap = await getFeedPostReactionSummaries(postIds, user.id);
+    const posts = result.rows.map((row) => toFeedPost(row, reactionMap[row.id] ?? buildEmptyFeedReactionSummary()));
 
     logger.info("request.success", {
       status: 200,
@@ -323,6 +331,7 @@ export async function POST(request: NextRequest) {
       logger.error("request.failed", { status: 500, durationMs: elapsedMs(startedAt), reason: "post_not_found_after_save" });
       return NextResponse.json({ error: "Failed to publish recording." }, { status: 500 });
     }
+    const reactionMap = await getFeedPostReactionSummaries([post.id], user.id);
 
     logger.info("request.success", {
       status: created ? 201 : 200,
@@ -333,7 +342,10 @@ export async function POST(request: NextRequest) {
       created
     });
 
-    return NextResponse.json({ post: toFeedPost(post) }, { status: created ? 201 : 200 });
+    return NextResponse.json(
+      { post: toFeedPost(post, reactionMap[post.id] ?? buildEmptyFeedReactionSummary()) },
+      { status: created ? 201 : 200 }
+    );
   } catch (error) {
     logger.error("request.failed", { status: 500, durationMs: elapsedMs(startedAt), ...toErrorMeta(error) });
     return NextResponse.json({ error: "Failed to publish recording." }, { status: 500 });

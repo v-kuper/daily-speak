@@ -10,6 +10,21 @@ export type Suggestion = {
 };
 
 export type PracticeType = "free_talk" | "topic" | "photo_description";
+export const FEED_REACTION_VALUES = ["like", "love", "fire", "laugh", "support"] as const;
+export type FeedReaction = (typeof FEED_REACTION_VALUES)[number];
+
+export const FEED_REACTION_EMOJI: Record<FeedReaction, string> = {
+  like: "👍",
+  love: "❤️",
+  fire: "🔥",
+  laugh: "😂",
+  support: "🙌"
+};
+
+export type FeedReactionSummary = {
+  counts: Record<FeedReaction, number>;
+  currentReaction: FeedReaction | null;
+};
 
 export type Recording = {
   id: string;
@@ -38,6 +53,7 @@ export type FeedPost = {
   createdAt: string;
   authorMaskedEmail: string;
   replyCount: number;
+  reactions: FeedReactionSummary;
 };
 
 export type FeedReply = {
@@ -48,6 +64,7 @@ export type FeedReply = {
   timestamp: string;
   createdAt: string;
   authorMaskedEmail: string;
+  reactions: FeedReactionSummary;
 };
 
 const TOPIC_DATABASE: Record<string, TopicData> = {

@@ -107,6 +107,28 @@ CREATE TABLE IF NOT EXISTS feed_replies (
 
 CREATE INDEX IF NOT EXISTS feed_replies_post_created_idx
   ON feed_replies (post_id, created_at ASC);
+
+CREATE TABLE IF NOT EXISTS feed_post_reactions (
+  post_id TEXT NOT NULL REFERENCES feed_posts(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  reaction TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (post_id, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS feed_post_reactions_post_reaction_idx
+  ON feed_post_reactions (post_id, reaction);
+
+CREATE TABLE IF NOT EXISTS feed_reply_reactions (
+  reply_id TEXT NOT NULL REFERENCES feed_replies(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  reaction TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (reply_id, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS feed_reply_reactions_reply_reaction_idx
+  ON feed_reply_reactions (reply_id, reaction);
 `;
 
 const SCHEMA_HASH = createHash("sha256").update(SCHEMA_SQL).digest("hex");

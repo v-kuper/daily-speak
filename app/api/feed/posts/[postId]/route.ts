@@ -1,6 +1,12 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { query } from "../../../../../src/server/db";
 import { SESSION_COOKIE_NAME, getUserBySessionToken } from "../../../../../src/server/auth";
+import {
+  buildEmptyFeedReactionSummary,
+  getFeedPostReactionSummaries,
+  getFeedReplyReactionSummaries,
+  type FeedReactionSummary
+} from "../../../../../src/server/feedReactions";
 import { createRouteLogger, elapsedMs, toErrorMeta } from "../../../../../src/server/logger";
 
 export const runtime = "nodejs";
@@ -121,7 +127,7 @@ const maskEmail = (value: string): string => {
   return `${local.slice(0, 2)}***@${domain}`;
 };
 
-const toFeedPost = (row: FeedPostRow) => {
+const toFeedPost = (row: FeedPostRow, reactions: FeedReactionSummary) => {
   return {
     id: row.id,
     sourceRecordingId: row.source_recording_id,
@@ -135,11 +141,12 @@ const toFeedPost = (row: FeedPostRow) => {
     sourceTimestamp: new Date(row.source_timestamp).toISOString(),
     createdAt: new Date(row.created_at).toISOString(),
     authorMaskedEmail: maskEmail(row.author_email),
-    replyCount: toReplyCount(row.reply_count)
+    replyCount: toReplyCount(row.reply_count),
+    reactions
   };
 };
 
-const toFeedReply = (row: FeedReplyRow) => {
+const toFeedReply = (row: FeedReplyRow, reactions: FeedReactionSummary) => {
   return {
     id: row.id,
     postId: row.post_id,
@@ -147,7 +154,8 @@ const toFeedReply = (row: FeedReplyRow) => {
     audioDataUrl: normalizeAudioDataUrl(row.audio_data_url),
     timestamp: new Date(row.timestamp).toISOString(),
     createdAt: new Date(row.created_at).toISOString(),
-    authorMaskedEmail: maskEmail(row.author_email)
+    authorMaskedEmail: maskEmail(row.author_email),
+    reactions
   };
 };
 
@@ -216,7 +224,10 @@ export async function GET(
        ORDER BY r.created_at ASC`,
       [normalizedPostId]
     );
-    const replies = repliesResult.rows.map((row) => toFeedReply(row));
+    const postReactionMap = await getFeedPostReactionSummaries([post.id], user.id);
+    const replyIds = repliesResult.rows.map((row) => row.id);
+    const replyReactionMap = await getFeedReplyReactionSummaries(replyIds, user.id);
+    const replies = repliesResult.rows.map((row) => toFeedReply(row, replyReactionMap[row.id] ?? buildEmptyFeedReactionSummary()));
 
     logger.info("request.success", {
       status: 200,
@@ -226,7 +237,10 @@ export async function GET(
       repliesCount: replies.length
     });
 
-    return NextResponse.json({ post: toFeedPost(post), replies }, { status: 200 });
+    return NextResponse.json(
+      { post: toFeedPost(post, postReactionMap[post.id] ?? buildEmptyFeedReactionSummary()), replies },
+      { status: 200 }
+    );
   } catch (error) {
     logger.error("request.failed", { status: 500, durationMs: elapsedMs(startedAt), ...toErrorMeta(error) });
     return NextResponse.json({ error: "Failed to load feed thread." }, { status: 500 });

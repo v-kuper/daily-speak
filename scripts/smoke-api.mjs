@@ -78,6 +78,20 @@ const expectedChecks = [
     path: "/api/feed/posts/demo-post/replies",
     body: { duration: 10, audioDataUrl: "data:audio/webm;base64,AAAA" },
     expectedStatus: 401
+  },
+  {
+    name: "feed/post reaction unauthorized",
+    method: "POST",
+    path: "/api/feed/posts/demo-post/reactions",
+    body: { reaction: "like" },
+    expectedStatus: 401
+  },
+  {
+    name: "feed/reply reaction unauthorized",
+    method: "POST",
+    path: "/api/feed/replies/demo-reply/reactions",
+    body: { reaction: "like" },
+    expectedStatus: 401
   }
 ];
 

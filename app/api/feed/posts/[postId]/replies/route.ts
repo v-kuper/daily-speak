@@ -4,6 +4,7 @@ import path from "node:path";
 import { NextResponse, type NextRequest } from "next/server";
 import { query } from "../../../../../../src/server/db";
 import { SESSION_COOKIE_NAME, getUserBySessionToken } from "../../../../../../src/server/auth";
+import { buildEmptyFeedReactionSummary } from "../../../../../../src/server/feedReactions";
 import {
   FREE_WEEKLY_LIMIT_SECONDS,
   SUBSCRIBER_MAX_SESSION_SECONDS,
@@ -206,7 +207,8 @@ const toFeedReply = (row: FeedReplyRow, authorEmail: string) => {
     audioDataUrl: row.audio_data_url,
     timestamp: new Date(row.timestamp).toISOString(),
     createdAt: new Date(row.created_at).toISOString(),
-    authorMaskedEmail: maskEmail(authorEmail)
+    authorMaskedEmail: maskEmail(authorEmail),
+    reactions: buildEmptyFeedReactionSummary()
   };
 };
 

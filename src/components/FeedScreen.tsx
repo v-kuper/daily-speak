@@ -3,11 +3,14 @@
 import { useEffect, useState } from "react";
 import { formatTime } from "../lib/utils";
 import { useAppDispatch, useAppSelector } from "../store/hooks";
-import { fetchFeedPosts, openFeedThread } from "../store/slices/appSlice";
+import { fetchFeedPosts, openFeedThread, reactToFeedPost } from "../store/slices/appSlice";
+import FeedReactionBar from "./FeedReactionBar";
 
 export default function FeedScreen() {
   const dispatch = useAppDispatch();
-  const { feedPosts, feedPostsStatus, feedPostsError } = useAppSelector((state) => state.app);
+  const { feedPosts, feedPostsStatus, feedPostsError, feedReactionStatus, feedReactionError } = useAppSelector(
+    (state) => state.app
+  );
   const [expandedTranscriptMap, setExpandedTranscriptMap] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
@@ -27,6 +30,7 @@ export default function FeedScreen() {
       </div>
 
       {feedPostsError && <div className="auth-error top-spaced">{feedPostsError}</div>}
+      {feedReactionError && <div className="auth-error top-spaced">{feedReactionError}</div>}
       {feedPostsStatus === "loading" && feedPosts.length === 0 && <div className="empty-state">Loading feed posts...</div>}
 
       {feedPosts.length === 0 && feedPostsStatus !== "loading" ? (
@@ -63,6 +67,14 @@ export default function FeedScreen() {
                 Comments ({post.replyCount})
               </button>
             </div>
+
+            <FeedReactionBar
+              reactions={post.reactions}
+              disabled={feedReactionStatus === "loading"}
+              onReact={(reaction) => {
+                void dispatch(reactToFeedPost({ postId: post.id, reaction }));
+              }}
+            />
 
             {expandedTranscriptMap[post.id] && (
               <div className="feed-transcript-accordion">

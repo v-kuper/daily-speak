@@ -1,5 +1,14 @@
 import { createAsyncThunk, createSlice, type PayloadAction } from "@reduxjs/toolkit";
-import { type FeedPost, type FeedReply, type PracticeType, type Recording, type Suggestion } from "../../lib/data";
+import {
+  FEED_REACTION_VALUES,
+  type FeedPost,
+  type FeedReaction,
+  type FeedReactionSummary,
+  type FeedReply,
+  type PracticeType,
+  type Recording,
+  type Suggestion
+} from "../../lib/data";
 import { DEFAULT_ENGLISH_LEVEL, normalizeEnglishLevel, parseEnglishLevel, type EnglishLevel } from "../../lib/englishLevel";
 import { formatTime, toDateKey } from "../../lib/utils";
 
@@ -210,6 +219,8 @@ export type AppState = {
   feedPublishError: string | null;
   feedReplyStatus: AuthStatus;
   feedReplyError: string | null;
+  feedReactionStatus: AuthStatus;
+  feedReactionError: string | null;
 };
 
 const today = new Date();
@@ -342,6 +353,11 @@ type PublishFeedPostResponse = {
 type CreateFeedReplyResponse = {
   reply?: unknown;
   quota?: unknown;
+  error?: string;
+};
+
+type FeedReactionResponse = {
+  reactions?: unknown;
   error?: string;
 };
 
@@ -759,6 +775,53 @@ const normalizeFeedAudioDataUrl = (value: unknown): string | null => {
   return normalizeAudioDataUrl(normalized);
 };
 
+const FEED_REACTION_SET = new Set<FeedReaction>(FEED_REACTION_VALUES);
+
+const buildEmptyFeedReactionSummary = (): FeedReactionSummary => {
+  return {
+    counts: {
+      like: 0,
+      love: 0,
+      fire: 0,
+      laugh: 0,
+      support: 0
+    },
+    currentReaction: null
+  };
+};
+
+const parseFeedReaction = (value: unknown): FeedReaction | null => {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim().toLowerCase() as FeedReaction;
+  return FEED_REACTION_SET.has(normalized) ? normalized : null;
+};
+
+const parseFeedReactionSummary = (value: unknown): FeedReactionSummary => {
+  if (typeof value !== "object" || value === null) {
+    return buildEmptyFeedReactionSummary();
+  }
+
+  const candidate = value as Record<string, unknown>;
+  const countsRaw =
+    typeof candidate.counts === "object" && candidate.counts !== null
+      ? (candidate.counts as Record<string, unknown>)
+      : {};
+  const counts = buildEmptyFeedReactionSummary().counts;
+
+  FEED_REACTION_VALUES.forEach((reaction) => {
+    const parsed = Number.parseInt(String(countsRaw[reaction] ?? 0), 10);
+    counts[reaction] = Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+  });
+
+  return {
+    counts,
+    currentReaction: parseFeedReaction(candidate.currentReaction)
+  };
+};
+
 const parseFeedPost = (value: unknown): FeedPost | null => {
   if (typeof value !== "object" || value === null) {
     return null;
@@ -780,6 +843,7 @@ const parseFeedPost = (value: unknown): FeedPost | null => {
   const photoDataUrl = normalizePhotoDataUrl(candidate.photoDataUrl);
   const photoObject = normalizePhotoObject(candidate.photoObject);
   const practiceType = parsePracticeType(candidate.practiceType, topic, Boolean(photoDataUrl));
+  const reactions = parseFeedReactionSummary(candidate.reactions);
 
   if (
     !id ||
@@ -809,7 +873,8 @@ const parseFeedPost = (value: unknown): FeedPost | null => {
     sourceTimestamp: sourceTimestamp.toISOString(),
     createdAt: createdAt.toISOString(),
     authorMaskedEmail,
-    replyCount: Math.max(0, replyCount)
+    replyCount: Math.max(0, replyCount),
+    reactions
   };
 };
 
@@ -828,6 +893,7 @@ const parseFeedReply = (value: unknown): FeedReply | null => {
   const createdAt = new Date(createdAtRaw);
   const duration = Number.parseInt(String(candidate.duration ?? 0), 10);
   const audioDataUrl = normalizeFeedAudioDataUrl(candidate.audioDataUrl);
+  const reactions = parseFeedReactionSummary(candidate.reactions);
 
   if (
     !id ||
@@ -848,7 +914,8 @@ const parseFeedReply = (value: unknown): FeedReply | null => {
     audioDataUrl,
     timestamp: timestamp.toISOString(),
     createdAt: createdAt.toISOString(),
-    authorMaskedEmail
+    authorMaskedEmail,
+    reactions
   };
 };
 
@@ -1569,6 +1636,88 @@ export const createFeedReply = createAsyncThunk<
   }
 });
 
+export const reactToFeedPost = createAsyncThunk<
+  { postId: string; reactions: FeedReactionSummary },
+  { postId: string; reaction: FeedReaction | null },
+  { state: { app: AppState }; rejectValue: string }
+>("app/reactToFeedPost", async ({ postId, reaction }, { getState, rejectWithValue }) => {
+  if (!getState().app.isAuthenticated) {
+    return rejectWithValue("Unauthorized");
+  }
+
+  const normalizedPostId = postId.trim();
+  if (!normalizedPostId) {
+    return rejectWithValue("Feed post is missing.");
+  }
+
+  try {
+    const response = await fetch(`/api/feed/posts/${encodeURIComponent(normalizedPostId)}/reactions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ reaction })
+    });
+    const payload = (await response.json().catch(() => null)) as FeedReactionResponse | null;
+
+    if (response.status === 401) {
+      return rejectWithValue("Unauthorized");
+    }
+
+    if (!response.ok) {
+      return rejectWithValue(payload?.error ?? "Failed to update post reaction.");
+    }
+
+    return {
+      postId: normalizedPostId,
+      reactions: parseFeedReactionSummary(payload?.reactions)
+    };
+  } catch {
+    return rejectWithValue("Cannot connect to feed service.");
+  }
+});
+
+export const reactToFeedReply = createAsyncThunk<
+  { replyId: string; reactions: FeedReactionSummary },
+  { replyId: string; reaction: FeedReaction | null },
+  { state: { app: AppState }; rejectValue: string }
+>("app/reactToFeedReply", async ({ replyId, reaction }, { getState, rejectWithValue }) => {
+  if (!getState().app.isAuthenticated) {
+    return rejectWithValue("Unauthorized");
+  }
+
+  const normalizedReplyId = replyId.trim();
+  if (!normalizedReplyId) {
+    return rejectWithValue("Feed reply is missing.");
+  }
+
+  try {
+    const response = await fetch(`/api/feed/replies/${encodeURIComponent(normalizedReplyId)}/reactions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ reaction })
+    });
+    const payload = (await response.json().catch(() => null)) as FeedReactionResponse | null;
+
+    if (response.status === 401) {
+      return rejectWithValue("Unauthorized");
+    }
+
+    if (!response.ok) {
+      return rejectWithValue(payload?.error ?? "Failed to update comment reaction.");
+    }
+
+    return {
+      replyId: normalizedReplyId,
+      reactions: parseFeedReactionSummary(payload?.reactions)
+    };
+  } catch {
+    return rejectWithValue("Cannot connect to feed service.");
+  }
+});
+
 export const subscribeMonthly = createAsyncThunk<
   { subscription: SubscriptionState; quota: RecordingQuota | null },
   void,
@@ -1845,7 +1994,9 @@ const initialState: AppState = {
   feedPublishStatus: "idle",
   feedPublishError: null,
   feedReplyStatus: "idle",
-  feedReplyError: null
+  feedReplyError: null,
+  feedReactionStatus: "idle",
+  feedReactionError: null
 };
 
 const resetPlayback = (state: AppState): void => {
@@ -1880,6 +2031,8 @@ const clearFeedThreadState = (state: AppState): void => {
   state.feedThreadError = null;
   state.feedReplyStatus = "idle";
   state.feedReplyError = null;
+  state.feedReactionStatus = "idle";
+  state.feedReactionError = null;
 };
 
 const clearFeedState = (state: AppState): void => {
@@ -2831,6 +2984,53 @@ const appSlice = createSlice({
           return;
         }
         state.feedReplyError = action.payload ?? "Failed to save voice reply.";
+      })
+      .addCase(reactToFeedPost.pending, (state) => {
+        state.feedReactionStatus = "loading";
+        state.feedReactionError = null;
+      })
+      .addCase(reactToFeedPost.fulfilled, (state, action) => {
+        state.feedReactionStatus = "idle";
+        state.feedReactionError = null;
+
+        state.feedPosts = state.feedPosts.map((item) =>
+          item.id === action.payload.postId ? { ...item, reactions: action.payload.reactions } : item
+        );
+
+        if (state.currentFeedPost?.id === action.payload.postId) {
+          state.currentFeedPost = {
+            ...state.currentFeedPost,
+            reactions: action.payload.reactions
+          };
+        }
+      })
+      .addCase(reactToFeedPost.rejected, (state, action) => {
+        state.feedReactionStatus = "idle";
+        if (action.payload === "Unauthorized") {
+          clearAuthenticatedState(state);
+          return;
+        }
+        state.feedReactionError = action.payload ?? "Failed to update post reaction.";
+      })
+      .addCase(reactToFeedReply.pending, (state) => {
+        state.feedReactionStatus = "loading";
+        state.feedReactionError = null;
+      })
+      .addCase(reactToFeedReply.fulfilled, (state, action) => {
+        state.feedReactionStatus = "idle";
+        state.feedReactionError = null;
+
+        state.currentFeedReplies = state.currentFeedReplies.map((item) =>
+          item.id === action.payload.replyId ? { ...item, reactions: action.payload.reactions } : item
+        );
+      })
+      .addCase(reactToFeedReply.rejected, (state, action) => {
+        state.feedReactionStatus = "idle";
+        if (action.payload === "Unauthorized") {
+          clearAuthenticatedState(state);
+          return;
+        }
+        state.feedReactionError = action.payload ?? "Failed to update comment reaction.";
       })
       .addCase(subscribeMonthly.pending, (state) => {
         state.subscriptionActionStatus = "loading";
