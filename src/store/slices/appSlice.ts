@@ -207,12 +207,6 @@ export type AppState = {
   subscriptionCancelled: boolean;
   subscriptionActionStatus: AuthStatus;
   subscriptionActionError: string | null;
-  selectedOllamaModel: string;
-  availableOllamaModels: string[];
-  ollamaModelsStatus: QuestionsStatus;
-  ollamaModelsError: string | null;
-  ollamaModelSaveStatus: AuthStatus;
-  ollamaModelSaveError: string | null;
   englishLevelSaveStatus: AuthStatus;
   englishLevelSaveError: string | null;
   feedPublishStatus: AuthStatus;
@@ -229,7 +223,6 @@ const MIN_PASSWORD_LENGTH = 8;
 export const MAX_SELECTED_INTERESTS = 10;
 const FREE_WEEKLY_LIMIT_SECONDS = 10 * 60;
 const SESSION_LIMIT_SECONDS = 10 * 60;
-const DEFAULT_OLLAMA_MODEL = "gemma3:12b";
 const MIN_DAILY_QUESTIONS = 3;
 const MIN_TOPIC_GUIDANCE_QUESTIONS = 10;
 const PHOTO_PRACTICE_MAX_OBJECT_LENGTH = 120;
@@ -367,13 +360,6 @@ type SubscriptionResponse = {
   error?: string;
 };
 
-type OllamaModelResponse = {
-  selectedModel?: unknown;
-  availableModels?: unknown;
-  warning?: unknown;
-  error?: string;
-};
-
 type EnglishLevelResponse = {
   level?: unknown;
   error?: string;
@@ -391,12 +377,6 @@ type SubscriptionState = {
   isSubscriber: boolean;
   subscriptionExpiresAt: string | null;
   subscriptionCancelled: boolean;
-};
-
-type OllamaModelState = {
-  selectedModel: string;
-  availableModels: string[];
-  warning: string | null;
 };
 
 const buildDefaultRecordingQuota = (isSubscriber: boolean): RecordingQuota => {
@@ -424,12 +404,6 @@ const DEFAULT_SUBSCRIPTION_STATE: SubscriptionState = {
   isSubscriber: false,
   subscriptionExpiresAt: null,
   subscriptionCancelled: false
-};
-
-const DEFAULT_OLLAMA_MODEL_STATE: OllamaModelState = {
-  selectedModel: DEFAULT_OLLAMA_MODEL,
-  availableModels: [DEFAULT_OLLAMA_MODEL],
-  warning: null
 };
 
 const parseAuthUser = (payload: AuthResponse | null): { email: string; isSubscriber: boolean; englishLevel: EnglishLevel } | null => {
@@ -526,40 +500,6 @@ const parseSubscriptionState = (value: unknown): SubscriptionState | null => {
     isSubscriber,
     subscriptionExpiresAt: parsedDate.toISOString(),
     subscriptionCancelled: isSubscriber ? subscriptionCancelled : false
-  };
-};
-
-const normalizeModelName = (value: unknown): string | null => {
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const cleaned = value.trim();
-  if (!cleaned || cleaned.length > 120) {
-    return null;
-  }
-
-  return cleaned;
-};
-
-const parseOllamaModelState = (payload: OllamaModelResponse | null): OllamaModelState | null => {
-  const selectedModel = normalizeModelName(payload?.selectedModel);
-  if (!selectedModel) {
-    return null;
-  }
-
-  const rawList = Array.isArray(payload?.availableModels) ? payload?.availableModels : [];
-  const list = rawList
-    .map((item) => normalizeModelName(item))
-    .filter((item): item is string => item !== null);
-  const availableModels = Array.from(new Set([selectedModel, ...list]));
-  const warningRaw = payload?.warning;
-  const warning = typeof warningRaw === "string" && warningRaw.trim() ? warningRaw.trim() : null;
-
-  return {
-    selectedModel,
-    availableModels: availableModels.length > 0 ? availableModels : [selectedModel],
-    warning
   };
 };
 
@@ -1788,83 +1728,6 @@ export const cancelSubscription = createAsyncThunk<
   }
 });
 
-export const fetchOllamaModelSettings = createAsyncThunk<
-  OllamaModelState,
-  void,
-  { state: { app: AppState }; rejectValue: string }
->("app/fetchOllamaModelSettings", async (_, { getState, rejectWithValue }) => {
-  if (!getState().app.isAuthenticated) {
-    return rejectWithValue("Unauthorized");
-  }
-
-  try {
-    const response = await fetch("/api/user/ollama-model", {
-      cache: "no-store"
-    });
-    const payload = (await response.json().catch(() => null)) as OllamaModelResponse | null;
-
-    if (response.status === 401) {
-      return rejectWithValue("Unauthorized");
-    }
-
-    if (!response.ok) {
-      return rejectWithValue(payload?.error ?? "Failed to load Ollama model settings.");
-    }
-
-    const modelState = parseOllamaModelState(payload);
-    if (!modelState) {
-      return rejectWithValue("Invalid Ollama model payload.");
-    }
-
-    return modelState;
-  } catch {
-    return rejectWithValue("Cannot connect to Ollama model service.");
-  }
-});
-
-export const saveOllamaModel = createAsyncThunk<
-  OllamaModelState,
-  string,
-  { state: { app: AppState }; rejectValue: string }
->("app/saveOllamaModel", async (model, { getState, rejectWithValue }) => {
-  if (!getState().app.isAuthenticated) {
-    return rejectWithValue("Unauthorized");
-  }
-
-  const normalizedModel = normalizeModelName(model);
-  if (!normalizedModel) {
-    return rejectWithValue("Model name is invalid.");
-  }
-
-  try {
-    const response = await fetch("/api/user/ollama-model", {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({ model: normalizedModel })
-    });
-    const payload = (await response.json().catch(() => null)) as OllamaModelResponse | null;
-
-    if (response.status === 401) {
-      return rejectWithValue("Unauthorized");
-    }
-
-    if (!response.ok) {
-      return rejectWithValue(payload?.error ?? "Failed to save Ollama model settings.");
-    }
-
-    const modelState = parseOllamaModelState(payload);
-    if (!modelState) {
-      return rejectWithValue("Invalid Ollama model payload.");
-    }
-
-    return modelState;
-  } catch {
-    return rejectWithValue("Cannot connect to Ollama model service.");
-  }
-});
-
 export const saveEnglishLevel = createAsyncThunk<
   EnglishLevel,
   EnglishLevel,
@@ -1983,12 +1846,6 @@ const initialState: AppState = {
   subscriptionCancelled: DEFAULT_SUBSCRIPTION_STATE.subscriptionCancelled,
   subscriptionActionStatus: "idle",
   subscriptionActionError: null,
-  selectedOllamaModel: DEFAULT_OLLAMA_MODEL_STATE.selectedModel,
-  availableOllamaModels: DEFAULT_OLLAMA_MODEL_STATE.availableModels,
-  ollamaModelsStatus: "idle",
-  ollamaModelsError: null,
-  ollamaModelSaveStatus: "idle",
-  ollamaModelSaveError: null,
   englishLevelSaveStatus: "idle",
   englishLevelSaveError: null,
   feedPublishStatus: "idle",
@@ -2107,18 +1964,6 @@ const applySubscriptionState = (state: AppState, subscription: SubscriptionState
   state.subscriptionCancelled = subscription.isSubscriber ? subscription.subscriptionCancelled : false;
 };
 
-const applyOllamaModelState = (state: AppState, modelState: OllamaModelState | null): void => {
-  if (!modelState) {
-    state.selectedOllamaModel = DEFAULT_OLLAMA_MODEL_STATE.selectedModel;
-    state.availableOllamaModels = DEFAULT_OLLAMA_MODEL_STATE.availableModels;
-    return;
-  }
-
-  state.selectedOllamaModel = modelState.selectedModel;
-  state.availableOllamaModels = modelState.availableModels;
-  state.ollamaModelsError = modelState.warning;
-};
-
 const applyRecordingQuotaState = (state: AppState, quota: RecordingQuota | null): void => {
   if (!quota) {
     const fallback = buildDefaultRecordingQuota(state.isSubscriber);
@@ -2165,10 +2010,6 @@ const completeAuthSuccess = (
   state.interestsSaveError = null;
   state.subscriptionActionStatus = "idle";
   state.subscriptionActionError = null;
-  state.ollamaModelsStatus = "idle";
-  state.ollamaModelsError = null;
-  state.ollamaModelSaveStatus = "idle";
-  state.ollamaModelSaveError = null;
   state.englishLevelSaveStatus = "idle";
   state.englishLevelSaveError = null;
   state.recordingSaveStatus = "idle";
@@ -2192,7 +2033,6 @@ const completeAuthSuccess = (
     subscriptionCancelled: false
   });
   applyRecordingQuotaState(state, buildDefaultRecordingQuota(isSubscriber));
-  applyOllamaModelState(state, DEFAULT_OLLAMA_MODEL_STATE);
   clearStudyWordsState(state);
 };
 
@@ -2235,17 +2075,12 @@ const clearAuthenticatedState = (state: AppState): void => {
   state.interestsSaveError = null;
   state.subscriptionActionStatus = "idle";
   state.subscriptionActionError = null;
-  state.ollamaModelsStatus = "idle";
-  state.ollamaModelsError = null;
-  state.ollamaModelSaveStatus = "idle";
-  state.ollamaModelSaveError = null;
   state.englishLevelSaveStatus = "idle";
   state.englishLevelSaveError = null;
   state.isSubscriber = false;
   state.subscriptionExpiresAt = DEFAULT_SUBSCRIPTION_STATE.subscriptionExpiresAt;
   state.subscriptionCancelled = DEFAULT_SUBSCRIPTION_STATE.subscriptionCancelled;
   applyRecordingQuotaState(state, DEFAULT_RECORDING_QUOTA);
-  applyOllamaModelState(state, DEFAULT_OLLAMA_MODEL_STATE);
   clearTopicGuidanceState(state);
   clearStudyWordsState(state);
   resetPlayback(state);
@@ -2744,11 +2579,6 @@ const appSlice = createSlice({
             subscriptionCancelled: false
           });
           applyRecordingQuotaState(state, buildDefaultRecordingQuota(isSubscriber));
-          applyOllamaModelState(state, DEFAULT_OLLAMA_MODEL_STATE);
-          state.ollamaModelsStatus = "idle";
-          state.ollamaModelsError = null;
-          state.ollamaModelSaveStatus = "idle";
-          state.ollamaModelSaveError = null;
           state.englishLevelSaveStatus = "idle";
           state.englishLevelSaveError = null;
           state.userDataStatus = "idle";
@@ -2765,11 +2595,6 @@ const appSlice = createSlice({
         state.questionsEnglishLevel = DEFAULT_ENGLISH_LEVEL;
         applySubscriptionState(state, DEFAULT_SUBSCRIPTION_STATE);
         applyRecordingQuotaState(state, DEFAULT_RECORDING_QUOTA);
-        applyOllamaModelState(state, DEFAULT_OLLAMA_MODEL_STATE);
-        state.ollamaModelsStatus = "idle";
-        state.ollamaModelsError = null;
-        state.ollamaModelSaveStatus = "idle";
-        state.ollamaModelSaveError = null;
         state.englishLevelSaveStatus = "idle";
         state.englishLevelSaveError = null;
         state.userDataStatus = "idle";
@@ -2791,11 +2616,6 @@ const appSlice = createSlice({
         state.questionsEnglishLevel = DEFAULT_ENGLISH_LEVEL;
         applySubscriptionState(state, DEFAULT_SUBSCRIPTION_STATE);
         applyRecordingQuotaState(state, DEFAULT_RECORDING_QUOTA);
-        applyOllamaModelState(state, DEFAULT_OLLAMA_MODEL_STATE);
-        state.ollamaModelsStatus = "idle";
-        state.ollamaModelsError = null;
-        state.ollamaModelSaveStatus = "idle";
-        state.ollamaModelSaveError = null;
         state.englishLevelSaveStatus = "idle";
         state.englishLevelSaveError = null;
         state.userDataStatus = "idle";
@@ -3067,43 +2887,6 @@ const appSlice = createSlice({
           return;
         }
         state.subscriptionActionError = action.payload ?? "Failed to cancel subscription.";
-      })
-      .addCase(fetchOllamaModelSettings.pending, (state) => {
-        state.ollamaModelsStatus = "loading";
-        state.ollamaModelsError = null;
-        state.ollamaModelSaveError = null;
-      })
-      .addCase(fetchOllamaModelSettings.fulfilled, (state, action) => {
-        state.ollamaModelsStatus = "ready";
-        state.ollamaModelsError = action.payload.warning;
-        applyOllamaModelState(state, action.payload);
-      })
-      .addCase(fetchOllamaModelSettings.rejected, (state, action) => {
-        state.ollamaModelsStatus = "failed";
-        if (action.payload === "Unauthorized") {
-          clearAuthenticatedState(state);
-          return;
-        }
-        state.ollamaModelsError = action.payload ?? "Failed to load Ollama model settings.";
-      })
-      .addCase(saveOllamaModel.pending, (state) => {
-        state.ollamaModelSaveStatus = "loading";
-        state.ollamaModelSaveError = null;
-      })
-      .addCase(saveOllamaModel.fulfilled, (state, action) => {
-        state.ollamaModelSaveStatus = "idle";
-        state.ollamaModelSaveError = null;
-        state.ollamaModelsStatus = "ready";
-        state.ollamaModelsError = action.payload.warning;
-        applyOllamaModelState(state, action.payload);
-      })
-      .addCase(saveOllamaModel.rejected, (state, action) => {
-        state.ollamaModelSaveStatus = "idle";
-        if (action.payload === "Unauthorized") {
-          clearAuthenticatedState(state);
-          return;
-        }
-        state.ollamaModelSaveError = action.payload ?? "Failed to save Ollama model settings.";
       })
       .addCase(saveEnglishLevel.pending, (state) => {
         state.englishLevelSaveStatus = "loading";

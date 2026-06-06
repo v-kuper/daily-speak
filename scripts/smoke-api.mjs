@@ -115,6 +115,19 @@ const pushLog = (source, chunk) => {
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+const buildCookieHeader = (response) => {
+  const setCookie = response.headers.get("set-cookie");
+  if (!setCookie) {
+    return "";
+  }
+
+  return setCookie
+    .split(/,\s*(?=[^=;,]+=[^;,]+)/)
+    .map((cookie) => cookie.split(";")[0])
+    .filter(Boolean)
+    .join("; ");
+};
+
 const waitForServer = async () => {
   const startedAt = Date.now();
 
@@ -151,6 +164,43 @@ const runChecks = async () => {
 
     process.stdout.write(`✓ ${check.name}\n`);
   }
+};
+
+const runHiddenModelSettingsCheck = async () => {
+  const email = `smoke-model-${Date.now()}@example.com`;
+  const registerResponse = await fetch(`${baseUrl}/api/auth/register`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password: "SmokeTest123!" })
+  });
+
+  if (registerResponse.status !== 201) {
+    const responseBody = await registerResponse.text();
+    throw new Error(`auth/register model settings setup failed: expected 201, got ${registerResponse.status}. Body: ${responseBody.slice(0, 300)}`);
+  }
+
+  const cookieHeader = buildCookieHeader(registerResponse);
+  if (!cookieHeader) {
+    throw new Error("auth/register model settings setup failed: missing session cookie.");
+  }
+
+  const initialResponse = await fetch(`${baseUrl}/api/user/ollama-model`, {
+    method: "GET",
+    headers: {
+      Cookie: cookieHeader
+    }
+  });
+  const initialPayload = await initialResponse.json().catch(() => null);
+
+  if (initialResponse.status !== 200) {
+    throw new Error(`user/ollama-model initial settings failed: expected 200, got ${initialResponse.status}. Body: ${JSON.stringify(initialPayload).slice(0, 300)}`);
+  }
+
+  if (initialPayload?.selectedModel !== "gemma4:31b-cloud" || initialPayload?.isThinkingModel !== true) {
+    throw new Error(`user/ollama-model initial settings failed: expected hidden cloud model and server-side thinking flag, got ${JSON.stringify(initialPayload).slice(0, 300)}`);
+  }
+
+  process.stdout.write("✓ user/ollama-model hidden server settings\n");
 };
 
 const stopServer = async (child) => {
@@ -196,6 +246,7 @@ const main = async () => {
 
   try {
     await waitForServer();
+    await runHiddenModelSettingsCheck();
     await runChecks();
   } catch (error) {
     const details = logs.slice(-40).join("\n");

@@ -13,7 +13,7 @@ import {
   extractJsonCandidates,
   getOllamaThinkOption,
   normalizeOllamaContent,
-  resolveOllamaModelForUser
+  resolveOllamaSettingsForUser
 } from "../../../src/server/ollama";
 import { createRouteLogger, elapsedMs, toErrorMeta } from "../../../src/server/logger";
 
@@ -290,7 +290,8 @@ export async function GET(request: NextRequest) {
   const user = await getUserBySessionToken(token);
   const requestedLevel = normalizeEnglishLevel(searchParams.get("level"), DEFAULT_ENGLISH_LEVEL);
   const englishLevel = user?.englishLevel ?? requestedLevel;
-  const model = await resolveOllamaModelForUser(user?.id ?? null);
+  const ollamaSettings = await resolveOllamaSettingsForUser();
+  const model = ollamaSettings.model;
   const baseUrl = process.env.OLLAMA_BASE_URL ?? DEFAULT_OLLAMA_BASE_URL;
 
   const seed = Math.abs(
@@ -321,7 +322,7 @@ export async function GET(request: NextRequest) {
         body: JSON.stringify({
           model,
           stream: false,
-          think: getOllamaThinkOption(model),
+          think: getOllamaThinkOption(ollamaSettings.isThinkingModel),
           messages: [
             {
               role: "system",

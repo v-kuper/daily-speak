@@ -3,17 +3,15 @@
 import { useEffect, useState } from "react";
 import {
   cancelSubscription,
-  fetchOllamaModelSettings,
   openInterests,
   saveEnglishLevel,
-  saveOllamaModel,
   subscribeMonthly
 } from "../store/slices/appSlice";
 import { ENGLISH_LEVEL_OPTIONS, parseEnglishLevel } from "../lib/englishLevel";
 import { useAppDispatch, useAppSelector } from "../store/hooks";
 import { formatTime } from "../lib/utils";
 
-type ProfileView = "home" | "subscription" | "learning" | "ai";
+type ProfileView = "home" | "subscription" | "learning";
 
 const resolveEnglishLevelOption = (value: string) => {
   return ENGLISH_LEVEL_OPTIONS.find((option) => option.value === value) ?? ENGLISH_LEVEL_OPTIONS[2];
@@ -34,21 +32,13 @@ export default function ProfileScreen() {
     subscriptionActionError,
     selectedEnglishLevel,
     englishLevelSaveStatus,
-    englishLevelSaveError,
-    selectedOllamaModel,
-    availableOllamaModels,
-    ollamaModelsStatus,
-    ollamaModelsError,
-    ollamaModelSaveStatus,
-    ollamaModelSaveError
+    englishLevelSaveError
   } = useAppSelector((state) => state.app);
 
   const freeLimit = Math.max(0, weeklyLimitSeconds ?? 0);
   const freeUsed = Math.max(0, weeklyUsedSeconds);
   const freeRemaining = Math.max(0, weeklyRemainingSeconds ?? 0);
   const isSubscriptionLoading = subscriptionActionStatus === "loading";
-  const isModelsLoading = ollamaModelsStatus === "loading";
-  const isModelSaving = ollamaModelSaveStatus === "loading";
   const isEnglishLevelSaving = englishLevelSaveStatus === "loading";
   const subscriptionEndsLabel = subscriptionExpiresAt
     ? new Date(subscriptionExpiresAt).toLocaleString("ru-RU", {
@@ -59,28 +49,12 @@ export default function ProfileScreen() {
     : null;
 
   const [view, setView] = useState<ProfileView>("home");
-  const [modelDraft, setModelDraft] = useState(selectedOllamaModel);
   const [englishLevelDraft, setEnglishLevelDraft] = useState(selectedEnglishLevel);
-
-  useEffect(() => {
-    setModelDraft(selectedOllamaModel);
-  }, [selectedOllamaModel]);
 
   useEffect(() => {
     setEnglishLevelDraft(selectedEnglishLevel);
   }, [selectedEnglishLevel]);
 
-  useEffect(() => {
-    if (ollamaModelsStatus === "idle") {
-      void dispatch(fetchOllamaModelSettings());
-    }
-  }, [dispatch, ollamaModelsStatus]);
-
-  const canSaveModel =
-    modelDraft.trim().length > 0 &&
-    modelDraft.trim() !== selectedOllamaModel &&
-    !isModelsLoading &&
-    !isModelSaving;
   const canSaveEnglishLevel = englishLevelDraft !== selectedEnglishLevel && !isEnglishLevelSaving;
 
   const activeEnglishLevel = resolveEnglishLevelOption(selectedEnglishLevel);
@@ -204,55 +178,6 @@ export default function ProfileScreen() {
     );
   }
 
-  if (view === "ai") {
-    return (
-      <section className="screen-section profile-screen">
-        <button className="back-btn" onClick={() => setView("home")}>
-          ← Назад к профилю
-        </button>
-        <h2>AI настройки</h2>
-
-        <div className="profile-card">
-          <div className="profile-row">
-            <div className="profile-label">Ollama model</div>
-            <select
-              className="profile-select"
-              value={modelDraft}
-              onChange={(event) => setModelDraft(event.target.value)}
-              disabled={isModelsLoading || isModelSaving || availableOllamaModels.length === 0}
-            >
-              {availableOllamaModels.map((modelName) => (
-                <option key={modelName} value={modelName}>
-                  {modelName}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {ollamaModelsError && <div className="auth-error">{ollamaModelsError}</div>}
-          {ollamaModelSaveError && <div className="auth-error">{ollamaModelSaveError}</div>}
-
-          <div className="auth-buttons">
-            <button
-              className="btn btn-secondary"
-              onClick={() => void dispatch(fetchOllamaModelSettings())}
-              disabled={isModelsLoading || isModelSaving}
-            >
-              {isModelsLoading ? "Обновляем..." : "Обновить модели"}
-            </button>
-            <button
-              className="btn btn-primary"
-              onClick={() => void dispatch(saveOllamaModel(modelDraft))}
-              disabled={!canSaveModel}
-            >
-              {isModelSaving ? "Сохраняем..." : "Сохранить модель"}
-            </button>
-          </div>
-        </div>
-      </section>
-    );
-  }
-
   return (
     <section className="screen-section profile-screen">
       <h2>Профиль</h2>
@@ -277,14 +202,6 @@ export default function ProfileScreen() {
             <div className="profile-menu-content">
               <span className="profile-menu-title">Уровень английского</span>
               <span className="profile-menu-subtitle">{activeEnglishLevel.label}</span>
-            </div>
-            <span className="profile-menu-arrow">→</span>
-          </button>
-
-          <button className="profile-menu-item" onClick={() => setView("ai")}>
-            <div className="profile-menu-content">
-              <span className="profile-menu-title">AI настройки</span>
-              <span className="profile-menu-subtitle">{selectedOllamaModel}</span>
             </div>
             <span className="profile-menu-arrow">→</span>
           </button>

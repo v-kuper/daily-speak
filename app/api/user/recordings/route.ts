@@ -14,8 +14,7 @@ import {
   extractOllamaMessageContent,
   extractJsonCandidates,
   getOllamaThinkOption,
-  isThinkingModel,
-  resolveOllamaModelForUser
+  resolveOllamaSettingsForUser
 } from "../../../../src/server/ollama";
 import { createRouteLogger, elapsedMs, toErrorMeta } from "../../../../src/server/logger";
 import { WhisperTranscriptionError, transcribeAudioWithLocalWhisper } from "../../../../src/server/whisper";
@@ -385,6 +384,7 @@ const createSuggestionsPrompt = (
 
 const buildRequestBody = (
   model: string,
+  isThinkingModel: boolean,
   prompt: string,
   seed: number,
   strictJson: boolean,
@@ -393,7 +393,7 @@ const buildRequestBody = (
   const body: Record<string, unknown> = {
     model,
     stream: false,
-    think: getOllamaThinkOption(model),
+    think: getOllamaThinkOption(isThinkingModel),
     messages: [
       {
         role: "system",
@@ -433,8 +433,9 @@ const generateRecordingSuggestions = async (
   }
 
   const baseUrl = process.env.OLLAMA_BASE_URL ?? DEFAULT_OLLAMA_BASE_URL;
-  const model = await resolveOllamaModelForUser(userId);
-  const useJsonFormat = !isThinkingModel(model);
+  const ollamaSettings = await resolveOllamaSettingsForUser();
+  const { model, isThinkingModel } = ollamaSettings;
+  const useJsonFormat = !isThinkingModel;
   const seed = Math.abs((hashString(topic.toLowerCase()) * 131 + hashString(transcript) * 17) % 2_147_483_647);
   const prompt = createSuggestionsPrompt(transcript, topic, interests, practiceType, photoObject);
 
@@ -448,7 +449,7 @@ const generateRecordingSuggestions = async (
         headers: {
           "Content-Type": "application/json"
         },
-        body: JSON.stringify(buildRequestBody(model, prompt, seed + attempt * 97, strictJson, useJsonFormat)),
+        body: JSON.stringify(buildRequestBody(model, isThinkingModel, prompt, seed + attempt * 97, strictJson, useJsonFormat)),
         cache: "no-store"
       });
     } catch (error) {

@@ -1,33 +1,11 @@
-import { query } from "./db";
-
 export const DEFAULT_OLLAMA_BASE_URL = "http://127.0.0.1:11434";
-export const DEFAULT_OLLAMA_MODEL = "gemma3:12b";
+export const DEFAULT_OLLAMA_MODEL = "gemma4:31b-cloud";
+const DEFAULT_OLLAMA_IS_THINKING_MODEL = true;
 
-type UserModelRow = {
-  preferred_ollama_model: string | null;
+export type OllamaUserSettings = {
+  model: string;
+  isThinkingModel: boolean;
 };
-
-type OllamaTagModel = {
-  name?: unknown;
-  model?: unknown;
-};
-
-type OllamaTagsResponse = {
-  models?: unknown;
-};
-
-const THINKING_MODEL_HINTS = [
-  "qwen3",
-  "qwen",
-  "deepseek-r1",
-  "deepseek-v3.1",
-  "deepseek-v3",
-  "gpt-oss",
-  "r1",
-  "qwq",
-  "reason",
-  "thinking"
-];
 
 const normalizeModel = (value: unknown): string | null => {
   if (typeof value !== "string") {
@@ -42,111 +20,33 @@ const normalizeModel = (value: unknown): string | null => {
   return cleaned;
 };
 
-const uniqueModels = (models: string[]): string[] => {
-  const seen = new Set<string>();
-  const unique: string[] = [];
-
-  for (const model of models) {
-    const normalized = normalizeModel(model);
-    if (!normalized) {
-      continue;
-    }
-
-    const key = normalized.toLowerCase();
-    if (seen.has(key)) {
-      continue;
-    }
-
-    seen.add(key);
-    unique.push(normalized);
-  }
-
-  return unique;
-};
-
 export const getDefaultOllamaModel = (): string => {
   return normalizeModel(process.env.OLLAMA_MODEL) ?? DEFAULT_OLLAMA_MODEL;
 };
 
-export const getUserPreferredOllamaModel = async (userId: string): Promise<string | null> => {
-  const result = await query<UserModelRow>(
-    `SELECT preferred_ollama_model
-     FROM users
-     WHERE id = $1
-     LIMIT 1`,
-    [userId]
-  );
-
-  return normalizeModel(result.rows[0]?.preferred_ollama_model);
-};
-
-export const resolveOllamaModelForUser = async (userId?: string | null): Promise<string> => {
-  const fallback = getDefaultOllamaModel();
-  if (!userId) {
-    return fallback;
+export const getDefaultOllamaIsThinkingModel = (): boolean => {
+  const rawValue = process.env.OLLAMA_THINKING_MODEL;
+  if (typeof rawValue !== "string") {
+    return DEFAULT_OLLAMA_IS_THINKING_MODEL;
   }
 
-  const preferred = await getUserPreferredOllamaModel(userId);
-  return preferred ?? fallback;
-};
-
-export const saveUserPreferredOllamaModel = async (userId: string, model: string): Promise<string> => {
-  const normalized = normalizeModel(model);
+  const normalized = rawValue.trim().toLowerCase();
   if (!normalized) {
-    throw new Error("Model name is invalid.");
+    return DEFAULT_OLLAMA_IS_THINKING_MODEL;
   }
 
-  await query(
-    `UPDATE users
-     SET preferred_ollama_model = $2
-     WHERE id = $1`,
-    [userId, normalized]
-  );
-
-  return normalized;
+  return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
 };
 
-export const fetchLocalOllamaModels = async (baseUrl: string): Promise<string[]> => {
-  const response = await fetch(`${baseUrl}/api/tags`, {
-    method: "GET",
-    cache: "no-store"
-  });
-
-  if (!response.ok) {
-    throw new Error(`Failed to list models (${response.status}).`);
-  }
-
-  const payload = (await response.json()) as OllamaTagsResponse;
-  const rawModels = Array.isArray(payload.models) ? (payload.models as OllamaTagModel[]) : [];
-  const names = rawModels
-    .map((item) => {
-      if (!item || typeof item !== "object") {
-        return null;
-      }
-      return normalizeModel(item.name) ?? normalizeModel(item.model);
-    })
-    .filter((value): value is string => value !== null);
-
-  return uniqueModels(names);
+export const resolveOllamaSettingsForUser = async (): Promise<OllamaUserSettings> => {
+  return {
+    model: getDefaultOllamaModel(),
+    isThinkingModel: getDefaultOllamaIsThinkingModel()
+  };
 };
 
-export const mergeModelList = (...lists: string[][]): string[] => {
-  const flattened = lists.flat();
-  return uniqueModels(flattened);
-};
-
-export const isThinkingModel = (model: string): boolean => {
-  const normalized = model.trim().toLowerCase();
-  return THINKING_MODEL_HINTS.some((hint) => normalized.includes(hint));
-};
-
-export const getOllamaThinkOption = (model: string): boolean | "low" => {
-  const normalized = model.trim().toLowerCase();
-  if (normalized.includes("gpt-oss")) {
-    return "low";
-  }
-
-  return false;
+export const getOllamaThinkOption = (isThinkingModel: boolean): boolean => {
+  return isThinkingModel;
 };
 
 type OllamaContentCarrier = {
