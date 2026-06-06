@@ -1,10 +1,11 @@
-# Daily Speaking Practice (Next.js + Redux)
+# Daily Speaking Practice (Next.js client + Go API)
 
 A demo speaking-practice app rewritten from static HTML into a modern React stack:
 
-- Next.js (App Router)
+- Next.js (App Router) for the client
 - TypeScript
 - Redux Toolkit + React Redux
+- Go API gateway/backend
 
 ## Run locally
 
@@ -15,9 +16,37 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000).
 
+The production backend now lives in `backend/` and serves the existing `/api/*`
+contract. For local API work, run PostgreSQL and start the Go API:
+
+```bash
+docker compose up -d postgres
+DATABASE_URL=postgres://postgres:postgres@localhost:5432/daily_speaking npm run dev:api
+```
+
+`npm run dev` starts the Next.js client only. In Docker, the Go gateway exposes
+one public port and proxies non-API requests to Next.js.
+
+## Docker app
+
+Run the full app container plus PostgreSQL:
+
+```bash
+npm run docker:app
+```
+
+If local port `3000` is already in use:
+
+```bash
+APP_PORT=3218 npm run docker:app
+```
+
+Then open the selected host port, for example
+[http://localhost:3218](http://localhost:3218).
+
 ## PostgreSQL setup (real auth)
 
-The app now uses PostgreSQL for real authentication:
+The Go API uses PostgreSQL for real authentication:
 - user registration (`email + password`)
 - sign-in
 - server-side session storage with HTTP-only cookie
@@ -32,7 +61,8 @@ export DATABASE_URL=postgres://user:password@localhost:5432/daily_speaking
 export DATABASE_SSL=require
 ```
 
-Database schema is created automatically on first request to auth API.
+Database schema is migrated automatically by the Go API at startup from
+`backend/migrations/0001_init.sql`.
 
 Quick local start with Docker:
 
@@ -41,11 +71,11 @@ docker compose up -d postgres
 cp .env.example .env.local
 ```
 
-After creating/updating `.env.local`, restart `npm run dev`.
+After creating/updating `.env.local`, restart the relevant process.
 
 ## Ollama setup (daily questions)
 
-The app now uses local Ollama to:
+The Go API uses local/external Ollama to:
 - generate 3 speaking questions for each day
 - generate follow-up questions and useful words for a selected topic
 - generate grammar suggestions for transcripts
@@ -127,13 +157,23 @@ To remove everything Whisper-related from this project:
 rm -rf .venv tools/whisper/openai-models tools/whisper/cache tools/whisper/pip-cache tools/ffmpeg/bin
 ```
 
+In Docker, Ollama and Whisper models/binaries are external dependencies. Mount
+or configure them via the existing `WHISPER_*` and `OLLAMA_*` environment
+variables.
+
 ## Available scripts
 
 - `npm run dev` - start dev server
+- `npm run dev:api` - start the Go API gateway
+- `npm run backend:test` - run Go backend tests
+- `npm run docker:app` - build and start the full Docker app plus PostgreSQL
+- `npm run docker:build` - build the Docker app image only
+- `npm run docker:logs` - follow app container logs
+- `npm run docker:stop` - stop Docker Compose services
 - `npm run typecheck` - run TypeScript type checks
 - `npm run lint` - run ESLint
-- `npm run test:smoke` - run API smoke checks
-- `npm run quality` - run typecheck + lint + smoke checks
+- `npm run test:smoke` - run API smoke checks against `SMOKE_BASE_URL`, or start Go API on `SMOKE_PORT`
+- `npm run quality` - run typecheck + lint + Go backend tests
 - `npm run build` - production build
 - `npm run start` - run production server
 

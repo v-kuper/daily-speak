@@ -1,0 +1,13 @@
+.git
+.next
+node_modules
+npm-debug.log
+.env*
+.idea
+.DS_Store
+public/uploads
+tools/whisper/cache
+tools/whisper/pip-cache
+tools/whisper/openai-models
+tools/ffmpeg/bin/ffmpeg
+backend/tmp

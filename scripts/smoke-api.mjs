@@ -3,8 +3,8 @@ import process from "node:process";
 import { spawn } from "node:child_process";
 
 const port = Number.parseInt(process.env.SMOKE_PORT ?? "3217", 10);
-const baseUrl = `http://127.0.0.1:${port}`;
-const npmCmd = process.platform === "win32" ? "npm.cmd" : "npm";
+const externalBaseUrl = process.env.SMOKE_BASE_URL?.trim();
+const baseUrl = externalBaseUrl || `http://127.0.0.1:${port}`;
 const startupTimeoutMs = 120_000;
 const pollIntervalMs = 1_500;
 const expectedChecks = [
@@ -208,7 +208,15 @@ const stopServer = async (child) => {
     return;
   }
 
-  child.kill("SIGTERM");
+  if (process.platform !== "win32" && child.pid) {
+    try {
+      process.kill(-child.pid, "SIGTERM");
+    } catch {
+      child.kill("SIGTERM");
+    }
+  } else {
+    child.kill("SIGTERM");
+  }
 
   const exited = await new Promise((resolve) => {
     const timeout = setTimeout(() => {
@@ -222,25 +230,37 @@ const stopServer = async (child) => {
   });
 
   if (!exited) {
-    child.kill("SIGKILL");
+    if (process.platform !== "win32" && child.pid) {
+      try {
+        process.kill(-child.pid, "SIGKILL");
+      } catch {
+        child.kill("SIGKILL");
+      }
+    } else {
+      child.kill("SIGKILL");
+    }
   }
 };
 
 const main = async () => {
-  const server = spawn(npmCmd, ["run", "dev", "--", "--port", String(port)], {
-    stdio: ["ignore", "pipe", "pipe"],
-    env: {
-      ...process.env,
-      CI: "1",
-      NEXT_TELEMETRY_DISABLED: "1"
-    }
-  });
+  const server = externalBaseUrl
+    ? null
+    : spawn("go", ["run", "./cmd/api"], {
+        cwd: "backend",
+        stdio: ["ignore", "pipe", "pipe"],
+        detached: process.platform !== "win32",
+        env: {
+          ...process.env,
+          APP_ADDR: `:${port}`,
+          NEXT_UPSTREAM_URL: "http://127.0.0.1:9"
+        }
+      });
 
-  server.stdout.on("data", (chunk) => pushLog("dev:stdout", chunk));
-  server.stderr.on("data", (chunk) => pushLog("dev:stderr", chunk));
+  server?.stdout.on("data", (chunk) => pushLog("api:stdout", chunk));
+  server?.stderr.on("data", (chunk) => pushLog("api:stderr", chunk));
 
   let serverExitCode = null;
-  server.on("exit", (code) => {
+  server?.on("exit", (code) => {
     serverExitCode = code;
   });
 
