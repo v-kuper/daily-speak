@@ -21,7 +21,7 @@ export default function FeedScreen() {
   }, [dispatch, feedPostsStatus]);
 
   return (
-    <section>
+    <section className="screen-section feed-screen">
       <div className="feed-header">
         <h2>Feed</h2>
         <button className="btn btn-secondary btn-small" onClick={() => void dispatch(fetchFeedPosts())}>

@@ -25,7 +25,6 @@ export default function AppShell() {
   const dispatch = useAppDispatch();
   const {
     currentScreen,
-    activeTab,
     isAuthenticated,
     userEmail,
     authInitialized,
@@ -60,75 +59,105 @@ export default function AppShell() {
     void dispatch(saveRecording());
   }, [dispatch, isAuthenticated, pendingSaveAfterAuth, speakState, recordingSaveStatus]);
 
+  const canShowHistory = isAuthenticated;
+  const canShowFeed = isAuthenticated;
+  const headerSubtitle = isAuthenticated ? "Practice studio" : "Sign in to save progress";
+  const profileInitial = userEmail?.slice(0, 1).toUpperCase() ?? "P";
+  const highlightedTab =
+    currentScreen === "feed" || currentScreen === "feedThread"
+      ? "feed"
+      : currentScreen === "history" || currentScreen === "details" || currentScreen === "share"
+        ? "history"
+        : currentScreen === "speak"
+          ? "speak"
+          : null;
+
   return (
-    <div className="app-container">
-      <header className="header">
-        <h1>Daily Speaking</h1>
-        <div className="header-actions">
-          <ul className="nav-tabs" aria-label="Main navigation">
-            <li>
-              <button
-                className={activeTab === "speak" ? "active" : ""}
-                onClick={() => dispatch(navigateToTab("speak"))}
-              >
-                Speak
-              </button>
-            </li>
-            {isAuthenticated && (
-              <li>
-                <button
-                  className={activeTab === "history" ? "active" : ""}
-                  onClick={() => dispatch(navigateToTab("history"))}
-                >
-                  History
-                </button>
-              </li>
-            )}
-            {isAuthenticated && (
-              <li>
-                <button className={activeTab === "feed" ? "active" : ""} onClick={() => dispatch(navigateToTab("feed"))}>
-                  Feed
-                </button>
-              </li>
-            )}
-          </ul>
+    <div className="app-viewport">
+      <div className="phone-shell" role="application" aria-label="Daily Speaking Practice">
+        <div className="phone-status-bar" aria-hidden="true">
+          <span>9:41</span>
+          <span className="phone-camera" />
+          <span>LTE</span>
+        </div>
+
+        <header className="app-header">
+          <button
+            type="button"
+            className="icon-btn brand-mark"
+            onClick={() => dispatch(navigateToTab("speak"))}
+            aria-label="Go to speaking practice"
+          >
+            DS
+          </button>
+
+          <div className="app-title-block">
+            <h1>Daily Speaking</h1>
+            <p>{headerSubtitle}</p>
+          </div>
 
           {isAuthenticated ? (
-            <div className="session-info" onClick={() => dispatch(openProfile())} role="presentation">
-              <button type="button" className="session-email-btn" onClick={() => dispatch(openProfile())}>
-                {userEmail}
-              </button>
-              <button
-                type="button"
-                className="btn btn-secondary btn-small"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  void dispatch(logout());
-                }}
-                disabled={authStatus === "loading"}
-              >
-                Log out
-              </button>
-            </div>
+            <button type="button" className="icon-btn profile-trigger" onClick={() => dispatch(openProfile())}>
+              {profileInitial}
+            </button>
           ) : (
             <button className="btn btn-secondary btn-small" onClick={() => dispatch(openAuth())}>
-              Sign in / Register
+              Sign in
             </button>
           )}
-        </div>
-      </header>
+        </header>
 
-      <main className="main-content">
-        {currentScreen === "speak" && <SpeakScreen />}
-        {currentScreen === "history" && <HistoryScreen />}
-        {currentScreen === "feed" && <FeedScreen />}
-        {currentScreen === "feedThread" && <FeedThreadScreen />}
-        {currentScreen === "details" && <DetailsScreen />}
-        {currentScreen === "share" && <ShareScreen />}
-        {currentScreen === "auth" && <AuthScreen />}
-        {currentScreen === "profile" && <ProfileScreen />}
-        {currentScreen === "interests" && <InterestsScreen />}
-      </main>
+        {isAuthenticated && (
+          <div className="session-strip">
+            <button type="button" className="session-email-btn" onClick={() => dispatch(openProfile())}>
+              {userEmail}
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary btn-small"
+              onClick={() => void dispatch(logout())}
+              disabled={authStatus === "loading"}
+            >
+              Log out
+            </button>
+          </div>
+        )}
+
+        <main className="main-content">
+          {currentScreen === "speak" && <SpeakScreen />}
+          {currentScreen === "history" && <HistoryScreen />}
+          {currentScreen === "feed" && <FeedScreen />}
+          {currentScreen === "feedThread" && <FeedThreadScreen />}
+          {currentScreen === "details" && <DetailsScreen />}
+          {currentScreen === "share" && <ShareScreen />}
+          {currentScreen === "auth" && <AuthScreen />}
+          {currentScreen === "profile" && <ProfileScreen />}
+          {currentScreen === "interests" && <InterestsScreen />}
+        </main>
+
+        <nav className="bottom-tabs" aria-label="Main navigation">
+          <button className={highlightedTab === "speak" ? "active" : ""} onClick={() => dispatch(navigateToTab("speak"))}>
+            <span className="tab-icon">Rec</span>
+            <span>Speak</span>
+          </button>
+          <button
+            className={highlightedTab === "history" ? "active" : ""}
+            onClick={() => dispatch(navigateToTab("history"))}
+            disabled={!canShowHistory}
+          >
+            <span className="tab-icon">Log</span>
+            <span>History</span>
+          </button>
+          <button
+            className={highlightedTab === "feed" ? "active" : ""}
+            onClick={() => dispatch(navigateToTab("feed"))}
+            disabled={!canShowFeed}
+          >
+            <span className="tab-icon">Live</span>
+            <span>Feed</span>
+          </button>
+        </nav>
+      </div>
     </div>
   );
 }

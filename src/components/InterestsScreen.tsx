@@ -30,7 +30,7 @@ export default function InterestsScreen() {
   }, [dispatch, selectedInterestIds]);
 
   return (
-    <section className="profile-screen">
+    <section className="screen-section profile-screen interests-screen">
       <button className="back-btn" onClick={() => dispatch(backToProfile())}>
         ← Назад в профиль
       </button>

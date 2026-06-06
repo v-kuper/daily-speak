@@ -33,6 +33,7 @@ import {
   toggleWords,
   useCustomTopic as applyCustomTopic
 } from "../store/slices/appSlice";
+import AudioWaveform from "./AudioWaveform";
 
 const PHOTO_ACCEPTED_TYPES = new Set(["image/jpeg", "image/jpg", "image/png", "image/webp", "image/gif"]);
 const AUDIO_MIME_CANDIDATES = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"];
@@ -468,6 +469,11 @@ export default function SpeakScreen() {
         <div className="speak-card speak-hero-card">
           <div className="heading-sm">Daily practice</div>
           <h2 className="heading-xl speak-heading-tight">Start a new speaking session</h2>
+          <div className="studio-focus-panel">
+            <div className="studio-kicker">Ready when you are</div>
+            <AudioWaveform variant="hero" />
+            <div className="studio-timer-preview">00:00</div>
+          </div>
           {quotaHint && <div className="notice">{quotaHint}</div>}
           {freeLimitReached && (
             <div className="auth-error">Free weekly limit reached. New quota will be available next week.</div>
@@ -666,6 +672,11 @@ export default function SpeakScreen() {
           )}
           <h2 className="heading-xl speak-heading-tight">{selectedTopic}</h2>
 
+          <div className="studio-focus-panel studio-ready-panel">
+            <div className="studio-kicker">Session loaded</div>
+            <AudioWaveform variant="compact" />
+          </div>
+
           {quotaHint && <div className="notice">{quotaHint}</div>}
           {freeLimitReached && (
             <div className="auth-error">Free weekly limit reached. New quota will be available next week.</div>
@@ -766,6 +777,11 @@ export default function SpeakScreen() {
             <img src={pendingPhotoDataUrl} alt="Photo being described" className="photo-practice-preview" />
           )}
 
+          <div className="studio-focus-panel live">
+            <div className="studio-kicker">Live recording</div>
+            <AudioWaveform variant="hero" active />
+          </div>
+
           <div className="timer">{formatTime(recordingDuration)}</div>
           {isAuthenticated && (
             <div className="recorded-subtitle">Session limit: {formatTime(Math.max(0, sessionLimitSeconds))}</div>
@@ -806,6 +822,11 @@ export default function SpeakScreen() {
         {isPhotoPractice && pendingPhotoDataUrl && (
           <img src={pendingPhotoDataUrl} alt="Photo from completed session" className="photo-practice-preview" />
         )}
+
+        <div className="studio-focus-panel">
+          <div className="studio-kicker">Captured audio</div>
+          <AudioWaveform variant="hero" />
+        </div>
 
         {quotaHint && <div className="notice">{quotaHint}</div>}
         {isAuthenticated && !isSubscriber && normalizedWeeklyRemainingSeconds <= 0 && (
