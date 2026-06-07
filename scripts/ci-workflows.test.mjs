@@ -97,6 +97,17 @@ test("local deploy workflow verifies Whisper inside the Docker app container", (
   assert.match(deployWorkflow, /echo whisper-ok/);
 });
 
+test("local deploy workflow configures persistent uploaded media storage", () => {
+  const deployWorkflow = readFileSync(
+    ".github/workflows/deploy-local.yml",
+    "utf8",
+  );
+
+  assert.match(deployWorkflow, /UPLOADS_DIR:\s+\/app\/uploads/);
+  assert.match(deployWorkflow, /UPLOADS_HOST_DIR:\s+\$\{\{\s*vars\.UPLOADS_HOST_DIR/);
+  assert.match(deployWorkflow, /D:\\DailySpeaking\\data\\uploads/);
+});
+
 test("repository forces LF endings for scripts used inside Linux containers", () => {
   const gitAttributes = readFileSync(".gitattributes", "utf8");
 
@@ -117,6 +128,14 @@ test("Docker runtime includes the local Python Whisper backend", () => {
   assert.match(dockerfile, /WHISPER_BACKEND=openai/);
   assert.match(dockerfile, /WHISPER_PYTHON_BIN=\/opt\/whisper\/bin\/python/);
   assert.match(dockerfile, /WHISPER_FFMPEG_BIN=\/usr\/bin\/ffmpeg/);
+});
+
+test("Docker runtime and Compose use persistent uploaded media storage", () => {
+  assert.match(dockerfile, /UPLOADS_DIR=\/app\/uploads/);
+  assert.match(dockerfile, /mkdir -p \/app\/uploads/);
+  assert.match(dockerCompose, /UPLOADS_DIR:\s+\$\{UPLOADS_DIR:-\/app\/uploads\}/);
+  assert.match(dockerCompose, /\$\{UPLOADS_HOST_DIR:-\.\/\.data\/uploads\}:\/app\/uploads/);
+  assert.doesNotMatch(dockerCompose, /\.\/public\/uploads:\/app\/public\/uploads/);
 });
 
 test("Docker Compose defaults to the local Python Whisper backend", () => {

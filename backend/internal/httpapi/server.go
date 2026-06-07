@@ -38,6 +38,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", s.healthz)
 	mux.HandleFunc("/api/", s.routeAPI)
+	mux.Handle(uploadsURLPrefix, uploadsHandler())
 	mux.Handle("/", s.nextProxy)
 	return mux
 }

@@ -3,6 +3,8 @@ node_modules
 out
 coverage
 .superpowers/
+.cache/
+.data/
 .venv
 npm-debug.log*
 yarn-debug.log*

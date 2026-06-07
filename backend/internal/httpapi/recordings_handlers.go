@@ -287,7 +287,7 @@ func saveAudioFile(kind string, userID string, id string, audio *domain.ParsedAu
 	userDir := domain.SanitizePathSegment(userID)
 	fileName := id + "." + audio.Extension
 	publicBase := "/uploads/" + kind
-	storageRoot := filepath.Join("public", "uploads", kind)
+	storageRoot := filepath.Join(resolveUploadsDir(), kind)
 	directory := filepath.Join(storageRoot, userDir)
 	absolutePath := filepath.Join(directory, fileName)
 	data, err := domain.DecodeBase64(audio.Base64)

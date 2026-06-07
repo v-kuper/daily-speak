@@ -39,6 +39,16 @@ test("LAN HTTPS proxy script keeps deployment running when firewall rule creatio
   assert.match(script, /pre-create the same rule/);
 });
 
+test("LAN HTTPS proxy script prepares persistent uploaded media storage", () => {
+  const script = readFileSync(scriptPath, "utf8");
+
+  assert.match(script, /\[string\]\$UploadsHostDir/);
+  assert.match(script, /UPLOADS_HOST_DIR/);
+  assert.match(script, /New-Item -ItemType Directory -Force \$UploadsHostDir/);
+  assert.match(script, /\$env:UPLOADS_HOST_DIR = \$UploadsHostDir/);
+  assert.match(script, /\$env:UPLOADS_DIR = "\/app\/uploads"/);
+});
+
 test("LAN HTTPS proxy script prefers physical LAN addresses over Docker or WSL adapters", () => {
   const script = readFileSync(scriptPath, "utf8");
 
@@ -62,6 +72,8 @@ test("Windows CI docs describe the exact Docker HTTPS setup path", () => {
 
   assert.match(docs, /D:\\Projects\\daily-speak/);
   assert.match(docs, /D:\\Projects\\daily-speak\\lan-https/);
+  assert.match(docs, /D:\\DailySpeaking\\data\\uploads/);
+  assert.match(docs, /UPLOADS_HOST_DIR/);
   assert.match(docs, /scripts\\setup-lan-https-proxy\.ps1/);
   assert.match(docs, /https:\/\/<windows-ipv4>:3443/);
   assert.match(docs, /docker compose up --build -d app postgres lan-https/);

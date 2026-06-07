@@ -1,6 +1,7 @@
 param(
   [string]$HostIp = "",
   [int]$HttpsPort = $(if ($env:HTTPS_PORT) { [int]$env:HTTPS_PORT } else { 3443 }),
+  [string]$UploadsHostDir = "",
   [switch]$SkipCertificateGeneration,
   [switch]$SkipDockerComposeUp
 )
@@ -10,6 +11,14 @@ $ErrorActionPreference = "Stop"
 $ProjectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $HttpsDir = Join-Path $ProjectRoot "lan-https"
 $CertDir = Join-Path $HttpsDir "certs"
+
+if ([string]::IsNullOrWhiteSpace($UploadsHostDir)) {
+  if (-not [string]::IsNullOrWhiteSpace($env:UPLOADS_HOST_DIR)) {
+    $UploadsHostDir = $env:UPLOADS_HOST_DIR
+  } else {
+    $UploadsHostDir = Join-Path $ProjectRoot ".data\uploads"
+  }
+}
 
 function Get-PrivateIPv4Address {
   $addresses = Get-NetIPAddress -AddressFamily IPv4 |
@@ -92,6 +101,9 @@ if (-not $docker) {
 }
 
 New-Item -ItemType Directory -Force $CertDir | Out-Null
+New-Item -ItemType Directory -Force $UploadsHostDir | Out-Null
+$env:UPLOADS_HOST_DIR = $UploadsHostDir
+$env:UPLOADS_DIR = "/app/uploads"
 Push-Location $ProjectRoot
 
 try {
@@ -124,13 +136,15 @@ https://${HostIp}:${HttpsPort}, https://localhost:${HttpsPort}, https://127.0.0.
   Write-Host ""
   Write-Host "LAN HTTPS Docker proxy files are ready:"
   Write-Host "  $HttpsDir"
+  Write-Host "Uploaded media storage:"
+  Write-Host "  $UploadsHostDir"
   Write-Host ""
   Write-Host "Allow the HTTPS port in an elevated PowerShell once:"
   Write-Host "  New-NetFirewallRule -DisplayName `"Daily Speaking HTTPS $HttpsPort`" -Direction Inbound -Protocol TCP -LocalPort $HttpsPort -Action Allow"
   Write-Host ""
   Write-Host "Start or restart the Docker app with HTTPS:"
   Write-Host "  cd `"$ProjectRoot`""
-  Write-Host "  `$env:HTTPS_PORT=$HttpsPort; docker compose up --build -d app postgres lan-https"
+  Write-Host "  `$env:HTTPS_PORT=$HttpsPort; `$env:UPLOADS_HOST_DIR=`"$UploadsHostDir`"; `$env:UPLOADS_DIR=`"/app/uploads`"; docker compose up --build -d app postgres lan-https"
   Write-Host ""
   Write-Host "Open from another LAN device:"
   Write-Host "  https://${HostIp}:${HttpsPort}"

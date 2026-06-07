@@ -25,6 +25,8 @@ jobs:
       APP_PORT: ${{ vars.APP_PORT || '3218' }}
       HTTPS_PORT: ${{ vars.HTTPS_PORT || '3443' }}
       POSTGRES_PORT: ${{ vars.POSTGRES_PORT || '5433' }}
+      UPLOADS_HOST_DIR: ${{ vars.UPLOADS_HOST_DIR || 'D:\DailySpeaking\data\uploads' }}
+      UPLOADS_DIR: /app/uploads
       OLLAMA_BASE_URL: ${{ vars.OLLAMA_BASE_URL || 'http://host.docker.internal:11434' }}
       OLLAMA_MODEL: ${{ vars.OLLAMA_MODEL || 'gemma4:31b-cloud' }}
       OLLAMA_THINKING_MODEL: ${{ vars.OLLAMA_THINKING_MODEL || 'true' }}

@@ -22,6 +22,7 @@ ENV PORT=3001
 ENV HOSTNAME=127.0.0.1
 ENV APP_ADDR=:3000
 ENV NEXT_UPSTREAM_URL=http://127.0.0.1:3001
+ENV UPLOADS_DIR=/app/uploads
 ENV WHISPER_BACKEND=openai
 ENV WHISPER_PYTHON_BIN=/opt/whisper/bin/python
 ENV WHISPER_OPENAI_MODEL=base.en
@@ -41,7 +42,7 @@ COPY --from=next-build /app/.next/static ./.next/static
 COPY --from=next-build /app/public ./public
 COPY --from=go-build /out/daily-speaking-api ./daily-speaking-api
 COPY docker-entrypoint.sh ./docker-entrypoint.sh
-RUN mkdir -p /app/tools/whisper/openai-models /app/tools/whisper/cache \
+RUN mkdir -p /app/uploads /app/tools/whisper/openai-models /app/tools/whisper/cache \
   && chmod +x ./docker-entrypoint.sh ./daily-speaking-api
 EXPOSE 3000
 CMD ["./docker-entrypoint.sh"]

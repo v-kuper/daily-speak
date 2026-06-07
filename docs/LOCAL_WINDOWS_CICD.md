@@ -11,11 +11,16 @@ project checkout. A clean layout is:
 ```text
 D:\Projects\daily-speak
 D:\Runners\daily-speaking
+D:\DailySpeaking\data\uploads
 ```
 
 Do not put the runner application inside `D:\Projects\daily-speak`. The runner
 stores service files, logs, credentials, work directories, and auto-update files
 that should not be mixed with repository files.
+
+Do not store uploaded recordings inside the Git checkout either. The deploy
+workflow uses `D:\DailySpeaking\data\uploads` by default for persistent media
+storage, then mounts that folder into the app container as `/app/uploads`.
 
 `D:\Projects\daily-speak` is the developer checkout you edit manually. GitHub
 Actions jobs use their own checkout under the runner work directory, for
@@ -108,6 +113,7 @@ Automatic deploy:
 - the Windows runner runs `npm run quality`
 - the runner runs `.\scripts\setup-lan-https-proxy.ps1`
 - the script creates `lan-https` cert/config files in the checkout
+- the script creates the persistent uploaded media directory
 - the script opens inbound TCP `HTTPS_PORT` in Windows Firewall
 - the script runs `docker compose up --build -d app postgres lan-https`
 - the workflow checks `http://127.0.0.1:3218/healthz`
@@ -117,6 +123,46 @@ Manual deploy:
 1. Open `Actions` in GitHub.
 2. Select `Deploy Local Windows`.
 3. Click `Run workflow`.
+
+## Uploaded media storage
+
+Audio recordings are stored on the Windows host filesystem, not inside the
+Docker image and not inside PostgreSQL. The app container sees the media folder
+at:
+
+```text
+/app/uploads
+```
+
+The default Windows host folder is:
+
+```text
+D:\DailySpeaking\data\uploads
+```
+
+When a user saves a recording, the Go API writes the audio file under:
+
+```text
+D:\DailySpeaking\data\uploads\recordings\<user-id>\<recording-id>.<ext>
+```
+
+PostgreSQL stores only the public URL, for example:
+
+```text
+/uploads/recordings/<user-id>/<recording-id>.webm
+```
+
+The Go API serves `/uploads/...` directly before proxying other requests to
+Next.js. This keeps playback working for phones and other LAN clients after
+CI/CD redeploys. `actions/checkout` can clean the repo checkout, but it does
+not touch `D:\DailySpeaking\data\uploads`.
+
+To use a different media folder, set the repository variable
+`UPLOADS_HOST_DIR`, for example:
+
+```text
+E:\DailySpeaking\uploads
+```
 
 ## Access from LAN
 
@@ -165,6 +211,7 @@ The script writes:
 D:\Projects\daily-speak\lan-https\certs\daily-speaking.pem
 D:\Projects\daily-speak\lan-https\certs\daily-speaking-key.pem
 D:\Projects\daily-speak\lan-https\Caddyfile
+D:\DailySpeaking\data\uploads
 ```
 
 It also runs:
@@ -188,7 +235,10 @@ To restart the Docker app with HTTPS later:
 
 ```powershell
 cd D:\Projects\daily-speak
-$env:HTTPS_PORT=3443; docker compose up --build -d app postgres lan-https
+$env:HTTPS_PORT=3443
+$env:UPLOADS_HOST_DIR="D:\DailySpeaking\data\uploads"
+$env:UPLOADS_DIR="/app/uploads"
+docker compose up --build -d app postgres lan-https
 ```
 
 Then open the HTTPS URL from another LAN device:
@@ -220,6 +270,8 @@ The workflow uses GitHub repository variables when present:
 - `APP_PORT`, default `3218`
 - `HTTPS_PORT`, default `3443`
 - `POSTGRES_PORT`, default `5433`
+- `UPLOADS_HOST_DIR`, default `D:\DailySpeaking\data\uploads`
+- `UPLOADS_DIR`, default `/app/uploads`
 - `OLLAMA_BASE_URL`, default `http://host.docker.internal:11434`
 - `OLLAMA_MODEL`, default `gemma4:31b-cloud`
 - `OLLAMA_THINKING_MODEL`, default `true`
