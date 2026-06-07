@@ -26,11 +26,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Typecheck
-        run: npm run typecheck
-
-      - name: Lint
-        run: npm run lint
+      - name: Quality gates
+        run: npm run quality
 
       - name: Smoke API checks
         run: npm run test:smoke

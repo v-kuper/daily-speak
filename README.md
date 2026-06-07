@@ -35,14 +35,49 @@ Run the full app container plus PostgreSQL:
 npm run docker:app
 ```
 
-If local port `3000` is already in use:
+Then open [http://localhost:3218](http://localhost:3218).
+
+If you want a different host port:
 
 ```bash
-APP_PORT=3218 npm run docker:app
+APP_PORT=3000 npm run docker:app
 ```
 
-Then open the selected host port, for example
-[http://localhost:3218](http://localhost:3218).
+## Windows/LAN hosting
+
+On a Windows machine on your local network:
+
+```bash
+npm install
+npm run docker:lan
+```
+
+This single command builds the Next.js client, builds the Go API, starts the
+app container, starts PostgreSQL, and prints local-network URLs for the host
+machine. From another device on the same LAN, open the printed address, for
+example:
+
+```text
+http://192.168.1.42:3218
+```
+
+You do not need to start the frontend, backend, or database separately. The app
+container exposes only the app port to the LAN. PostgreSQL stays inside Docker
+and is bound to `127.0.0.1` on the host for local admin tools.
+
+If another device cannot connect:
+- make sure both devices are on the same Wi-Fi/LAN
+- allow inbound TCP port `3218` in Windows Defender Firewall / Docker Desktop
+- run `ipconfig` on Windows and use the IPv4 address of that machine
+
+PowerShell port override:
+
+```powershell
+$env:APP_PORT=8080; npm run docker:lan
+```
+
+CI/CD setup for the Windows LAN host is documented in
+`docs/LOCAL_WINDOWS_CICD.md`.
 
 ## PostgreSQL setup (real auth)
 
@@ -167,12 +202,14 @@ variables.
 - `npm run dev:api` - start the Go API gateway
 - `npm run backend:test` - run Go backend tests
 - `npm run docker:app` - build and start the full Docker app plus PostgreSQL
+- `npm run docker:lan` - build/start Docker app plus PostgreSQL and print LAN URLs
 - `npm run docker:build` - build the Docker app image only
 - `npm run docker:logs` - follow app container logs
 - `npm run docker:stop` - stop Docker Compose services
 - `npm run typecheck` - run TypeScript type checks
 - `npm run lint` - run ESLint
 - `npm run test:smoke` - run API smoke checks against `SMOKE_BASE_URL`, or start Go API on `SMOKE_PORT`
+- `npm run test:docker-lan` - run LAN helper unit tests
 - `npm run quality` - run typecheck + lint + Go backend tests
 - `npm run build` - production build
 - `npm run start` - run production server
@@ -198,4 +235,5 @@ Defaults:
 
 ## Project docs
 
+- Local Windows CI/CD setup: `docs/LOCAL_WINDOWS_CICD.md`
 - Technical debt audit and refactor roadmap: `docs/TECH_DEBT.md`
