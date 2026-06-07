@@ -82,6 +82,12 @@ func (s *Server) routeAPI(w http.ResponseWriter, r *http.Request) {
 		s.handlePutEnglishLevel(w, r)
 	case path == "/api/user/recordings" && r.Method == http.MethodPost:
 		s.handleCreateRecording(w, r)
+	case strings.HasPrefix(path, "/api/recordings/") && r.Method == http.MethodGet:
+		s.handleGetRecording(w, r, strings.TrimPrefix(path, "/api/recordings/"))
+	case path == "/api/recording-sessions" && r.Method == http.MethodPost:
+		s.handleCreateRecordingSession(w, r)
+	case strings.HasPrefix(path, "/api/recording-sessions/"):
+		s.routeRecordingSessionPath(w, r, strings.TrimPrefix(path, "/api/recording-sessions/"))
 	case path == "/api/feed/posts" && r.Method == http.MethodGet:
 		s.handleFeedPosts(w, r)
 	case path == "/api/feed/posts" && r.Method == http.MethodPost:

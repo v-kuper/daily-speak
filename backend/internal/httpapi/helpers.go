@@ -18,16 +18,18 @@ type suggestion struct {
 }
 
 type recordingResponse struct {
-	ID           string       `json:"id"`
-	Topic        string       `json:"topic"`
-	Duration     int          `json:"duration"`
-	Timestamp    string       `json:"timestamp"`
-	Transcript   string       `json:"transcript"`
-	Suggestions  []suggestion `json:"suggestions"`
-	PracticeType string       `json:"practiceType"`
-	AudioDataURL *string      `json:"audioDataUrl"`
-	PhotoDataURL *string      `json:"photoDataUrl"`
-	PhotoObject  *string      `json:"photoObject"`
+	ID              string       `json:"id"`
+	Topic           string       `json:"topic"`
+	Duration        int          `json:"duration"`
+	Timestamp       string       `json:"timestamp"`
+	Status          string       `json:"status"`
+	Transcript      string       `json:"transcript"`
+	Suggestions     []suggestion `json:"suggestions"`
+	PracticeType    string       `json:"practiceType"`
+	AudioDataURL    *string      `json:"audioDataUrl"`
+	PhotoDataURL    *string      `json:"photoDataUrl"`
+	PhotoObject     *string      `json:"photoObject"`
+	ProcessingError *string      `json:"processingError"`
 }
 
 func (s *Server) optionalUser(r *http.Request) (*auth.User, error) {

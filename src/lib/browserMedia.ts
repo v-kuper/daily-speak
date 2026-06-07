@@ -1,5 +1,19 @@
 export const AUDIO_MIME_CANDIDATES = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"];
 
+const AUDIO_EXTENSION_BY_MIME: Record<string, string> = {
+  "audio/webm": "webm",
+  "video/webm": "webm",
+  "audio/mp4": "m4a",
+  "audio/x-m4a": "m4a",
+  "video/mp4": "m4a",
+  "audio/ogg": "ogg",
+  "video/ogg": "ogg",
+  "audio/wav": "wav",
+  "audio/x-wav": "wav",
+  "audio/vnd.wave": "wav",
+  "audio/mpeg": "mp3"
+};
+
 export const MICROPHONE_SECURE_CONTEXT_ERROR =
   "Microphone recording requires HTTPS or localhost. Open this app with an HTTPS URL; remote HTTP/IP addresses cannot show the browser microphone permission prompt.";
 
@@ -99,6 +113,29 @@ export const resolvePreferredAudioMimeType = (
   }
 
   return null;
+};
+
+export const resolveAudioFileExtension = (mimeType: string): string => {
+  const baseMime = mimeType.split(";", 1)[0]?.trim().toLowerCase() ?? "";
+  const mapped = AUDIO_EXTENSION_BY_MIME[baseMime];
+  if (mapped) {
+    return mapped;
+  }
+  if (!baseMime.startsWith("audio/") && !baseMime.startsWith("video/")) {
+    return "webm";
+  }
+  const subtype = baseMime.replace(/^(audio|video)\//, "").replace(/^x-/, "");
+  if (subtype === "mpeg") {
+    return "mp3";
+  }
+  if (subtype === "mp4") {
+    return "m4a";
+  }
+  if (subtype === "wave") {
+    return "wav";
+  }
+  const cleaned = subtype.replace(/[^a-z0-9]+/g, "");
+  return cleaned && cleaned.length <= 10 ? cleaned : "webm";
 };
 
 export const resolveMicrophoneError = (

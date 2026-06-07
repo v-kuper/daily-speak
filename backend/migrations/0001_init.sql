@@ -55,12 +55,38 @@ ALTER TABLE recordings
 ADD COLUMN IF NOT EXISTS audio_data_url TEXT;
 
 ALTER TABLE recordings
+ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'ready';
+
+ALTER TABLE recordings
+ADD COLUMN IF NOT EXISTS processing_error TEXT;
+
+ALTER TABLE recordings
 ADD COLUMN IF NOT EXISTS photo_data_url TEXT;
 
 ALTER TABLE recordings
 ADD COLUMN IF NOT EXISTS photo_object TEXT;
 
 CREATE INDEX IF NOT EXISTS recordings_user_id_timestamp_idx ON recordings (user_id, timestamp DESC);
+
+CREATE TABLE IF NOT EXISTS recording_upload_sessions (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  topic TEXT NOT NULL,
+  duration INTEGER NOT NULL,
+  timestamp TIMESTAMPTZ NOT NULL,
+  practice_type TEXT NOT NULL DEFAULT 'topic',
+  photo_data_url TEXT,
+  photo_object TEXT,
+  audio_extension TEXT,
+  chunk_count INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'open',
+  recording_id TEXT REFERENCES recordings(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS recording_upload_sessions_user_id_idx
+  ON recording_upload_sessions (user_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS feed_posts (
   id TEXT PRIMARY KEY,

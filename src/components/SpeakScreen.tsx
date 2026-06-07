@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, type ChangeEvent } from "react";
 import {
   readBlobAsDataUrl,
+  resolveAudioFileExtension,
   resolveBrowserRecordingSupportError,
   resolveMicrophoneError,
   resolvePreferredAudioMimeType
@@ -26,6 +27,7 @@ import {
   setCustomTopicDraft,
   setRecordingAudioDataUrl,
   setRecordingInputError,
+  setRecordingUploadSessionId,
   setPhotoForPractice,
   setPhotoObjectDraft,
   setPhotoUploadError,
@@ -57,6 +59,20 @@ const readFileAsDataUrl = (file: File): Promise<string> => {
     reader.onerror = () => reject(new Error("Failed to read image file."));
     reader.readAsDataURL(file);
   });
+};
+
+const uploadRecordingChunk = async (sessionId: string, chunkIndex: number, blob: Blob): Promise<void> => {
+  const form = new FormData();
+  const extension = resolveAudioFileExtension(blob.type);
+  form.append("chunkIndex", String(chunkIndex));
+  form.append("audio", blob, `chunk-${chunkIndex}.${extension}`);
+  const response = await fetch(`/api/recording-sessions/${encodeURIComponent(sessionId)}/chunks`, {
+    method: "POST",
+    body: form
+  });
+  if (!response.ok) {
+    throw new Error("Failed to upload recording chunk.");
+  }
 };
 
 type StudyTextSegment = {
@@ -189,6 +205,10 @@ export default function SpeakScreen() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const mediaChunksRef = useRef<Blob[]>([]);
+  const uploadSessionIdRef = useRef<string | null>(null);
+  const uploadChunkIndexRef = useRef(0);
+  const chunkUploadQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const chunkUploadFailedRef = useRef(false);
 
   const releaseMedia = useCallback(() => {
     if (mediaStreamRef.current) {
@@ -201,10 +221,55 @@ export default function SpeakScreen() {
     mediaChunksRef.current = [];
   }, []);
 
+  const createUploadSession = useCallback(async (): Promise<string | null> => {
+    if (!isAuthenticated) {
+      dispatch(setRecordingUploadSessionId(null));
+      return null;
+    }
+
+    const normalizedPhotoObject = pendingPhotoObjectDraft
+      .trim()
+      .replace(/\s+/g, " ")
+      .slice(0, 120);
+    const photoObject = normalizedPhotoObject || null;
+    const topic =
+      recordingPracticeType === "photo_description"
+        ? photoObject
+          ? `Photo description: ${photoObject}`
+          : "Photo description"
+        : selectedTopic ?? "Free talk";
+    const response = await fetch("/api/recording-sessions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        topic,
+        duration: 0,
+        timestamp: new Date().toISOString(),
+        practiceType: recordingPracticeType,
+        photoDataUrl: recordingPracticeType === "photo_description" ? pendingPhotoDataUrl : null,
+        photoObject
+      })
+    });
+    const payload = (await response.json().catch(() => null)) as { sessionId?: unknown; error?: string } | null;
+    if (!response.ok || typeof payload?.sessionId !== "string" || !payload.sessionId.trim()) {
+      throw new Error(payload?.error ?? "Failed to start recording upload.");
+    }
+    const sessionId = payload.sessionId.trim();
+    dispatch(setRecordingUploadSessionId(sessionId));
+    return sessionId;
+  }, [dispatch, isAuthenticated, pendingPhotoDataUrl, pendingPhotoObjectDraft, recordingPracticeType, selectedTopic]);
+
   const createRecordingFromMicrophone = useCallback(
     async (onRecordingStarted: () => void) => {
       dispatch(setRecordingInputError(null));
       dispatch(setRecordingAudioDataUrl(null));
+      dispatch(setRecordingUploadSessionId(null));
+      uploadSessionIdRef.current = null;
+      uploadChunkIndexRef.current = 0;
+      chunkUploadFailedRef.current = false;
+      chunkUploadQueueRef.current = Promise.resolve();
 
       const recordingSupportError = resolveBrowserRecordingSupportError();
       if (recordingSupportError) {
@@ -213,6 +278,13 @@ export default function SpeakScreen() {
       }
 
       try {
+        let uploadSessionId: string | null = null;
+        try {
+          uploadSessionId = await createUploadSession();
+        } catch {
+          dispatch(setRecordingInputError("Live upload is unavailable. The full recording will be uploaded when you save."));
+        }
+
         const getUserMedia = navigator.mediaDevices?.getUserMedia?.bind(navigator.mediaDevices);
         if (!getUserMedia) {
           dispatch(setRecordingInputError("Your browser does not support microphone recording."));
@@ -226,10 +298,25 @@ export default function SpeakScreen() {
         mediaStreamRef.current = stream;
         mediaRecorderRef.current = recorder;
         mediaChunksRef.current = [];
+        uploadSessionIdRef.current = uploadSessionId;
 
         recorder.ondataavailable = (event: BlobEvent) => {
           if (event.data && event.data.size > 0) {
             mediaChunksRef.current.push(event.data);
+            const sessionId = uploadSessionIdRef.current;
+            if (sessionId && !chunkUploadFailedRef.current) {
+              const chunkIndex = uploadChunkIndexRef.current;
+              uploadChunkIndexRef.current += 1;
+              const blob = event.data;
+              chunkUploadQueueRef.current = chunkUploadQueueRef.current
+                .catch(() => undefined)
+                .then(() => uploadRecordingChunk(sessionId, chunkIndex, blob))
+                .catch(() => {
+                  chunkUploadFailedRef.current = true;
+                  dispatch(setRecordingUploadSessionId(null));
+                  dispatch(setRecordingInputError("Live upload paused. The full recording will be uploaded when you save."));
+                });
+            }
           }
         };
 
@@ -248,8 +335,8 @@ export default function SpeakScreen() {
           }
 
           const blob = new Blob(chunks, { type: resultingType });
-          void readBlobAsDataUrl(blob)
-            .then((dataUrl) => {
+          void Promise.all([readBlobAsDataUrl(blob), chunkUploadQueueRef.current])
+            .then(([dataUrl]) => {
               dispatch(setRecordingAudioDataUrl(dataUrl));
             })
             .catch(() => {
@@ -257,14 +344,14 @@ export default function SpeakScreen() {
             });
         };
 
-        recorder.start();
+        recorder.start(uploadSessionId ? 5000 : undefined);
         onRecordingStarted();
       } catch (error) {
         releaseMedia();
         dispatch(setRecordingInputError(resolveMicrophoneError(error)));
       }
     },
-    [dispatch, releaseMedia]
+    [createUploadSession, dispatch, releaseMedia]
   );
 
   const onStartFreeTalk = () => {

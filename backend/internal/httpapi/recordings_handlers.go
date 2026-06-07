@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -129,8 +130,8 @@ func (s *Server) handleCreateRecording(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	suggestions := s.generateRecordingSuggestions(r, transcript, topic, interests, practiceType, photoObject, logger)
-	suggestionJSON, _ := json.Marshal(suggestions)
+	suggestions := s.generateRecordingSuggestions(r.Context(), transcript, topic, interests, practiceType, photoObject, logger)
+	suggestionJSON := marshalSuggestions(suggestions)
 	timestamp := domain.ParseTimestamp(stringAny(source["timestamp"]))
 
 	var inserted struct {
@@ -157,7 +158,7 @@ func (s *Server) handleCreateRecording(w http.ResponseWriter, r *http.Request) {
 		duration,
 		timestamp,
 		transcript,
-		string(suggestionJSON),
+		suggestionJSON,
 		practiceType,
 		savedAudio.publicURL,
 		stringOrNil(practiceType == "photo_description", photoDataURL),
@@ -179,6 +180,7 @@ func (s *Server) handleCreateRecording(w http.ResponseWriter, r *http.Request) {
 		Topic:        inserted.Topic,
 		Duration:     domain.ToNonNegativeInt(inserted.Duration),
 		Timestamp:    inserted.Timestamp.UTC().Format(time.RFC3339Nano),
+		Status:       "ready",
 		Transcript:   inserted.Transcript,
 		Suggestions:  normalizeSuggestions(inserted.Suggestions, 8),
 		PracticeType: domain.NormalizePracticeType(inserted.PracticeType),
@@ -190,7 +192,12 @@ func (s *Server) handleCreateRecording(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, map[string]any{"recording": recording, "quota": q})
 }
 
-func (s *Server) generateRecordingSuggestions(r *http.Request, transcript string, topic string, interests []string, practiceType string, photoObject *string, logger logging.Logger) []suggestion {
+func marshalSuggestions(suggestions []suggestion) string {
+	suggestionJSON, _ := json.Marshal(suggestions)
+	return string(suggestionJSON)
+}
+
+func (s *Server) generateRecordingSuggestions(ctx context.Context, transcript string, topic string, interests []string, practiceType string, photoObject *string, logger logging.Logger) []suggestion {
 	if strings.TrimSpace(transcript) == "" {
 		return []suggestion{}
 	}
@@ -216,7 +223,7 @@ func (s *Server) generateRecordingSuggestions(r *http.Request, transcript string
 		if useJSONFormat {
 			body["format"] = "json"
 		}
-		payload, _, err := ai.PostChat(r.Context(), body)
+		payload, _, err := ai.PostChat(ctx, body)
 		if err != nil {
 			logger.Warn("ollama.suggestions_request_failed", logging.ErrorMeta(err))
 			return []suggestion{}

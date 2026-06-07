@@ -30,6 +30,10 @@ func ForRequest(scope string, r *http.Request) Logger {
 	return Logger{scope: scope, requestID: requestID, method: r.Method, path: r.URL.Path}
 }
 
+func ForBackground(scope string) Logger {
+	return Logger{scope: scope, requestID: uuid.NewString()[:8], method: "BACKGROUND", path: ""}
+}
+
 func (l Logger) Debug(message string, meta map[string]any) { l.write("debug", message, meta) }
 func (l Logger) Info(message string, meta map[string]any)  { l.write("info", message, meta) }
 func (l Logger) Warn(message string, meta map[string]any)  { l.write("warn", message, meta) }

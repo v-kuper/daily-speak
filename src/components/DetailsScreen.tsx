@@ -6,6 +6,7 @@ import { formatTime } from "../lib/utils";
 import { useAppDispatch, useAppSelector } from "../store/hooks";
 import {
   backToHistory,
+  fetchRecording,
   fetchFeedPosts,
   openShareModal,
   resetPlaybackState,
@@ -132,6 +133,8 @@ export default function DetailsScreen() {
   );
   const recordingId = recording?.id ?? null;
   const hasAudio = Boolean(audioSrc);
+  const isProcessing = recording?.status === "processing";
+  const isFailed = recording?.status === "failed";
   const recordingDuration = recording?.duration ?? 0;
   const playbackPercent = recordingDuration > 0 ? Math.max(0, Math.min(100, (playbackPosition / recordingDuration) * 100)) : 0;
   const hasTranscript = recording ? recording.transcript.trim().length > 0 : false;
@@ -160,6 +163,22 @@ export default function DetailsScreen() {
 
     void dispatch(fetchFeedPosts());
   }, [dispatch, feedPostsStatus, recordingId]);
+
+  useEffect(() => {
+    if (!recordingId || recording?.status !== "processing") {
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      void dispatch(fetchRecording(recordingId));
+    }, 3000);
+
+    void dispatch(fetchRecording(recordingId));
+
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, [dispatch, recording?.status, recordingId]);
 
   useEffect(() => {
     if (!sharedFeedPostId) {
@@ -372,6 +391,10 @@ export default function DetailsScreen() {
       <h2>Recording</h2>
 
       {copyMessage && <div className="notice">{copyMessage}</div>}
+      {isProcessing && <div className="notice">Processing recording in the background. You can come back later.</div>}
+      {isFailed && (
+        <div className="auth-error">{recording.processingError ?? "Recording processing failed. Try recording again."}</div>
+      )}
 
       {recording.photoDataUrl && (
         <div className="details-photo-card">
@@ -412,7 +435,9 @@ export default function DetailsScreen() {
 
       <div className="transcript-section">
         <div className="section-title">Transcript</div>
-        {hasTranscript ? (
+        {isFailed ? (
+          <div className="empty-state">{recording?.processingError ?? "Recording processing failed. Try recording again."}</div>
+        ) : hasTranscript ? (
           <div className="transcript-text">
             {transcriptSegments.map((segment, index) =>
               segment.isError ? (
@@ -425,13 +450,17 @@ export default function DetailsScreen() {
             )}
           </div>
         ) : (
-          <div className="empty-state">Transcript is in progress and will be available soon.</div>
+          <div className="empty-state">
+            {isProcessing ? "Processing recording. Transcript will appear here automatically." : "Transcript is unavailable."}
+          </div>
         )}
       </div>
 
       <div className="suggestions-section">
         <div className="section-title">AI Suggestions</div>
-        {hasSuggestions ? (
+        {isFailed ? (
+          <div className="empty-state">AI suggestions are unavailable for this recording.</div>
+        ) : hasSuggestions ? (
           recording.suggestions.map((suggestion) => (
             <div key={suggestion.wrong} className="suggestion-item">
               <div className="suggestion-wrong">
@@ -446,7 +475,9 @@ export default function DetailsScreen() {
             </div>
           ))
         ) : (
-          <div className="empty-state">AI error analysis is in progress and will be available soon.</div>
+          <div className="empty-state">
+            {isProcessing ? "AI error analysis is running in the background." : "AI suggestions are unavailable."}
+          </div>
         )}
       </div>
 

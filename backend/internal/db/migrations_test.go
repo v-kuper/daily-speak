@@ -12,6 +12,7 @@ func TestInitialMigrationContainsCurrentTables(t *testing.T) {
 		"CREATE TABLE IF NOT EXISTS user_sessions",
 		"CREATE TABLE IF NOT EXISTS user_interests",
 		"CREATE TABLE IF NOT EXISTS recordings",
+		"CREATE TABLE IF NOT EXISTS recording_upload_sessions",
 		"CREATE TABLE IF NOT EXISTS feed_posts",
 		"CREATE TABLE IF NOT EXISTS feed_replies",
 		"CREATE TABLE IF NOT EXISTS feed_post_reactions",

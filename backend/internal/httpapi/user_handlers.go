@@ -184,7 +184,8 @@ func (s *Server) handleUserData(w http.ResponseWriter, r *http.Request) {
 	recordingRows, err := s.db.Query(r.Context(), `
 		SELECT
 		  id, topic, duration, timestamp, transcript, suggestions,
-		  practice_type, audio_data_url, photo_data_url, photo_object
+		  practice_type, audio_data_url, photo_data_url, photo_object,
+		  status, processing_error
 		FROM recordings
 		WHERE user_id = $1
 		ORDER BY timestamp DESC`, user.ID)
@@ -195,26 +196,28 @@ func (s *Server) handleUserData(w http.ResponseWriter, r *http.Request) {
 	defer recordingRows.Close()
 	recordings := []recordingResponse{}
 	for recordingRows.Next() {
-		var id, topic, transcript, practiceType string
+		var id, topic, transcript, practiceType, status string
 		var duration int
 		var timestamp time.Time
 		var suggestionsBytes []byte
-		var audioDataURL, photoDataURL, photoObject *string
-		if err := recordingRows.Scan(&id, &topic, &duration, &timestamp, &transcript, &suggestionsBytes, &practiceType, &audioDataURL, &photoDataURL, &photoObject); err != nil {
+		var audioDataURL, photoDataURL, photoObject, processingError *string
+		if err := recordingRows.Scan(&id, &topic, &duration, &timestamp, &transcript, &suggestionsBytes, &practiceType, &audioDataURL, &photoDataURL, &photoObject, &status, &processingError); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to load user data."})
 			return
 		}
 		recordings = append(recordings, recordingResponse{
-			ID:           id,
-			Topic:        topic,
-			Duration:     domain.ToNonNegativeInt(duration),
-			Timestamp:    timestamp.UTC().Format(time.RFC3339Nano),
-			Transcript:   transcript,
-			Suggestions:  normalizeSuggestions(suggestionsBytes, 20),
-			PracticeType: domain.NormalizePracticeType(practiceType),
-			AudioDataURL: normalizeOptionalAudio(audioDataURL, true),
-			PhotoDataURL: normalizeOptionalPhoto(photoDataURL),
-			PhotoObject:  normalizeOptionalPhotoObject(photoObject),
+			ID:              id,
+			Topic:           topic,
+			Duration:        domain.ToNonNegativeInt(duration),
+			Timestamp:       timestamp.UTC().Format(time.RFC3339Nano),
+			Status:          normalizeRecordingStatus(status),
+			Transcript:      transcript,
+			Suggestions:     normalizeSuggestions(suggestionsBytes, 20),
+			PracticeType:    domain.NormalizePracticeType(practiceType),
+			AudioDataURL:    normalizeOptionalAudio(audioDataURL, true),
+			PhotoDataURL:    normalizeOptionalPhoto(photoDataURL),
+			PhotoObject:     normalizeOptionalPhotoObject(photoObject),
+			ProcessingError: normalizeOptionalProcessingError(processingError),
 		})
 	}
 

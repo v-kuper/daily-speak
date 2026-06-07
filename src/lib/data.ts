@@ -10,6 +10,7 @@ export type Suggestion = {
 };
 
 export type PracticeType = "free_talk" | "topic" | "photo_description";
+export type RecordingStatus = "processing" | "ready" | "failed";
 export const FEED_REACTION_VALUES = ["like", "love", "fire", "laugh", "support"] as const;
 export type FeedReaction = (typeof FEED_REACTION_VALUES)[number];
 
@@ -31,12 +32,14 @@ export type Recording = {
   topic: string;
   duration: number;
   timestamp: string;
+  status: RecordingStatus;
   transcript: string;
   suggestions: Suggestion[];
   practiceType: PracticeType;
   audioDataUrl: string | null;
   photoDataUrl: string | null;
   photoObject: string | null;
+  processingError: string | null;
 };
 
 export type FeedPost = {
