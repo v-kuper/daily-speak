@@ -31,6 +31,9 @@ test("local deploy workflow verifies quality, deploys the LAN Docker app, and ch
     "utf8",
   );
 
+  assert.match(deployWorkflow, /POSTGRES_PORT:\s+\$\{\{\s*vars\.POSTGRES_PORT/);
+  assert.match(deployWorkflow, /uses:\s+actions\/setup-go@v5/);
+  assert.match(deployWorkflow, /go-version-file:\s+backend\/go\.mod/);
   assert.match(deployWorkflow, /run:\s+npm run quality/);
   assert.match(deployWorkflow, /run:\s+npm run docker:lan/);
   assert.match(deployWorkflow, /\/healthz/);
