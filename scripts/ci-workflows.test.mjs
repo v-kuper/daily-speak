@@ -4,6 +4,7 @@ import test from "node:test";
 
 const dockerLanScript = readFileSync("scripts/docker-lan.mjs", "utf8");
 const dockerfile = readFileSync("Dockerfile", "utf8");
+const dockerCompose = readFileSync("docker-compose.yml", "utf8");
 const qualityWorkflow = readFileSync(
   ".github/workflows/quality-gates.yml",
   "utf8",
@@ -73,4 +74,26 @@ test("repository forces LF endings for scripts used inside Linux containers", ()
 test("Docker build creates public before copying it into the runtime image", () => {
   assert.match(dockerfile, /RUN mkdir -p public && npm run build/);
   assert.match(dockerfile, /COPY --from=next-build \/app\/public \.\/public/);
+});
+
+test("Docker runtime includes the local Python Whisper backend", () => {
+  assert.match(dockerfile, /FROM node:22-bookworm-slim AS runtime/);
+  assert.match(dockerfile, /python3-venv/);
+  assert.match(dockerfile, /ffmpeg/);
+  assert.match(dockerfile, /openai-whisper/);
+  assert.match(dockerfile, /WHISPER_BACKEND=openai/);
+  assert.match(dockerfile, /WHISPER_PYTHON_BIN=\/opt\/whisper\/bin\/python/);
+  assert.match(dockerfile, /WHISPER_FFMPEG_BIN=\/usr\/bin\/ffmpeg/);
+});
+
+test("Docker Compose defaults to the local Python Whisper backend", () => {
+  assert.match(dockerCompose, /WHISPER_BACKEND:\s+\$\{WHISPER_BACKEND:-openai\}/);
+  assert.match(
+    dockerCompose,
+    /WHISPER_PYTHON_BIN:\s+\$\{WHISPER_PYTHON_BIN:-\/opt\/whisper\/bin\/python\}/,
+  );
+  assert.match(
+    dockerCompose,
+    /WHISPER_FFMPEG_BIN:\s+\$\{WHISPER_FFMPEG_BIN:-\/usr\/bin\/ffmpeg\}/,
+  );
 });

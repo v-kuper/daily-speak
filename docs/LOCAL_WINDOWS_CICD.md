@@ -128,6 +128,58 @@ On the Windows machine, find the IPv4 address with:
 ipconfig
 ```
 
+The HTTP URL is enough for checking that the app loads, but browser microphone
+recording requires HTTPS. This repository has a setup script that creates a
+Caddy reverse proxy next to the documented project checkout.
+
+If the checkout is the documented `D:\Projects\daily-speak`, the script creates:
+
+```text
+D:\Projects\daily-speak-proxy
+```
+
+From PowerShell in `D:\Projects\daily-speak`, run:
+
+```powershell
+.\scripts\setup-lan-https-proxy.ps1 -HostIp <windows-ipv4>
+```
+
+For example:
+
+```powershell
+.\scripts\setup-lan-https-proxy.ps1 -HostIp 192.168.0.115
+```
+
+The script writes:
+
+```text
+D:\Projects\daily-speak-proxy\daily-speaking.pem
+D:\Projects\daily-speak-proxy\daily-speaking-key.pem
+D:\Projects\daily-speak-proxy\Caddyfile
+```
+
+Then allow the HTTPS port once in an elevated PowerShell:
+
+```powershell
+New-NetFirewallRule -DisplayName "Daily Speaking HTTPS 3443" -Direction Inbound -Protocol TCP -LocalPort 3443 -Action Allow
+```
+
+Start the proxy:
+
+```powershell
+cd D:\Projects\daily-speak-proxy
+caddy run --config Caddyfile
+```
+
+Then open the HTTPS URL from another LAN device:
+
+```text
+https://<windows-ipv4>:3443
+```
+
+Keep the Docker app running on `http://127.0.0.1:3218`; Caddy proxies HTTPS
+traffic to it. Do not redirect clients to `localhost`.
+
 ## Optional variables
 
 The workflow uses GitHub repository variables when present:
@@ -137,11 +189,16 @@ The workflow uses GitHub repository variables when present:
 - `OLLAMA_BASE_URL`, default `http://host.docker.internal:11434`
 - `OLLAMA_MODEL`, default `gemma4:31b-cloud`
 - `OLLAMA_THINKING_MODEL`, default `true`
-- `WHISPER_BACKEND`, default `auto`
+- `WHISPER_BACKEND`, default `openai`
 - `WHISPER_BINARY_PATH`
 - `WHISPER_MODEL_PATH`
-- `WHISPER_PYTHON_BIN`
+- `WHISPER_PYTHON_BIN`, default `/opt/whisper/bin/python`
 - `WHISPER_OPENAI_MODEL`, default `base.en`
+- `WHISPER_OPENAI_MODEL_DIR`, default `/app/tools/whisper/openai-models`
+- `WHISPER_OPENAI_CACHE_DIR`, default `/app/tools/whisper/cache`
+- `WHISPER_FFMPEG_BIN`, default `/usr/bin/ffmpeg`
+- `WHISPER_OPENAI_DEVICE`, default `cpu`
+- `WHISPER_OPENAI_FP16`, default `false`
 - `WHISPER_LANGUAGE`, default `en`
 
 Set them in `Settings` -> `Secrets and variables` -> `Actions` -> `Variables`.

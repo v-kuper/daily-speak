@@ -15,19 +15,33 @@ RUN go mod download
 COPY backend/ ./
 RUN CGO_ENABLED=0 GOOS=linux go build -o /out/daily-speaking-api ./cmd/api
 
-FROM node:22-alpine AS runtime
+FROM node:22-bookworm-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=3001
 ENV HOSTNAME=127.0.0.1
 ENV APP_ADDR=:3000
 ENV NEXT_UPSTREAM_URL=http://127.0.0.1:3001
-RUN apk add --no-cache ca-certificates
+ENV WHISPER_BACKEND=openai
+ENV WHISPER_PYTHON_BIN=/opt/whisper/bin/python
+ENV WHISPER_OPENAI_MODEL=base.en
+ENV WHISPER_OPENAI_MODEL_DIR=/app/tools/whisper/openai-models
+ENV WHISPER_OPENAI_CACHE_DIR=/app/tools/whisper/cache
+ENV WHISPER_FFMPEG_BIN=/usr/bin/ffmpeg
+ENV WHISPER_OPENAI_DEVICE=cpu
+ENV WHISPER_OPENAI_FP16=false
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates ffmpeg python3 python3-venv \
+  && python3 -m venv /opt/whisper \
+  && /opt/whisper/bin/pip install --no-cache-dir -U pip \
+  && /opt/whisper/bin/pip install --no-cache-dir -U openai-whisper \
+  && rm -rf /var/lib/apt/lists/*
 COPY --from=next-build /app/.next/standalone ./
 COPY --from=next-build /app/.next/static ./.next/static
 COPY --from=next-build /app/public ./public
 COPY --from=go-build /out/daily-speaking-api ./daily-speaking-api
 COPY docker-entrypoint.sh ./docker-entrypoint.sh
-RUN chmod +x ./docker-entrypoint.sh ./daily-speaking-api
+RUN mkdir -p /app/tools/whisper/openai-models /app/tools/whisper/cache \
+  && chmod +x ./docker-entrypoint.sh ./daily-speaking-api
 EXPOSE 3000
 CMD ["./docker-entrypoint.sh"]

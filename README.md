@@ -153,6 +153,24 @@ Saved recordings support two local backends:
 - `openai` (Python `openai/whisper`)
 - `cpp` (`whisper.cpp`)
 
+Docker deploys use the same local Python Whisper backend. The image installs
+Linux Python, `openai-whisper`, and `ffmpeg`; `docker-compose.yml` mounts
+`./tools` into `/app/tools` so downloaded models and cache survive rebuilds.
+The first transcription can download the configured model if it is not already
+in `tools/whisper/openai-models`.
+
+```bash
+WHISPER_BACKEND=openai
+WHISPER_PYTHON_BIN=/opt/whisper/bin/python
+WHISPER_OPENAI_MODEL=base.en
+WHISPER_OPENAI_MODEL_DIR=/app/tools/whisper/openai-models
+WHISPER_OPENAI_CACHE_DIR=/app/tools/whisper/cache
+WHISPER_FFMPEG_BIN=/usr/bin/ffmpeg
+WHISPER_OPENAI_DEVICE=cpu
+WHISPER_OPENAI_FP16=false
+WHISPER_LANGUAGE=en
+```
+
 Use `openai/whisper`:
 
 ```bash
@@ -194,7 +212,8 @@ export WHISPER_LANGUAGE=en
 export WHISPER_THREADS=4
 ```
 
-If `WHISPER_BACKEND` is not set, app tries `cpp` first, then falls back to `openai`.
+If `WHISPER_BACKEND` is not set outside Docker, app tries `cpp` first, then
+falls back to local Python `openai/whisper`.
 Detailed setup notes: `tools/whisper/README.md`.
 
 To remove everything Whisper-related from this project:
@@ -203,9 +222,8 @@ To remove everything Whisper-related from this project:
 rm -rf .venv tools/whisper/openai-models tools/whisper/cache tools/whisper/pip-cache tools/ffmpeg/bin
 ```
 
-In Docker, Ollama and Whisper models/binaries are external dependencies. Mount
-or configure them via the existing `WHISPER_*` and `OLLAMA_*` environment
-variables.
+In Docker, Ollama remains external by default. Whisper runs inside the app
+container through local Python `openai-whisper`.
 
 ## Available scripts
 
