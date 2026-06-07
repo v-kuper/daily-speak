@@ -31,6 +31,7 @@ test("local deploy workflow targets the dedicated Windows self-hosted runner", (
 
   assert.match(deployWorkflow, /workflow_dispatch:/);
   assert.match(deployWorkflow, /branches:\s*\n\s+- main\s*\n\s+- master/);
+  assert.match(deployWorkflow, /shell:\s+powershell/);
   assert.match(
     deployWorkflow,
     /runs-on:\s*\[self-hosted,\s*windows,\s*daily-speaking\]/,
