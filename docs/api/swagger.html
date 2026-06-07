@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>DailySpeak API Swagger</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css" />
+    <style>
+      body {
+        margin: 0;
+        background: #f7f7f7;
+      }
+
+      .docs-header {
+        box-sizing: border-box;
+        padding: 16px 24px;
+        border-bottom: 1px solid #d9d9d9;
+        background: #111827;
+        color: #fff;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      .docs-header h1 {
+        margin: 0 0 4px;
+        font-size: 20px;
+        font-weight: 700;
+      }
+
+      .docs-header p {
+        margin: 0;
+        color: #d1d5db;
+        font-size: 14px;
+      }
+
+      .docs-header a {
+        color: #93c5fd;
+      }
+
+      #swagger-ui {
+        max-width: 1440px;
+        margin: 0 auto;
+      }
+    </style>
+  </head>
+  <body>
+    <header class="docs-header">
+      <h1>DailySpeak API</h1>
+      <p>
+        Local Swagger UI. Source spec:
+        <a href="./openapi.json">docs/api/openapi.json</a>
+      </p>
+    </header>
+    <div id="swagger-ui"></div>
+
+    <script src="./openapi.spec.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+    <script>
+      if (!window.DAILY_SPEAKING_OPENAPI) {
+        document.getElementById("swagger-ui").innerHTML =
+          '<div style="padding:24px;font-family:sans-serif">Missing openapi.spec.js. Run <code>npm run build:api-docs</code>.</div>';
+      } else {
+        window.ui = SwaggerUIBundle({
+          spec: window.DAILY_SPEAKING_OPENAPI,
+          dom_id: "#swagger-ui",
+          deepLinking: true,
+          persistAuthorization: true,
+          displayRequestDuration: true,
+          tryItOutEnabled: false,
+          docExpansion: "list",
+          defaultModelsExpandDepth: 2
+        });
+      }
+    </script>
+  </body>
+</html>
