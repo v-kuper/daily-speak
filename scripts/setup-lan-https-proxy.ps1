@@ -17,6 +17,15 @@ function Get-PrivateIPv4Address {
       $_.IPAddress -match "^(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[0-1])\.)" -and
       $_.IPAddress -ne "127.0.0.1"
     } |
+    Sort-Object {
+      if ($_.IPAddress -match "^192\.168\.") {
+        0
+      } elseif ($_.IPAddress -match "^10\.") {
+        1
+      } else {
+        2
+      }
+    }, IPAddress |
     Select-Object -ExpandProperty IPAddress -Unique
 
   if ($addresses.Count -eq 0) {
@@ -26,7 +35,7 @@ function Get-PrivateIPv4Address {
   if ($addresses.Count -gt 1) {
     Write-Host "Detected several LAN IPv4 addresses:"
     $addresses | ForEach-Object { Write-Host "  $_" }
-    Write-Host "Using first one: $($addresses[0])"
+    Write-Host "Using preferred LAN address: $($addresses[0])"
   }
 
   return $addresses[0]
@@ -65,7 +74,12 @@ function Ensure-FirewallRule {
     return
   }
 
-  New-NetFirewallRule -DisplayName $displayName -Direction Inbound -Protocol TCP -LocalPort $HttpsPort -Action Allow | Out-Null
+  try {
+    New-NetFirewallRule -DisplayName $displayName -Direction Inbound -Protocol TCP -LocalPort $HttpsPort -Action Allow | Out-Null
+  } catch {
+    Write-Warning "Could not create Windows Firewall rule '$displayName': $($_.Exception.Message)"
+    Write-Warning "Deploy will continue, but LAN clients may be blocked until you pre-create the same rule from an elevated PowerShell."
+  }
 }
 
 if ([string]::IsNullOrWhiteSpace($HostIp)) {

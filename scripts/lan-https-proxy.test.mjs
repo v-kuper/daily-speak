@@ -30,6 +30,23 @@ test("LAN HTTPS proxy script writes Caddy reverse proxy config for the Docker ap
   assert.match(script, /New-NetFirewallRule -DisplayName `?"Daily Speaking HTTPS \$HttpsPort`?"/);
 });
 
+test("LAN HTTPS proxy script keeps deployment running when firewall rule creation is denied", () => {
+  const script = readFileSync(scriptPath, "utf8");
+
+  assert.match(script, /try\s*\{\s*New-NetFirewallRule -DisplayName \$displayName/s);
+  assert.match(script, /catch\s*\{/);
+  assert.match(script, /Write-Warning/);
+  assert.match(script, /pre-create the same rule/);
+});
+
+test("LAN HTTPS proxy script prefers physical LAN addresses over Docker or WSL adapters", () => {
+  const script = readFileSync(scriptPath, "utf8");
+
+  assert.match(script, /Sort-Object\s+\{\s*if\s*\(\$_.IPAddress -match "\^192\\\.168\\\."\)/);
+  assert.match(script, /elseif\s*\(\$_.IPAddress -match "\^10\\\."\)/);
+  assert.match(script, /else\s*\{\s*2\s*\}/);
+});
+
 test("Docker Compose defines the LAN HTTPS Caddy service", () => {
   const compose = readFileSync(composePath, "utf8");
 

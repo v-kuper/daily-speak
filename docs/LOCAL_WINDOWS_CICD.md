@@ -178,9 +178,10 @@ The script tries to allow the HTTPS port in Windows Firewall automatically:
 New-NetFirewallRule -DisplayName "Daily Speaking HTTPS 3443" -Direction Inbound -Protocol TCP -LocalPort 3443 -Action Allow
 ```
 
-If the runner service account cannot create firewall rules, the deploy will fail
-at this step. In that case, run the runner service with an account that can
-manage Windows Firewall or pre-create the same rule once.
+If the runner service account cannot create firewall rules, the script prints a
+warning and continues the deploy. LAN clients may still be blocked until you run
+the same command once from an elevated PowerShell or run the runner service with
+an account that can manage Windows Firewall.
 
 To restart the Docker app with HTTPS later:
 
