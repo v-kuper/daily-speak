@@ -21,3 +21,13 @@ func TestPythonCandidatesPreferConfiguredAbsolutePythonPath(t *testing.T) {
 		t.Fatalf("expected first python candidate to be configured absolute path, got %#v", candidates)
 	}
 }
+
+func TestResolvePathEnvPreservesDockerAbsolutePath(t *testing.T) {
+	t.Setenv("WHISPER_OPENAI_CACHE_DIR", "/app/tools/whisper/cache")
+
+	got := resolvePathEnv("WHISPER_OPENAI_CACHE_DIR", "")
+
+	if got != "/app/tools/whisper/cache" {
+		t.Fatalf("expected docker cache path to be preserved, got %q", got)
+	}
+}

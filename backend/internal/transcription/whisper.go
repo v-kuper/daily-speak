@@ -308,7 +308,7 @@ func resolvePathEnv(name string, fallback string) string {
 	if value == "" {
 		return ""
 	}
-	if filepath.IsAbs(value) {
+	if isAbsoluteEnvPath(value) {
 		return value
 	}
 	return filepath.Join(".", value)
@@ -319,13 +319,17 @@ func resolveCommandEnv(name string) string {
 	if value == "" {
 		return ""
 	}
-	if filepath.IsAbs(value) {
+	if isAbsoluteEnvPath(value) {
 		return value
 	}
 	if strings.HasPrefix(value, ".") || strings.ContainsAny(value, `/\`) {
 		return filepath.Clean(value)
 	}
 	return value
+}
+
+func isAbsoluteEnvPath(value string) bool {
+	return filepath.IsAbs(value) || strings.HasPrefix(value, "/")
 }
 
 func executable(path string) bool {
