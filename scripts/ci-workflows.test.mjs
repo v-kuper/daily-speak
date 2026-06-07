@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const dockerLanScript = readFileSync("scripts/docker-lan.mjs", "utf8");
+const dockerfile = readFileSync("Dockerfile", "utf8");
 const qualityWorkflow = readFileSync(
   ".github/workflows/quality-gates.yml",
   "utf8",
@@ -67,4 +68,9 @@ test("repository forces LF endings for scripts used inside Linux containers", ()
 
   assert.match(gitAttributes, /\*\.sh\s+text\s+eol=lf/);
   assert.match(gitAttributes, /Dockerfile\s+text\s+eol=lf/);
+});
+
+test("Docker build creates public before copying it into the runtime image", () => {
+  assert.match(dockerfile, /RUN mkdir -p public && npm run build/);
+  assert.match(dockerfile, /COPY --from=next-build \/app\/public \.\/public/);
 });

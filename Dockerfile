@@ -6,7 +6,7 @@ RUN npm ci
 FROM next-deps AS next-build
 WORKDIR /app
 COPY . .
-RUN npm run build
+RUN mkdir -p public && npm run build
 
 FROM golang:1.26.2-alpine AS go-build
 WORKDIR /src/backend
