@@ -68,10 +68,9 @@ jobs:
       - name: Build and start local Docker HTTPS app
         run: .\scripts\setup-lan-https-proxy.ps1
 
-      - name: Wait for HTTPS health check
+      - name: Wait for app health check
         run: |
-          [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
-          $healthUrl = "https://127.0.0.1:$env:HTTPS_PORT/healthz"
+          $healthUrl = "http://127.0.0.1:$env:APP_PORT/healthz"
           Write-Host "Checking $healthUrl"
 
           for ($attempt = 1; $attempt -le 30; $attempt++) {
@@ -92,3 +91,7 @@ jobs:
           docker compose logs --tail 120 app
           docker compose logs --tail 120 lan-https
           exit 1
+
+      - name: Verify Docker Whisper runtime
+        run: |
+          docker compose exec -T app sh -lc 'env | grep WHISPER && test -x "$WHISPER_PYTHON_BIN" && $WHISPER_PYTHON_BIN -m whisper --help >/dev/null && echo whisper-ok'

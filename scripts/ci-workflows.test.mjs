@@ -53,8 +53,8 @@ test("local deploy workflow verifies quality, deploys the LAN Docker app, and ch
   assert.match(deployWorkflow, /run:\s+npm run quality/);
   assert.match(deployWorkflow, /\.\\scripts\\setup-lan-https-proxy\.ps1/);
   assert.match(deployWorkflow, /docker compose ps/);
-  assert.match(deployWorkflow, /https:\/\/127\.0\.0\.1:\$env:HTTPS_PORT\/healthz/);
-  assert.match(deployWorkflow, /ServerCertificateValidationCallback/);
+  assert.match(deployWorkflow, /http:\/\/127\.0\.0\.1:\$env:APP_PORT\/healthz/);
+  assert.doesNotMatch(deployWorkflow, /ServerCertificateValidationCallback/);
   assert.match(deployWorkflow, /docker compose logs --tail 120 lan-https/);
 });
 
@@ -82,6 +82,19 @@ test("local deploy workflow defaults to the Docker-local Python Whisper backend"
   assert.match(deployWorkflow, /WHISPER_FFMPEG_BIN:\s+\/usr\/bin\/ffmpeg/);
   assert.match(deployWorkflow, /WHISPER_OPENAI_DEVICE:\s+cpu/);
   assert.match(deployWorkflow, /WHISPER_OPENAI_FP16:\s+false/);
+});
+
+test("local deploy workflow verifies Whisper inside the Docker app container", () => {
+  const deployWorkflow = readFileSync(
+    ".github/workflows/deploy-local.yml",
+    "utf8",
+  );
+
+  assert.match(deployWorkflow, /name:\s+Verify Docker Whisper runtime/);
+  assert.match(deployWorkflow, /docker compose exec -T app sh -lc/);
+  assert.match(deployWorkflow, /test -x "\$WHISPER_PYTHON_BIN"/);
+  assert.match(deployWorkflow, /\$WHISPER_PYTHON_BIN -m whisper --help/);
+  assert.match(deployWorkflow, /echo whisper-ok/);
 });
 
 test("repository forces LF endings for scripts used inside Linux containers", () => {

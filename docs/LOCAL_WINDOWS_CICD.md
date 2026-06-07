@@ -110,7 +110,8 @@ Automatic deploy:
 - the script creates `lan-https` cert/config files in the checkout
 - the script opens inbound TCP `HTTPS_PORT` in Windows Firewall
 - the script runs `docker compose up --build -d app postgres lan-https`
-- the workflow checks `https://127.0.0.1:3443/healthz`
+- the workflow checks `http://127.0.0.1:3218/healthz`
+- the workflow verifies local Whisper inside the `app` container
 
 Manual deploy:
 1. Open `Actions` in GitHub.
