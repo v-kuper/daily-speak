@@ -4,12 +4,20 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const DEFAULT_APP_PORT = "3218";
+const DEFAULT_COMPOSE_PROJECT_NAME = "daily-speaking";
 
 export function getHostPort(env = process.env) {
   const configuredPort = env.APP_PORT;
   return typeof configuredPort === "string" && configuredPort.trim()
     ? configuredPort.trim()
     : DEFAULT_APP_PORT;
+}
+
+export function getComposeProjectName(env = process.env) {
+  const configuredName = env.COMPOSE_PROJECT_NAME;
+  return typeof configuredName === "string" && configuredName.trim()
+    ? configuredName.trim()
+    : DEFAULT_COMPOSE_PROJECT_NAME;
 }
 
 function isIPv4Address(entry) {
@@ -94,12 +102,14 @@ export function formatLanSummary({
 }
 
 function runDockerCompose({ port, env = process.env } = {}) {
+  const composeProjectName = getComposeProjectName(env);
+
   return new Promise((resolve) => {
     const child = spawn(
       "docker",
       ["compose", "up", "--build", "-d", "app", "postgres"],
       {
-        env: { ...env, APP_PORT: port },
+        env: { ...env, APP_PORT: port, COMPOSE_PROJECT_NAME: composeProjectName },
         stdio: "inherit",
       },
     );
@@ -122,7 +132,8 @@ Builds and starts the app and PostgreSQL with Docker Compose, then prints
 local-network URLs for this machine.
 
 Environment:
-  APP_PORT  Host port to expose, default ${DEFAULT_APP_PORT}
+  APP_PORT              Host port to expose, default ${DEFAULT_APP_PORT}
+  COMPOSE_PROJECT_NAME  Docker Compose project name, default ${DEFAULT_COMPOSE_PROJECT_NAME}
 
 Options:
   --print-only  Print URLs without starting Docker

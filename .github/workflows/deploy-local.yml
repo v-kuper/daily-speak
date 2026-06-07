@@ -21,8 +21,9 @@ jobs:
         shell: pwsh
 
     env:
+      COMPOSE_PROJECT_NAME: daily-speaking
       APP_PORT: ${{ vars.APP_PORT || '3218' }}
-      POSTGRES_PORT: ${{ vars.POSTGRES_PORT || '5432' }}
+      POSTGRES_PORT: ${{ vars.POSTGRES_PORT || '5433' }}
       OLLAMA_BASE_URL: ${{ vars.OLLAMA_BASE_URL || 'http://host.docker.internal:11434' }}
       OLLAMA_MODEL: ${{ vars.OLLAMA_MODEL || 'gemma4:31b-cloud' }}
       OLLAMA_THINKING_MODEL: ${{ vars.OLLAMA_THINKING_MODEL || 'true' }}

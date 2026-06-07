@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   formatLanSummary,
+  getComposeProjectName,
   getHostPort,
   listLanUrls,
 } from "./docker-lan.mjs";
@@ -10,6 +11,11 @@ import {
 test("getHostPort defaults to the Docker Compose app port and accepts overrides", () => {
   assert.equal(getHostPort({}), "3218");
   assert.equal(getHostPort({ APP_PORT: "8080" }), "8080");
+});
+
+test("getComposeProjectName defaults to the stable project name and accepts overrides", () => {
+  assert.equal(getComposeProjectName({}), "daily-speaking");
+  assert.equal(getComposeProjectName({ COMPOSE_PROJECT_NAME: "custom-app" }), "custom-app");
 });
 
 test("listLanUrls returns only private LAN IPv4 addresses", () => {

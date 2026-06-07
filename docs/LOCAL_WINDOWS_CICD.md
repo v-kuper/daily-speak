@@ -133,7 +133,7 @@ ipconfig
 The workflow uses GitHub repository variables when present:
 
 - `APP_PORT`, default `3218`
-- `POSTGRES_PORT`, default `5432`
+- `POSTGRES_PORT`, default `5433`
 - `OLLAMA_BASE_URL`, default `http://host.docker.internal:11434`
 - `OLLAMA_MODEL`, default `gemma4:31b-cloud`
 - `OLLAMA_THINKING_MODEL`, default `true`
@@ -147,7 +147,9 @@ The workflow uses GitHub repository variables when present:
 Set them in `Settings` -> `Secrets and variables` -> `Actions` -> `Variables`.
 
 If several projects deploy on the same Windows machine, give each project a
-unique `APP_PORT` and `POSTGRES_PORT` to avoid host-port conflicts.
+unique `APP_PORT` and `POSTGRES_PORT` to avoid host-port conflicts. The deploy
+workflow also sets `COMPOSE_PROJECT_NAME=daily-speaking` so Docker Compose uses
+the same project name regardless of the runner checkout directory.
 
 ## Useful commands on the Windows machine
 
