@@ -46,6 +46,7 @@ test("formatLanSummary prints local, LAN, health, and Windows firewall hints", (
   assert.match(summary, /http:\/\/localhost:8080/);
   assert.match(summary, /http:\/\/192\.168\.1\.42:8080/);
   assert.match(summary, /http:\/\/localhost:8080\/healthz/);
+  assert.match(summary, /Microphone recording on LAN\/remote URLs requires HTTPS or localhost/);
   assert.match(summary, /Windows Defender Firewall/);
   assert.match(summary, /PostgreSQL stays inside Docker/);
 });

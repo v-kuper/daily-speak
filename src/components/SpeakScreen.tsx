@@ -1,6 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useRef, type ChangeEvent } from "react";
+import {
+  readBlobAsDataUrl,
+  resolveBrowserRecordingSupportError,
+  resolveMicrophoneError,
+  resolvePreferredAudioMimeType
+} from "../lib/browserMedia";
 import { formatTime, toDateKey } from "../lib/utils";
 import { useAppDispatch, useAppSelector } from "../store/hooks";
 import {
@@ -36,7 +42,6 @@ import {
 import AudioWaveform from "./AudioWaveform";
 
 const PHOTO_ACCEPTED_TYPES = new Set(["image/jpeg", "image/jpg", "image/png", "image/webp", "image/gif"]);
-const AUDIO_MIME_CANDIDATES = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"];
 
 const readFileAsDataUrl = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -52,53 +57,6 @@ const readFileAsDataUrl = (file: File): Promise<string> => {
     reader.onerror = () => reject(new Error("Failed to read image file."));
     reader.readAsDataURL(file);
   });
-};
-
-const readBlobAsDataUrl = (blob: Blob): Promise<string> => {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = typeof reader.result === "string" ? reader.result : "";
-      if (!result) {
-        reject(new Error("Failed to read recorded audio."));
-        return;
-      }
-      resolve(result);
-    };
-    reader.onerror = () => reject(new Error("Failed to read recorded audio."));
-    reader.readAsDataURL(blob);
-  });
-};
-
-const resolvePreferredAudioMimeType = (): string | null => {
-  if (typeof MediaRecorder === "undefined" || typeof MediaRecorder.isTypeSupported !== "function") {
-    return null;
-  }
-
-  for (const candidate of AUDIO_MIME_CANDIDATES) {
-    if (MediaRecorder.isTypeSupported(candidate)) {
-      return candidate;
-    }
-  }
-
-  return null;
-};
-
-const resolveMicrophoneError = (error: unknown): string => {
-  if (error && typeof error === "object" && "name" in error && typeof (error as { name?: unknown }).name === "string") {
-    const name = (error as { name: string }).name;
-    if (name === "NotAllowedError" || name === "PermissionDeniedError") {
-      return "Microphone access denied. Allow microphone permission in your browser settings.";
-    }
-    if (name === "NotFoundError" || name === "DevicesNotFoundError") {
-      return "No microphone found on this device.";
-    }
-    if (name === "NotReadableError" || name === "TrackStartError") {
-      return "Microphone is busy in another app. Close it and try again.";
-    }
-  }
-
-  return "Cannot access microphone. Check browser permissions and device settings.";
 };
 
 type StudyTextSegment = {
@@ -248,18 +206,20 @@ export default function SpeakScreen() {
       dispatch(setRecordingInputError(null));
       dispatch(setRecordingAudioDataUrl(null));
 
-      if (typeof window === "undefined" || typeof navigator === "undefined") {
-        dispatch(setRecordingInputError("Recording is available only in browser."));
-        return;
-      }
-
-      if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
-        dispatch(setRecordingInputError("Your browser does not support microphone recording."));
+      const recordingSupportError = resolveBrowserRecordingSupportError();
+      if (recordingSupportError) {
+        dispatch(setRecordingInputError(recordingSupportError));
         return;
       }
 
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const getUserMedia = navigator.mediaDevices?.getUserMedia?.bind(navigator.mediaDevices);
+        if (!getUserMedia) {
+          dispatch(setRecordingInputError("Your browser does not support microphone recording."));
+          return;
+        }
+
+        const stream = await getUserMedia({ audio: true });
         const mimeType = resolvePreferredAudioMimeType();
         const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
 

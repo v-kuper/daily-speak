@@ -37,6 +37,11 @@ npm run docker:app
 
 Then open [http://localhost:3218](http://localhost:3218).
 
+Microphone recording works from `localhost` in modern browsers, but remote
+addresses must be served over HTTPS. If you open the Docker app from another
+machine as `http://<ip>:3218`, the page can load, but the browser will not show
+the microphone permission prompt.
+
 If you want a different host port:
 
 ```bash
@@ -60,6 +65,12 @@ example:
 ```text
 http://192.168.1.42:3218
 ```
+
+Those LAN HTTP URLs are useful for checking layout and backend connectivity, but
+browser microphone recording requires `https://...` or `http://localhost`. For a
+phone or another computer, put the app behind an HTTPS reverse proxy or tunnel
+such as Caddy, nginx with TLS, Cloudflare Tunnel, or another trusted certificate
+setup, then open the HTTPS URL.
 
 You do not need to start the frontend, backend, or database separately. The app
 container exposes only the app port to the LAN. PostgreSQL stays inside Docker

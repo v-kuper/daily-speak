@@ -95,6 +95,9 @@ export function formatLanSummary({
     `For Windows LAN access, allow inbound TCP port ${port} in Windows Defender Firewall / Docker Desktop if another device cannot connect.`,
   );
   lines.push(
+    "Microphone recording on LAN/remote URLs requires HTTPS or localhost; plain HTTP IP addresses can load the app but cannot show the browser microphone permission prompt.",
+  );
+  lines.push(
     "PostgreSQL stays inside Docker; use the app URL, not the database port, from other devices.",
   );
 
