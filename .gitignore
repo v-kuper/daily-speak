@@ -27,3 +27,4 @@ pnpm-debug.log*
 !/tools/whisper/pip-cache/.gitkeep
 !/tools/ffmpeg/bin/.gitkeep
 /public/uploads/feed-replies/
+/lan-https/

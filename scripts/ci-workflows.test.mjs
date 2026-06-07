@@ -47,11 +47,15 @@ test("local deploy workflow verifies quality, deploys the LAN Docker app, and ch
   );
 
   assert.match(deployWorkflow, /POSTGRES_PORT:\s+\$\{\{\s*vars\.POSTGRES_PORT/);
+  assert.match(deployWorkflow, /HTTPS_PORT:\s+\$\{\{\s*vars\.HTTPS_PORT/);
   assert.match(deployWorkflow, /uses:\s+actions\/setup-go@v5/);
   assert.match(deployWorkflow, /go-version-file:\s+backend\/go\.mod/);
   assert.match(deployWorkflow, /run:\s+npm run quality/);
-  assert.match(deployWorkflow, /run:\s+npm run docker:lan/);
-  assert.match(deployWorkflow, /\/healthz/);
+  assert.match(deployWorkflow, /\.\\scripts\\setup-lan-https-proxy\.ps1/);
+  assert.match(deployWorkflow, /docker compose ps/);
+  assert.match(deployWorkflow, /https:\/\/127\.0\.0\.1:\$env:HTTPS_PORT\/healthz/);
+  assert.match(deployWorkflow, /ServerCertificateValidationCallback/);
+  assert.match(deployWorkflow, /docker compose logs --tail 120 lan-https/);
 });
 
 test("local deploy uses a stable Docker Compose project name", () => {
@@ -62,6 +66,22 @@ test("local deploy uses a stable Docker Compose project name", () => {
 
   assert.match(deployWorkflow, /COMPOSE_PROJECT_NAME:\s+daily-speaking/);
   assert.match(dockerLanScript, /COMPOSE_PROJECT_NAME/);
+});
+
+test("local deploy workflow defaults to the Docker-local Python Whisper backend", () => {
+  const deployWorkflow = readFileSync(
+    ".github/workflows/deploy-local.yml",
+    "utf8",
+  );
+
+  assert.match(deployWorkflow, /WHISPER_BACKEND:\s+openai/);
+  assert.doesNotMatch(deployWorkflow, /vars\.WHISPER_BACKEND/);
+  assert.match(deployWorkflow, /WHISPER_PYTHON_BIN:\s+\/opt\/whisper\/bin\/python/);
+  assert.match(deployWorkflow, /WHISPER_OPENAI_MODEL_DIR:\s+\/app\/tools\/whisper\/openai-models/);
+  assert.match(deployWorkflow, /WHISPER_OPENAI_CACHE_DIR:\s+\/app\/tools\/whisper\/cache/);
+  assert.match(deployWorkflow, /WHISPER_FFMPEG_BIN:\s+\/usr\/bin\/ffmpeg/);
+  assert.match(deployWorkflow, /WHISPER_OPENAI_DEVICE:\s+cpu/);
+  assert.match(deployWorkflow, /WHISPER_OPENAI_FP16:\s+false/);
 });
 
 test("repository forces LF endings for scripts used inside Linux containers", () => {

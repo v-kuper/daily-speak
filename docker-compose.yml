@@ -31,6 +31,18 @@ services:
       - ./tools:/app/tools
       - ./public/uploads:/app/public/uploads
 
+  lan-https:
+    image: caddy:2-alpine
+    container_name: daily-speaking-lan-https
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - "0.0.0.0:${HTTPS_PORT:-3443}:3443"
+    volumes:
+      - ./lan-https/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./lan-https/certs:/certs:ro
+
   postgres:
     image: postgres:16-alpine
     container_name: daily-speaking-postgres

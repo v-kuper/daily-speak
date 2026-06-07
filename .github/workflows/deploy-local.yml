@@ -23,15 +23,21 @@ jobs:
     env:
       COMPOSE_PROJECT_NAME: daily-speaking
       APP_PORT: ${{ vars.APP_PORT || '3218' }}
+      HTTPS_PORT: ${{ vars.HTTPS_PORT || '3443' }}
       POSTGRES_PORT: ${{ vars.POSTGRES_PORT || '5433' }}
       OLLAMA_BASE_URL: ${{ vars.OLLAMA_BASE_URL || 'http://host.docker.internal:11434' }}
       OLLAMA_MODEL: ${{ vars.OLLAMA_MODEL || 'gemma4:31b-cloud' }}
       OLLAMA_THINKING_MODEL: ${{ vars.OLLAMA_THINKING_MODEL || 'true' }}
-      WHISPER_BACKEND: ${{ vars.WHISPER_BACKEND || 'auto' }}
+      WHISPER_BACKEND: openai
       WHISPER_BINARY_PATH: ${{ vars.WHISPER_BINARY_PATH || '' }}
       WHISPER_MODEL_PATH: ${{ vars.WHISPER_MODEL_PATH || '' }}
-      WHISPER_PYTHON_BIN: ${{ vars.WHISPER_PYTHON_BIN || '' }}
+      WHISPER_PYTHON_BIN: /opt/whisper/bin/python
       WHISPER_OPENAI_MODEL: ${{ vars.WHISPER_OPENAI_MODEL || 'base.en' }}
+      WHISPER_OPENAI_MODEL_DIR: /app/tools/whisper/openai-models
+      WHISPER_OPENAI_CACHE_DIR: /app/tools/whisper/cache
+      WHISPER_FFMPEG_BIN: /usr/bin/ffmpeg
+      WHISPER_OPENAI_DEVICE: cpu
+      WHISPER_OPENAI_FP16: false
       WHISPER_LANGUAGE: ${{ vars.WHISPER_LANGUAGE || 'en' }}
 
     steps:
@@ -59,12 +65,13 @@ jobs:
       - name: Check Docker
         run: docker version
 
-      - name: Build and start local Docker app
-        run: npm run docker:lan
+      - name: Build and start local Docker HTTPS app
+        run: .\scripts\setup-lan-https-proxy.ps1
 
-      - name: Wait for health check
+      - name: Wait for HTTPS health check
         run: |
-          $healthUrl = "http://127.0.0.1:$env:APP_PORT/healthz"
+          [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
+          $healthUrl = "https://127.0.0.1:$env:HTTPS_PORT/healthz"
           Write-Host "Checking $healthUrl"
 
           for ($attempt = 1; $attempt -le 30; $attempt++) {
@@ -83,4 +90,5 @@ jobs:
 
           docker compose ps
           docker compose logs --tail 120 app
+          docker compose logs --tail 120 lan-https
           exit 1

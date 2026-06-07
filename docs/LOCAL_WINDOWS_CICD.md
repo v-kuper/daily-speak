@@ -106,8 +106,11 @@ Automatic deploy:
 - push to `main` or `master`
 - GitHub runs `.github/workflows/deploy-local.yml`
 - the Windows runner runs `npm run quality`
-- the runner runs `npm run docker:lan`
-- the workflow checks `http://127.0.0.1:3218/healthz`
+- the runner runs `.\scripts\setup-lan-https-proxy.ps1`
+- the script creates `lan-https` cert/config files in the checkout
+- the script opens inbound TCP `HTTPS_PORT` in Windows Firewall
+- the script runs `docker compose up --build -d app postgres lan-https`
+- the workflow checks `https://127.0.0.1:3443/healthz`
 
 Manual deploy:
 1. Open `Actions` in GitHub.
@@ -129,13 +132,15 @@ ipconfig
 ```
 
 The HTTP URL is enough for checking that the app loads, but browser microphone
-recording requires HTTPS. This repository has a setup script that creates a
-Caddy reverse proxy next to the documented project checkout.
+recording requires HTTPS. The deploy workflow runs
+`.\scripts\setup-lan-https-proxy.ps1` automatically on the Windows runner. The
+script creates certificates and a Caddy config inside the checked-out project,
+then starts a `lan-https` Caddy container through Docker Compose.
 
 If the checkout is the documented `D:\Projects\daily-speak`, the script creates:
 
 ```text
-D:\Projects\daily-speak-proxy
+D:\Projects\daily-speak\lan-https
 ```
 
 From PowerShell in `D:\Projects\daily-speak`, run:
@@ -143,6 +148,9 @@ From PowerShell in `D:\Projects\daily-speak`, run:
 ```powershell
 .\scripts\setup-lan-https-proxy.ps1 -HostIp <windows-ipv4>
 ```
+
+Manual execution is only needed for local troubleshooting; CI/CD runs the same
+script during deploy.
 
 For example:
 
@@ -153,22 +161,32 @@ For example:
 The script writes:
 
 ```text
-D:\Projects\daily-speak-proxy\daily-speaking.pem
-D:\Projects\daily-speak-proxy\daily-speaking-key.pem
-D:\Projects\daily-speak-proxy\Caddyfile
+D:\Projects\daily-speak\lan-https\certs\daily-speaking.pem
+D:\Projects\daily-speak\lan-https\certs\daily-speaking-key.pem
+D:\Projects\daily-speak\lan-https\Caddyfile
 ```
 
-Then allow the HTTPS port once in an elevated PowerShell:
+It also runs:
+
+```powershell
+docker compose up --build -d app postgres lan-https
+```
+
+The script tries to allow the HTTPS port in Windows Firewall automatically:
 
 ```powershell
 New-NetFirewallRule -DisplayName "Daily Speaking HTTPS 3443" -Direction Inbound -Protocol TCP -LocalPort 3443 -Action Allow
 ```
 
-Start the proxy:
+If the runner service account cannot create firewall rules, the deploy will fail
+at this step. In that case, run the runner service with an account that can
+manage Windows Firewall or pre-create the same rule once.
+
+To restart the Docker app with HTTPS later:
 
 ```powershell
-cd D:\Projects\daily-speak-proxy
-caddy run --config Caddyfile
+cd D:\Projects\daily-speak
+$env:HTTPS_PORT=3443; docker compose up --build -d app postgres lan-https
 ```
 
 Then open the HTTPS URL from another LAN device:
@@ -177,14 +195,28 @@ Then open the HTTPS URL from another LAN device:
 https://<windows-ipv4>:3443
 ```
 
-Keep the Docker app running on `http://127.0.0.1:3218`; Caddy proxies HTTPS
-traffic to it. Do not redirect clients to `localhost`.
+The Caddy container proxies HTTPS traffic to the Docker Compose `app` service
+at `app:3000`. Do not redirect clients to `localhost`.
+
+The script can install `mkcert` on the runner via `winget` when it is missing.
+The generated certificate is still a local certificate. Client machines must
+trust the runner's mkcert root CA once, otherwise their browser will show a
+certificate warning and microphone access may still be blocked. On the Windows
+runner, find that CA with:
+
+```powershell
+mkcert -CAROOT
+```
+
+Copy only `rootCA.pem` to client machines and import it into Trusted Root
+Certification Authorities. Do not copy `rootCA-key.pem`.
 
 ## Optional variables
 
 The workflow uses GitHub repository variables when present:
 
 - `APP_PORT`, default `3218`
+- `HTTPS_PORT`, default `3443`
 - `POSTGRES_PORT`, default `5433`
 - `OLLAMA_BASE_URL`, default `http://host.docker.internal:11434`
 - `OLLAMA_MODEL`, default `gemma4:31b-cloud`
