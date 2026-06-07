@@ -35,6 +35,7 @@ func TestUnauthorizedAPIContractWithoutCookie(t *testing.T) {
 		{http.MethodGet, "/api/recordings/demo-recording", ""},
 		{http.MethodPost, "/api/recording-sessions", `{"topic":"Free talk"}`},
 		{http.MethodPost, "/api/recording-sessions/demo-session/chunks", ""},
+		{http.MethodPost, "/api/recording-sessions/demo-session/audio", ""},
 		{http.MethodPost, "/api/recording-sessions/demo-session/finish", "{}"},
 		{http.MethodGet, "/api/feed/posts", ""},
 		{http.MethodPost, "/api/feed/posts", `{"recordingId":"demo"}`},

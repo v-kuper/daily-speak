@@ -75,6 +75,19 @@ const uploadRecordingChunk = async (sessionId: string, chunkIndex: number, blob:
   }
 };
 
+const uploadRecordingFinalAudio = async (sessionId: string, blob: Blob): Promise<void> => {
+  const form = new FormData();
+  const extension = resolveAudioFileExtension(blob.type);
+  form.append("audio", blob, `recording.${extension}`);
+  const response = await fetch(`/api/recording-sessions/${encodeURIComponent(sessionId)}/audio`, {
+    method: "POST",
+    body: form
+  });
+  if (!response.ok) {
+    throw new Error("Failed to upload final recording audio.");
+  }
+};
+
 type StudyTextSegment = {
   text: string;
   isStudyWord: boolean;
@@ -313,8 +326,7 @@ export default function SpeakScreen() {
                 .then(() => uploadRecordingChunk(sessionId, chunkIndex, blob))
                 .catch(() => {
                   chunkUploadFailedRef.current = true;
-                  dispatch(setRecordingUploadSessionId(null));
-                  dispatch(setRecordingInputError("Live upload paused. The full recording will be uploaded when you save."));
+                  dispatch(setRecordingInputError("Live chunk upload paused. The complete recording will be uploaded before saving."));
                 });
             }
           }
@@ -335,7 +347,26 @@ export default function SpeakScreen() {
           }
 
           const blob = new Blob(chunks, { type: resultingType });
-          void Promise.all([readBlobAsDataUrl(blob), chunkUploadQueueRef.current])
+          const finalUpload = chunkUploadQueueRef.current
+            .catch(() => undefined)
+            .then(() => {
+              const sessionId = uploadSessionIdRef.current;
+              if (!sessionId) {
+                return undefined;
+              }
+              return uploadRecordingFinalAudio(sessionId, blob)
+                .then(() => {
+                  if (chunkUploadFailedRef.current) {
+                    dispatch(setRecordingInputError(null));
+                  }
+                })
+                .catch(() => {
+                  uploadSessionIdRef.current = null;
+                  dispatch(setRecordingUploadSessionId(null));
+                  dispatch(setRecordingInputError("Full recording will be uploaded when you save."));
+                });
+            });
+          void Promise.all([readBlobAsDataUrl(blob), finalUpload])
             .then(([dataUrl]) => {
               dispatch(setRecordingAudioDataUrl(dataUrl));
             })

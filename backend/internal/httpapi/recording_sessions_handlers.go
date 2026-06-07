@@ -98,6 +98,8 @@ func (s *Server) routeRecordingSessionPath(w http.ResponseWriter, r *http.Reques
 	switch {
 	case action == "chunks" && r.Method == http.MethodPost:
 		s.handleUploadRecordingSessionChunk(w, r, sessionID)
+	case action == "audio" && r.Method == http.MethodPost:
+		s.handleUploadRecordingSessionAudio(w, r, sessionID)
 	case action == "finish" && r.Method == http.MethodPost:
 		s.handleFinishRecordingSession(w, r, sessionID)
 	default:
@@ -150,6 +152,46 @@ func (s *Server) handleUploadRecordingSessionChunk(w http.ResponseWriter, r *htt
 	writeJSON(w, http.StatusCreated, map[string]any{"sessionId": session.ID, "chunkIndex": chunk.Index})
 }
 
+func (s *Server) handleUploadRecordingSessionAudio(w http.ResponseWriter, r *http.Request, sessionID string) {
+	user, ok := s.authorizedUser(w, r, "api.recording-sessions.audio.post")
+	if !ok {
+		return
+	}
+	session, err := s.recordingSessionForUser(r.Context(), user.ID, sessionID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Recording upload session not found."})
+		return
+	}
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to load recording upload session."})
+		return
+	}
+	if session.Status != "open" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Recording upload session is already finalized."})
+		return
+	}
+	audio, err := readMultipartFinalAudioRequest(r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Recording audio is invalid."})
+		return
+	}
+	if _, err := saveRecordingSessionFinalAudio(session.ID, audio.Extension, audio.Bytes); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to save recording audio."})
+		return
+	}
+	_, err = s.db.Exec(r.Context(), `
+		UPDATE recording_upload_sessions
+		SET audio_extension = $3,
+		    updated_at = NOW()
+		WHERE id = $1 AND user_id = $2`,
+		session.ID, user.ID, audio.Extension)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to save recording audio."})
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"sessionId": session.ID, "extension": audio.Extension})
+}
+
 func (s *Server) handleFinishRecordingSession(w http.ResponseWriter, r *http.Request, sessionID string) {
 	user, ok := s.authorizedUser(w, r, "api.recording-sessions.finish.post")
 	if !ok {
@@ -180,7 +222,8 @@ func (s *Server) handleFinishRecordingSession(w http.ResponseWriter, r *http.Req
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Recording upload session is already finalized."})
 		return
 	}
-	if session.AudioExtension == nil || session.ChunkCount <= 0 {
+	hasFinalAudio := session.AudioExtension != nil && recordingSessionFinalAudioExists(session.ID, *session.AudioExtension)
+	if session.AudioExtension == nil || (session.ChunkCount <= 0 && !hasFinalAudio) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Upload at least one recording chunk before saving."})
 		return
 	}
@@ -206,7 +249,7 @@ func (s *Server) handleFinishRecordingSession(w http.ResponseWriter, r *http.Req
 
 	recordingID := uuid.NewString()
 	audioPath := filepath.Join(resolveUploadsDir(), "recordings", domain.SanitizePathSegment(user.ID), recordingID+"."+*session.AudioExtension)
-	if err := assembleRecordingSessionChunks(session.ID, *session.AudioExtension, session.ChunkCount, audioPath); err != nil {
+	if err := assembleRecordingSessionAudio(session.ID, *session.AudioExtension, session.ChunkCount, audioPath); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to assemble recording audio."})
 		return
 	}

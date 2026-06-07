@@ -80,6 +80,53 @@ func TestAssembleRecordingSessionChunksRejectsMissingChunk(t *testing.T) {
 	}
 }
 
+func TestRecordingSessionFinalAudioStorageSavesCompleteBlob(t *testing.T) {
+	uploadsDir := t.TempDir()
+	t.Setenv("UPLOADS_DIR", uploadsDir)
+
+	path, err := saveRecordingSessionFinalAudio("session-123", "webm", []byte{0x1a, 0x45, 0xdf, 0xa3})
+	if err != nil {
+		t.Fatalf("expected final audio save to succeed: %v", err)
+	}
+
+	expected := filepath.Join(uploadsDir, "tmp", "recording-sessions", "session-123", "final.webm")
+	if path != expected {
+		t.Fatalf("expected final audio path %q, got %q", expected, path)
+	}
+	saved, err := os.ReadFile(expected)
+	if err != nil {
+		t.Fatalf("expected final audio file to exist: %v", err)
+	}
+	if !bytes.Equal(saved, []byte{0x1a, 0x45, 0xdf, 0xa3}) {
+		t.Fatalf("expected final audio bytes to be saved, got %x", saved)
+	}
+}
+
+func TestAssembleRecordingSessionAudioPrefersFinalAudioOverChunks(t *testing.T) {
+	uploadsDir := t.TempDir()
+	t.Setenv("UPLOADS_DIR", uploadsDir)
+
+	if _, err := saveRecordingSessionChunk("session-123", 0, "webm", []byte("bad chunk bytes")); err != nil {
+		t.Fatalf("expected chunk save: %v", err)
+	}
+	if _, err := saveRecordingSessionFinalAudio("session-123", "webm", []byte("complete final audio")); err != nil {
+		t.Fatalf("expected final audio save: %v", err)
+	}
+
+	outPath := filepath.Join(uploadsDir, "recordings", "user-123", "recording-456.webm")
+	if err := assembleRecordingSessionAudio("session-123", "webm", 1, outPath); err != nil {
+		t.Fatalf("expected assembly to prefer final audio: %v", err)
+	}
+
+	bytes, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("expected assembled audio file: %v", err)
+	}
+	if string(bytes) != "complete final audio" {
+		t.Fatalf("expected final audio bytes, got %q", string(bytes))
+	}
+}
+
 func TestReadMultipartChunkRequestParsesChunkIndexAndAudio(t *testing.T) {
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)

@@ -756,6 +756,54 @@ window.DAILY_SPEAKING_OPENAPI = {
         }
       }
     },
+    "/api/recording-sessions/{sessionId}/audio": {
+      "post": {
+        "tags": [
+          "Recording upload sessions"
+        ],
+        "summary": "Upload the final complete recording audio",
+        "description": "Uploads the complete browser-created Blob for the session. Backend prefers this file over raw chunk concatenation when finishing the recording.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/SessionIdPath"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/UploadRecordingFinalAudioRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Final audio saved.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadRecordingFinalAudioResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      }
+    },
     "/api/recording-sessions/{sessionId}/finish": {
       "post": {
         "tags": [
@@ -1941,6 +1989,35 @@ window.DAILY_SPEAKING_OPENAPI = {
           "chunkIndex": {
             "type": "integer",
             "minimum": 0
+          }
+        }
+      },
+      "UploadRecordingFinalAudioRequest": {
+        "type": "object",
+        "required": [
+          "audio"
+        ],
+        "properties": {
+          "audio": {
+            "type": "string",
+            "format": "binary",
+            "description": "Complete MediaRecorder Blob; max 80MB."
+          }
+        }
+      },
+      "UploadRecordingFinalAudioResponse": {
+        "type": "object",
+        "required": [
+          "sessionId",
+          "extension"
+        ],
+        "properties": {
+          "sessionId": {
+            "type": "string"
+          },
+          "extension": {
+            "type": "string",
+            "example": "webm"
           }
         }
       },
