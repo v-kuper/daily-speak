@@ -223,8 +223,8 @@ func (s *Server) handleFinishRecordingSession(w http.ResponseWriter, r *http.Req
 		return
 	}
 	hasFinalAudio := session.AudioExtension != nil && recordingSessionFinalAudioExists(session.ID, *session.AudioExtension)
-	if session.AudioExtension == nil || (session.ChunkCount <= 0 && !hasFinalAudio) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Upload at least one recording chunk before saving."})
+	if session.AudioExtension == nil || !hasFinalAudio {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "Recording audio is still uploading."})
 		return
 	}
 

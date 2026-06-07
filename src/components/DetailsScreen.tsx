@@ -391,7 +391,14 @@ export default function DetailsScreen() {
       <h2>Recording</h2>
 
       {copyMessage && <div className="notice">{copyMessage}</div>}
-      {isProcessing && <div className="notice">Processing recording in the background. You can come back later.</div>}
+      {isProcessing && (
+        <div className="notice">
+          Processing recording in the background. You can come back later.
+          <div className="background-progress" aria-hidden="true">
+            <div className="background-progress-fill" />
+          </div>
+        </div>
+      )}
       {isFailed && (
         <div className="auth-error">{recording.processingError ?? "Recording processing failed. Try recording again."}</div>
       )}

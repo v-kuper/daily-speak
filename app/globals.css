@@ -1033,6 +1033,34 @@ button {
   border-radius: inherit;
 }
 
+.background-progress {
+  position: relative;
+  height: 6px;
+  margin-top: 10px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(49, 95, 60, 0.14);
+}
+
+.background-progress-fill {
+  position: absolute;
+  inset: 0;
+  width: 42%;
+  border-radius: inherit;
+  background: var(--success);
+  animation: background-progress-slide 1.35s ease-in-out infinite;
+}
+
+@keyframes background-progress-slide {
+  0% {
+    transform: translateX(-120%);
+  }
+
+  100% {
+    transform: translateX(240%);
+  }
+}
+
 .feed-player {
   margin-bottom: 12px;
 }

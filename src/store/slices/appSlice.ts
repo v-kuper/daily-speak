@@ -147,6 +147,7 @@ export type AppState = {
   currentFeedReplies: FeedReply[];
   selectedDate: string | null;
   currentRecordingId: string | null;
+  backgroundSaveRecordingId: string | null;
   isPlaying: boolean;
   playbackPosition: number;
   topics: string[];
@@ -217,6 +218,18 @@ export type AppState = {
   feedReplyError: string | null;
   feedReactionStatus: AuthStatus;
   feedReactionError: string | null;
+};
+
+export type RecordingSaveDraft = {
+  localRecordingId?: string;
+  recordingUploadSessionId: string | null;
+  topic: string;
+  duration: number;
+  timestamp: string;
+  practiceType: PracticeType;
+  audioDataUrl: string | null;
+  photoDataUrl: string | null;
+  photoObject: string | null;
 };
 
 const today = new Date();
@@ -1311,11 +1324,12 @@ export const saveInterests = createAsyncThunk<string[], void, { state: { app: Ap
 
 export const saveRecording = createAsyncThunk<
   { recording: Recording; quota: RecordingQuota | null },
-  void,
+  RecordingSaveDraft | void,
   { state: { app: AppState }; rejectValue: string }
 >(
   "app/saveRecording",
-  async (_, { getState, rejectWithValue }) => {
+  async (draftArg, { getState, rejectWithValue }) => {
+    const draft = typeof draftArg === "object" && draftArg !== null ? draftArg : null;
     const {
       isAuthenticated,
       speakState,
@@ -1331,7 +1345,7 @@ export const saveRecording = createAsyncThunk<
       maxSessionSeconds
     } = getState().app;
 
-    if (speakState !== "recorded") {
+    if (!draft && speakState !== "recorded") {
       return rejectWithValue("Recording is not ready to save.");
     }
 
@@ -1339,12 +1353,13 @@ export const saveRecording = createAsyncThunk<
       return rejectWithValue("Unauthorized");
     }
 
-    const audioDataUrl = normalizeAudioDataUrl(pendingRecordingAudioDataUrl);
-    if (!recordingUploadSessionId && !audioDataUrl) {
+    const uploadSessionId = draft?.recordingUploadSessionId?.trim() || recordingUploadSessionId;
+    const audioDataUrl = normalizeAudioDataUrl(draft ? draft.audioDataUrl : pendingRecordingAudioDataUrl);
+    if (!uploadSessionId && !audioDataUrl) {
       return rejectWithValue("Record your voice first.");
     }
 
-    const normalizedDuration = Math.max(0, Math.floor(recordingDuration));
+    const normalizedDuration = Math.max(0, Math.floor(draft ? draft.duration : recordingDuration));
     const normalizedMaxSession = Math.max(0, Math.floor(maxSessionSeconds));
     const normalizedWeeklyRemaining = Math.max(0, Math.floor(weeklyRemainingSeconds ?? 0));
 
@@ -1358,19 +1373,20 @@ export const saveRecording = createAsyncThunk<
       );
     }
 
-    const normalizedPhotoObject = pendingPhotoObjectDraft
-      .trim()
-      .replace(/\s+/g, " ")
-      .slice(0, PHOTO_PRACTICE_MAX_OBJECT_LENGTH);
+    const practiceType = draft ? draft.practiceType : recordingPracticeType;
+    const normalizedPhotoObject = draft
+      ? (draft.photoObject ?? "").trim().replace(/\s+/g, " ").slice(0, PHOTO_PRACTICE_MAX_OBJECT_LENGTH)
+      : pendingPhotoObjectDraft.trim().replace(/\s+/g, " ").slice(0, PHOTO_PRACTICE_MAX_OBJECT_LENGTH);
     const photoObject = normalizedPhotoObject || null;
-    const photoDataUrl = recordingPracticeType === "photo_description" ? pendingPhotoDataUrl : null;
+    const photoDataUrl = practiceType === "photo_description" ? (draft ? draft.photoDataUrl : pendingPhotoDataUrl) : null;
 
-    if (recordingPracticeType === "photo_description" && !photoDataUrl) {
+    if (practiceType === "photo_description" && !photoDataUrl) {
       return rejectWithValue("Upload a photo before saving this practice.");
     }
 
-    const topic =
-      recordingPracticeType === "photo_description"
+    const topic = draft?.topic.trim()
+      ? draft.topic.trim()
+      : practiceType === "photo_description"
         ? photoObject
           ? `Photo description: ${photoObject}`
           : "Photo description"
@@ -1379,16 +1395,16 @@ export const saveRecording = createAsyncThunk<
     const recordingDraft = {
       topic,
       duration: normalizedDuration,
-      timestamp: new Date().toISOString(),
-      practiceType: recordingPracticeType,
+      timestamp: draft?.timestamp || new Date().toISOString(),
+      practiceType,
       audioDataUrl,
       photoDataUrl,
       photoObject
     };
 
     try {
-      const response = recordingUploadSessionId
-        ? await fetch(`/api/recording-sessions/${encodeURIComponent(recordingUploadSessionId)}/finish`, {
+      const response = uploadSessionId
+        ? await fetch(`/api/recording-sessions/${encodeURIComponent(uploadSessionId)}/finish`, {
             method: "POST",
             headers: {
               "Content-Type": "application/json"
@@ -1835,6 +1851,7 @@ const initialState: AppState = {
   currentFeedReplies: [],
   selectedDate: null,
   currentRecordingId: null,
+  backgroundSaveRecordingId: null,
   isPlaying: false,
   playbackPosition: 0,
   topics: [],
@@ -1967,8 +1984,30 @@ const openAuthFlow = (state: AppState, pendingSaveAfterAuth: boolean): void => {
 };
 
 const applySavedRecording = (state: AppState, recording: Recording): void => {
-  state.recordings = [recording, ...state.recordings.filter((item) => item.id !== recording.id)];
+  const backgroundSaveRecordingId = state.backgroundSaveRecordingId;
+  const isBackgroundSave = Boolean(backgroundSaveRecordingId);
+  state.recordings = [
+    recording,
+    ...state.recordings.filter((item) => item.id !== recording.id && item.id !== backgroundSaveRecordingId)
+  ];
+  if (isBackgroundSave) {
+    if (state.currentRecordingId === backgroundSaveRecordingId) {
+      state.currentRecordingId = recording.id;
+      state.selectedDate = toDateKey(new Date(recording.timestamp));
+      const recordingDate = new Date(recording.timestamp);
+      state.calendarMonth = recordingDate.getMonth();
+      state.calendarYear = recordingDate.getFullYear();
+    }
+    state.backgroundSaveRecordingId = null;
+    state.recordingSaveStatus = "idle";
+    state.recordingSaveError = null;
+    state.feedPublishStatus = "idle";
+    state.feedPublishError = null;
+    return;
+  }
+
   state.currentRecordingId = recording.id;
+  state.backgroundSaveRecordingId = null;
   state.selectedDate = toDateKey(new Date(recording.timestamp));
   state.speakState = "idle";
   state.selectedTopic = null;
@@ -2075,6 +2114,7 @@ const completeAuthSuccess = (
   state.selectedInterestIds = [];
   state.questionsEnglishLevel = englishLevel;
   state.recordings = [];
+  state.backgroundSaveRecordingId = null;
   clearFeedState(state);
   state.currentRecordingId = null;
   state.selectedDate = null;
@@ -2118,6 +2158,7 @@ const clearAuthenticatedState = (state: AppState): void => {
   state.pendingPhotoError = null;
   state.selectedEnglishLevel = DEFAULT_ENGLISH_LEVEL;
   state.recordings = [];
+  state.backgroundSaveRecordingId = null;
   clearFeedState(state);
   state.currentRecordingId = null;
   state.selectedDate = null;
@@ -2253,6 +2294,64 @@ const appSlice = createSlice({
     setRecordingUploadSessionId: (state, action: PayloadAction<string | null>) => {
       const value = typeof action.payload === "string" ? action.payload.trim() : "";
       state.recordingUploadSessionId = value || null;
+    },
+    showBackgroundRecordingSave: (state, action: PayloadAction<RecordingSaveDraft>) => {
+      const draft = action.payload;
+      const localRecordingId = draft.localRecordingId?.trim();
+      if (!localRecordingId) {
+        return;
+      }
+
+      const timestamp = draft.timestamp || new Date().toISOString();
+      const recordingDate = new Date(timestamp);
+      const recording: Recording = {
+        id: localRecordingId,
+        topic: draft.topic.trim() || "Free talk",
+        duration: Math.max(0, Math.floor(draft.duration)),
+        timestamp,
+        status: "processing",
+        transcript: "",
+        suggestions: [],
+        practiceType: draft.practiceType,
+        audioDataUrl: normalizeAudioDataUrl(draft.audioDataUrl),
+        photoDataUrl: normalizePhotoDataUrl(draft.photoDataUrl),
+        photoObject: normalizePhotoObject(draft.photoObject),
+        processingError: null
+      };
+
+      state.recordings = [
+        recording,
+        ...state.recordings.filter((item) => item.id !== localRecordingId && item.id !== state.backgroundSaveRecordingId)
+      ];
+      state.currentRecordingId = localRecordingId;
+      state.backgroundSaveRecordingId = localRecordingId;
+      state.selectedDate = toDateKey(recordingDate);
+      state.calendarMonth = recordingDate.getMonth();
+      state.calendarYear = recordingDate.getFullYear();
+      state.speakState = "idle";
+      state.selectedTopic = null;
+      state.showQuestions = false;
+      state.showWords = false;
+      state.recordingDuration = 0;
+      state.showAddTopicInput = false;
+      state.customTopicDraft = "";
+      state.activeTab = "history";
+      state.currentScreen = "details";
+      state.copyMessage = null;
+      state.pendingSaveAfterAuth = false;
+      state.recordingSaveStatus = "loading";
+      state.recordingSaveError = null;
+      state.feedPublishStatus = "idle";
+      state.feedPublishError = null;
+      state.recordingPracticeType = "topic";
+      state.pendingRecordingAudioDataUrl = null;
+      state.recordingUploadSessionId = null;
+      state.recordingInputError = null;
+      state.pendingPhotoDataUrl = null;
+      state.pendingPhotoObjectDraft = "";
+      state.pendingPhotoError = null;
+      clearTopicGuidanceState(state);
+      resetPlayback(state);
     },
     setPhotoForPractice: (state, action: PayloadAction<string>) => {
       const normalized = action.payload.trim();
@@ -2665,11 +2764,12 @@ const appSlice = createSlice({
         state.englishLevelSaveError = null;
         state.userDataStatus = "idle";
         state.userDataError = null;
-        state.selectedInterestIds = [];
-        state.recordings = [];
-        clearFeedState(state);
-        clearTopicGuidanceState(state);
-        clearStudyWordsState(state);
+      state.selectedInterestIds = [];
+      state.recordings = [];
+      state.backgroundSaveRecordingId = null;
+      clearFeedState(state);
+      clearTopicGuidanceState(state);
+      clearStudyWordsState(state);
       })
       .addCase(restoreSession.rejected, (state, action) => {
         state.authStatus = "idle";
@@ -2686,11 +2786,12 @@ const appSlice = createSlice({
         state.englishLevelSaveError = null;
         state.userDataStatus = "idle";
         state.userDataError = null;
-        state.selectedInterestIds = [];
-        state.recordings = [];
-        clearFeedState(state);
-        clearTopicGuidanceState(state);
-        clearStudyWordsState(state);
+      state.selectedInterestIds = [];
+      state.recordings = [];
+      state.backgroundSaveRecordingId = null;
+      clearFeedState(state);
+      clearTopicGuidanceState(state);
+      clearStudyWordsState(state);
       })
       .addCase(signIn.pending, (state) => {
         state.authStatus = "loading";
@@ -2730,6 +2831,7 @@ const appSlice = createSlice({
         state.selectedInterestIds = action.payload.interestIds;
         state.selectedEnglishLevel = action.payload.englishLevel;
         state.recordings = action.payload.recordings;
+        state.backgroundSaveRecordingId = null;
         applySubscriptionState(state, action.payload.subscription);
         applyRecordingQuotaState(state, action.payload.quota);
         clearStudyWordsState(state);
@@ -2771,11 +2873,21 @@ const appSlice = createSlice({
       .addCase(saveRecording.rejected, (state, action) => {
         state.recordingSaveStatus = "idle";
         if (action.payload === "Unauthorized") {
+          state.backgroundSaveRecordingId = null;
           clearAuthenticatedState(state);
           openAuthFlow(state, true);
           return;
         }
         if (action.payload && action.payload !== "Unauthorized") {
+          if (state.backgroundSaveRecordingId) {
+            const backgroundSaveRecordingId = state.backgroundSaveRecordingId;
+            state.recordings = state.recordings.map((item) =>
+              item.id === backgroundSaveRecordingId
+                ? { ...item, status: "failed", processingError: action.payload ?? "Failed to save recording." }
+                : item
+            );
+            state.backgroundSaveRecordingId = null;
+          }
           state.recordingSaveError = action.payload;
         }
       })
@@ -3062,6 +3174,7 @@ export const {
   setRecordingInputError,
   setRecordingAudioDataUrl,
   setRecordingUploadSessionId,
+  showBackgroundRecordingSave,
   setPhotoForPractice,
   clearPhotoForPractice,
   setPhotoObjectDraft,

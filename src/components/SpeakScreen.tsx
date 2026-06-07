@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, type ChangeEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type ChangeEvent } from "react";
 import {
   readBlobAsDataUrl,
   resolveAudioFileExtension,
@@ -22,12 +22,14 @@ import {
   openAuthForSave,
   PHOTO_PRACTICE_MAX_BYTES,
   reRecord,
+  type RecordingSaveDraft,
   saveRecording,
   selectTopic,
   setCustomTopicDraft,
   setRecordingAudioDataUrl,
   setRecordingInputError,
   setRecordingUploadSessionId,
+  showBackgroundRecordingSave,
   setPhotoForPractice,
   setPhotoObjectDraft,
   setPhotoUploadError,
@@ -44,6 +46,7 @@ import {
 import AudioWaveform from "./AudioWaveform";
 
 const PHOTO_ACCEPTED_TYPES = new Set(["image/jpeg", "image/jpg", "image/png", "image/webp", "image/gif"]);
+type FinalAudioUploadState = "idle" | "uploading" | "ready" | "failed";
 
 const readFileAsDataUrl = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -161,6 +164,7 @@ const buildStudyTextSegments = (text: string, words: string[]): StudyTextSegment
 
 export default function SpeakScreen() {
   const dispatch = useAppDispatch();
+  const [finalAudioUploadState, setFinalAudioUploadState] = useState<FinalAudioUploadState>("idle");
   const {
     speakState,
     selectedTopic,
@@ -222,6 +226,7 @@ export default function SpeakScreen() {
   const uploadChunkIndexRef = useRef(0);
   const chunkUploadQueueRef = useRef<Promise<void>>(Promise.resolve());
   const chunkUploadFailedRef = useRef(false);
+  const finalAudioUploadPromiseRef = useRef<Promise<void> | null>(null);
 
   const releaseMedia = useCallback(() => {
     if (mediaStreamRef.current) {
@@ -283,6 +288,8 @@ export default function SpeakScreen() {
       uploadChunkIndexRef.current = 0;
       chunkUploadFailedRef.current = false;
       chunkUploadQueueRef.current = Promise.resolve();
+      finalAudioUploadPromiseRef.current = null;
+      setFinalAudioUploadState("idle");
 
       const recordingSupportError = resolveBrowserRecordingSupportError();
       if (recordingSupportError) {
@@ -349,29 +356,35 @@ export default function SpeakScreen() {
           const blob = new Blob(chunks, { type: resultingType });
           const finalUpload = chunkUploadQueueRef.current
             .catch(() => undefined)
-            .then(() => {
+            .then(async () => {
               const sessionId = uploadSessionIdRef.current;
               if (!sessionId) {
-                return undefined;
+                return;
               }
-              return uploadRecordingFinalAudio(sessionId, blob)
-                .then(() => {
-                  if (chunkUploadFailedRef.current) {
-                    dispatch(setRecordingInputError(null));
-                  }
-                })
-                .catch(() => {
-                  uploadSessionIdRef.current = null;
-                  dispatch(setRecordingUploadSessionId(null));
-                  dispatch(setRecordingInputError("Full recording will be uploaded when you save."));
-                });
+              await uploadRecordingFinalAudio(sessionId, blob);
             });
-          void Promise.all([readBlobAsDataUrl(blob), finalUpload])
-            .then(([dataUrl]) => {
+          finalAudioUploadPromiseRef.current = finalUpload;
+          setFinalAudioUploadState(uploadSessionIdRef.current ? "uploading" : "ready");
+
+          void readBlobAsDataUrl(blob)
+            .then((dataUrl) => {
               dispatch(setRecordingAudioDataUrl(dataUrl));
             })
             .catch(() => {
               dispatch(setRecordingInputError("Failed to process recorded audio."));
+            });
+          void finalUpload
+            .then(() => {
+              setFinalAudioUploadState("ready");
+              if (chunkUploadFailedRef.current) {
+                dispatch(setRecordingInputError(null));
+              }
+            })
+            .catch(() => {
+              uploadSessionIdRef.current = null;
+              setFinalAudioUploadState("failed");
+              dispatch(setRecordingUploadSessionId(null));
+              dispatch(setRecordingInputError("Full recording will be uploaded when you save."));
             });
         };
 
@@ -384,6 +397,79 @@ export default function SpeakScreen() {
     },
     [createUploadSession, dispatch, releaseMedia]
   );
+
+  const buildRecordingSaveDraft = useCallback((): RecordingSaveDraft | null => {
+    const audioDataUrl = pendingRecordingAudioDataUrl?.trim() || null;
+    if (!audioDataUrl) {
+      return null;
+    }
+
+    const normalizedPhotoObject = pendingPhotoObjectDraft
+      .trim()
+      .replace(/\s+/g, " ")
+      .slice(0, 120);
+    const photoObject = normalizedPhotoObject || null;
+    const topic =
+      recordingPracticeType === "photo_description"
+        ? photoObject
+          ? `Photo description: ${photoObject}`
+          : "Photo description"
+        : selectedTopic ?? "Free talk";
+    const timestamp = new Date().toISOString();
+
+    return {
+      localRecordingId: `local-${Date.now()}`,
+      recordingUploadSessionId: uploadSessionIdRef.current,
+      topic,
+      duration: Math.max(0, Math.floor(recordingDuration)),
+      timestamp,
+      practiceType: recordingPracticeType,
+      audioDataUrl,
+      photoDataUrl: recordingPracticeType === "photo_description" ? pendingPhotoDataUrl : null,
+      photoObject
+    };
+  }, [
+    pendingPhotoDataUrl,
+    pendingPhotoObjectDraft,
+    pendingRecordingAudioDataUrl,
+    recordingDuration,
+    recordingPracticeType,
+    selectedTopic
+  ]);
+
+  const onSaveRecording = useCallback(() => {
+    if (!isAuthenticated) {
+      dispatch(openAuthForSave());
+      return;
+    }
+
+    const draft = buildRecordingSaveDraft();
+    if (!draft) {
+      dispatch(setRecordingInputError("Preparing audio, please wait a moment before saving."));
+      return;
+    }
+
+    const finalUpload = finalAudioUploadPromiseRef.current;
+    dispatch(showBackgroundRecordingSave(draft));
+
+    void (async () => {
+      try {
+        if (finalUpload) {
+          await finalUpload;
+        }
+        await dispatch(saveRecording(draft)).unwrap();
+      } catch {
+        if (!draft.audioDataUrl) {
+          return;
+        }
+        try {
+          await dispatch(saveRecording({ ...draft, recordingUploadSessionId: null })).unwrap();
+        } catch {
+          // The rejected thunk marks the optimistic recording as failed.
+        }
+      }
+    })();
+  }, [buildRecordingSaveDraft, dispatch, isAuthenticated]);
 
   const onStartFreeTalk = () => {
     void createRecordingFromMicrophone(() => {
@@ -921,13 +1007,7 @@ export default function SpeakScreen() {
           </button>
           <button
             className="btn btn-primary"
-            onClick={() => {
-              if (!isAuthenticated) {
-                dispatch(openAuthForSave());
-                return;
-              }
-              void dispatch(saveRecording());
-            }}
+            onClick={onSaveRecording}
             disabled={recordingSaveStatus === "loading" || (isAuthenticated && !pendingRecordingAudioDataUrl)}
           >
             {isAuthenticated
@@ -939,6 +1019,17 @@ export default function SpeakScreen() {
         </div>
         {!pendingRecordingAudioDataUrl && !recordingInputError && (
           <div className="notice top-spaced">Preparing audio, please wait a moment before saving.</div>
+        )}
+        {pendingRecordingAudioDataUrl && finalAudioUploadState === "uploading" && (
+          <div className="notice top-spaced">
+            Uploading audio in the background. You can save now and continue while processing runs.
+            <div className="background-progress" aria-hidden="true">
+              <div className="background-progress-fill" />
+            </div>
+          </div>
+        )}
+        {pendingRecordingAudioDataUrl && finalAudioUploadState === "ready" && (
+          <div className="notice top-spaced">Audio is ready. Saving will start background transcription.</div>
         )}
         {recordingInputError && <div className="auth-error top-spaced">{recordingInputError}</div>}
         {recordingSaveError && <div className="auth-error top-spaced">{recordingSaveError}</div>}
