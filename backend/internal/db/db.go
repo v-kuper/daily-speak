@@ -78,6 +78,13 @@ func (d *DB) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandT
 	return d.pool.Exec(ctx, sql, args...)
 }
 
+func (d *DB) Begin(ctx context.Context) (pgx.Tx, error) {
+	if d == nil || d.pool == nil {
+		return nil, errors.New("database is not configured")
+	}
+	return d.pool.Begin(ctx)
+}
+
 func SchemaHash() string {
 	sum := sha256.Sum256([]byte(InitialSchemaSQL()))
 	return hex.EncodeToString(sum[:])

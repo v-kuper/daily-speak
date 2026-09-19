@@ -97,7 +97,7 @@ CREATE INDEX IF NOT EXISTS recording_upload_sessions_user_id_idx
 CREATE TABLE IF NOT EXISTS feed_posts (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  source_recording_id TEXT NOT NULL,
+  source_recording_id TEXT NOT NULL REFERENCES recordings(id) ON DELETE CASCADE,
   topic TEXT NOT NULL,
   duration INTEGER NOT NULL,
   practice_type TEXT NOT NULL DEFAULT 'topic',
@@ -113,6 +113,21 @@ CREATE UNIQUE INDEX IF NOT EXISTS feed_posts_user_source_recording_uidx
   ON feed_posts (user_id, source_recording_id);
 CREATE INDEX IF NOT EXISTS feed_posts_created_at_idx
   ON feed_posts (created_at DESC);
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'feed_posts_source_recording_id_fkey'
+      AND conrelid = 'feed_posts'::regclass
+  ) THEN
+    ALTER TABLE feed_posts
+      ADD CONSTRAINT feed_posts_source_recording_id_fkey
+      FOREIGN KEY (source_recording_id) REFERENCES recordings(id) ON DELETE CASCADE NOT VALID;
+  END IF;
+END
+$$;
 
 CREATE TABLE IF NOT EXISTS feed_replies (
   id TEXT PRIMARY KEY,
@@ -148,3 +163,14 @@ CREATE TABLE IF NOT EXISTS feed_reply_reactions (
 
 CREATE INDEX IF NOT EXISTS feed_reply_reactions_reply_reaction_idx
   ON feed_reply_reactions (reply_id, reaction);
+
+CREATE TABLE IF NOT EXISTS pending_file_deletions (
+  public_url TEXT PRIMARY KEY,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  last_error TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS pending_file_deletions_updated_at_idx
+  ON pending_file_deletions (updated_at ASC);

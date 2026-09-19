@@ -17,6 +17,8 @@ func TestInitialMigrationContainsCurrentTables(t *testing.T) {
 		"CREATE TABLE IF NOT EXISTS feed_replies",
 		"CREATE TABLE IF NOT EXISTS feed_post_reactions",
 		"CREATE TABLE IF NOT EXISTS feed_reply_reactions",
+		"CREATE TABLE IF NOT EXISTS pending_file_deletions",
+		"FOREIGN KEY (source_recording_id) REFERENCES recordings(id) ON DELETE CASCADE",
 		"ADD COLUMN IF NOT EXISTS corrected_transcript TEXT NOT NULL DEFAULT ''",
 		"ADD COLUMN IF NOT EXISTS processing_stage TEXT",
 	}

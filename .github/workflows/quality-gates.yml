@@ -48,6 +48,8 @@ jobs:
         run: npm ci
 
       - name: Quality gates
+        env:
+          TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/daily_speaking
         run: npm run quality
 
       - name: Smoke API checks

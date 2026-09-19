@@ -662,6 +662,42 @@ window.DAILY_SPEAKING_OPENAPI = {
             "$ref": "#/components/responses/InternalServerError"
           }
         }
+      },
+      "delete": {
+        "tags": [
+          "Recordings"
+        ],
+        "summary": "Permanently delete a recording and related feed content",
+        "description": "Deletes the owned recording, its Feed publication, replies and reactions, and durably queues recording and reply audio files for removal from server storage.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RecordingIdPath"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Recording deleted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteRecordingResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
       }
     },
     "/api/recording-sessions": {
@@ -1607,6 +1643,28 @@ window.DAILY_SPEAKING_OPENAPI = {
         "properties": {
           "recording": {
             "$ref": "#/components/schemas/Recording"
+          }
+        }
+      },
+      "DeleteRecordingResponse": {
+        "type": "object",
+        "required": [
+          "deletedRecordingId",
+          "quota"
+        ],
+        "properties": {
+          "deletedRecordingId": {
+            "type": "string"
+          },
+          "quota": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RecordingQuota"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         }
       },

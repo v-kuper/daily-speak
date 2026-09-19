@@ -33,9 +33,11 @@ func main() {
 
 	addr := envDefault("APP_ADDR", ":3000")
 	nextURL := envDefault("NEXT_UPSTREAM_URL", "http://127.0.0.1:3001")
+	apiServer := httpapi.NewServer(httpapi.Config{DB: database, NextURL: nextURL})
+	apiServer.StartBackgroundWorkers(ctx)
 	server := &http.Server{
 		Addr:              addr,
-		Handler:           httpapi.NewServer(httpapi.Config{DB: database, NextURL: nextURL}).Handler(),
+		Handler:           apiServer.Handler(),
 		ReadHeaderTimeout: 15 * time.Second,
 	}
 

@@ -11,11 +11,17 @@ import (
 )
 
 func (s *Server) processRecordingInBackground(recordingID string, userID string, audioPath string, topic string, practiceType string, photoObject *string, englishLevel string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+	s.registerRecordingProcessing(recordingID, cancel)
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 		defer cancel()
+		defer s.unregisterRecordingProcessing(recordingID)
 		logger := logging.ForBackground("api.recordings.process")
 		if err := s.processSavedRecording(ctx, recordingID, userID, audioPath, topic, practiceType, photoObject, englishLevel, logger); err != nil {
+			if errors.Is(ctx.Err(), context.Canceled) {
+				logger.Info("recording.processing_cancelled", map[string]any{"recordingId": recordingID})
+				return
+			}
 			logger.Error("recording.processing_failed", logging.ErrorMeta(err))
 			_, _ = s.db.Exec(context.Background(), `
 				UPDATE recordings
@@ -23,6 +29,32 @@ func (s *Server) processRecordingInBackground(recordingID string, userID string,
 				WHERE id = $1`, recordingID, truncateRunes(err.Error(), 500))
 		}
 	}()
+}
+
+func (s *Server) registerRecordingProcessing(recordingID string, cancel context.CancelFunc) {
+	s.recordingProcessingMu.Lock()
+	previous := s.recordingProcessingCancels[recordingID]
+	s.recordingProcessingCancels[recordingID] = cancel
+	s.recordingProcessingMu.Unlock()
+	if previous != nil {
+		previous()
+	}
+}
+
+func (s *Server) unregisterRecordingProcessing(recordingID string) {
+	s.recordingProcessingMu.Lock()
+	delete(s.recordingProcessingCancels, recordingID)
+	s.recordingProcessingMu.Unlock()
+}
+
+func (s *Server) cancelRecordingProcessing(recordingID string) {
+	s.recordingProcessingMu.Lock()
+	cancel := s.recordingProcessingCancels[recordingID]
+	delete(s.recordingProcessingCancels, recordingID)
+	s.recordingProcessingMu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
 }
 
 func (s *Server) processSavedRecording(ctx context.Context, recordingID string, userID string, audioPath string, topic string, practiceType string, photoObject *string, englishLevel string, logger logging.Logger) error {

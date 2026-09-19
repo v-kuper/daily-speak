@@ -61,3 +61,36 @@ func TestHandlerServesUploadsFromConfiguredDir(t *testing.T) {
 		t.Fatalf("expected uploaded audio bytes, got %q", recorder.Body.String())
 	}
 }
+
+func TestStoredUploadPathRejectsTraversalOutsideConfiguredDir(t *testing.T) {
+	uploadsDir := t.TempDir()
+	t.Setenv("UPLOADS_DIR", uploadsDir)
+
+	if _, err := storedUploadPath("/uploads/../private.txt"); err == nil {
+		t.Fatal("expected traversal path to be rejected")
+	}
+}
+
+func TestRemoveStoredUploadFilesDeletesExistingFilesAndIgnoresMissingFiles(t *testing.T) {
+	uploadsDir := t.TempDir()
+	t.Setenv("UPLOADS_DIR", uploadsDir)
+	audioPath := filepath.Join(uploadsDir, "recordings", "user-123", "recording-456.webm")
+	if err := os.MkdirAll(filepath.Dir(audioPath), 0o755); err != nil {
+		t.Fatalf("expected test uploads directory: %v", err)
+	}
+	if err := os.WriteFile(audioPath, []byte("audio-bytes"), 0o644); err != nil {
+		t.Fatalf("expected test audio file: %v", err)
+	}
+
+	err := removeStoredUploadFiles([]string{
+		"/uploads/recordings/user-123/recording-456.webm",
+		"/uploads/feed-replies/user-123/missing.webm",
+	})
+
+	if err != nil {
+		t.Fatalf("expected file cleanup to succeed: %v", err)
+	}
+	if _, err := os.Stat(audioPath); !os.IsNotExist(err) {
+		t.Fatalf("expected recording audio to be removed, got %v", err)
+	}
+}

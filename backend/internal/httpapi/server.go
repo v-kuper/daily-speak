@@ -7,6 +7,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"daily-speaking-practice/backend/internal/auth"
@@ -20,8 +21,13 @@ type Config struct {
 }
 
 type Server struct {
-	db        *db.DB
-	nextProxy http.Handler
+	db                         *db.DB
+	nextProxy                  http.Handler
+	recordingProcessingMu      sync.Mutex
+	recordingProcessingCancels map[string]func()
+	fileDeletionWorkerOnce     sync.Once
+	fileDeletionWake           chan struct{}
+	removeStoredUploads        func([]string) error
 }
 
 func NewServer(config Config) *Server {
@@ -31,7 +37,13 @@ func NewServer(config Config) *Server {
 			proxy = httputil.NewSingleHostReverseProxy(parsed)
 		}
 	}
-	return &Server{db: config.DB, nextProxy: proxy}
+	return &Server{
+		db:                         config.DB,
+		nextProxy:                  proxy,
+		recordingProcessingCancels: map[string]func(){},
+		fileDeletionWake:           make(chan struct{}, 1),
+		removeStoredUploads:        removeStoredUploadFiles,
+	}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -84,6 +96,8 @@ func (s *Server) routeAPI(w http.ResponseWriter, r *http.Request) {
 		s.handleCreateRecording(w, r)
 	case strings.HasPrefix(path, "/api/recordings/") && r.Method == http.MethodGet:
 		s.handleGetRecording(w, r, strings.TrimPrefix(path, "/api/recordings/"))
+	case strings.HasPrefix(path, "/api/recordings/") && r.Method == http.MethodDelete:
+		s.handleDeleteRecording(w, r, strings.TrimPrefix(path, "/api/recordings/"))
 	case path == "/api/recording-sessions" && r.Method == http.MethodPost:
 		s.handleCreateRecordingSession(w, r)
 	case strings.HasPrefix(path, "/api/recording-sessions/"):

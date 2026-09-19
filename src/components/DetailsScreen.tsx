@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { buildTranscriptSegments } from "../lib/transcriptHighlight";
 import { recordingProcessingLabel } from "../lib/recordingProcessing";
 import { formatTime } from "../lib/utils";
 import { useAppDispatch, useAppSelector } from "../store/hooks";
 import {
   backToHistory,
+  clearRecordingDeleteError,
+  deleteRecording,
   fetchRecording,
   fetchFeedPosts,
   openShareModal,
@@ -115,6 +117,7 @@ export default function DetailsScreen() {
   const [sharedReplies, setSharedReplies] = useState<FeedThreadReply[]>([]);
   const [sharedRepliesStatus, setSharedRepliesStatus] = useState<"idle" | "loading" | "ready" | "failed">("idle");
   const [sharedRepliesError, setSharedRepliesError] = useState<string | null>(null);
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const {
     recordings,
     currentRecordingId,
@@ -122,7 +125,10 @@ export default function DetailsScreen() {
     playbackPosition,
     copyMessage,
     feedPosts,
-    feedPostsStatus
+    feedPostsStatus,
+    backgroundSaveRecordingId,
+    recordingDeleteStatus,
+    recordingDeleteError
   } = useAppSelector(
     (state) => state.app
   );
@@ -156,6 +162,8 @@ export default function DetailsScreen() {
   }, [feedPosts, recording]);
   const sharedFeedPostId = sharedFeedPost?.id ?? null;
   const isShareStatusLoading = Boolean(recording) && (feedPostsStatus === "idle" || feedPostsStatus === "loading");
+  const isDeleteLoading = recordingDeleteStatus === "loading";
+  const canDelete = Boolean(recordingId) && recordingId !== backgroundSaveRecordingId;
 
   useEffect(() => {
     if (!recordingId || feedPostsStatus !== "idle") {
@@ -372,6 +380,52 @@ export default function DetailsScreen() {
     }
   };
 
+  const onOpenDeleteModal = () => {
+    dispatch(clearRecordingDeleteError());
+    setDeleteModalOpen(true);
+  };
+
+  const onCloseDeleteModal = () => {
+    if (isDeleteLoading) {
+      return;
+    }
+    dispatch(clearRecordingDeleteError());
+    setDeleteModalOpen(false);
+  };
+
+  const onConfirmDelete = () => {
+    if (!recordingId || !canDelete) {
+      return;
+    }
+    void dispatch(deleteRecording(recordingId)).unwrap().catch(() => undefined);
+  };
+
+  const onDeleteModalKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      onCloseDeleteModal();
+      return;
+    }
+    if (event.key !== "Tab") {
+      return;
+    }
+
+    const focusable = Array.from(event.currentTarget.querySelectorAll<HTMLElement>("button:not(:disabled)"));
+    if (focusable.length === 0) {
+      event.preventDefault();
+      return;
+    }
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
+
   if (!recording) {
     return (
       <section>
@@ -508,6 +562,41 @@ export default function DetailsScreen() {
           <div className="empty-state">The natural version is unavailable for this recording.</div>
         )}
       </div>
+
+      <button className="btn btn-danger btn-large delete-recording-btn" onClick={onOpenDeleteModal} disabled={!canDelete || isDeleteLoading}>
+        {!canDelete ? "Saving recording..." : isDeleteLoading ? "Deleting..." : "Delete recording"}
+      </button>
+
+      {deleteModalOpen && (
+        <div
+          className="modal visible"
+          role="presentation"
+          onKeyDown={onDeleteModalKeyDown}
+          onClick={(event) => {
+            if (event.target === event.currentTarget) {
+              onCloseDeleteModal();
+            }
+          }}
+        >
+          <div className="modal-content" role="dialog" aria-modal="true" aria-label="Delete recording">
+            <div className="modal-title">Delete recording?</div>
+            <p>
+              This permanently deletes the recording and its audio file. If it was published, the Feed post, reactions,
+              comments, and comment audio files will also be deleted.
+            </p>
+            {isProcessing && <p className="auth-hint">The background analysis for this recording will be stopped.</p>}
+            {recordingDeleteError && <div className="auth-error top-spaced">{recordingDeleteError}</div>}
+            <div className="modal-buttons top-spaced">
+              <button className="btn btn-secondary" onClick={onCloseDeleteModal} disabled={isDeleteLoading} autoFocus>
+                Cancel
+              </button>
+              <button className="btn btn-danger" onClick={onConfirmDelete} disabled={isDeleteLoading}>
+                {isDeleteLoading ? "Deleting..." : "Delete permanently"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {sharedFeedPost ? (
         <div className="top-spaced">

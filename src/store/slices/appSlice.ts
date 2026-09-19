@@ -10,6 +10,11 @@ import {
   type RecordingStatus,
   type Suggestion
 } from "../../lib/data";
+import {
+  filterDeletedFeedPosts,
+  filterDeletedRecordings,
+  removeRecordingAndFeedPost
+} from "../../lib/recordingDeletion";
 import { parseRecordingProcessingStage } from "../../lib/recordingProcessing";
 import { DEFAULT_ENGLISH_LEVEL, normalizeEnglishLevel, parseEnglishLevel, type EnglishLevel } from "../../lib/englishLevel";
 import { formatTime, toDateKey } from "../../lib/utils";
@@ -138,6 +143,7 @@ export type AppState = {
   showWords: boolean;
   recordingDuration: number;
   recordings: Recording[];
+  deletedRecordingIds: string[];
   feedPosts: FeedPost[];
   feedPostsStatus: QuestionsStatus;
   feedPostsError: string | null;
@@ -200,6 +206,8 @@ export type AppState = {
   userDataError: string | null;
   recordingSaveStatus: AuthStatus;
   recordingSaveError: string | null;
+  recordingDeleteStatus: AuthStatus;
+  recordingDeleteError: string | null;
   interestsSaveStatus: AuthStatus;
   interestsSaveError: string | null;
   isSubscriber: boolean;
@@ -339,6 +347,12 @@ type SaveInterestsResponse = {
 
 type SaveRecordingResponse = {
   recording?: unknown;
+  quota?: unknown;
+  error?: string;
+};
+
+type DeleteRecordingResponse = {
+  deletedRecordingId?: unknown;
   quota?: unknown;
   error?: string;
 };
@@ -1474,6 +1488,48 @@ export const fetchRecording = createAsyncThunk<Recording, string, { rejectValue:
   }
 );
 
+export const deleteRecording = createAsyncThunk<
+  { recordingId: string; quota: RecordingQuota | null },
+  string,
+  { state: { app: AppState }; rejectValue: string }
+>("app/deleteRecording", async (recordingId, { getState, rejectWithValue }) => {
+  if (!getState().app.isAuthenticated) {
+    return rejectWithValue("Unauthorized");
+  }
+
+  const normalizedRecordingId = recordingId.trim();
+  if (!normalizedRecordingId) {
+    return rejectWithValue("Recording is missing.");
+  }
+  if (normalizedRecordingId.startsWith("local-")) {
+    return { recordingId: normalizedRecordingId, quota: null };
+  }
+
+  try {
+    const response = await fetch(`/api/recordings/${encodeURIComponent(normalizedRecordingId)}`, {
+      method: "DELETE"
+    });
+    const payload = (await response.json().catch(() => null)) as DeleteRecordingResponse | null;
+    if (response.status === 401) {
+      return rejectWithValue("Unauthorized");
+    }
+    if (!response.ok) {
+      return rejectWithValue(payload?.error ?? "Failed to delete recording.");
+    }
+    const deletedRecordingId =
+      typeof payload?.deletedRecordingId === "string" ? payload.deletedRecordingId.trim() : "";
+    if (!deletedRecordingId || deletedRecordingId !== normalizedRecordingId) {
+      return rejectWithValue("Invalid recording deletion response from server.");
+    }
+    return {
+      recordingId: deletedRecordingId,
+      quota: parseRecordingQuota(payload?.quota)
+    };
+  } catch {
+    return rejectWithValue("Cannot connect to recording service.");
+  }
+});
+
 export const fetchFeedPosts = createAsyncThunk<FeedPost[], void, { rejectValue: string }>(
   "app/fetchFeedPosts",
   async (_, { rejectWithValue }) => {
@@ -1846,6 +1902,7 @@ const initialState: AppState = {
   showWords: false,
   recordingDuration: 0,
   recordings: [],
+  deletedRecordingIds: [],
   feedPosts: [],
   feedPostsStatus: "idle",
   feedPostsError: null,
@@ -1908,6 +1965,8 @@ const initialState: AppState = {
   userDataError: null,
   recordingSaveStatus: "idle",
   recordingSaveError: null,
+  recordingDeleteStatus: "idle",
+  recordingDeleteError: null,
   interestsSaveStatus: "idle",
   interestsSaveError: null,
   isSubscriber: DEFAULT_RECORDING_QUOTA.isSubscriber,
@@ -2030,6 +2089,8 @@ const applySavedRecording = (state: AppState, recording: Recording): void => {
   state.pendingSaveAfterAuth = false;
   state.recordingSaveStatus = "idle";
   state.recordingSaveError = null;
+  state.recordingDeleteStatus = "idle";
+  state.recordingDeleteError = null;
   state.feedPublishStatus = "idle";
   state.feedPublishError = null;
   state.recordingPracticeType = "topic";
@@ -2110,6 +2171,8 @@ const completeAuthSuccess = (
   state.englishLevelSaveError = null;
   state.recordingSaveStatus = "idle";
   state.recordingSaveError = null;
+  state.recordingDeleteStatus = "idle";
+  state.recordingDeleteError = null;
   state.feedPublishStatus = "idle";
   state.feedPublishError = null;
   state.pendingRecordingAudioDataUrl = null;
@@ -2119,6 +2182,7 @@ const completeAuthSuccess = (
   state.selectedInterestIds = [];
   state.questionsEnglishLevel = englishLevel;
   state.recordings = [];
+  state.deletedRecordingIds = [];
   state.backgroundSaveRecordingId = null;
   clearFeedState(state);
   state.currentRecordingId = null;
@@ -2163,6 +2227,7 @@ const clearAuthenticatedState = (state: AppState): void => {
   state.pendingPhotoError = null;
   state.selectedEnglishLevel = DEFAULT_ENGLISH_LEVEL;
   state.recordings = [];
+  state.deletedRecordingIds = [];
   state.backgroundSaveRecordingId = null;
   clearFeedState(state);
   state.currentRecordingId = null;
@@ -2171,6 +2236,8 @@ const clearAuthenticatedState = (state: AppState): void => {
   state.userDataError = null;
   state.recordingSaveStatus = "idle";
   state.recordingSaveError = null;
+  state.recordingDeleteStatus = "idle";
+  state.recordingDeleteError = null;
   state.interestsSaveStatus = "idle";
   state.interestsSaveError = null;
   state.subscriptionActionStatus = "idle";
@@ -2299,6 +2366,9 @@ const appSlice = createSlice({
     setRecordingUploadSessionId: (state, action: PayloadAction<string | null>) => {
       const value = typeof action.payload === "string" ? action.payload.trim() : "";
       state.recordingUploadSessionId = value || null;
+    },
+    clearRecordingDeleteError: (state) => {
+      state.recordingDeleteError = null;
     },
     showBackgroundRecordingSave: (state, action: PayloadAction<RecordingSaveDraft>) => {
       const draft = action.payload;
@@ -2837,7 +2907,7 @@ const appSlice = createSlice({
         state.userDataError = null;
         state.selectedInterestIds = action.payload.interestIds;
         state.selectedEnglishLevel = action.payload.englishLevel;
-        state.recordings = action.payload.recordings;
+        state.recordings = filterDeletedRecordings(action.payload.recordings, state.deletedRecordingIds);
         state.backgroundSaveRecordingId = null;
         applySubscriptionState(state, action.payload.subscription);
         applyRecordingQuotaState(state, action.payload.quota);
@@ -2899,6 +2969,9 @@ const appSlice = createSlice({
         }
       })
       .addCase(fetchRecording.fulfilled, (state, action) => {
+        if (state.deletedRecordingIds.includes(action.payload.id)) {
+          return;
+        }
         const recordingIndex = state.recordings.findIndex((item) => item.id === action.payload.id);
         if (recordingIndex >= 0) {
           state.recordings[recordingIndex] = action.payload;
@@ -2911,6 +2984,48 @@ const appSlice = createSlice({
           clearAuthenticatedState(state);
         }
       })
+      .addCase(deleteRecording.pending, (state) => {
+        state.recordingDeleteStatus = "loading";
+        state.recordingDeleteError = null;
+      })
+      .addCase(deleteRecording.fulfilled, (state, action) => {
+        const { recordingId, quota } = action.payload;
+        if (!state.deletedRecordingIds.includes(recordingId)) {
+          state.deletedRecordingIds.push(recordingId);
+        }
+        const nextCollections = removeRecordingAndFeedPost(state.recordings, state.feedPosts, recordingId);
+        state.recordings = nextCollections.recordings;
+        state.feedPosts = nextCollections.feedPosts;
+        state.feedPostsStatus = "idle";
+        state.feedPostsError = null;
+        if (state.currentFeedPost?.sourceRecordingId === recordingId) {
+          clearFeedThreadState(state);
+        }
+        if (state.currentRecordingId === recordingId) {
+          state.currentRecordingId = null;
+          state.currentScreen = "history";
+          state.activeTab = "history";
+        }
+        if (state.backgroundSaveRecordingId === recordingId) {
+          state.backgroundSaveRecordingId = null;
+        }
+        state.shareModalOpen = false;
+        state.copyMessage = null;
+        state.recordingDeleteStatus = "idle";
+        state.recordingDeleteError = null;
+        if (quota) {
+          applyRecordingQuotaState(state, quota);
+        }
+        resetPlayback(state);
+      })
+      .addCase(deleteRecording.rejected, (state, action) => {
+        state.recordingDeleteStatus = "idle";
+        if (action.payload === "Unauthorized") {
+          clearAuthenticatedState(state);
+          return;
+        }
+        state.recordingDeleteError = action.payload ?? "Failed to delete recording.";
+      })
       .addCase(fetchFeedPosts.pending, (state) => {
         state.feedPostsStatus = "loading";
         state.feedPostsError = null;
@@ -2918,7 +3033,7 @@ const appSlice = createSlice({
       .addCase(fetchFeedPosts.fulfilled, (state, action) => {
         state.feedPostsStatus = "ready";
         state.feedPostsError = null;
-        state.feedPosts = action.payload;
+        state.feedPosts = filterDeletedFeedPosts(action.payload, state.deletedRecordingIds);
       })
       .addCase(fetchFeedPosts.rejected, (state, action) => {
         if (action.payload === "Unauthorized") {
@@ -2935,6 +3050,10 @@ const appSlice = createSlice({
         state.currentFeedPostId = action.meta.arg;
       })
       .addCase(fetchFeedThread.fulfilled, (state, action) => {
+        if (state.deletedRecordingIds.includes(action.payload.post.sourceRecordingId)) {
+          clearFeedThreadState(state);
+          return;
+        }
         state.feedThreadStatus = "ready";
         state.feedThreadError = null;
         state.currentFeedPostId = action.payload.post.id;
@@ -2958,6 +3077,10 @@ const appSlice = createSlice({
         state.feedPublishStatus = "idle";
         state.feedPublishError = null;
         state.shareModalOpen = false;
+        if (state.deletedRecordingIds.includes(action.payload.sourceRecordingId)) {
+          state.copyMessage = null;
+          return;
+        }
         state.copyMessage = "Recording published to Feed.";
         upsertFeedPost(state, action.payload);
       })
@@ -3186,6 +3309,7 @@ export const {
   setRecordingInputError,
   setRecordingAudioDataUrl,
   setRecordingUploadSessionId,
+  clearRecordingDeleteError,
   showBackgroundRecordingSave,
   setPhotoForPractice,
   clearPhotoForPractice,

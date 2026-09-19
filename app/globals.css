@@ -1644,6 +1644,22 @@ body {
   box-shadow: none;
 }
 
+.btn-danger {
+  border-color: var(--danger);
+  background: var(--danger);
+  color: #ffffff;
+}
+
+.btn-danger:hover:not(:disabled),
+.btn-danger:focus-visible:not(:disabled) {
+  border-color: #7e2424;
+  background: #7e2424;
+}
+
+.delete-recording-btn {
+  margin-bottom: 24px;
+}
+
 .btn-secondary {
   border: 1px solid var(--border-soft);
   background: #ffffff;
