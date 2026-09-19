@@ -17,6 +17,7 @@ import {
 } from "../../lib/recordingDeletion";
 import { parseRecordingProcessingStage } from "../../lib/recordingProcessing";
 import { DEFAULT_ENGLISH_LEVEL, normalizeEnglishLevel, parseEnglishLevel, type EnglishLevel } from "../../lib/englishLevel";
+import { isCurrentInterviewGuidanceRequest } from "../../lib/interviewGuidance";
 import { formatTime, toDateKey } from "../../lib/utils";
 
 export type ScreenName = "speak" | "history" | "feed" | "feedThread" | "details" | "share" | "auth" | "profile" | "interests";
@@ -187,6 +188,7 @@ export type AppState = {
   topicGuidanceTopic: string | null;
   topicGuidanceInterestsKey: string;
   topicGuidanceEnglishLevel: EnglishLevel;
+  topicGuidanceRequestId: string | null;
   studyWords: string[];
   studyText: string;
   studyStatus: QuestionsStatus;
@@ -248,7 +250,8 @@ export const MAX_SELECTED_INTERESTS = 10;
 const FREE_WEEKLY_LIMIT_SECONDS = 10 * 60;
 const SESSION_LIMIT_SECONDS = 10 * 60;
 const MIN_DAILY_QUESTIONS = 3;
-const MIN_TOPIC_GUIDANCE_QUESTIONS = 10;
+const MIN_TOPIC_GUIDANCE_QUESTIONS = 17;
+const MIN_TOPIC_GUIDANCE_WORDS = 16;
 const PHOTO_PRACTICE_MAX_OBJECT_LENGTH = 120;
 const MAX_RECORDING_AUDIO_BYTES = 80 * 1024 * 1024;
 const AUDIO_DATA_URL_PATTERN = /^data:((?:audio|video)\/[a-z0-9.+-]+(?:;[^,]+)*);base64,([A-Za-z0-9+/_=-]+)$/i;
@@ -279,7 +282,7 @@ type DailyQuestionsResponse = {
   error?: string;
 };
 
-type FetchTopicGuidanceArgs = {
+export type FetchTopicGuidanceArgs = {
   topic: string;
   force?: boolean;
   refreshToken?: string;
@@ -990,7 +993,7 @@ export const fetchTopicGuidance = createAsyncThunk<
   "app/fetchTopicGuidance",
   async (
     { topic, refreshToken, interestIds = [], avoidQuestions = [], avoidWords = [], englishLevel = DEFAULT_ENGLISH_LEVEL },
-    { rejectWithValue }
+    { rejectWithValue, signal }
   ) => {
     try {
       const params = new URLSearchParams({ topic, level: englishLevel });
@@ -1007,7 +1010,8 @@ export const fetchTopicGuidance = createAsyncThunk<
         .forEach((item) => params.append("avoidWord", item.trim()));
 
       const response = await fetch(`/api/topic-guidance?${params.toString()}`, {
-        cache: "no-store"
+        cache: "no-store",
+        signal
       });
       const payload = (await response.json().catch(() => null)) as TopicGuidanceResponse | null;
 
@@ -1029,16 +1033,16 @@ export const fetchTopicGuidance = createAsyncThunk<
             .filter((item) => item.length > 0)
         : [];
 
-      if (questions.length < MIN_TOPIC_GUIDANCE_QUESTIONS || words.length === 0) {
+      if (questions.length < MIN_TOPIC_GUIDANCE_QUESTIONS || words.length < MIN_TOPIC_GUIDANCE_WORDS) {
         return rejectWithValue(
-          `Ollama must return at least ${MIN_TOPIC_GUIDANCE_QUESTIONS} follow-up questions for this topic.`
+          `Ollama must return ${MIN_TOPIC_GUIDANCE_QUESTIONS} follow-up questions and ${MIN_TOPIC_GUIDANCE_WORDS} useful words for this topic.`
         );
       }
 
       return {
         topic,
         questions: questions.slice(0, MIN_TOPIC_GUIDANCE_QUESTIONS),
-        words: words.slice(0, 10)
+        words: words.slice(0, MIN_TOPIC_GUIDANCE_WORDS)
       };
     } catch {
       return rejectWithValue("Cannot connect to local Ollama. Make sure Ollama is running.");
@@ -1056,20 +1060,12 @@ export const fetchTopicGuidance = createAsyncThunk<
       const { app } = getState();
       const interestKey = buildInterestsKey(interestIds);
       if (
-        app.topicGuidanceStatus === "loading" &&
-        app.topicGuidanceTopic === normalizedTopic &&
-        app.topicGuidanceInterestsKey === interestKey &&
-        app.topicGuidanceEnglishLevel === englishLevel
-      ) {
-        return false;
-      }
-      if (
         app.topicGuidanceTopic === normalizedTopic &&
         app.topicGuidanceInterestsKey === interestKey &&
         app.topicGuidanceEnglishLevel === englishLevel &&
         app.topicGuidanceStatus === "ready" &&
         app.topicGuidanceQuestions.length >= MIN_TOPIC_GUIDANCE_QUESTIONS &&
-        app.topicGuidanceWords.length > 0
+        app.topicGuidanceWords.length >= MIN_TOPIC_GUIDANCE_WORDS
       ) {
         return false;
       }
@@ -1946,6 +1942,7 @@ const initialState: AppState = {
   topicGuidanceTopic: null,
   topicGuidanceInterestsKey: "",
   topicGuidanceEnglishLevel: DEFAULT_ENGLISH_LEVEL,
+  topicGuidanceRequestId: null,
   studyWords: [],
   studyText: "",
   studyStatus: "idle",
@@ -2001,6 +1998,7 @@ const clearTopicGuidanceState = (state: AppState): void => {
   state.topicGuidanceTopic = null;
   state.topicGuidanceInterestsKey = "";
   state.topicGuidanceEnglishLevel = state.selectedEnglishLevel;
+  state.topicGuidanceRequestId = null;
 };
 
 const clearStudyWordsState = (state: AppState): void => {
@@ -3273,17 +3271,25 @@ const appSlice = createSlice({
         const topic = action.meta.arg.topic.trim();
         const interestKey = buildInterestsKey(action.meta.arg.interestIds ?? []);
         const englishLevel = action.meta.arg.englishLevel ?? DEFAULT_ENGLISH_LEVEL;
-        if (state.topicGuidanceTopic !== topic || state.topicGuidanceInterestsKey !== interestKey) {
+        if (
+          state.topicGuidanceTopic !== topic ||
+          state.topicGuidanceInterestsKey !== interestKey ||
+          state.topicGuidanceEnglishLevel !== englishLevel
+        ) {
           state.topicGuidanceQuestions = [];
           state.topicGuidanceWords = [];
         }
         state.topicGuidanceTopic = topic;
         state.topicGuidanceInterestsKey = interestKey;
         state.topicGuidanceEnglishLevel = englishLevel;
+        state.topicGuidanceRequestId = action.meta.requestId;
         state.topicGuidanceStatus = "loading";
         state.topicGuidanceError = null;
       })
       .addCase(fetchTopicGuidance.fulfilled, (state, action) => {
+        if (!isCurrentInterviewGuidanceRequest(state.topicGuidanceRequestId, action.meta.requestId)) {
+          return;
+        }
         state.topicGuidanceTopic = action.payload.topic;
         state.topicGuidanceInterestsKey = buildInterestsKey(action.meta.arg.interestIds ?? []);
         state.topicGuidanceEnglishLevel = action.meta.arg.englishLevel ?? DEFAULT_ENGLISH_LEVEL;
@@ -3291,11 +3297,16 @@ const appSlice = createSlice({
         state.topicGuidanceWords = action.payload.words;
         state.topicGuidanceStatus = "ready";
         state.topicGuidanceError = null;
+        state.topicGuidanceRequestId = null;
       })
       .addCase(fetchTopicGuidance.rejected, (state, action) => {
+        if (!isCurrentInterviewGuidanceRequest(state.topicGuidanceRequestId, action.meta.requestId)) {
+          return;
+        }
         state.topicGuidanceStatus =
           state.topicGuidanceQuestions.length > 0 || state.topicGuidanceWords.length > 0 ? "ready" : "failed";
         state.topicGuidanceError = action.payload ?? "Failed to generate guidance.";
+        state.topicGuidanceRequestId = null;
       });
   }
 });

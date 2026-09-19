@@ -9,6 +9,7 @@ import {
   resolvePreferredAudioMimeType,
   stopMediaRecorderSafely
 } from "../lib/browserMedia";
+import { buildInterviewGuidanceRequestKey } from "../lib/interviewGuidance";
 import { formatTime, toDateKey } from "../lib/utils";
 import { useAppDispatch, useAppSelector } from "../store/hooks";
 import {
@@ -42,8 +43,11 @@ import {
   toggleAddTopicInput,
   toggleQuestions,
   toggleWords,
+  type FetchTopicGuidanceArgs,
   useCustomTopic as applyCustomTopic
 } from "../store/slices/appSlice";
+import GuidanceWordTicker from "./GuidanceWordTicker";
+import InterviewQuestionCard from "./InterviewQuestionCard";
 
 const PHOTO_ACCEPTED_TYPES = new Set(["image/jpeg", "image/jpg", "image/png", "image/webp", "image/gif"]);
 type FinalAudioUploadState = "idle" | "uploading" | "ready" | "failed";
@@ -165,6 +169,7 @@ const buildStudyTextSegments = (text: string, words: string[]): StudyTextSegment
 export default function SpeakScreen() {
   const dispatch = useAppDispatch();
   const [finalAudioUploadState, setFinalAudioUploadState] = useState<FinalAudioUploadState>("idle");
+  const [recordingStarting, setRecordingStarting] = useState(false);
   const {
     speakState,
     selectedTopic,
@@ -227,6 +232,41 @@ export default function SpeakScreen() {
   const chunkUploadQueueRef = useRef<Promise<void>>(Promise.resolve());
   const chunkUploadFailedRef = useRef(false);
   const finalAudioUploadPromiseRef = useRef<Promise<void> | null>(null);
+  const recordingStartingRef = useRef(false);
+  const topicGuidanceRequestRef = useRef<{ key: string; abort: () => void } | null>(null);
+
+  const cancelTopicGuidanceRequest = useCallback(() => {
+    const current = topicGuidanceRequestRef.current;
+    topicGuidanceRequestRef.current = null;
+    current?.abort();
+  }, []);
+
+  const requestTopicGuidance = useCallback(
+    (args: FetchTopicGuidanceArgs) => {
+      if (recordingStartingRef.current || speakState === "recording") {
+        return;
+      }
+      const key = buildInterviewGuidanceRequestKey(
+        args.topic,
+        args.interestIds ?? [],
+        args.englishLevel ?? selectedEnglishLevel
+      );
+      const previous = topicGuidanceRequestRef.current;
+      if (!args.force && previous?.key === key) {
+        return;
+      }
+      const request = dispatch(fetchTopicGuidance(args));
+      const current = { key, abort: () => request.abort() };
+      topicGuidanceRequestRef.current = current;
+      previous?.abort();
+      void request.finally(() => {
+        if (topicGuidanceRequestRef.current === current) {
+          topicGuidanceRequestRef.current = null;
+        }
+      });
+    },
+    [dispatch, selectedEnglishLevel, speakState]
+  );
 
   const releaseMedia = useCallback(() => {
     if (mediaStreamRef.current) {
@@ -471,14 +511,35 @@ export default function SpeakScreen() {
     })();
   }, [buildRecordingSaveDraft, dispatch, isAuthenticated]);
 
+  const beginRecordingFromMicrophone = (onRecordingStarted: () => void) => {
+    if (recordingStartingRef.current) {
+      return;
+    }
+    recordingStartingRef.current = true;
+    setRecordingStarting(true);
+    cancelTopicGuidanceRequest();
+    void createRecordingFromMicrophone(onRecordingStarted).finally(() => {
+      recordingStartingRef.current = false;
+      setRecordingStarting(false);
+    });
+  };
+
   const onStartFreeTalk = () => {
-    void createRecordingFromMicrophone(() => {
+    beginRecordingFromMicrophone(() => {
       dispatch(startFreeTalk());
     });
   };
 
   const onStartTopicRecording = () => {
-    void createRecordingFromMicrophone(() => {
+    if (
+      recordingPracticeType === "topic" &&
+      (topicGuidanceStatus === "idle" ||
+        topicGuidanceStatus === "loading" ||
+        topicGuidanceRequestRef.current !== null)
+    ) {
+      return;
+    }
+    beginRecordingFromMicrophone(() => {
       dispatch(startRecording());
     });
   };
@@ -505,14 +566,21 @@ export default function SpeakScreen() {
   }, [dispatch, selectedEnglishLevel, selectedInterestIds]);
 
   useEffect(() => {
-    if (!selectedTopic || recordingPracticeType === "photo_description") {
+    if (speakState !== "readyToRecord" || !selectedTopic || recordingPracticeType === "photo_description") {
+      cancelTopicGuidanceRequest();
       return;
     }
 
-    void dispatch(
-      fetchTopicGuidance({ topic: selectedTopic, interestIds: selectedInterestIds, englishLevel: selectedEnglishLevel })
-    );
-  }, [dispatch, recordingPracticeType, selectedEnglishLevel, selectedTopic, selectedInterestIds]);
+    requestTopicGuidance({
+      topic: selectedTopic,
+      interestIds: selectedInterestIds,
+      englishLevel: selectedEnglishLevel
+    });
+  }, [cancelTopicGuidanceRequest, recordingPracticeType, requestTopicGuidance, selectedEnglishLevel, selectedTopic, selectedInterestIds, speakState]);
+
+  useEffect(() => {
+    return cancelTopicGuidanceRequest;
+  }, [cancelTopicGuidanceRequest]);
 
   useEffect(() => {
     if (speakState === "recording") {
@@ -548,17 +616,15 @@ export default function SpeakScreen() {
       return;
     }
     dispatch(clearTopicGuidanceError());
-    void dispatch(
-      fetchTopicGuidance({
-        topic: selectedTopic,
-        force: true,
-        refreshToken: String(Date.now()),
-        interestIds: selectedInterestIds,
-        avoidQuestions: topicGuidanceQuestions,
-        avoidWords: topicGuidanceWords,
-        englishLevel: selectedEnglishLevel
-      })
-    );
+    void requestTopicGuidance({
+      topic: selectedTopic,
+      force: true,
+      refreshToken: String(Date.now()),
+      interestIds: selectedInterestIds,
+      avoidQuestions: topicGuidanceQuestions,
+      avoidWords: topicGuidanceWords,
+      englishLevel: selectedEnglishLevel
+    });
   };
 
   const onGenerateStudyWords = () => {
@@ -623,9 +689,9 @@ export default function SpeakScreen() {
           <button
             className="btn btn-primary btn-large speak-primary-btn"
             onClick={onStartFreeTalk}
-            disabled={!hasRecordingBudget}
+            disabled={!hasRecordingBudget || recordingStarting}
           >
-            Start speaking
+            {recordingStarting ? "Starting..." : "Start speaking"}
           </button>
           {recordingInputError && <div className="auth-error top-spaced">{recordingInputError}</div>}
         </div>
@@ -797,6 +863,8 @@ export default function SpeakScreen() {
 
   if (speakState === "readyToRecord") {
     const isPhotoPractice = recordingPracticeType === "photo_description";
+    const isTopicGuidancePreparing =
+      !isPhotoPractice && (topicGuidanceStatus === "idle" || topicGuidanceStatus === "loading");
     const shouldShowQuestions = !isPhotoPractice && showQuestions && topicGuidanceQuestions.length > 0;
     const shouldShowWords = !isPhotoPractice && showWords && topicGuidanceWords.length > 0;
     const shouldShowGuidanceSkeleton =
@@ -805,7 +873,11 @@ export default function SpeakScreen() {
     return (
       <section className="speak-screen">
         <div className="speak-card speak-hero-card">
-          <button className="btn btn-secondary btn-small" onClick={() => dispatch(backToQuestionsList())}>
+          <button
+            className="btn btn-secondary btn-small"
+            onClick={() => dispatch(backToQuestionsList())}
+            disabled={recordingStarting}
+          >
             ← Back to questions
           </button>
           <div className="heading-sm">Selected question</div>
@@ -822,9 +894,14 @@ export default function SpeakScreen() {
           <button
             className="btn btn-primary btn-large speak-primary-btn"
             onClick={onStartTopicRecording}
-            disabled={!hasRecordingBudget || (isPhotoPractice && !pendingPhotoDataUrl)}
+            disabled={
+              !hasRecordingBudget ||
+              recordingStarting ||
+              (isPhotoPractice && !pendingPhotoDataUrl) ||
+              isTopicGuidancePreparing
+            }
           >
-            Start speaking
+            {recordingStarting ? "Starting..." : isTopicGuidancePreparing ? "Preparing interview..." : "Start speaking"}
           </button>
           {recordingInputError && <div className="auth-error top-spaced">{recordingInputError}</div>}
           {pendingPhotoError && <div className="auth-error top-spaced">{pendingPhotoError}</div>}
@@ -844,9 +921,9 @@ export default function SpeakScreen() {
               <button
                 className="btn btn-secondary btn-small"
                 onClick={onRefreshTopicGuidance}
-                disabled={topicGuidanceStatus === "loading"}
+                disabled={topicGuidanceStatus === "loading" || recordingStarting}
               >
-                {topicGuidanceStatus === "loading" ? "Generating..." : "↻ Regenerate"}
+                {recordingStarting ? "Starting..." : topicGuidanceStatus === "loading" ? "Generating..." : "↻ Regenerate"}
               </button>
             </div>
 
@@ -900,14 +977,16 @@ export default function SpeakScreen() {
 
   if (speakState === "recording") {
     const isPhotoPractice = recordingPracticeType === "photo_description";
-    const shouldShowQuestions = !isPhotoPractice && showQuestions && topicGuidanceQuestions.length > 0;
+    const isTopicInterview = recordingPracticeType === "topic" && Boolean(selectedTopic);
 
     return (
       <section className="speak-screen">
+        {isTopicInterview && topicGuidanceWords.length > 0 && <GuidanceWordTicker words={topicGuidanceWords} />}
+
         <div className="speak-card speak-center-card">
           <div className="recording-indicator">
             <div className="recording-dot" />
-            <span>{selectedTopic ?? "Free talk"}</span>
+            <span>{isTopicInterview ? "Topic interview" : selectedTopic ?? "Free talk"}</span>
           </div>
 
           {isPhotoPractice && pendingPhotoDataUrl && (
@@ -919,24 +998,16 @@ export default function SpeakScreen() {
             <div className="recorded-subtitle">Session limit: {formatTime(Math.max(0, sessionLimitSeconds))}</div>
           )}
 
+          {isTopicInterview && selectedTopic && (
+            <InterviewQuestionCard topic={selectedTopic} followUps={topicGuidanceQuestions} />
+          )}
+
           <button className="btn btn-primary btn-large speak-primary-btn" onClick={onStopRecording}>
             Stop
           </button>
           {recordingInputError && <div className="auth-error top-spaced">{recordingInputError}</div>}
         </div>
 
-        {shouldShowQuestions && (
-          <div className="speak-card">
-            <div className="section-title speak-section-title">Questions</div>
-            <div className="section-content speak-question-list">
-              {topicGuidanceQuestions.map((question) => (
-                <div key={question} className="question-item">
-                  {question}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
       </section>
     );
   }

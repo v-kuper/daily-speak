@@ -16,8 +16,8 @@ import (
 
 const (
 	dailyQuestionsCount       = 3
-	topicGuidanceQuestionsCnt = 10
-	topicGuidanceWordsCnt     = 8
+	topicGuidanceQuestionsCnt = 17
+	topicGuidanceWordsCnt     = 16
 )
 
 var dateKeyPattern = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
@@ -132,6 +132,7 @@ func (s *Server) handleTopicGuidance(w http.ResponseWriter, r *http.Request) {
 		englishLevel = user.EnglishLevel
 	}
 	settings := ai.ResolveSettingsForUser()
+	topicQuestion := lowerSet(normalizeQuestions([]string{topic}, 0))
 	seed := absMod(domain.HashString(strings.ToLower(topic))*131+domain.HashString(strings.ToLower(strings.Join(interests, "|")))*17+domain.HashString(englishLevel)*19+domain.HashString(refreshToken), 2147483647)
 
 	for attempt := 0; attempt < 3; attempt++ {
@@ -155,7 +156,7 @@ func (s *Server) handleTopicGuidance(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		guidance, ok := parseTopicGuidance(ai.ExtractMessageContent(payload))
-		if !ok || anyLowerOverlap(guidance.Questions, avoidQuestions) || anyLowerOverlap(guidance.Words, avoidWords) {
+		if !ok || anyLowerOverlap(guidance.Questions, topicQuestion) || anyLowerOverlap(guidance.Questions, avoidQuestions) || anyLowerOverlap(guidance.Words, avoidWords) {
 			continue
 		}
 		logger.Info("request.success", map[string]any{"status": 200, "durationMs": logging.ElapsedMs(started), "model": settings.Model, "attempt": attemptNumber})
@@ -248,12 +249,15 @@ func topicGuidancePrompt(topic string, refreshToken string, englishLevel string,
 		`Topic: "` + topic + `".`,
 		"Generate guidance for an English speaking practice session for level " + domain.FormatEnglishLevel(englishLevel) + ".",
 		"Language difficulty: " + domain.EnglishLevelPromptGuidance(englishLevel),
-		fmt.Sprintf("Return exactly %d follow-up questions for speaking practice.", topicGuidanceQuestionsCnt),
+		fmt.Sprintf("Return exactly %d follow-up questions that form one coherent interview after the topic question.", topicGuidanceQuestionsCnt),
 		fmt.Sprintf("Return exactly %d useful words or short phrases connected to this topic.", topicGuidanceWordsCnt),
 		"Useful words must match the learner level and stay understandable for that level.",
-		"All follow-up questions should be distinct in angle and not paraphrases of each other.",
+		"Order the interview from opening context through personal experience, concrete details, reasons, comparison, consequences, a hypothetical situation, practical advice, reflection, and a final conclusion.",
+		"Each question must follow naturally from the topic while remaining answerable regardless of the learner's exact previous answer.",
+		"Do not repeat the original topic question or assume that the learner gave a particular answer.",
+		"All follow-up questions must be distinct in angle and not paraphrases of each other.",
 		"Useful words should be diverse, not near-duplicates.",
-		`Return only JSON with this exact shape: {"questions":["q1","q2","q3","q4","q5","q6","q7","q8","q9","q10"],"words":["w1","w2","w3","w4","w5","w6","w7","w8"]}.`,
+		`Return only JSON with exactly two keys: {"questions":["q1","q2","q3","q4","q5","q6","q7","q8","q9","q10","q11","q12","q13","q14","q15","q16","q17"],"words":["w1","w2","w3","w4","w5","w6","w7","w8","w9","w10","w11","w12","w13","w14","w15","w16"]}.`,
 		"No markdown, no extra keys, no explanations.",
 	}
 	if len(interests) > 0 {
@@ -333,8 +337,8 @@ func parseTopicGuidance(content string) (topicGuidance, bool) {
 		}
 		questions := normalizeQuestions(payload.Questions, 0)
 		words := normalizeWords(payload.Words)
-		if len(questions) >= topicGuidanceQuestionsCnt && len(words) >= 5 {
-			return topicGuidance{Questions: questions[:topicGuidanceQuestionsCnt], Words: words[:min(len(words), topicGuidanceWordsCnt)]}, true
+		if len(questions) >= topicGuidanceQuestionsCnt && len(words) >= topicGuidanceWordsCnt {
+			return topicGuidance{Questions: questions[:topicGuidanceQuestionsCnt], Words: words[:topicGuidanceWordsCnt]}, true
 		}
 		return topicGuidance{}, false
 	}
@@ -358,8 +362,8 @@ func parseTopicGuidance(content string) (topicGuidance, bool) {
 	}
 	questions := normalizeQuestions(questionLines, 0)
 	words := normalizeWords(wordLines)
-	if len(questions) >= topicGuidanceQuestionsCnt && len(words) >= 5 {
-		return topicGuidance{Questions: questions[:topicGuidanceQuestionsCnt], Words: words[:min(len(words), topicGuidanceWordsCnt)]}, true
+	if len(questions) >= topicGuidanceQuestionsCnt && len(words) >= topicGuidanceWordsCnt {
+		return topicGuidance{Questions: questions[:topicGuidanceQuestionsCnt], Words: words[:topicGuidanceWordsCnt]}, true
 	}
 	return topicGuidance{}, false
 }
