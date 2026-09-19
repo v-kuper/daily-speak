@@ -50,7 +50,7 @@ export default function HistoryScreen() {
   );
 
   return (
-    <section className="screen-section history-screen">
+    <section>
       <h2>History</h2>
 
       <div className="calendar-wrapper">

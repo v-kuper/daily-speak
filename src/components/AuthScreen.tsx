@@ -27,7 +27,7 @@ export default function AuthScreen() {
   };
 
   return (
-    <section className="screen-section auth-screen">
+    <section className="auth-screen">
       <h2>{pendingSaveAfterAuth ? "Sign in to save recording" : "Sign in / Register"}</h2>
 
       <form className="auth-form" onSubmit={onSubmit}>

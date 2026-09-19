@@ -67,7 +67,7 @@ export default function ProfileScreen() {
 
   if (view === "subscription") {
     return (
-      <section className="screen-section profile-screen">
+      <section className="profile-screen">
         <button className="back-btn" onClick={() => setView("home")}>
           ← Назад к профилю
         </button>
@@ -128,7 +128,7 @@ export default function ProfileScreen() {
 
   if (view === "learning") {
     return (
-      <section className="screen-section profile-screen">
+      <section className="profile-screen">
         <button className="back-btn" onClick={() => setView("home")}>
           ← Назад к профилю
         </button>
@@ -179,7 +179,7 @@ export default function ProfileScreen() {
   }
 
   return (
-    <section className="screen-section profile-screen">
+    <section className="profile-screen">
       <h2>Профиль</h2>
       <p className="profile-subtitle">Выберите, что хотите посмотреть или отредактировать.</p>
 

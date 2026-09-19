@@ -13,7 +13,6 @@ import {
   setPlaybackPlaying,
   setPlaybackPosition,
 } from "../store/slices/appSlice";
-import AudioWaveform from "./AudioWaveform";
 import ShareModal from "./ShareModal";
 
 type FeedThreadReply = {
@@ -425,8 +424,7 @@ export default function DetailsScreen() {
       )}
       {playbackError && <div className="auth-error top-spaced">{playbackError}</div>}
 
-      <div className="player studio-player">
-        <AudioWaveform variant="compact" active={isPlaying} />
+      <div className="player">
         <div className="player-controls">
           <button className="play-btn" onClick={onTogglePlayback} disabled={!hasAudio} aria-label={isPlaying ? "Pause" : "Play"}>
             {isPlaying ? "Pause" : "Play"}
