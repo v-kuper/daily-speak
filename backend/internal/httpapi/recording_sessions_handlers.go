@@ -255,25 +255,27 @@ func (s *Server) handleFinishRecordingSession(w http.ResponseWriter, r *http.Req
 	}
 	audioURL := "/uploads/recordings/" + domain.SanitizePathSegment(user.ID) + "/" + recordingID + "." + *session.AudioExtension
 	var inserted struct {
-		ID              string
-		Topic           string
-		Duration        int
-		Timestamp       time.Time
-		Status          string
-		Transcript      string
-		Suggestions     []byte
-		PracticeType    string
-		AudioDataURL    *string
-		PhotoDataURL    *string
-		PhotoObject     *string
-		ProcessingError *string
+		ID                  string
+		Topic               string
+		Duration            int
+		Timestamp           time.Time
+		Status              string
+		Transcript          string
+		CorrectedTranscript string
+		Suggestions         []byte
+		ProcessingStage     *string
+		PracticeType        string
+		AudioDataURL        *string
+		PhotoDataURL        *string
+		PhotoObject         *string
+		ProcessingError     *string
 	}
 	err = s.db.QueryRow(r.Context(), `
 		INSERT INTO recordings
-		  (id, user_id, topic, duration, timestamp, transcript, suggestions, practice_type, audio_data_url, photo_data_url, photo_object, status)
+		  (id, user_id, topic, duration, timestamp, transcript, corrected_transcript, suggestions, practice_type, audio_data_url, photo_data_url, photo_object, status, processing_stage)
 		VALUES
-		  ($1, $2, $3, $4, $5, '', '[]'::jsonb, $6, $7, $8, $9, 'processing')
-		RETURNING id, topic, duration, timestamp, status, transcript, suggestions, practice_type, audio_data_url, photo_data_url, photo_object, processing_error`,
+		  ($1, $2, $3, $4, $5, '', '', '[]'::jsonb, $6, $7, $8, $9, 'processing', 'transcribing')
+		RETURNING id, topic, duration, timestamp, status, transcript, corrected_transcript, suggestions, processing_stage, practice_type, audio_data_url, photo_data_url, photo_object, processing_error`,
 		recordingID,
 		user.ID,
 		session.Topic,
@@ -283,25 +285,27 @@ func (s *Server) handleFinishRecordingSession(w http.ResponseWriter, r *http.Req
 		audioURL,
 		stringOrNil(session.PracticeType == "photo_description", session.PhotoDataURL),
 		stringOrNil(session.PracticeType == "photo_description", session.PhotoObject),
-	).Scan(&inserted.ID, &inserted.Topic, &inserted.Duration, &inserted.Timestamp, &inserted.Status, &inserted.Transcript, &inserted.Suggestions, &inserted.PracticeType, &inserted.AudioDataURL, &inserted.PhotoDataURL, &inserted.PhotoObject, &inserted.ProcessingError)
+	).Scan(&inserted.ID, &inserted.Topic, &inserted.Duration, &inserted.Timestamp, &inserted.Status, &inserted.Transcript, &inserted.CorrectedTranscript, &inserted.Suggestions, &inserted.ProcessingStage, &inserted.PracticeType, &inserted.AudioDataURL, &inserted.PhotoDataURL, &inserted.PhotoObject, &inserted.ProcessingError)
 	if err != nil {
 		_ = os.Remove(audioPath)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to save recording."})
 		return
 	}
 	recording := recordingResponse{
-		ID:              inserted.ID,
-		Topic:           inserted.Topic,
-		Duration:        domain.ToNonNegativeInt(inserted.Duration),
-		Timestamp:       inserted.Timestamp.UTC().Format(time.RFC3339Nano),
-		Status:          normalizeRecordingStatus(inserted.Status),
-		Transcript:      inserted.Transcript,
-		Suggestions:     normalizeSuggestions(inserted.Suggestions, 20),
-		PracticeType:    domain.NormalizePracticeType(inserted.PracticeType),
-		AudioDataURL:    normalizeOptionalAudio(inserted.AudioDataURL, true),
-		PhotoDataURL:    normalizeOptionalPhoto(inserted.PhotoDataURL),
-		PhotoObject:     normalizeOptionalPhotoObject(inserted.PhotoObject),
-		ProcessingError: normalizeOptionalProcessingError(inserted.ProcessingError),
+		ID:                  inserted.ID,
+		Topic:               inserted.Topic,
+		Duration:            domain.ToNonNegativeInt(inserted.Duration),
+		Timestamp:           inserted.Timestamp.UTC().Format(time.RFC3339Nano),
+		Status:              normalizeRecordingStatus(inserted.Status),
+		Transcript:          inserted.Transcript,
+		CorrectedTranscript: inserted.CorrectedTranscript,
+		Suggestions:         normalizeSuggestions(inserted.Suggestions, 20),
+		ProcessingStage:     normalizeRecordingProcessingStage(inserted.ProcessingStage),
+		PracticeType:        domain.NormalizePracticeType(inserted.PracticeType),
+		AudioDataURL:        normalizeOptionalAudio(inserted.AudioDataURL, true),
+		PhotoDataURL:        normalizeOptionalPhoto(inserted.PhotoDataURL),
+		PhotoObject:         normalizeOptionalPhotoObject(inserted.PhotoObject),
+		ProcessingError:     normalizeOptionalProcessingError(inserted.ProcessingError),
 	}
 
 	_, err = s.db.Exec(r.Context(), `
@@ -313,12 +317,11 @@ func (s *Server) handleFinishRecordingSession(w http.ResponseWriter, r *http.Req
 		return
 	}
 	_ = os.RemoveAll(recordingSessionChunksDir(session.ID))
-	q, err := quota.GetRecordingQuota(r.Context(), s.db, user.ID, &user.IsSubscriber)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to save recording."})
-		return
+	s.processRecordingInBackground(recordingID, user.ID, audioPath, session.Topic, session.PracticeType, session.PhotoObject, user.EnglishLevel)
+	q := recordingQuotaAfterSave(qBefore, duration)
+	if refreshedQuota, quotaErr := quota.GetRecordingQuota(r.Context(), s.db, user.ID, &user.IsSubscriber); quotaErr == nil {
+		q = refreshedQuota
 	}
-	s.processRecordingInBackground(recordingID, user.ID, audioPath, session.Topic, session.PracticeType, session.PhotoObject)
 	writeJSON(w, http.StatusCreated, map[string]any{"recording": recording, "quota": q})
 }
 
@@ -353,41 +356,45 @@ func (s *Server) recordingSessionForUser(ctx context.Context, userID string, ses
 
 func (s *Server) recordingForUser(ctx context.Context, userID string, recordingID string) (recordingResponse, error) {
 	var row struct {
-		ID              string
-		Topic           string
-		Duration        int
-		Timestamp       time.Time
-		Status          string
-		Transcript      string
-		Suggestions     []byte
-		PracticeType    string
-		AudioDataURL    *string
-		PhotoDataURL    *string
-		PhotoObject     *string
-		ProcessingError *string
+		ID                  string
+		Topic               string
+		Duration            int
+		Timestamp           time.Time
+		Status              string
+		Transcript          string
+		CorrectedTranscript string
+		Suggestions         []byte
+		ProcessingStage     *string
+		PracticeType        string
+		AudioDataURL        *string
+		PhotoDataURL        *string
+		PhotoObject         *string
+		ProcessingError     *string
 	}
 	err := s.db.QueryRow(ctx, `
-		SELECT id, topic, duration, timestamp, status, transcript, suggestions,
-		       practice_type, audio_data_url, photo_data_url, photo_object, processing_error
+		SELECT id, topic, duration, timestamp, status, transcript, corrected_transcript, suggestions,
+		       processing_stage, practice_type, audio_data_url, photo_data_url, photo_object, processing_error
 		FROM recordings
 		WHERE id = $1 AND user_id = $2
-		LIMIT 1`, strings.TrimSpace(recordingID), userID).Scan(&row.ID, &row.Topic, &row.Duration, &row.Timestamp, &row.Status, &row.Transcript, &row.Suggestions, &row.PracticeType, &row.AudioDataURL, &row.PhotoDataURL, &row.PhotoObject, &row.ProcessingError)
+		LIMIT 1`, strings.TrimSpace(recordingID), userID).Scan(&row.ID, &row.Topic, &row.Duration, &row.Timestamp, &row.Status, &row.Transcript, &row.CorrectedTranscript, &row.Suggestions, &row.ProcessingStage, &row.PracticeType, &row.AudioDataURL, &row.PhotoDataURL, &row.PhotoObject, &row.ProcessingError)
 	if err != nil {
 		return recordingResponse{}, err
 	}
 	return recordingResponse{
-		ID:              row.ID,
-		Topic:           row.Topic,
-		Duration:        domain.ToNonNegativeInt(row.Duration),
-		Timestamp:       row.Timestamp.UTC().Format(time.RFC3339Nano),
-		Status:          normalizeRecordingStatus(row.Status),
-		Transcript:      row.Transcript,
-		Suggestions:     normalizeSuggestions(row.Suggestions, 20),
-		PracticeType:    domain.NormalizePracticeType(row.PracticeType),
-		AudioDataURL:    normalizeOptionalAudio(row.AudioDataURL, true),
-		PhotoDataURL:    normalizeOptionalPhoto(row.PhotoDataURL),
-		PhotoObject:     normalizeOptionalPhotoObject(row.PhotoObject),
-		ProcessingError: normalizeOptionalProcessingError(row.ProcessingError),
+		ID:                  row.ID,
+		Topic:               row.Topic,
+		Duration:            domain.ToNonNegativeInt(row.Duration),
+		Timestamp:           row.Timestamp.UTC().Format(time.RFC3339Nano),
+		Status:              normalizeRecordingStatus(row.Status),
+		Transcript:          row.Transcript,
+		CorrectedTranscript: row.CorrectedTranscript,
+		Suggestions:         normalizeSuggestions(row.Suggestions, 20),
+		ProcessingStage:     normalizeRecordingProcessingStage(row.ProcessingStage),
+		PracticeType:        domain.NormalizePracticeType(row.PracticeType),
+		AudioDataURL:        normalizeOptionalAudio(row.AudioDataURL, true),
+		PhotoDataURL:        normalizeOptionalPhoto(row.PhotoDataURL),
+		PhotoObject:         normalizeOptionalPhotoObject(row.PhotoObject),
+		ProcessingError:     normalizeOptionalProcessingError(row.ProcessingError),
 	}, nil
 }
 
@@ -397,6 +404,19 @@ func normalizeRecordingStatus(value string) string {
 		return strings.ToLower(strings.TrimSpace(value))
 	default:
 		return "ready"
+	}
+}
+
+func normalizeRecordingProcessingStage(value *string) *string {
+	if value == nil {
+		return nil
+	}
+	normalized := strings.ToLower(strings.TrimSpace(*value))
+	switch normalized {
+	case "transcribing", "suggestions", "rewriting":
+		return &normalized
+	default:
+		return nil
 	}
 }
 

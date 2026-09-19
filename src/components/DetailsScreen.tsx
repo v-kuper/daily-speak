@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { buildTranscriptSegments } from "../lib/transcriptHighlight";
+import { recordingProcessingLabel } from "../lib/recordingProcessing";
 import { formatTime } from "../lib/utils";
 import { useAppDispatch, useAppSelector } from "../store/hooks";
 import {
@@ -137,6 +138,7 @@ export default function DetailsScreen() {
   const recordingDuration = recording?.duration ?? 0;
   const playbackPercent = recordingDuration > 0 ? Math.max(0, Math.min(100, (playbackPosition / recordingDuration) * 100)) : 0;
   const hasTranscript = recording ? recording.transcript.trim().length > 0 : false;
+  const hasCorrectedTranscript = recording ? recording.correctedTranscript.trim().length > 0 : false;
   const hasSuggestions = recording ? recording.suggestions.length > 0 : false;
   const transcriptSegments = useMemo(() => {
     if (!recording) {
@@ -392,7 +394,7 @@ export default function DetailsScreen() {
       {copyMessage && <div className="notice">{copyMessage}</div>}
       {isProcessing && (
         <div className="notice">
-          Processing recording in the background. You can come back later.
+          {recordingProcessingLabel(recording.processingStage)} You can leave this page and come back later.
           <div className="background-progress" aria-hidden="true">
             <div className="background-progress-fill" />
           </div>
@@ -440,9 +442,7 @@ export default function DetailsScreen() {
 
       <div className="transcript-section">
         <div className="section-title">Transcript</div>
-        {isFailed ? (
-          <div className="empty-state">{recording?.processingError ?? "Recording processing failed. Try recording again."}</div>
-        ) : hasTranscript ? (
+        {hasTranscript ? (
           <div className="transcript-text">
             {transcriptSegments.map((segment, index) =>
               segment.isError ? (
@@ -454,18 +454,20 @@ export default function DetailsScreen() {
               )
             )}
           </div>
-        ) : (
+        ) : isProcessing ? (
           <div className="empty-state">
-            {isProcessing ? "Processing recording. Transcript will appear here automatically." : "Transcript is unavailable."}
+            {recording.processingStage === "transcribing"
+              ? "Transcribing audio. The transcript will appear here automatically."
+              : "The transcript will appear here automatically."}
           </div>
+        ) : (
+          <div className="empty-state">Transcript is unavailable for this recording.</div>
         )}
       </div>
 
       <div className="suggestions-section">
         <div className="section-title">AI Suggestions</div>
-        {isFailed ? (
-          <div className="empty-state">AI suggestions are unavailable for this recording.</div>
-        ) : hasSuggestions ? (
+        {hasSuggestions ? (
           recording.suggestions.map((suggestion) => (
             <div key={suggestion.wrong} className="suggestion-item">
               <div className="suggestion-wrong">
@@ -479,10 +481,31 @@ export default function DetailsScreen() {
               <div className="suggestion-explanation">{suggestion.explanation}</div>
             </div>
           ))
-        ) : (
+        ) : isProcessing && recording.processingStage !== "rewriting" ? (
           <div className="empty-state">
-            {isProcessing ? "AI error analysis is running in the background." : "AI suggestions are unavailable."}
+            AI error analysis will appear here after transcription.
           </div>
+        ) : isFailed && recording.processingStage !== "rewriting" ? (
+          <div className="empty-state">AI suggestions are unavailable for this recording.</div>
+        ) : (
+          <div className="empty-state">No clear corrections were needed.</div>
+        )}
+      </div>
+
+      <div className="natural-transcript-section">
+        <div className="section-title">A natural way to say it</div>
+        {hasCorrectedTranscript ? (
+          <div className="transcript-text">{recording.correctedTranscript}</div>
+        ) : isProcessing ? (
+          <div className="empty-state">
+            {recording.processingStage === "rewriting"
+              ? "Creating a natural conversational version for your English level."
+              : "This version will appear after the transcript and AI suggestions are ready."}
+          </div>
+        ) : isFailed ? (
+          <div className="empty-state">The natural version is unavailable, but completed results above are still saved.</div>
+        ) : (
+          <div className="empty-state">The natural version is unavailable for this recording.</div>
         )}
       </div>
 

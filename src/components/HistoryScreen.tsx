@@ -1,9 +1,12 @@
 "use client";
 
+import { useEffect } from "react";
+import { recordingProcessingLabel } from "../lib/recordingProcessing";
 import { formatTime, formatTimeOfDay, recordingDateKey } from "../lib/utils";
 import { useAppDispatch, useAppSelector } from "../store/hooks";
 import {
   clearSelectedDate,
+  fetchRecording,
   nextMonth,
   openDetails,
   previousMonth,
@@ -35,6 +38,28 @@ export default function HistoryScreen() {
   const { recordings, selectedDate, calendarVisible, calendarMonth, calendarYear } = useAppSelector(
     (state) => state.app
   );
+  const processingRecordingKey = recordings
+    .filter((recording) => recording.status === "processing")
+    .map((recording) => recording.id)
+    .sort()
+    .join(",");
+
+  useEffect(() => {
+    const recordingIds = processingRecordingKey ? processingRecordingKey.split(",") : [];
+    if (recordingIds.length === 0) {
+      return;
+    }
+
+    const refreshProcessingRecordings = () => {
+      recordingIds.forEach((recordingId) => {
+        void dispatch(fetchRecording(recordingId));
+      });
+    };
+
+    refreshProcessingRecordings();
+    const interval = window.setInterval(refreshProcessingRecordings, 5000);
+    return () => window.clearInterval(interval);
+  }, [dispatch, processingRecordingKey]);
 
   const firstDay = new Date(calendarYear, calendarMonth, 1);
   const lastDay = new Date(calendarYear, calendarMonth + 1, 0);
@@ -114,6 +139,15 @@ export default function HistoryScreen() {
                 <div className="recording-time">{formatTimeOfDay(recording.timestamp)}</div>
                 <div className="recording-topic">{recording.topic}</div>
                 <div className="recording-practice-tag">{formatPracticeLabel(recording.practiceType)}</div>
+                {recording.status === "processing" && (
+                  <div className="recording-processing-status" aria-live="polite">
+                    <span className="recording-processing-dot" aria-hidden="true" />
+                    {recordingProcessingLabel(recording.processingStage)}
+                  </div>
+                )}
+                {recording.status === "failed" && (
+                  <div className="recording-processing-status recording-processing-status-failed">Processing failed</div>
+                )}
               </div>
               <div className="recording-side">
                 <div className="recording-duration">{formatTime(recording.duration)}</div>

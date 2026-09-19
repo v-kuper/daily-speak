@@ -10,6 +10,7 @@ import {
   type RecordingStatus,
   type Suggestion
 } from "../../lib/data";
+import { parseRecordingProcessingStage } from "../../lib/recordingProcessing";
 import { DEFAULT_ENGLISH_LEVEL, normalizeEnglishLevel, parseEnglishLevel, type EnglishLevel } from "../../lib/englishLevel";
 import { formatTime, toDateKey } from "../../lib/utils";
 
@@ -694,6 +695,8 @@ const parseRecording = (value: unknown): Recording | null => {
   const topic = typeof candidate.topic === "string" ? candidate.topic.trim() : "";
   const status = parseRecordingStatus(candidate.status);
   const transcript = typeof candidate.transcript === "string" ? candidate.transcript : "";
+  const correctedTranscript = typeof candidate.correctedTranscript === "string" ? candidate.correctedTranscript : "";
+  const processingStage = parseRecordingProcessingStage(candidate.processingStage);
   const timestampRaw = typeof candidate.timestamp === "string" ? candidate.timestamp : "";
   const timestamp = new Date(timestampRaw);
   const duration = Number.parseInt(String(candidate.duration ?? 0), 10);
@@ -719,7 +722,9 @@ const parseRecording = (value: unknown): Recording | null => {
     timestamp: timestamp.toISOString(),
     status,
     transcript,
+    correctedTranscript,
     suggestions,
+    processingStage,
     practiceType,
     audioDataUrl,
     photoDataUrl,
@@ -2311,7 +2316,9 @@ const appSlice = createSlice({
         timestamp,
         status: "processing",
         transcript: "",
+        correctedTranscript: "",
         suggestions: [],
+        processingStage: null,
         practiceType: draft.practiceType,
         audioDataUrl: normalizeAudioDataUrl(draft.audioDataUrl),
         photoDataUrl: normalizePhotoDataUrl(draft.photoDataUrl),
@@ -2892,7 +2899,12 @@ const appSlice = createSlice({
         }
       })
       .addCase(fetchRecording.fulfilled, (state, action) => {
-        state.recordings = [action.payload, ...state.recordings.filter((item) => item.id !== action.payload.id)];
+        const recordingIndex = state.recordings.findIndex((item) => item.id === action.payload.id);
+        if (recordingIndex >= 0) {
+          state.recordings[recordingIndex] = action.payload;
+          return;
+        }
+        state.recordings.unshift(action.payload);
       })
       .addCase(fetchRecording.rejected, (state, action) => {
         if (action.payload === "Unauthorized") {

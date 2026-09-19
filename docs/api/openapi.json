@@ -371,8 +371,8 @@
     "/api/user/recordings": {
       "post": {
         "tags": ["Recordings"],
-        "summary": "Create recording synchronously from a full base64 audio payload",
-        "description": "Legacy/fallback flow. Backend saves the audio file, runs local Whisper and AI suggestions before responding.",
+        "summary": "Save a full base64 recording for background processing",
+        "description": "Legacy/fallback upload flow. Backend saves the recording immediately, returns it with `status=processing`, then runs transcription, AI suggestions, and the natural conversational rewrite in separate background steps.",
         "requestBody": {
           "required": true,
           "content": {
@@ -386,9 +386,7 @@
           "400": { "$ref": "#/components/responses/BadRequest" },
           "401": { "$ref": "#/components/responses/Unauthorized" },
           "402": { "$ref": "#/components/responses/PaymentRequired" },
-          "422": { "$ref": "#/components/responses/UnprocessableEntity" },
-          "500": { "$ref": "#/components/responses/InternalServerError" },
-          "502": { "$ref": "#/components/responses/BadGateway" }
+          "500": { "$ref": "#/components/responses/InternalServerError" }
         }
       }
     },
@@ -886,6 +884,10 @@
         "type": "string",
         "enum": ["processing", "ready", "failed"]
       },
+      "RecordingProcessingStage": {
+        "type": "string",
+        "enum": ["transcribing", "suggestions", "rewriting"]
+      },
       "AudioDataUrl": {
         "type": "string",
         "description": "A `data:audio/*;base64,...` payload for incoming requests, or `/uploads/...` URL in stored responses."
@@ -905,7 +907,7 @@
       },
       "Recording": {
         "type": "object",
-        "required": ["id", "topic", "duration", "timestamp", "status", "transcript", "suggestions", "practiceType"],
+        "required": ["id", "topic", "duration", "timestamp", "status", "transcript", "correctedTranscript", "suggestions", "practiceType"],
         "properties": {
           "id": { "type": "string" },
           "topic": { "type": "string" },
@@ -913,6 +915,7 @@
           "timestamp": { "type": "string", "format": "date-time" },
           "status": { "$ref": "#/components/schemas/RecordingStatus" },
           "transcript": { "type": "string" },
+          "correctedTranscript": { "type": "string" },
           "suggestions": {
             "type": "array",
             "items": { "$ref": "#/components/schemas/Suggestion" }
@@ -921,6 +924,7 @@
           "audioDataUrl": { "anyOf": [{ "$ref": "#/components/schemas/AudioDataUrl" }, { "type": "null" }] },
           "photoDataUrl": { "anyOf": [{ "$ref": "#/components/schemas/PhotoDataUrl" }, { "type": "null" }] },
           "photoObject": { "type": ["string", "null"], "maxLength": 120 },
+          "processingStage": { "anyOf": [{ "$ref": "#/components/schemas/RecordingProcessingStage" }, { "type": "null" }] },
           "processingError": { "type": ["string", "null"] }
         }
       },

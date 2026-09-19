@@ -936,6 +936,41 @@ button {
   color: var(--ink);
 }
 
+.recording-processing-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  color: var(--success);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.recording-processing-status-failed {
+  color: var(--danger);
+}
+
+.recording-processing-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: recording-processing-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes recording-processing-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.8);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
 .recording-duration,
 .feed-card-author,
 .feed-card-time,
@@ -1102,7 +1137,8 @@ button {
 
 .feed-replies-section,
 .transcript-section,
-.suggestions-section {
+.suggestions-section,
+.natural-transcript-section {
   margin-bottom: 24px;
 }
 
@@ -1571,6 +1607,7 @@ body {
 .player,
 .transcript-section,
 .suggestions-section,
+.natural-transcript-section,
 .modal-content {
   border: 1px solid var(--border-soft);
   border-radius: 8px;
@@ -1583,7 +1620,8 @@ body {
 .profile-card,
 .auth-form,
 .transcript-section,
-.suggestions-section {
+.suggestions-section,
+.natural-transcript-section {
   padding: 20px;
 }
 

@@ -14,7 +14,6 @@ import (
 	"daily-speaking-practice/backend/internal/domain"
 	"daily-speaking-practice/backend/internal/logging"
 	"daily-speaking-practice/backend/internal/quota"
-	"daily-speaking-practice/backend/internal/transcription"
 	"github.com/google/uuid"
 )
 
@@ -93,100 +92,68 @@ func (s *Server) handleCreateRecording(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	interestRows, err := s.db.Query(r.Context(), `
-		SELECT interest_id
-		FROM user_interests
-		WHERE user_id = $1
-		ORDER BY created_at ASC`, user.ID)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to save recording."})
-		return
-	}
-	interests := []string{}
-	for interestRows.Next() {
-		var interest string
-		if err := interestRows.Scan(&interest); err == nil {
-			interests = append(interests, interest)
-		}
-	}
-	interestRows.Close()
-	if len(interests) > 10 {
-		interests = interests[:10]
-	}
-
-	transcript, err := transcription.TranscribeAudioWithLocalWhisper(r.Context(), savedAudio.absolutePath)
-	if err != nil {
-		var typed transcription.Error
-		if errors.As(err, &typed) {
-			writeJSON(w, typed.Status, map[string]string{"error": typed.Message})
-			return
-		}
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to save recording."})
-		return
-	}
-	transcript = domain.NormalizeTranscript(transcript)
-	if transcript == "" {
-		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "Whisper returned an empty transcript. Try speaking louder or recording again."})
-		return
-	}
-
-	suggestions := s.generateRecordingSuggestions(r.Context(), transcript, topic, interests, practiceType, photoObject, logger)
-	suggestionJSON := marshalSuggestions(suggestions)
 	timestamp := domain.ParseTimestamp(stringAny(source["timestamp"]))
 
 	var inserted struct {
-		ID           string
-		Topic        string
-		Duration     int
-		Timestamp    time.Time
-		Transcript   string
-		Suggestions  []byte
-		PracticeType string
-		AudioDataURL *string
-		PhotoDataURL *string
-		PhotoObject  *string
+		ID                  string
+		Topic               string
+		Duration            int
+		Timestamp           time.Time
+		Status              string
+		Transcript          string
+		CorrectedTranscript string
+		Suggestions         []byte
+		ProcessingStage     *string
+		PracticeType        string
+		AudioDataURL        *string
+		PhotoDataURL        *string
+		PhotoObject         *string
+		ProcessingError     *string
 	}
 	err = s.db.QueryRow(r.Context(), `
 		INSERT INTO recordings
-		  (id, user_id, topic, duration, timestamp, transcript, suggestions, practice_type, audio_data_url, photo_data_url, photo_object)
+		  (id, user_id, topic, duration, timestamp, transcript, corrected_transcript, suggestions, practice_type, audio_data_url, photo_data_url, photo_object, status, processing_stage)
 		VALUES
-		  ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10, $11)
-		RETURNING id, topic, duration, timestamp, transcript, suggestions, practice_type, audio_data_url, photo_data_url, photo_object`,
+		  ($1, $2, $3, $4, $5, '', '', '[]'::jsonb, $6, $7, $8, $9, 'processing', 'transcribing')
+		RETURNING id, topic, duration, timestamp, status, transcript, corrected_transcript, suggestions, processing_stage, practice_type, audio_data_url, photo_data_url, photo_object, processing_error`,
 		recordingID,
 		user.ID,
 		truncateRunes(topic, 300),
 		duration,
 		timestamp,
-		transcript,
-		suggestionJSON,
 		practiceType,
 		savedAudio.publicURL,
 		stringOrNil(practiceType == "photo_description", photoDataURL),
 		stringOrNil(practiceType == "photo_description", photoObject),
-	).Scan(&inserted.ID, &inserted.Topic, &inserted.Duration, &inserted.Timestamp, &inserted.Transcript, &inserted.Suggestions, &inserted.PracticeType, &inserted.AudioDataURL, &inserted.PhotoDataURL, &inserted.PhotoObject)
+	).Scan(&inserted.ID, &inserted.Topic, &inserted.Duration, &inserted.Timestamp, &inserted.Status, &inserted.Transcript, &inserted.CorrectedTranscript, &inserted.Suggestions, &inserted.ProcessingStage, &inserted.PracticeType, &inserted.AudioDataURL, &inserted.PhotoDataURL, &inserted.PhotoObject, &inserted.ProcessingError)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to save recording."})
 		return
 	}
 	cleanupAudio = ""
+	s.processRecordingInBackground(recordingID, user.ID, savedAudio.absolutePath, topic, practiceType, photoObject, user.EnglishLevel)
 
-	q, err := quota.GetRecordingQuota(r.Context(), s.db, user.ID, &user.IsSubscriber)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to save recording."})
-		return
+	q := recordingQuotaAfterSave(qBefore, duration)
+	if refreshedQuota, quotaErr := quota.GetRecordingQuota(r.Context(), s.db, user.ID, &user.IsSubscriber); quotaErr == nil {
+		q = refreshedQuota
+	} else {
+		logger.Warn("recording.quota_refresh_failed", logging.ErrorMeta(quotaErr))
 	}
 	recording := recordingResponse{
-		ID:           inserted.ID,
-		Topic:        inserted.Topic,
-		Duration:     domain.ToNonNegativeInt(inserted.Duration),
-		Timestamp:    inserted.Timestamp.UTC().Format(time.RFC3339Nano),
-		Status:       "ready",
-		Transcript:   inserted.Transcript,
-		Suggestions:  normalizeSuggestions(inserted.Suggestions, 8),
-		PracticeType: domain.NormalizePracticeType(inserted.PracticeType),
-		AudioDataURL: normalizeOptionalAudio(inserted.AudioDataURL, true),
-		PhotoDataURL: normalizeOptionalPhoto(inserted.PhotoDataURL),
-		PhotoObject:  normalizeOptionalPhotoObject(inserted.PhotoObject),
+		ID:                  inserted.ID,
+		Topic:               inserted.Topic,
+		Duration:            domain.ToNonNegativeInt(inserted.Duration),
+		Timestamp:           inserted.Timestamp.UTC().Format(time.RFC3339Nano),
+		Status:              normalizeRecordingStatus(inserted.Status),
+		Transcript:          inserted.Transcript,
+		CorrectedTranscript: inserted.CorrectedTranscript,
+		Suggestions:         normalizeSuggestions(inserted.Suggestions, 8),
+		ProcessingStage:     normalizeRecordingProcessingStage(inserted.ProcessingStage),
+		PracticeType:        domain.NormalizePracticeType(inserted.PracticeType),
+		AudioDataURL:        normalizeOptionalAudio(inserted.AudioDataURL, true),
+		PhotoDataURL:        normalizeOptionalPhoto(inserted.PhotoDataURL),
+		PhotoObject:         normalizeOptionalPhotoObject(inserted.PhotoObject),
+		ProcessingError:     normalizeOptionalProcessingError(inserted.ProcessingError),
 	}
 	logger.Info("request.success", map[string]any{"status": 201, "durationMs": logging.ElapsedMs(started), "userId": user.ID, "recordingId": recording.ID})
 	writeJSON(w, http.StatusCreated, map[string]any{"recording": recording, "quota": q})
@@ -197,14 +164,14 @@ func marshalSuggestions(suggestions []suggestion) string {
 	return string(suggestionJSON)
 }
 
-func (s *Server) generateRecordingSuggestions(ctx context.Context, transcript string, topic string, interests []string, practiceType string, photoObject *string, logger logging.Logger) []suggestion {
+func (s *Server) generateRecordingSuggestions(ctx context.Context, transcript string, topic string, interests []string, practiceType string, photoObject *string, englishLevel string, logger logging.Logger) ([]suggestion, error) {
 	if strings.TrimSpace(transcript) == "" {
-		return []suggestion{}
+		return []suggestion{}, nil
 	}
 	settings := ai.ResolveSettingsForUser()
 	useJSONFormat := !settings.IsThinkingModel
 	seed := absMod(domain.HashString(strings.ToLower(topic))*131+domain.HashString(transcript)*17, 2147483647)
-	prompt := recordingSuggestionsPrompt(transcript, topic, interests, practiceType, photoObject)
+	prompt := recordingSuggestionsPrompt(transcript, topic, interests, practiceType, photoObject, englishLevel)
 	for attempt := 0; attempt < 2; attempt++ {
 		strictJSON := attempt > 0
 		body := map[string]any{
@@ -226,20 +193,63 @@ func (s *Server) generateRecordingSuggestions(ctx context.Context, transcript st
 		payload, _, err := ai.PostChat(ctx, body)
 		if err != nil {
 			logger.Warn("ollama.suggestions_request_failed", logging.ErrorMeta(err))
-			return []suggestion{}
+			return nil, errors.New("AI suggestions could not be generated. Please try again later.")
 		}
-		suggestions := parseSuggestionsFromContent(ai.ExtractMessageContent(payload))
-		if len(suggestions) > 0 {
+		suggestions, valid := parseSuggestionsResultFromContent(ai.ExtractMessageContent(payload))
+		if valid {
 			if len(suggestions) > 5 {
-				return suggestions[:5]
+				return suggestions[:5], nil
 			}
-			return suggestions
+			return suggestions, nil
 		}
 	}
-	return []suggestion{}
+	return nil, errors.New("AI suggestions could not be generated. Please try again later.")
+}
+
+func (s *Server) generateNaturalTranscript(ctx context.Context, transcript string, suggestions []suggestion, englishLevel string, logger logging.Logger) (string, error) {
+	if strings.TrimSpace(transcript) == "" {
+		return "", errors.New("The natural English version could not be generated. Please try again later.")
+	}
+	settings := ai.ResolveSettingsForUser()
+	useJSONFormat := !settings.IsThinkingModel
+	seed := absMod(domain.HashString(transcript)*193+domain.HashString(englishLevel)*29, 2147483647)
+	prompt := recordingNaturalVersionPrompt(transcript, suggestions, englishLevel)
+	for attempt := 0; attempt < 2; attempt++ {
+		strictJSON := attempt > 0
+		body := map[string]any{
+			"model":  settings.Model,
+			"stream": false,
+			"think":  ai.ThinkOption(settings.IsThinkingModel),
+			"messages": []map[string]string{
+				{"role": "system", "content": chooseString(strictJSON, "Return strict valid JSON only. No markdown. No prose.", "You rewrite learner speech as natural conversational English and output JSON only.")},
+				{"role": "user", "content": prompt},
+			},
+			"options": map[string]any{
+				"temperature": chooseFloat(strictJSON, 0.15, 0.35),
+				"seed":        seed + attempt*97,
+			},
+		}
+		if useJSONFormat {
+			body["format"] = "json"
+		}
+		payload, _, err := ai.PostChat(ctx, body)
+		if err != nil {
+			logger.Warn("ollama.natural_transcript_request_failed", logging.ErrorMeta(err))
+			return "", errors.New("The natural English version could not be generated. Please try again later.")
+		}
+		if correctedTranscript := parseNaturalTranscriptFromContent(ai.ExtractMessageContent(payload)); correctedTranscript != "" {
+			return correctedTranscript, nil
+		}
+	}
+	return "", errors.New("The natural English version could not be generated. Please try again later.")
 }
 
 func parseSuggestionsFromContent(content string) []suggestion {
+	suggestions, _ := parseSuggestionsResultFromContent(content)
+	return suggestions
+}
+
+func parseSuggestionsResultFromContent(content string) ([]suggestion, bool) {
 	for _, candidate := range ai.ExtractJSONCandidates(content) {
 		var payload map[string]json.RawMessage
 		if json.Unmarshal([]byte(candidate), &payload) != nil {
@@ -247,23 +257,51 @@ func parseSuggestionsFromContent(content string) []suggestion {
 		}
 		for _, key := range []string{"suggestions", "corrections", "mistakes", "errorAnalysis"} {
 			if raw, ok := payload[key]; ok {
+				var items []json.RawMessage
+				if json.Unmarshal(raw, &items) != nil {
+					continue
+				}
 				suggestions := normalizeSuggestions(raw, 5)
-				if len(suggestions) > 0 {
-					return suggestions
+				if len(items) == 0 || len(suggestions) > 0 {
+					return suggestions, true
 				}
 			}
 		}
 	}
-	return []suggestion{}
+	return []suggestion{}, false
 }
 
-func recordingSuggestionsPrompt(transcript string, topic string, interests []string, practiceType string, photoObject *string) string {
+func parseNaturalTranscriptFromContent(content string) string {
+	for _, candidate := range ai.ExtractJSONCandidates(content) {
+		var payload map[string]json.RawMessage
+		if json.Unmarshal([]byte(candidate), &payload) != nil {
+			continue
+		}
+		for _, key := range []string{"correctedTranscript", "naturalTranscript", "improvedTranscript"} {
+			raw, ok := payload[key]
+			if !ok {
+				continue
+			}
+			var value string
+			if json.Unmarshal(raw, &value) == nil {
+				if normalized := domain.NormalizeTranscript(value); normalized != "" {
+					return normalized
+				}
+			}
+		}
+	}
+	return ""
+}
+
+func recordingSuggestionsPrompt(transcript string, topic string, interests []string, practiceType string, photoObject *string, englishLevel string) string {
 	transcriptForPrompt := domain.NormalizeTranscript(transcript)
 	if len([]rune(transcriptForPrompt)) > 6000 {
 		transcriptForPrompt = string([]rune(transcriptForPrompt)[:6000])
 	}
 	parts := []string{
 		`Topic: "` + topic + `".`,
+		"Learner level: " + domain.FormatEnglishLevel(englishLevel) + ".",
+		"Language difficulty: " + domain.EnglishLevelPromptGuidance(englishLevel),
 		"You receive an English learner transcript from a speaking practice recording.",
 		"Find up to 4 grammar or word-choice mistakes that clearly appear in the transcript.",
 		`Return only JSON with this exact shape: {"suggestions":[{"wrong":"...","right":"...","explanation":"..."}]}.`,
@@ -283,6 +321,43 @@ func recordingSuggestionsPrompt(transcript string, topic string, interests []str
 		parts = append(parts, "Learner interests context: "+strings.Join(interests, ", ")+".")
 	}
 	return strings.Join(parts, " ")
+}
+
+func recordingNaturalVersionPrompt(transcript string, suggestions []suggestion, englishLevel string) string {
+	transcriptForPrompt := domain.NormalizeTranscript(transcript)
+	if len([]rune(transcriptForPrompt)) > 6000 {
+		transcriptForPrompt = string([]rune(transcriptForPrompt)[:6000])
+	}
+	suggestionsJSON, _ := json.Marshal(suggestions)
+	parts := []string{
+		"Learner level: " + domain.FormatEnglishLevel(englishLevel) + ".",
+		recordingNaturalVersionLevelGuidance(englishLevel),
+		"Rewrite the transcript as natural conversational English while you preserve the speaker's meaning, intent, and factual details.",
+		"Apply the supplied corrections, fix sentence structure and word order, and remove accidental repetitions or filler that make the thought unclear.",
+		"Do not invent new details, opinions, or events. Keep the result achievable and useful for a learner at the stated level.",
+		`Return only JSON with this exact shape: {"correctedTranscript":"..."}.`,
+		"No markdown and no extra keys.",
+		"Corrections: " + string(suggestionsJSON) + ".",
+		`Transcript: """` + transcriptForPrompt + `""".`,
+	}
+	return strings.Join(parts, " ")
+}
+
+func recordingNaturalVersionLevelGuidance(englishLevel string) string {
+	switch domain.NormalizeEnglishLevel(englishLevel) {
+	case "a1":
+		return "Use very simple everyday vocabulary and short spoken sentences."
+	case "a2":
+		return "Use simple everyday vocabulary and clear spoken sentences."
+	case "b2":
+		return "Use natural upper-intermediate vocabulary, connectors, and varied spoken sentences."
+	case "c1":
+		return "Use fluent advanced vocabulary and idiomatic but precise conversational phrasing."
+	case "c2":
+		return "Use sophisticated near-native vocabulary, nuance, and idiomatic conversational phrasing."
+	default:
+		return "Use clear intermediate vocabulary and natural spoken sentence structures."
+	}
 }
 
 type savedAudioFile struct {
@@ -333,6 +408,20 @@ func recordingQuotaError(q quota.RecordingQuota, duration int) *quotaHTTPError {
 		}
 	}
 	return nil
+}
+
+func recordingQuotaAfterSave(before quota.RecordingQuota, duration int) quota.RecordingQuota {
+	after := before
+	savedSeconds := domain.ToNonNegativeInt(duration)
+	after.WeeklyUsedSeconds = domain.ToNonNegativeInt(before.WeeklyUsedSeconds) + savedSeconds
+	if before.WeeklyRemainingSeconds != nil {
+		remaining := domain.ToNonNegativeInt(*before.WeeklyRemainingSeconds) - savedSeconds
+		if remaining < 0 {
+			remaining = 0
+		}
+		after.WeeklyRemainingSeconds = &remaining
+	}
+	return after
 }
 
 func stringOrNil(condition bool, value *string) *string {

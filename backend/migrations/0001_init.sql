@@ -61,6 +61,12 @@ ALTER TABLE recordings
 ADD COLUMN IF NOT EXISTS processing_error TEXT;
 
 ALTER TABLE recordings
+ADD COLUMN IF NOT EXISTS corrected_transcript TEXT NOT NULL DEFAULT '';
+
+ALTER TABLE recordings
+ADD COLUMN IF NOT EXISTS processing_stage TEXT;
+
+ALTER TABLE recordings
 ADD COLUMN IF NOT EXISTS photo_data_url TEXT;
 
 ALTER TABLE recordings

@@ -11,6 +11,7 @@ export type Suggestion = {
 
 export type PracticeType = "free_talk" | "topic" | "photo_description";
 export type RecordingStatus = "processing" | "ready" | "failed";
+export type RecordingProcessingStage = "transcribing" | "suggestions" | "rewriting";
 export const FEED_REACTION_VALUES = ["like", "love", "fire", "laugh", "support"] as const;
 export type FeedReaction = (typeof FEED_REACTION_VALUES)[number];
 
@@ -34,7 +35,9 @@ export type Recording = {
   timestamp: string;
   status: RecordingStatus;
   transcript: string;
+  correctedTranscript: string;
   suggestions: Suggestion[];
+  processingStage: RecordingProcessingStage | null;
   practiceType: PracticeType;
   audioDataUrl: string | null;
   photoDataUrl: string | null;

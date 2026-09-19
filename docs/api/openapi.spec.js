@@ -599,8 +599,8 @@ window.DAILY_SPEAKING_OPENAPI = {
         "tags": [
           "Recordings"
         ],
-        "summary": "Create recording synchronously from a full base64 audio payload",
-        "description": "Legacy/fallback flow. Backend saves the audio file, runs local Whisper and AI suggestions before responding.",
+        "summary": "Save a full base64 recording for background processing",
+        "description": "Legacy/fallback upload flow. Backend saves the recording immediately, returns it with `status=processing`, then runs transcription, AI suggestions, and the natural conversational rewrite in separate background steps.",
         "requestBody": {
           "required": true,
           "content": {
@@ -624,14 +624,8 @@ window.DAILY_SPEAKING_OPENAPI = {
           "402": {
             "$ref": "#/components/responses/PaymentRequired"
           },
-          "422": {
-            "$ref": "#/components/responses/UnprocessableEntity"
-          },
           "500": {
             "$ref": "#/components/responses/InternalServerError"
-          },
-          "502": {
-            "$ref": "#/components/responses/BadGateway"
           }
         }
       }
@@ -1478,6 +1472,14 @@ window.DAILY_SPEAKING_OPENAPI = {
           "failed"
         ]
       },
+      "RecordingProcessingStage": {
+        "type": "string",
+        "enum": [
+          "transcribing",
+          "suggestions",
+          "rewriting"
+        ]
+      },
       "AudioDataUrl": {
         "type": "string",
         "description": "A `data:audio/*;base64,...` payload for incoming requests, or `/uploads/...` URL in stored responses."
@@ -1514,6 +1516,7 @@ window.DAILY_SPEAKING_OPENAPI = {
           "timestamp",
           "status",
           "transcript",
+          "correctedTranscript",
           "suggestions",
           "practiceType"
         ],
@@ -1537,6 +1540,9 @@ window.DAILY_SPEAKING_OPENAPI = {
             "$ref": "#/components/schemas/RecordingStatus"
           },
           "transcript": {
+            "type": "string"
+          },
+          "correctedTranscript": {
             "type": "string"
           },
           "suggestions": {
@@ -1574,6 +1580,16 @@ window.DAILY_SPEAKING_OPENAPI = {
               "null"
             ],
             "maxLength": 120
+          },
+          "processingStage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RecordingProcessingStage"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "processingError": {
             "type": [

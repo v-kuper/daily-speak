@@ -17,6 +17,8 @@ func TestInitialMigrationContainsCurrentTables(t *testing.T) {
 		"CREATE TABLE IF NOT EXISTS feed_replies",
 		"CREATE TABLE IF NOT EXISTS feed_post_reactions",
 		"CREATE TABLE IF NOT EXISTS feed_reply_reactions",
+		"ADD COLUMN IF NOT EXISTS corrected_transcript TEXT NOT NULL DEFAULT ''",
+		"ADD COLUMN IF NOT EXISTS processing_stage TEXT",
 	}
 
 	for _, fragment := range required {
