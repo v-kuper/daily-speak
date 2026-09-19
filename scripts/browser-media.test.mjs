@@ -94,3 +94,33 @@ test("user denial remains a browser settings permission message on secure origin
     "Microphone access denied. Allow microphone permission in your browser settings.",
   );
 });
+
+test("an inactive recorder keeps pending data until its stop event finalizes the recording", () => {
+  let stopCalls = 0;
+  let releaseCalls = 0;
+
+  browserMedia.stopMediaRecorderSafely(
+    {
+      state: "inactive",
+      stop() {
+        stopCalls += 1;
+      },
+    },
+    () => {
+      releaseCalls += 1;
+    },
+  );
+
+  assert.equal(stopCalls, 0);
+  assert.equal(releaseCalls, 0);
+});
+
+test("missing recorders still release any orphaned microphone stream", () => {
+  let releaseCalls = 0;
+
+  browserMedia.stopMediaRecorderSafely(null, () => {
+    releaseCalls += 1;
+  });
+
+  assert.equal(releaseCalls, 1);
+});

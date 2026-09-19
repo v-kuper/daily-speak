@@ -140,15 +140,7 @@ func transcribeWithOpenAI(ctx context.Context, audioFilePath string) (string, er
 			continue
 		}
 		transcriptPath := filepath.Join(tempDir, strings.TrimSuffix(filepath.Base(audioFilePath), filepath.Ext(audioFilePath))+".txt")
-		transcriptBytes, _ := os.ReadFile(transcriptPath)
-		transcript := normalizeTranscript(string(transcriptBytes))
-		if transcript == "" {
-			transcript = normalizeTranscript(output)
-		}
-		if transcript == "" {
-			return "", Error{Message: "OpenAI Whisper returned an empty transcript. Check microphone audio quality and model settings.", Status: 422}
-		}
-		return transcript, nil
+		return readOpenAITranscript(transcriptPath, output)
 	}
 	if lastErr != nil {
 		message := lastErr.Error()
@@ -161,6 +153,18 @@ func transcribeWithOpenAI(ctx context.Context, audioFilePath string) (string, er
 		return "", lastErr
 	}
 	return "", Error{Message: "OpenAI Whisper backend is not configured. Set WHISPER_PYTHON_BIN and install openai-whisper.", Status: 500}
+}
+
+func readOpenAITranscript(transcriptPath string, _ string) (string, error) {
+	transcriptBytes, err := os.ReadFile(transcriptPath)
+	transcript := normalizeTranscript(string(transcriptBytes))
+	if err != nil || transcript == "" {
+		return "", Error{
+			Message: "OpenAI Whisper did not produce a transcript. The uploaded audio may be invalid or unsupported.",
+			Status:  422,
+		}
+	}
+	return transcript, nil
 }
 
 func runCommand(ctx context.Context, command string, args []string, env []string) (string, error) {

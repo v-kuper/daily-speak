@@ -6,7 +6,8 @@ import {
   resolveAudioFileExtension,
   resolveBrowserRecordingSupportError,
   resolveMicrophoneError,
-  resolvePreferredAudioMimeType
+  resolvePreferredAudioMimeType,
+  stopMediaRecorderSafely
 } from "../lib/browserMedia";
 import { formatTime, toDateKey } from "../lib/utils";
 import { useAppDispatch, useAppSelector } from "../store/hooks";
@@ -484,12 +485,6 @@ export default function SpeakScreen() {
 
   const onStopRecording = () => {
     dispatch(stopRecording());
-    const recorder = mediaRecorderRef.current;
-    if (recorder && recorder.state !== "inactive") {
-      recorder.stop();
-      return;
-    }
-    releaseMedia();
   };
 
   useEffect(() => {
@@ -524,23 +519,12 @@ export default function SpeakScreen() {
       return;
     }
 
-    const recorder = mediaRecorderRef.current;
-    if (recorder && recorder.state !== "inactive") {
-      recorder.stop();
-      return;
-    }
-
-    releaseMedia();
+    stopMediaRecorderSafely(mediaRecorderRef.current, releaseMedia);
   }, [releaseMedia, speakState]);
 
   useEffect(() => {
     return () => {
-      const recorder = mediaRecorderRef.current;
-      if (recorder && recorder.state !== "inactive") {
-        recorder.stop();
-        return;
-      }
-      releaseMedia();
+      stopMediaRecorderSafely(mediaRecorderRef.current, releaseMedia);
     };
   }, [releaseMedia]);
 

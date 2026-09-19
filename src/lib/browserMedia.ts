@@ -165,6 +165,22 @@ export const resolveMicrophoneError = (
   return "Cannot access microphone. Check browser permissions and device settings.";
 };
 
+type MediaRecorderControl = Pick<MediaRecorder, "state" | "stop">;
+
+export const stopMediaRecorderSafely = (
+  recorder: MediaRecorderControl | null,
+  releaseWhenMissing: () => void
+): void => {
+  if (!recorder) {
+    releaseWhenMissing();
+    return;
+  }
+
+  if (recorder.state !== "inactive") {
+    recorder.stop();
+  }
+};
+
 export const readBlobAsDataUrl = (blob: Blob): Promise<string> => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();

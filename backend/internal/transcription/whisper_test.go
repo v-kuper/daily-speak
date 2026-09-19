@@ -1,6 +1,10 @@
 package transcription
 
-import "testing"
+import (
+	"path/filepath"
+	"strings"
+	"testing"
+)
 
 func TestResolveCommandEnvPreservesAbsolutePath(t *testing.T) {
 	t.Setenv("WHISPER_PYTHON_BIN", "/opt/whisper/bin/python")
@@ -29,5 +33,22 @@ func TestResolvePathEnvPreservesDockerAbsolutePath(t *testing.T) {
 
 	if got != "/app/tools/whisper/cache" {
 		t.Fatalf("expected docker cache path to be preserved, got %q", got)
+	}
+}
+
+func TestReadOpenAITranscriptRejectsDiagnosticOutputWhenTranscriptFileIsMissing(t *testing.T) {
+	transcriptPath := filepath.Join(t.TempDir(), "missing.txt")
+	diagnosticOutput := "0%| | 0.00/139M Traceback: EBML header parsing failed"
+
+	transcript, err := readOpenAITranscript(transcriptPath, diagnosticOutput)
+
+	if err == nil {
+		t.Fatal("expected missing transcript file to be rejected")
+	}
+	if transcript != "" {
+		t.Fatalf("expected diagnostics not to become a transcript, got %q", transcript)
+	}
+	if strings.Contains(err.Error(), diagnosticOutput) {
+		t.Fatalf("expected a concise user-facing error, got %q", err.Error())
 	}
 }
