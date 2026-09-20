@@ -700,6 +700,49 @@ window.DAILY_SPEAKING_OPENAPI = {
         }
       }
     },
+    "/api/recordings/{recordingId}/shadowing": {
+      "post": {
+        "tags": [
+          "Recordings"
+        ],
+        "summary": "Generate pronunciation audio for the corrected transcript",
+        "description": "Claims an owned recording for background Cartesia synthesis. Ready or recently processing recordings are returned without starting a duplicate job.",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RecordingIdPath"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current recording state after scheduling or deduplication.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordingResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      }
+    },
     "/api/recording-sessions": {
       "post": {
         "tags": [
@@ -1508,6 +1551,15 @@ window.DAILY_SPEAKING_OPENAPI = {
           "failed"
         ]
       },
+      "ShadowingStatus": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "processing",
+          "ready",
+          "failed"
+        ]
+      },
       "RecordingProcessingStage": {
         "type": "string",
         "enum": [
@@ -1554,7 +1606,11 @@ window.DAILY_SPEAKING_OPENAPI = {
           "transcript",
           "correctedTranscript",
           "suggestions",
-          "practiceType"
+          "practiceType",
+          "shadowingStatus",
+          "shadowingAudioUrl",
+          "shadowingError",
+          "shadowingUpdatedAt"
         ],
         "properties": {
           "id": {
@@ -1632,6 +1688,26 @@ window.DAILY_SPEAKING_OPENAPI = {
               "string",
               "null"
             ]
+          },
+          "shadowingStatus": {
+            "$ref": "#/components/schemas/ShadowingStatus"
+          },
+          "shadowingAudioUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^/uploads/shadowing/[a-zA-Z0-9_-]+/[a-zA-Z0-9_-]+\\.mp3$"
+          },
+          "shadowingError": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "shadowingUpdatedAt": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       },

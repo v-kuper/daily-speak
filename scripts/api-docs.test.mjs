@@ -30,6 +30,7 @@ const documentedPaths = [
   "/api/user/english-level",
   "/api/user/recordings",
   "/api/recordings/{recordingId}",
+  "/api/recordings/{recordingId}/shadowing",
   "/api/recording-sessions",
   "/api/recording-sessions/{sessionId}/chunks",
   "/api/recording-sessions/{sessionId}/audio",
@@ -81,6 +82,10 @@ test("OpenAPI stays aligned with server.go route literals", () => {
     ["/api/user/english-level", /path == "\/api\/user\/english-level"/],
     ["/api/user/recordings", /path == "\/api\/user\/recordings"/],
     ["/api/recordings/{recordingId}", /strings\.HasPrefix\(path, "\/api\/recordings\/"\)/],
+    [
+      "/api/recordings/{recordingId}/shadowing",
+      /strings\.HasSuffix\(path, "\/shadowing"\)/,
+    ],
     ["/api/recording-sessions", /path == "\/api\/recording-sessions"/],
     ["/api/recording-sessions/{sessionId}/chunks", /action == "chunks"/],
     ["/api/recording-sessions/{sessionId}/audio", /action == "audio"/],
@@ -96,5 +101,15 @@ test("OpenAPI stays aligned with server.go route literals", () => {
   for (const [path, routePattern] of serverRouteChecks) {
     assert.match(routeSource, routePattern, `server route not found for ${path}`);
     assert.ok(openapi.paths[path], `OpenAPI path not found for ${path}`);
+  }
+});
+
+test("Recording schema documents shadowing state", () => {
+  const recordingSchema = openapi.components.schemas.Recording;
+  const requiredFields = new Set(recordingSchema.required);
+
+  for (const field of ["shadowingStatus", "shadowingAudioUrl", "shadowingError", "shadowingUpdatedAt"]) {
+    assert.ok(recordingSchema.properties[field], `missing Recording.${field}`);
+    assert.ok(requiredFields.has(field), `Recording.${field} must be required`);
   }
 });

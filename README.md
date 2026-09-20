@@ -225,6 +225,32 @@ rm -rf .venv tools/whisper/openai-models tools/whisper/cache tools/whisper/pip-c
 In Docker, Ollama remains external by default. Whisper runs inside the app
 container through local Python `openai-whisper`.
 
+## Cartesia shadowing audio
+
+The recording details screen can generate a separate pronunciation track for
+the corrected text. New recordings start synthesis automatically after the AI
+rewrite is ready; older recordings start synthesis when you open them.
+
+For the Docker setup, create a repository-root `.env` from the committed
+template:
+
+```bash
+cp .env.example .env
+```
+
+Open `.env`, paste the Cartesia API key after `CARTESIA_API_KEY=`, and paste the
+UUID of the chosen natural female American voice after `CARTESIA_VOICE_ID=`.
+Keep the remaining defaults unless your Cartesia account requires different
+values. Then rebuild and follow the app logs:
+
+```bash
+docker compose up --build -d app postgres
+docker compose logs -f app
+```
+
+The repository ignores `.env`. Never post the API key in chat or commit it to
+Git. The key is server-only; there is no client-prefixed Cartesia variable.
+
 ## Available scripts
 
 - `npm run dev` - start dev server
