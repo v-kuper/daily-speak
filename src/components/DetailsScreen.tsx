@@ -3,6 +3,12 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { buildTranscriptSegments } from "../lib/transcriptHighlight";
 import { recordingProcessingLabel } from "../lib/recordingProcessing";
+import {
+  isShadowingStale,
+  shadowingProgressLabel,
+  shouldPollRecording,
+  shouldScheduleShadowing,
+} from "../lib/shadowing";
 import { formatTime } from "../lib/utils";
 import { useAppDispatch, useAppSelector } from "../store/hooks";
 import {
@@ -11,6 +17,7 @@ import {
   deleteRecording,
   fetchRecording,
   fetchFeedPosts,
+  generateShadowingAudio,
   openShareModal,
   resetPlaybackState,
   setPlaybackPlaying,
@@ -112,6 +119,7 @@ const waitForAudioCanPlay = (audio: HTMLAudioElement): Promise<void> => {
 export default function DetailsScreen() {
   const dispatch = useAppDispatch();
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const autoShadowingRequestedRef = useRef(new Set<string>());
   const [audioSrc, setAudioSrc] = useState<string | null>(null);
   const [playbackError, setPlaybackError] = useState<string | null>(null);
   const [sharedReplies, setSharedReplies] = useState<FeedThreadReply[]>([]);
@@ -128,7 +136,9 @@ export default function DetailsScreen() {
     feedPostsStatus,
     backgroundSaveRecordingId,
     recordingDeleteStatus,
-    recordingDeleteError
+    recordingDeleteError,
+    shadowingRequestStatus,
+    shadowingRequestError,
   } = useAppSelector(
     (state) => state.app
   );
@@ -138,6 +148,11 @@ export default function DetailsScreen() {
     [currentRecordingId, recordings]
   );
   const recordingId = recording?.id ?? null;
+  const recordingAudioDataUrl = recording?.audioDataUrl ?? null;
+  const recordingStatus = recording?.status;
+  const correctedTranscript = recording?.correctedTranscript ?? "";
+  const shadowingStatus = recording?.shadowingStatus ?? "pending";
+  const shadowingUpdatedAt = recording?.shadowingUpdatedAt ?? "";
   const hasAudio = Boolean(audioSrc);
   const isProcessing = recording?.status === "processing";
   const isFailed = recording?.status === "failed";
@@ -163,6 +178,10 @@ export default function DetailsScreen() {
   const sharedFeedPostId = sharedFeedPost?.id ?? null;
   const isShareStatusLoading = Boolean(recording) && (feedPostsStatus === "idle" || feedPostsStatus === "loading");
   const isDeleteLoading = recordingDeleteStatus === "loading";
+  const isShadowingRequestLoading = shadowingRequestStatus === "loading";
+  const shadowingIsStale = isShadowingStale(shadowingStatus, shadowingUpdatedAt);
+  const canRetryShadowing =
+    shadowingStatus === "failed" || shadowingIsStale || Boolean(shadowingRequestError);
   const canDelete = Boolean(recordingId) && recordingId !== backgroundSaveRecordingId;
 
   useEffect(() => {
@@ -174,7 +193,7 @@ export default function DetailsScreen() {
   }, [dispatch, feedPostsStatus, recordingId]);
 
   useEffect(() => {
-    if (!recordingId || recording?.status !== "processing") {
+    if (!recordingId || !shouldPollRecording(recordingStatus ?? "", shadowingStatus)) {
       return;
     }
 
@@ -187,7 +206,32 @@ export default function DetailsScreen() {
     return () => {
       window.clearInterval(interval);
     };
-  }, [dispatch, recording?.status, recordingId]);
+  }, [dispatch, recordingId, recordingStatus, shadowingStatus]);
+
+  useEffect(() => {
+    if (
+      !recordingId ||
+      autoShadowingRequestedRef.current.has(recordingId) ||
+      !shouldScheduleShadowing({
+        recordingStatus: recordingStatus ?? "failed",
+        correctedTranscript,
+        shadowingStatus,
+        requestLoading: isShadowingRequestLoading,
+      })
+    ) {
+      return;
+    }
+
+    autoShadowingRequestedRef.current.add(recordingId);
+    void dispatch(generateShadowingAudio(recordingId));
+  }, [
+    correctedTranscript,
+    dispatch,
+    isShadowingRequestLoading,
+    recordingId,
+    recordingStatus,
+    shadowingStatus,
+  ]);
 
   useEffect(() => {
     if (!sharedFeedPostId) {
@@ -260,14 +304,14 @@ export default function DetailsScreen() {
   useEffect(() => {
     setPlaybackError(null);
 
-    if (!recording?.audioDataUrl) {
+    if (!recordingAudioDataUrl) {
       setAudioSrc(null);
       return;
     }
 
-    const objectUrl = createAudioObjectUrl(recording.audioDataUrl);
+    const objectUrl = createAudioObjectUrl(recordingAudioDataUrl);
     if (!objectUrl) {
-      setAudioSrc(recording.audioDataUrl);
+      setAudioSrc(recordingAudioDataUrl);
       return;
     }
 
@@ -275,17 +319,17 @@ export default function DetailsScreen() {
     return () => {
       URL.revokeObjectURL(objectUrl);
     };
-  }, [recording?.audioDataUrl, recording?.id]);
+  }, [recordingAudioDataUrl, recordingId]);
 
   useEffect(() => {
-    if (!recording) {
+    if (!recordingId) {
       return;
     }
     dispatch(resetPlaybackState());
-  }, [dispatch, recording?.id]);
+  }, [dispatch, recordingId]);
 
   useEffect(() => {
-    if (!recording || !hasAudio) {
+    if (!recordingId || !hasAudio) {
       dispatch(setPlaybackPlaying(false));
       return;
     }
@@ -332,7 +376,7 @@ export default function DetailsScreen() {
       audio.removeEventListener("ended", handleEnded);
       audio.removeEventListener("error", handleError);
     };
-  }, [dispatch, hasAudio, recording?.id, audioSrc]);
+  }, [dispatch, hasAudio, recordingId, audioSrc]);
 
   const onTogglePlayback = () => {
     if (!recording || !hasAudio) {
@@ -398,6 +442,13 @@ export default function DetailsScreen() {
       return;
     }
     void dispatch(deleteRecording(recordingId)).unwrap().catch(() => undefined);
+  };
+
+  const onRetryShadowing = () => {
+    if (!recording || isShadowingRequestLoading) {
+      return;
+    }
+    void dispatch(generateShadowingAudio(recording.id)).unwrap().catch(() => undefined);
   };
 
   const onDeleteModalKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -546,8 +597,9 @@ export default function DetailsScreen() {
         )}
       </div>
 
-      <div className="natural-transcript-section">
-        <div className="section-title">A natural way to say it</div>
+      <div className="shadowing-section">
+        <div className="section-title">Shadowing practice</div>
+        <p className="shadowing-hint">Listen, then repeat with the same rhythm and pronunciation.</p>
         {hasCorrectedTranscript ? (
           <div className="transcript-text">{recording.correctedTranscript}</div>
         ) : isProcessing ? (
@@ -560,6 +612,38 @@ export default function DetailsScreen() {
           <div className="empty-state">The natural version is unavailable, but completed results above are still saved.</div>
         ) : (
           <div className="empty-state">The natural version is unavailable for this recording.</div>
+        )}
+        {recording.shadowingStatus === "ready" && recording.shadowingAudioUrl && (
+          <audio
+            className="shadowing-audio"
+            controls
+            preload="metadata"
+            src={recording.shadowingAudioUrl}
+          />
+        )}
+        {(recording.shadowingStatus === "pending" || recording.shadowingStatus === "processing") &&
+          !shadowingRequestError && (
+            <div className={shadowingIsStale ? "auth-error" : "empty-state"}>
+              {shadowingProgressLabel(recording.shadowingStatus, shadowingIsStale)}
+            </div>
+          )}
+        {(recording.shadowingStatus === "failed" || shadowingRequestError) && (
+          <div className="auth-error">
+            {shadowingRequestError ??
+              recording.shadowingError ??
+              "Pronunciation audio could not be generated. Please try again."}
+          </div>
+        )}
+        {canRetryShadowing && (
+          <div className="shadowing-actions">
+            <button
+              className="btn btn-secondary"
+              onClick={onRetryShadowing}
+              disabled={isShadowingRequestLoading}
+            >
+              {isShadowingRequestLoading ? "Retrying..." : "Retry"}
+            </button>
+          </div>
         )}
       </div>
 

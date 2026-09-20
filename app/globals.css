@@ -1138,8 +1138,32 @@ button {
 .feed-replies-section,
 .transcript-section,
 .suggestions-section,
-.natural-transcript-section {
+.shadowing-section {
   margin-bottom: 24px;
+}
+
+.shadowing-hint {
+  margin: 0 0 14px;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.shadowing-audio {
+  display: block;
+  width: 100%;
+  margin-top: 16px;
+}
+
+.shadowing-audio:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.shadowing-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 14px;
 }
 
 .feed-reply-composer {
@@ -1607,7 +1631,7 @@ body {
 .player,
 .transcript-section,
 .suggestions-section,
-.natural-transcript-section,
+.shadowing-section,
 .modal-content {
   border: 1px solid var(--border-soft);
   border-radius: 8px;
@@ -1621,7 +1645,7 @@ body {
 .auth-form,
 .transcript-section,
 .suggestions-section,
-.natural-transcript-section {
+.shadowing-section {
   padding: 20px;
 }
 

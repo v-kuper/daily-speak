@@ -1,3 +1,5 @@
+import type { ShadowingStatus } from "./shadowing";
+
 export type TopicData = {
   questions: string[];
   words: string[];
@@ -43,6 +45,10 @@ export type Recording = {
   photoDataUrl: string | null;
   photoObject: string | null;
   processingError: string | null;
+  shadowingStatus: ShadowingStatus;
+  shadowingAudioUrl: string | null;
+  shadowingError: string | null;
+  shadowingUpdatedAt: string;
 };
 
 export type FeedPost = {

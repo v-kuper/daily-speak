@@ -16,6 +16,7 @@ import {
   removeRecordingAndFeedPost
 } from "../../lib/recordingDeletion";
 import { parseRecordingProcessingStage } from "../../lib/recordingProcessing";
+import { parseShadowingStatus } from "../../lib/shadowing";
 import { DEFAULT_ENGLISH_LEVEL, normalizeEnglishLevel, parseEnglishLevel, type EnglishLevel } from "../../lib/englishLevel";
 import { isCurrentInterviewGuidanceRequest } from "../../lib/interviewGuidance";
 import { formatTime, toDateKey } from "../../lib/utils";
@@ -210,6 +211,8 @@ export type AppState = {
   recordingSaveError: string | null;
   recordingDeleteStatus: AuthStatus;
   recordingDeleteError: string | null;
+  shadowingRequestStatus: AuthStatus;
+  shadowingRequestError: string | null;
   interestsSaveStatus: AuthStatus;
   interestsSaveError: string | null;
   isSubscriber: boolean;
@@ -257,6 +260,7 @@ const MAX_RECORDING_AUDIO_BYTES = 80 * 1024 * 1024;
 const AUDIO_DATA_URL_PATTERN = /^data:((?:audio|video)\/[a-z0-9.+-]+(?:;[^,]+)*);base64,([A-Za-z0-9+/_=-]+)$/i;
 const AUDIO_FILE_URL_PATTERN = /^\/uploads\/recordings\/[a-z0-9/_-]+\.[a-z0-9]{2,10}$/i;
 const ANY_AUDIO_FILE_URL_PATTERN = /^\/uploads\/[a-z0-9/_-]+\.[a-z0-9]{2,10}$/i;
+const SHADOWING_AUDIO_FILE_URL_PATTERN = /^\/uploads\/shadowing\/[a-z0-9_-]+\/[a-z0-9_-]+\.mp3$/i;
 export const PHOTO_PRACTICE_MAX_BYTES = 4 * 1024 * 1024;
 const PHOTO_DATA_URL_PATTERN = /^data:image\/(png|jpeg|jpg|webp|gif);base64,([A-Za-z0-9+/=]+)$/i;
 const PRACTICE_TYPE_SET = new Set<PracticeType>(["free_talk", "topic", "photo_description"]);
@@ -726,11 +730,26 @@ const parseRecording = (value: unknown): Recording | null => {
   const photoDataUrl = normalizePhotoDataUrl(candidate.photoDataUrl);
   const photoObject = normalizePhotoObject(candidate.photoObject);
   const processingError = typeof candidate.processingError === "string" ? candidate.processingError.trim() || null : null;
+  const shadowingStatus = parseShadowingStatus(candidate.shadowingStatus);
+  const shadowingAudioUrlRaw =
+    typeof candidate.shadowingAudioUrl === "string" ? candidate.shadowingAudioUrl.trim() : "";
+  const shadowingAudioUrl = SHADOWING_AUDIO_FILE_URL_PATTERN.test(shadowingAudioUrlRaw)
+    ? shadowingAudioUrlRaw
+    : null;
+  const shadowingError =
+    typeof candidate.shadowingError === "string" ? candidate.shadowingError.trim() || null : null;
   const practiceType = parsePracticeType(candidate.practiceType, topic, Boolean(photoDataUrl));
 
   if (!id || !topic || Number.isNaN(timestamp.getTime()) || !Number.isFinite(duration) || duration < 0) {
     return null;
   }
+
+  const shadowingUpdatedAtRaw =
+    typeof candidate.shadowingUpdatedAt === "string" ? candidate.shadowingUpdatedAt : "";
+  const shadowingUpdatedAtDate = new Date(shadowingUpdatedAtRaw);
+  const shadowingUpdatedAt = Number.isNaN(shadowingUpdatedAtDate.getTime())
+    ? timestamp.toISOString()
+    : shadowingUpdatedAtDate.toISOString();
 
   return {
     id,
@@ -746,7 +765,11 @@ const parseRecording = (value: unknown): Recording | null => {
     audioDataUrl,
     photoDataUrl,
     photoObject,
-    processingError
+    processingError,
+    shadowingStatus,
+    shadowingAudioUrl,
+    shadowingError,
+    shadowingUpdatedAt
   };
 };
 
@@ -1484,6 +1507,34 @@ export const fetchRecording = createAsyncThunk<Recording, string, { rejectValue:
   }
 );
 
+export const generateShadowingAudio = createAsyncThunk<Recording, string, { rejectValue: string }>(
+  "app/generateShadowingAudio",
+  async (recordingId, { rejectWithValue }) => {
+    try {
+      const response = await fetch(`/api/recordings/${encodeURIComponent(recordingId)}/shadowing`, {
+        method: "POST",
+      });
+      const payload = (await response.json().catch(() => null)) as {
+        recording?: unknown;
+        error?: string;
+      } | null;
+      if (response.status === 401) {
+        return rejectWithValue("Unauthorized");
+      }
+      if (!response.ok) {
+        return rejectWithValue(payload?.error ?? "Failed to generate pronunciation audio.");
+      }
+      const recording = parseRecording(payload?.recording);
+      if (!recording) {
+        return rejectWithValue("Invalid recording payload from server.");
+      }
+      return recording;
+    } catch {
+      return rejectWithValue("Cannot connect to pronunciation service.");
+    }
+  },
+);
+
 export const deleteRecording = createAsyncThunk<
   { recordingId: string; quota: RecordingQuota | null },
   string,
@@ -1964,6 +2015,8 @@ const initialState: AppState = {
   recordingSaveError: null,
   recordingDeleteStatus: "idle",
   recordingDeleteError: null,
+  shadowingRequestStatus: "idle",
+  shadowingRequestError: null,
   interestsSaveStatus: "idle",
   interestsSaveError: null,
   isSubscriber: DEFAULT_RECORDING_QUOTA.isSubscriber,
@@ -1988,6 +2041,23 @@ const initialState: AppState = {
 const resetPlayback = (state: AppState): void => {
   state.isPlaying = false;
   state.playbackPosition = 0;
+};
+
+const resetShadowingRequest = (state: AppState): void => {
+  state.shadowingRequestStatus = "idle";
+  state.shadowingRequestError = null;
+};
+
+const upsertRecording = (state: AppState, recording: Recording): void => {
+  if (state.deletedRecordingIds.includes(recording.id)) {
+    return;
+  }
+  const recordingIndex = state.recordings.findIndex((item) => item.id === recording.id);
+  if (recordingIndex >= 0) {
+    state.recordings[recordingIndex] = recording;
+    return;
+  }
+  state.recordings.unshift(recording);
 };
 
 const clearTopicGuidanceState = (state: AppState): void => {
@@ -2089,6 +2159,7 @@ const applySavedRecording = (state: AppState, recording: Recording): void => {
   state.recordingSaveError = null;
   state.recordingDeleteStatus = "idle";
   state.recordingDeleteError = null;
+  resetShadowingRequest(state);
   state.feedPublishStatus = "idle";
   state.feedPublishError = null;
   state.recordingPracticeType = "topic";
@@ -2171,6 +2242,7 @@ const completeAuthSuccess = (
   state.recordingSaveError = null;
   state.recordingDeleteStatus = "idle";
   state.recordingDeleteError = null;
+  resetShadowingRequest(state);
   state.feedPublishStatus = "idle";
   state.feedPublishError = null;
   state.pendingRecordingAudioDataUrl = null;
@@ -2236,6 +2308,7 @@ const clearAuthenticatedState = (state: AppState): void => {
   state.recordingSaveError = null;
   state.recordingDeleteStatus = "idle";
   state.recordingDeleteError = null;
+  resetShadowingRequest(state);
   state.interestsSaveStatus = "idle";
   state.interestsSaveError = null;
   state.subscriptionActionStatus = "idle";
@@ -2391,7 +2464,11 @@ const appSlice = createSlice({
         audioDataUrl: normalizeAudioDataUrl(draft.audioDataUrl),
         photoDataUrl: normalizePhotoDataUrl(draft.photoDataUrl),
         photoObject: normalizePhotoObject(draft.photoObject),
-        processingError: null
+        processingError: null,
+        shadowingStatus: "pending",
+        shadowingAudioUrl: null,
+        shadowingError: null,
+        shadowingUpdatedAt: timestamp
       };
 
       state.recordings = [
@@ -2656,6 +2733,7 @@ const appSlice = createSlice({
       state.currentRecordingId = action.payload;
       state.activeTab = "history";
       state.currentScreen = "details";
+      state.shadowingRequestError = null;
       clearFeedThreadState(state);
       state.copyMessage = null;
       resetPlayback(state);
@@ -2967,20 +3045,29 @@ const appSlice = createSlice({
         }
       })
       .addCase(fetchRecording.fulfilled, (state, action) => {
-        if (state.deletedRecordingIds.includes(action.payload.id)) {
-          return;
-        }
-        const recordingIndex = state.recordings.findIndex((item) => item.id === action.payload.id);
-        if (recordingIndex >= 0) {
-          state.recordings[recordingIndex] = action.payload;
-          return;
-        }
-        state.recordings.unshift(action.payload);
+        upsertRecording(state, action.payload);
       })
       .addCase(fetchRecording.rejected, (state, action) => {
         if (action.payload === "Unauthorized") {
           clearAuthenticatedState(state);
         }
+      })
+      .addCase(generateShadowingAudio.pending, (state) => {
+        state.shadowingRequestStatus = "loading";
+        state.shadowingRequestError = null;
+      })
+      .addCase(generateShadowingAudio.fulfilled, (state, action) => {
+        state.shadowingRequestStatus = "idle";
+        state.shadowingRequestError = null;
+        upsertRecording(state, action.payload);
+      })
+      .addCase(generateShadowingAudio.rejected, (state, action) => {
+        state.shadowingRequestStatus = "idle";
+        if (action.payload === "Unauthorized") {
+          clearAuthenticatedState(state);
+          return;
+        }
+        state.shadowingRequestError = action.payload ?? "Failed to generate pronunciation audio.";
       })
       .addCase(deleteRecording.pending, (state) => {
         state.recordingDeleteStatus = "loading";
