@@ -108,6 +108,55 @@ test("local deploy workflow configures persistent uploaded media storage", () =>
   assert.match(deployWorkflow, /D:\\DailySpeaking\\data\\uploads/);
 });
 
+test("local deploy passes Cartesia credentials from the correct GitHub stores", () => {
+  const deployWorkflow = readFileSync(
+    ".github/workflows/deploy-local.yml",
+    "utf8",
+  );
+
+  assert.match(
+    deployWorkflow,
+    /CARTESIA_API_KEY:\s+\$\{\{\s*secrets\.CARTESIA_API_KEY\s*\}\}/,
+  );
+  assert.doesNotMatch(deployWorkflow, /vars\.CARTESIA_API_KEY/);
+  assert.match(
+    deployWorkflow,
+    /CARTESIA_VOICE_ID:\s+\$\{\{\s*vars\.CARTESIA_VOICE_ID\s*\}\}/,
+  );
+});
+
+test("local deploy stops before Docker when Cartesia configuration is missing", () => {
+  const deployWorkflow = readFileSync(
+    ".github/workflows/deploy-local.yml",
+    "utf8",
+  );
+
+  assert.match(deployWorkflow, /name:\s+Validate Cartesia configuration/);
+  assert.match(
+    deployWorkflow,
+    /IsNullOrWhiteSpace\(\$env:CARTESIA_API_KEY\)/,
+  );
+  assert.match(
+    deployWorkflow,
+    /IsNullOrWhiteSpace\(\$env:CARTESIA_VOICE_ID\)/,
+  );
+  assert.doesNotMatch(deployWorkflow, /Write-Host[^\n]*CARTESIA_API_KEY/);
+});
+
+test("local deploy verifies Cartesia variables reached the app container without printing them", () => {
+  const deployWorkflow = readFileSync(
+    ".github/workflows/deploy-local.yml",
+    "utf8",
+  );
+
+  assert.match(deployWorkflow, /name:\s+Verify Docker Cartesia configuration/);
+  assert.match(
+    deployWorkflow,
+    /test -n "\$CARTESIA_API_KEY" && test -n "\$CARTESIA_VOICE_ID" && echo cartesia-config-ok/,
+  );
+  assert.doesNotMatch(deployWorkflow, /env \| grep CARTESIA/);
+});
+
 test("repository forces LF endings for scripts used inside Linux containers", () => {
   const gitAttributes = readFileSync(".gitattributes", "utf8");
 

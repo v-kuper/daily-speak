@@ -251,6 +251,11 @@ docker compose logs -f app
 The repository ignores `.env`. Never post the API key in chat or commit it to
 Git. The key is server-only; there is no client-prefixed Cartesia variable.
 
+The Windows GitHub Actions deployment does not need a `.env` file. It reads
+`CARTESIA_API_KEY` from GitHub Actions Secrets and `CARTESIA_VOICE_ID` from
+GitHub Actions Variables. See `docs/LOCAL_WINDOWS_CICD.md` for the exact setup
+and verification checklist.
+
 ## Available scripts
 
 - `npm run dev` - start dev server

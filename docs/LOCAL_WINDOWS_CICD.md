@@ -124,6 +124,63 @@ Manual deploy:
 2. Select `Deploy Local Windows`.
 3. Click `Run workflow`.
 
+## Cartesia credentials for shadowing audio
+
+The Windows CI/CD deployment receives Cartesia configuration directly from
+GitHub Actions. Do not create or commit a `.env` file in the runner checkout.
+The workflow exposes the API key only to the validation and Docker deploy
+steps, and it never prints the key.
+
+Complete this checklist before the first Cartesia-enabled deploy:
+
+1. In Cartesia, create or copy an API key.
+2. In Cartesia Play, choose the natural female American voice you want and copy
+   its voice UUID. The UUID is configuration, not a secret.
+3. Open the GitHub repository, then go to `Settings` ->
+   `Secrets and variables` -> `Actions`.
+4. On the `Secrets` tab, click `New repository secret` and create:
+
+   ```text
+   Name: CARTESIA_API_KEY
+   Secret: <paste the Cartesia API key>
+   ```
+
+5. On the `Variables` tab, click `New repository variable` and create:
+
+   ```text
+   Name: CARTESIA_VOICE_ID
+   Value: <paste the selected voice UUID>
+   ```
+
+6. Do not put `CARTESIA_API_KEY` in Variables, repository files, workflow
+   source, runner system variables, Docker image layers, issues, or chat.
+7. Push the workflow changes to `main`, or open `Actions` ->
+   `Deploy Local Windows` -> `Run workflow` after the changes are already on
+   `main`.
+8. Confirm these workflow steps pass:
+   - `Validate Cartesia configuration`
+   - `Build and start local Docker HTTPS app`
+   - `Verify Docker Cartesia configuration`
+9. Create one short recording in the live app. Open its details and wait for
+   `Shadowing practice` to change from processing to an MP3 player.
+10. Play the original recording and the pronunciation track independently,
+    reload the page, and confirm the pronunciation track still plays.
+
+The deploy workflow passes the two values to the PowerShell process that runs
+Docker Compose. `docker-compose.yml` then injects them into the `app` container.
+Changing the GitHub Secret or Variable requires another deploy so Docker
+Compose recreates the container with the new value.
+
+For safe troubleshooting on the Windows machine, verify only that both values
+are non-empty:
+
+```powershell
+docker compose exec -T app sh -lc 'test -n "$CARTESIA_API_KEY" && test -n "$CARTESIA_VOICE_ID" && echo cartesia-config-ok'
+```
+
+Do not run `env | grep CARTESIA`, `docker compose config`, or another command
+that could print the API key into the terminal or Actions logs.
+
 ## Uploaded media storage
 
 Audio recordings are stored on the Windows host filesystem, not inside the
@@ -286,8 +343,12 @@ The workflow uses GitHub repository variables when present:
 - `WHISPER_OPENAI_DEVICE`, default `cpu`
 - `WHISPER_OPENAI_FP16`, default `false`
 - `WHISPER_LANGUAGE`, default `en`
+- `CARTESIA_VOICE_ID`, required for shadowing pronunciation audio
 
 Set them in `Settings` -> `Secrets and variables` -> `Actions` -> `Variables`.
+
+The Cartesia API key is intentionally not in this Variables list. Store
+`CARTESIA_API_KEY` on the `Secrets` tab as described above.
 
 If several projects deploy on the same Windows machine, give each project a
 unique `APP_PORT` and `POSTGRES_PORT` to avoid host-port conflicts. The deploy

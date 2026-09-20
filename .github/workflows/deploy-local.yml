@@ -46,6 +46,22 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Validate Cartesia configuration
+        env:
+          CARTESIA_API_KEY: ${{ secrets.CARTESIA_API_KEY }}
+          CARTESIA_VOICE_ID: ${{ vars.CARTESIA_VOICE_ID }}
+        run: |
+          $missing = @()
+          if ([string]::IsNullOrWhiteSpace($env:CARTESIA_API_KEY)) {
+            $missing += "GitHub Actions secret CARTESIA_API_KEY"
+          }
+          if ([string]::IsNullOrWhiteSpace($env:CARTESIA_VOICE_ID)) {
+            $missing += "GitHub Actions variable CARTESIA_VOICE_ID"
+          }
+          if ($missing.Count -gt 0) {
+            throw "Missing required Cartesia configuration: $($missing -join ', ')."
+          }
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -68,6 +84,9 @@ jobs:
         run: docker version
 
       - name: Build and start local Docker HTTPS app
+        env:
+          CARTESIA_API_KEY: ${{ secrets.CARTESIA_API_KEY }}
+          CARTESIA_VOICE_ID: ${{ vars.CARTESIA_VOICE_ID }}
         run: .\scripts\setup-lan-https-proxy.ps1
 
       - name: Wait for app health check
@@ -97,3 +116,7 @@ jobs:
       - name: Verify Docker Whisper runtime
         run: |
           docker compose exec -T app sh -lc 'env | grep WHISPER && test -x "$WHISPER_PYTHON_BIN" && $WHISPER_PYTHON_BIN -m whisper --help >/dev/null && echo whisper-ok'
+
+      - name: Verify Docker Cartesia configuration
+        run: |
+          docker compose exec -T app sh -lc 'test -n "$CARTESIA_API_KEY" && test -n "$CARTESIA_VOICE_ID" && echo cartesia-config-ok'
