@@ -21,6 +21,10 @@ func TestInitialMigrationContainsCurrentTables(t *testing.T) {
 		"FOREIGN KEY (source_recording_id) REFERENCES recordings(id) ON DELETE CASCADE",
 		"ADD COLUMN IF NOT EXISTS corrected_transcript TEXT NOT NULL DEFAULT ''",
 		"ADD COLUMN IF NOT EXISTS processing_stage TEXT",
+		"ADD COLUMN IF NOT EXISTS shadowing_status TEXT NOT NULL DEFAULT 'pending'",
+		"ADD COLUMN IF NOT EXISTS shadowing_audio_url TEXT",
+		"ADD COLUMN IF NOT EXISTS shadowing_error TEXT",
+		"ADD COLUMN IF NOT EXISTS shadowing_updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()",
 	}
 
 	for _, fragment := range required {

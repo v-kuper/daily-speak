@@ -32,6 +32,10 @@ type recordingResponse struct {
 	PhotoDataURL        *string      `json:"photoDataUrl"`
 	PhotoObject         *string      `json:"photoObject"`
 	ProcessingError     *string      `json:"processingError"`
+	ShadowingStatus     string       `json:"shadowingStatus"`
+	ShadowingAudioURL   *string      `json:"shadowingAudioUrl"`
+	ShadowingError      *string      `json:"shadowingError"`
+	ShadowingUpdatedAt  string       `json:"shadowingUpdatedAt"`
 }
 
 func (s *Server) optionalUser(r *http.Request) (*auth.User, error) {

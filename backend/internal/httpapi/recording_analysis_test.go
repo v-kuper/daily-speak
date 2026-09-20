@@ -77,6 +77,17 @@ func TestNormalizeRecordingProcessingStageRejectsUnknownStage(t *testing.T) {
 	}
 }
 
+func TestNormalizeShadowingStatus(t *testing.T) {
+	for _, value := range []string{"pending", "processing", "ready", "failed"} {
+		if got := normalizeShadowingStatus(value); got != value {
+			t.Fatalf("expected %q, got %q", value, got)
+		}
+	}
+	if got := normalizeShadowingStatus("unexpected"); got != "pending" {
+		t.Fatalf("expected unknown shadowing status to become pending, got %q", got)
+	}
+}
+
 func TestRecordingQuotaAfterSaveUpdatesFreeUsage(t *testing.T) {
 	limit := 600
 	remaining := 480

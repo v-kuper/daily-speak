@@ -30,6 +30,7 @@ var photoDataURLPattern = regexp.MustCompile(`(?i)^data:image/(png|jpeg|jpg|webp
 var audioDataURLPattern = regexp.MustCompile(`(?i)^data:((?:audio|video)/[a-z0-9.+-]+(?:;[^,]+)*);base64,([A-Za-z0-9+/_=-]+)$`)
 var recordingAudioFileURLPattern = regexp.MustCompile(`(?i)^/uploads/recordings/[a-z0-9/_-]+\.[a-z0-9]{2,10}$`)
 var genericAudioFileURLPattern = regexp.MustCompile(`(?i)^/uploads/[a-z0-9/_-]+\.[a-z0-9]{2,10}$`)
+var shadowingAudioFileURLPattern = regexp.MustCompile(`(?i)^/uploads/shadowing/[a-z0-9_-]+/[a-z0-9_-]+\.mp3$`)
 
 var audioExtensionByMIME = map[string]string{
 	"audio/webm":     "webm",
@@ -269,6 +270,14 @@ func NormalizeStoredGenericAudioSource(value string) *string {
 		return nil
 	}
 	return &parsed.NormalizedDataURL
+}
+
+func NormalizeStoredShadowingAudioSource(value string) *string {
+	normalized := strings.TrimSpace(value)
+	if !shadowingAudioFileURLPattern.MatchString(normalized) {
+		return nil
+	}
+	return &normalized
 }
 
 func SanitizePathSegment(value string) string {

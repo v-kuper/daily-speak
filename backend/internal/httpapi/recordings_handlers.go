@@ -109,13 +109,18 @@ func (s *Server) handleCreateRecording(w http.ResponseWriter, r *http.Request) {
 		PhotoDataURL        *string
 		PhotoObject         *string
 		ProcessingError     *string
+		ShadowingStatus     string
+		ShadowingAudioURL   *string
+		ShadowingError      *string
+		ShadowingUpdatedAt  time.Time
 	}
 	err = s.db.QueryRow(r.Context(), `
 		INSERT INTO recordings
 		  (id, user_id, topic, duration, timestamp, transcript, corrected_transcript, suggestions, practice_type, audio_data_url, photo_data_url, photo_object, status, processing_stage)
 		VALUES
 		  ($1, $2, $3, $4, $5, '', '', '[]'::jsonb, $6, $7, $8, $9, 'processing', 'transcribing')
-		RETURNING id, topic, duration, timestamp, status, transcript, corrected_transcript, suggestions, processing_stage, practice_type, audio_data_url, photo_data_url, photo_object, processing_error`,
+		RETURNING id, topic, duration, timestamp, status, transcript, corrected_transcript, suggestions, processing_stage, practice_type, audio_data_url, photo_data_url, photo_object, processing_error,
+		          shadowing_status, shadowing_audio_url, shadowing_error, shadowing_updated_at`,
 		recordingID,
 		user.ID,
 		truncateRunes(topic, 300),
@@ -125,7 +130,7 @@ func (s *Server) handleCreateRecording(w http.ResponseWriter, r *http.Request) {
 		savedAudio.publicURL,
 		stringOrNil(practiceType == "photo_description", photoDataURL),
 		stringOrNil(practiceType == "photo_description", photoObject),
-	).Scan(&inserted.ID, &inserted.Topic, &inserted.Duration, &inserted.Timestamp, &inserted.Status, &inserted.Transcript, &inserted.CorrectedTranscript, &inserted.Suggestions, &inserted.ProcessingStage, &inserted.PracticeType, &inserted.AudioDataURL, &inserted.PhotoDataURL, &inserted.PhotoObject, &inserted.ProcessingError)
+	).Scan(&inserted.ID, &inserted.Topic, &inserted.Duration, &inserted.Timestamp, &inserted.Status, &inserted.Transcript, &inserted.CorrectedTranscript, &inserted.Suggestions, &inserted.ProcessingStage, &inserted.PracticeType, &inserted.AudioDataURL, &inserted.PhotoDataURL, &inserted.PhotoObject, &inserted.ProcessingError, &inserted.ShadowingStatus, &inserted.ShadowingAudioURL, &inserted.ShadowingError, &inserted.ShadowingUpdatedAt)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to save recording."})
 		return
@@ -154,6 +159,10 @@ func (s *Server) handleCreateRecording(w http.ResponseWriter, r *http.Request) {
 		PhotoDataURL:        normalizeOptionalPhoto(inserted.PhotoDataURL),
 		PhotoObject:         normalizeOptionalPhotoObject(inserted.PhotoObject),
 		ProcessingError:     normalizeOptionalProcessingError(inserted.ProcessingError),
+		ShadowingStatus:     normalizeShadowingStatus(inserted.ShadowingStatus),
+		ShadowingAudioURL:   normalizeOptionalShadowingAudio(inserted.ShadowingAudioURL),
+		ShadowingError:      normalizeOptionalProcessingError(inserted.ShadowingError),
+		ShadowingUpdatedAt:  inserted.ShadowingUpdatedAt.UTC().Format(time.RFC3339Nano),
 	}
 	logger.Info("request.success", map[string]any{"status": 201, "durationMs": logging.ElapsedMs(started), "userId": user.ID, "recordingId": recording.ID})
 	writeJSON(w, http.StatusCreated, map[string]any{"recording": recording, "quota": q})

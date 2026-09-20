@@ -185,7 +185,8 @@ func (s *Server) handleUserData(w http.ResponseWriter, r *http.Request) {
 		SELECT
 		  id, topic, duration, timestamp, transcript, corrected_transcript, suggestions,
 		  practice_type, audio_data_url, photo_data_url, photo_object,
-		  status, processing_stage, processing_error
+		  status, processing_stage, processing_error,
+		  shadowing_status, shadowing_audio_url, shadowing_error, shadowing_updated_at
 		FROM recordings
 		WHERE user_id = $1
 		ORDER BY timestamp DESC`, user.ID)
@@ -196,12 +197,12 @@ func (s *Server) handleUserData(w http.ResponseWriter, r *http.Request) {
 	defer recordingRows.Close()
 	recordings := []recordingResponse{}
 	for recordingRows.Next() {
-		var id, topic, transcript, correctedTranscript, practiceType, status string
+		var id, topic, transcript, correctedTranscript, practiceType, status, shadowingStatus string
 		var duration int
-		var timestamp time.Time
+		var timestamp, shadowingUpdatedAt time.Time
 		var suggestionsBytes []byte
-		var audioDataURL, photoDataURL, photoObject, processingStage, processingError *string
-		if err := recordingRows.Scan(&id, &topic, &duration, &timestamp, &transcript, &correctedTranscript, &suggestionsBytes, &practiceType, &audioDataURL, &photoDataURL, &photoObject, &status, &processingStage, &processingError); err != nil {
+		var audioDataURL, photoDataURL, photoObject, processingStage, processingError, shadowingAudioURL, shadowingError *string
+		if err := recordingRows.Scan(&id, &topic, &duration, &timestamp, &transcript, &correctedTranscript, &suggestionsBytes, &practiceType, &audioDataURL, &photoDataURL, &photoObject, &status, &processingStage, &processingError, &shadowingStatus, &shadowingAudioURL, &shadowingError, &shadowingUpdatedAt); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to load user data."})
 			return
 		}
@@ -220,6 +221,10 @@ func (s *Server) handleUserData(w http.ResponseWriter, r *http.Request) {
 			PhotoDataURL:        normalizeOptionalPhoto(photoDataURL),
 			PhotoObject:         normalizeOptionalPhotoObject(photoObject),
 			ProcessingError:     normalizeOptionalProcessingError(processingError),
+			ShadowingStatus:     normalizeShadowingStatus(shadowingStatus),
+			ShadowingAudioURL:   normalizeOptionalShadowingAudio(shadowingAudioURL),
+			ShadowingError:      normalizeOptionalProcessingError(shadowingError),
+			ShadowingUpdatedAt:  shadowingUpdatedAt.UTC().Format(time.RFC3339Nano),
 		})
 	}
 

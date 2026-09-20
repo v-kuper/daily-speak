@@ -269,13 +269,18 @@ func (s *Server) handleFinishRecordingSession(w http.ResponseWriter, r *http.Req
 		PhotoDataURL        *string
 		PhotoObject         *string
 		ProcessingError     *string
+		ShadowingStatus     string
+		ShadowingAudioURL   *string
+		ShadowingError      *string
+		ShadowingUpdatedAt  time.Time
 	}
 	err = s.db.QueryRow(r.Context(), `
 		INSERT INTO recordings
 		  (id, user_id, topic, duration, timestamp, transcript, corrected_transcript, suggestions, practice_type, audio_data_url, photo_data_url, photo_object, status, processing_stage)
 		VALUES
 		  ($1, $2, $3, $4, $5, '', '', '[]'::jsonb, $6, $7, $8, $9, 'processing', 'transcribing')
-		RETURNING id, topic, duration, timestamp, status, transcript, corrected_transcript, suggestions, processing_stage, practice_type, audio_data_url, photo_data_url, photo_object, processing_error`,
+		RETURNING id, topic, duration, timestamp, status, transcript, corrected_transcript, suggestions, processing_stage, practice_type, audio_data_url, photo_data_url, photo_object, processing_error,
+		          shadowing_status, shadowing_audio_url, shadowing_error, shadowing_updated_at`,
 		recordingID,
 		user.ID,
 		session.Topic,
@@ -285,7 +290,7 @@ func (s *Server) handleFinishRecordingSession(w http.ResponseWriter, r *http.Req
 		audioURL,
 		stringOrNil(session.PracticeType == "photo_description", session.PhotoDataURL),
 		stringOrNil(session.PracticeType == "photo_description", session.PhotoObject),
-	).Scan(&inserted.ID, &inserted.Topic, &inserted.Duration, &inserted.Timestamp, &inserted.Status, &inserted.Transcript, &inserted.CorrectedTranscript, &inserted.Suggestions, &inserted.ProcessingStage, &inserted.PracticeType, &inserted.AudioDataURL, &inserted.PhotoDataURL, &inserted.PhotoObject, &inserted.ProcessingError)
+	).Scan(&inserted.ID, &inserted.Topic, &inserted.Duration, &inserted.Timestamp, &inserted.Status, &inserted.Transcript, &inserted.CorrectedTranscript, &inserted.Suggestions, &inserted.ProcessingStage, &inserted.PracticeType, &inserted.AudioDataURL, &inserted.PhotoDataURL, &inserted.PhotoObject, &inserted.ProcessingError, &inserted.ShadowingStatus, &inserted.ShadowingAudioURL, &inserted.ShadowingError, &inserted.ShadowingUpdatedAt)
 	if err != nil {
 		_ = os.Remove(audioPath)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to save recording."})
@@ -306,6 +311,10 @@ func (s *Server) handleFinishRecordingSession(w http.ResponseWriter, r *http.Req
 		PhotoDataURL:        normalizeOptionalPhoto(inserted.PhotoDataURL),
 		PhotoObject:         normalizeOptionalPhotoObject(inserted.PhotoObject),
 		ProcessingError:     normalizeOptionalProcessingError(inserted.ProcessingError),
+		ShadowingStatus:     normalizeShadowingStatus(inserted.ShadowingStatus),
+		ShadowingAudioURL:   normalizeOptionalShadowingAudio(inserted.ShadowingAudioURL),
+		ShadowingError:      normalizeOptionalProcessingError(inserted.ShadowingError),
+		ShadowingUpdatedAt:  inserted.ShadowingUpdatedAt.UTC().Format(time.RFC3339Nano),
 	}
 
 	_, err = s.db.Exec(r.Context(), `
@@ -370,13 +379,18 @@ func (s *Server) recordingForUser(ctx context.Context, userID string, recordingI
 		PhotoDataURL        *string
 		PhotoObject         *string
 		ProcessingError     *string
+		ShadowingStatus     string
+		ShadowingAudioURL   *string
+		ShadowingError      *string
+		ShadowingUpdatedAt  time.Time
 	}
 	err := s.db.QueryRow(ctx, `
 		SELECT id, topic, duration, timestamp, status, transcript, corrected_transcript, suggestions,
-		       processing_stage, practice_type, audio_data_url, photo_data_url, photo_object, processing_error
+		       processing_stage, practice_type, audio_data_url, photo_data_url, photo_object, processing_error,
+		       shadowing_status, shadowing_audio_url, shadowing_error, shadowing_updated_at
 		FROM recordings
 		WHERE id = $1 AND user_id = $2
-		LIMIT 1`, strings.TrimSpace(recordingID), userID).Scan(&row.ID, &row.Topic, &row.Duration, &row.Timestamp, &row.Status, &row.Transcript, &row.CorrectedTranscript, &row.Suggestions, &row.ProcessingStage, &row.PracticeType, &row.AudioDataURL, &row.PhotoDataURL, &row.PhotoObject, &row.ProcessingError)
+		LIMIT 1`, strings.TrimSpace(recordingID), userID).Scan(&row.ID, &row.Topic, &row.Duration, &row.Timestamp, &row.Status, &row.Transcript, &row.CorrectedTranscript, &row.Suggestions, &row.ProcessingStage, &row.PracticeType, &row.AudioDataURL, &row.PhotoDataURL, &row.PhotoObject, &row.ProcessingError, &row.ShadowingStatus, &row.ShadowingAudioURL, &row.ShadowingError, &row.ShadowingUpdatedAt)
 	if err != nil {
 		return recordingResponse{}, err
 	}
@@ -395,6 +409,10 @@ func (s *Server) recordingForUser(ctx context.Context, userID string, recordingI
 		PhotoDataURL:        normalizeOptionalPhoto(row.PhotoDataURL),
 		PhotoObject:         normalizeOptionalPhotoObject(row.PhotoObject),
 		ProcessingError:     normalizeOptionalProcessingError(row.ProcessingError),
+		ShadowingStatus:     normalizeShadowingStatus(row.ShadowingStatus),
+		ShadowingAudioURL:   normalizeOptionalShadowingAudio(row.ShadowingAudioURL),
+		ShadowingError:      normalizeOptionalProcessingError(row.ShadowingError),
+		ShadowingUpdatedAt:  row.ShadowingUpdatedAt.UTC().Format(time.RFC3339Nano),
 	}, nil
 }
 
@@ -418,6 +436,23 @@ func normalizeRecordingProcessingStage(value *string) *string {
 	default:
 		return nil
 	}
+}
+
+func normalizeShadowingStatus(value string) string {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	switch normalized {
+	case "pending", "processing", "ready", "failed":
+		return normalized
+	default:
+		return "pending"
+	}
+}
+
+func normalizeOptionalShadowingAudio(value *string) *string {
+	if value == nil {
+		return nil
+	}
+	return domain.NormalizeStoredShadowingAudioSource(*value)
 }
 
 func normalizeOptionalProcessingError(value *string) *string {
