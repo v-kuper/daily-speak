@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -13,11 +14,18 @@ import (
 	"daily-speaking-practice/backend/internal/auth"
 	"daily-speaking-practice/backend/internal/db"
 	"daily-speaking-practice/backend/internal/logging"
+	"daily-speaking-practice/backend/internal/tts"
 )
 
 type Config struct {
-	DB      *db.DB
-	NextURL string
+	DB          *db.DB
+	NextURL     string
+	Synthesizer tts.Synthesizer
+}
+
+type shadowingJob struct {
+	id     string
+	cancel context.CancelFunc
 }
 
 type Server struct {
@@ -28,6 +36,9 @@ type Server struct {
 	fileDeletionWorkerOnce     sync.Once
 	fileDeletionWake           chan struct{}
 	removeStoredUploads        func([]string) error
+	synthesizer                tts.Synthesizer
+	shadowingProcessingMu      sync.Mutex
+	shadowingProcessingJobs    map[string]shadowingJob
 }
 
 func NewServer(config Config) *Server {
@@ -37,12 +48,18 @@ func NewServer(config Config) *Server {
 			proxy = httputil.NewSingleHostReverseProxy(parsed)
 		}
 	}
+	synthesizer := config.Synthesizer
+	if synthesizer == nil {
+		synthesizer = tts.NewCartesia(tts.ConfigFromEnv())
+	}
 	return &Server{
 		db:                         config.DB,
 		nextProxy:                  proxy,
 		recordingProcessingCancels: map[string]func(){},
 		fileDeletionWake:           make(chan struct{}, 1),
 		removeStoredUploads:        removeStoredUploadFiles,
+		synthesizer:                synthesizer,
+		shadowingProcessingJobs:    map[string]shadowingJob{},
 	}
 }
 
@@ -94,6 +111,8 @@ func (s *Server) routeAPI(w http.ResponseWriter, r *http.Request) {
 		s.handlePutEnglishLevel(w, r)
 	case path == "/api/user/recordings" && r.Method == http.MethodPost:
 		s.handleCreateRecording(w, r)
+	case strings.HasPrefix(path, "/api/recordings/") && strings.HasSuffix(path, "/shadowing") && r.Method == http.MethodPost:
+		s.routeShadowingPath(w, r, strings.TrimPrefix(path, "/api/recordings/"))
 	case strings.HasPrefix(path, "/api/recordings/") && r.Method == http.MethodGet:
 		s.handleGetRecording(w, r, strings.TrimPrefix(path, "/api/recordings/"))
 	case strings.HasPrefix(path, "/api/recordings/") && r.Method == http.MethodDelete:

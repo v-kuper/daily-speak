@@ -31,12 +31,12 @@ func (s *Server) handleDeleteRecording(w http.ResponseWriter, r *http.Request, r
 	}
 	defer func() { _ = tx.Rollback(r.Context()) }()
 
-	var recordingAudioURL *string
+	var recordingAudioURL, shadowingAudioURL *string
 	err = tx.QueryRow(r.Context(), `
-		SELECT audio_data_url
+		SELECT audio_data_url, shadowing_audio_url
 		FROM recordings
 		WHERE id = $1 AND user_id = $2
-		FOR UPDATE`, recordingID, user.ID).Scan(&recordingAudioURL)
+		FOR UPDATE`, recordingID, user.ID).Scan(&recordingAudioURL, &shadowingAudioURL)
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Recording not found."})
 		return
@@ -63,6 +63,7 @@ func (s *Server) handleDeleteRecording(w http.ResponseWriter, r *http.Request, r
 		fileURLs = append(fileURLs, normalized)
 	}
 	appendFileURL(recordingAudioURL)
+	appendFileURL(shadowingAudioURL)
 
 	postIDs := []string{}
 	postRows, err := tx.Query(r.Context(), `
@@ -154,6 +155,7 @@ func (s *Server) handleDeleteRecording(w http.ResponseWriter, r *http.Request, r
 	}
 
 	s.cancelRecordingProcessing(recordingID)
+	s.cancelShadowingProcessing(recordingID)
 	s.wakeFileDeletionWorker()
 	var quotaResponse *quota.RecordingQuota
 	if currentQuota, quotaErr := quota.GetRecordingQuota(r.Context(), s.db, user.ID, &user.IsSubscriber); quotaErr == nil {

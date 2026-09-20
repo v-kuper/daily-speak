@@ -71,6 +71,29 @@ func TestStoredUploadPathRejectsTraversalOutsideConfiguredDir(t *testing.T) {
 	}
 }
 
+func TestStoredUploadPathAcceptsShadowingAndRejectsUnsafeShapes(t *testing.T) {
+	uploadsDir := t.TempDir()
+	t.Setenv("UPLOADS_DIR", uploadsDir)
+
+	got, err := storedUploadPath("/uploads/shadowing/user-1/recording-1.mp3")
+	if err != nil {
+		t.Fatalf("expected shadowing path to be accepted: %v", err)
+	}
+	want := filepath.Join(uploadsDir, "shadowing", "user-1", "recording-1.mp3")
+	if got != want {
+		t.Fatalf("path = %q, want %q", got, want)
+	}
+
+	for _, value := range []string{
+		"/uploads/shadowing/../../secret",
+		"/uploads/shadowing/user-1/nested/recording-1.mp3",
+	} {
+		if _, err := storedUploadPath(value); err == nil {
+			t.Fatalf("expected %q to be rejected", value)
+		}
+	}
+}
+
 func TestRemoveStoredUploadFilesDeletesExistingFilesAndIgnoresMissingFiles(t *testing.T) {
 	uploadsDir := t.TempDir()
 	t.Setenv("UPLOADS_DIR", uploadsDir)

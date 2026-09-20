@@ -117,12 +117,17 @@ func (s *Server) processSavedRecording(ctx context.Context, recordingID string, 
 	if err != nil {
 		return err
 	}
-	_, err = s.db.Exec(ctx, `
+	if _, err = s.db.Exec(ctx, `
 		UPDATE recordings
 		SET status = 'ready',
 		    corrected_transcript = $2,
 		    processing_stage = NULL,
 		    processing_error = NULL
-		WHERE id = $1`, recordingID, correctedTranscript)
-	return err
+		WHERE id = $1`, recordingID, correctedTranscript); err != nil {
+		return err
+	}
+	if _, _, scheduleErr := s.scheduleShadowing(context.Background(), userID, recordingID); scheduleErr != nil {
+		logger.Warn("shadowing.schedule_failed", map[string]any{"recordingId": recordingID})
+	}
+	return nil
 }

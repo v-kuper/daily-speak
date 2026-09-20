@@ -43,9 +43,10 @@ func TestDeleteRecordingCascadesDataAndRetriesQueuedFilesAfterRestart(t *testing
 	replyID := uuid.NewString()
 	uploadSessionID := uuid.NewString()
 	recordingURL := fmt.Sprintf("/uploads/recordings/%s/%s.webm", user.ID, recordingID)
+	shadowingURL := fmt.Sprintf("/uploads/shadowing/%s/%s.mp3", user.ID, recordingID)
 	replyURL := fmt.Sprintf("/uploads/feed-replies/%s/%s.webm", user.ID, replyID)
 	t.Cleanup(func() {
-		_, _ = database.Exec(context.Background(), `DELETE FROM pending_file_deletions WHERE public_url = ANY($1::text[])`, []string{recordingURL, replyURL})
+		_, _ = database.Exec(context.Background(), `DELETE FROM pending_file_deletions WHERE public_url = ANY($1::text[])`, []string{recordingURL, shadowingURL, replyURL})
 		_, _ = database.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, user.ID)
 	})
 
@@ -55,9 +56,9 @@ func TestDeleteRecordingCascadesDataAndRetriesQueuedFilesAfterRestart(t *testing
 	}
 	now := time.Now().UTC()
 	if _, err := database.Exec(ctx, `
-		INSERT INTO recordings (id, user_id, topic, duration, timestamp, transcript, audio_data_url, status)
-		VALUES ($1, $2, 'Deletion test', 30, $3, 'Test transcript', $4, 'ready')`,
-		recordingID, user.ID, now, recordingURL); err != nil {
+		INSERT INTO recordings (id, user_id, topic, duration, timestamp, transcript, audio_data_url, status, shadowing_status, shadowing_audio_url)
+		VALUES ($1, $2, 'Deletion test', 30, $3, 'Test transcript', $4, 'ready', 'ready', $5)`,
+		recordingID, user.ID, now, recordingURL, shadowingURL); err != nil {
 		t.Fatalf("insert recording: %v", err)
 	}
 	if _, err := database.Exec(ctx, `
@@ -89,6 +90,7 @@ func TestDeleteRecordingCascadesDataAndRetriesQueuedFilesAfterRestart(t *testing
 	uploadsDir := t.TempDir()
 	t.Setenv("UPLOADS_DIR", uploadsDir)
 	writeTestUpload(t, uploadsDir, recordingURL)
+	writeTestUpload(t, uploadsDir, shadowingURL)
 	writeTestUpload(t, uploadsDir, replyURL)
 
 	request := httptest.NewRequest(http.MethodDelete, "/api/recordings/"+recordingID, nil)
@@ -106,6 +108,7 @@ func TestDeleteRecordingCascadesDataAndRetriesQueuedFilesAfterRestart(t *testing
 	assertTableRowCount(t, database, "feed_post_reactions", "post_id", postID, 0)
 	assertTableRowCount(t, database, "feed_reply_reactions", "reply_id", replyID, 0)
 	assertTableRowCount(t, database, "pending_file_deletions", "public_url", recordingURL, 1)
+	assertTableRowCount(t, database, "pending_file_deletions", "public_url", shadowingURL, 1)
 	assertTableRowCount(t, database, "pending_file_deletions", "public_url", replyURL, 1)
 	if _, err := database.Exec(ctx, `
 		INSERT INTO feed_posts
@@ -121,13 +124,16 @@ func TestDeleteRecordingCascadesDataAndRetriesQueuedFilesAfterRestart(t *testing
 	}
 	restartedServer.processPendingFileDeletions(ctx, logging.ForBackground("test.file_cleanup"))
 	assertPendingDeletionAttempts(t, database, recordingURL, 1)
+	assertPendingDeletionAttempts(t, database, shadowingURL, 1)
 	assertPendingDeletionAttempts(t, database, replyURL, 1)
 
 	secondRestart := NewServer(Config{DB: database})
 	secondRestart.processPendingFileDeletions(ctx, logging.ForBackground("test.file_cleanup"))
 	assertTableRowCount(t, database, "pending_file_deletions", "public_url", recordingURL, 0)
+	assertTableRowCount(t, database, "pending_file_deletions", "public_url", shadowingURL, 0)
 	assertTableRowCount(t, database, "pending_file_deletions", "public_url", replyURL, 0)
 	assertUploadMissing(t, uploadsDir, recordingURL)
+	assertUploadMissing(t, uploadsDir, shadowingURL)
 	assertUploadMissing(t, uploadsDir, replyURL)
 }
 

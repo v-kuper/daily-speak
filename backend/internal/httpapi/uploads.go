@@ -30,7 +30,7 @@ func storedUploadPath(publicURL string) (string, error) {
 		return "", errors.New("stored upload URL is invalid")
 	}
 	segments := strings.Split(strings.TrimPrefix(normalized, uploadsURLPrefix), "/")
-	if len(segments) != 3 || (segments[0] != "recordings" && segments[0] != "feed-replies") {
+	if len(segments) != 3 || (segments[0] != "recordings" && segments[0] != "feed-replies" && segments[0] != "shadowing") {
 		return "", errors.New("stored upload URL is outside removable directories")
 	}
 	for _, segment := range segments {
