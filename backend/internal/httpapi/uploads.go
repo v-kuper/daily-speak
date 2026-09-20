@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"unicode"
+
+	"daily-speaking-practice/backend/internal/domain"
 )
 
 const uploadsURLPrefix = "/uploads/"
@@ -22,6 +24,44 @@ func resolveUploadsDir() string {
 
 func uploadsHandler() http.Handler {
 	return http.StripPrefix(uploadsURLPrefix, http.FileServer(http.Dir(resolveUploadsDir())))
+}
+
+func (s *Server) handleShadowingUpload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		w.Header().Set("Allow", "GET, HEAD")
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
+		return
+	}
+	publicURL := domain.NormalizeStoredShadowingAudioSource(r.URL.Path)
+	if publicURL == nil || *publicURL != r.URL.Path {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Not found"})
+		return
+	}
+	user, ok := s.authorizedUser(w, r, "uploads.shadowing.get")
+	if !ok {
+		return
+	}
+
+	var owned bool
+	if err := s.db.QueryRow(r.Context(), `
+		SELECT EXISTS (
+			SELECT 1 FROM recordings
+			WHERE user_id = $1 AND shadowing_audio_url = $2
+		)`, user.ID, *publicURL).Scan(&owned); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to load pronunciation audio."})
+		return
+	}
+	if !owned {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Not found"})
+		return
+	}
+	absolutePath, err := storedUploadPath(*publicURL)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Not found"})
+		return
+	}
+	w.Header().Set("Cache-Control", "private, no-store")
+	http.ServeFile(w, r, absolutePath)
 }
 
 func storedUploadPath(publicURL string) (string, error) {

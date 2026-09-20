@@ -25,6 +25,7 @@ func TestInitialMigrationContainsCurrentTables(t *testing.T) {
 		"ADD COLUMN IF NOT EXISTS shadowing_audio_url TEXT",
 		"ADD COLUMN IF NOT EXISTS shadowing_error TEXT",
 		"ADD COLUMN IF NOT EXISTS shadowing_updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()",
+		"ADD COLUMN IF NOT EXISTS shadowing_attempt_id TEXT",
 	}
 
 	for _, fragment := range required {

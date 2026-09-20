@@ -40,6 +40,7 @@ const documentedPaths = [
   "/api/feed/posts/{postId}/replies",
   "/api/feed/posts/{postId}/reactions",
   "/api/feed/replies/{replyId}/reactions",
+  "/uploads/shadowing/{userId}/{fileName}",
   "/uploads/{path}",
 ];
 
@@ -95,6 +96,7 @@ test("OpenAPI stays aligned with server.go route literals", () => {
     ["/api/feed/posts/{postId}/replies", /parts\[1\] == "replies"/],
     ["/api/feed/posts/{postId}/reactions", /parts\[1\] == "reactions"/],
     ["/api/feed/replies/{replyId}/reactions", /strings\.HasPrefix\(path, "\/api\/feed\/replies\/"\)/],
+    ["/uploads/shadowing/{userId}/{fileName}", /mux\.HandleFunc\("\/uploads\/shadowing\/"/],
     ["/uploads/{path}", /mux\.Handle\(uploadsURLPrefix, uploadsHandler\(\)\)/],
   ];
 
@@ -102,6 +104,13 @@ test("OpenAPI stays aligned with server.go route literals", () => {
     assert.match(routeSource, routePattern, `server route not found for ${path}`);
     assert.ok(openapi.paths[path], `OpenAPI path not found for ${path}`);
   }
+});
+
+test("shadowing media requires cookie authentication", () => {
+  const shadowingMedia = openapi.paths["/uploads/shadowing/{userId}/{fileName}"].get;
+  assert.deepEqual(shadowingMedia.security, [{ cookieAuth: [] }]);
+  assert.ok(shadowingMedia.responses["401"]);
+  assert.ok(shadowingMedia.responses["404"]);
 });
 
 test("Recording schema documents shadowing state", () => {

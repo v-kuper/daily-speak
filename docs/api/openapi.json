@@ -705,10 +705,44 @@
         }
       }
     },
+    "/uploads/shadowing/{userId}/{fileName}": {
+      "get": {
+        "tags": ["Uploads"],
+        "summary": "Serve owned shadowing pronunciation audio",
+        "description": "Returns a persisted shadowing MP3 only when the session user owns the recording whose active shadowing URL matches this path. Directory requests are rejected.",
+        "security": [{ "cookieAuth": [] }],
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "pattern": "^[a-zA-Z0-9_-]+$" }
+          },
+          {
+            "name": "fileName",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "pattern": "^[a-zA-Z0-9_-]+\\.mp3$" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Owned shadowing MP3.",
+            "content": {
+              "audio/mpeg": { "schema": { "type": "string", "format": "binary" } }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "500": { "$ref": "#/components/responses/InternalServerError" }
+        }
+      }
+    },
     "/uploads/{path}": {
       "get": {
         "tags": ["Uploads"],
-        "summary": "Serve uploaded media",
+        "summary": "Serve non-shadowing uploaded media",
+        "description": "Serves recording and Feed media. Shadowing MP3s use the authenticated route documented separately.",
         "security": [],
         "parameters": [
           {

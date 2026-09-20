@@ -84,6 +84,9 @@ ADD COLUMN IF NOT EXISTS shadowing_error TEXT;
 ALTER TABLE recordings
 ADD COLUMN IF NOT EXISTS shadowing_updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
 
+ALTER TABLE recordings
+ADD COLUMN IF NOT EXISTS shadowing_attempt_id TEXT;
+
 CREATE INDEX IF NOT EXISTS recordings_user_id_timestamp_idx ON recordings (user_id, timestamp DESC);
 
 CREATE TABLE IF NOT EXISTS recording_upload_sessions (

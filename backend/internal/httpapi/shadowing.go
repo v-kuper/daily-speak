@@ -71,12 +71,14 @@ func (s *Server) handleGenerateShadowing(w http.ResponseWriter, r *http.Request,
 func (s *Server) scheduleShadowing(ctx context.Context, userID string, recordingID string) (recordingResponse, bool, error) {
 	userID = strings.TrimSpace(userID)
 	recordingID = strings.TrimSpace(recordingID)
+	attemptID := uuid.NewString()
 	var correctedTranscript string
 	err := s.db.QueryRow(ctx, `
 		UPDATE recordings
 		SET shadowing_status = 'processing',
 		    shadowing_error = NULL,
-		    shadowing_updated_at = NOW()
+		    shadowing_updated_at = NOW(),
+		    shadowing_attempt_id = $3
 		WHERE id = $1
 		  AND user_id = $2
 		  AND BTRIM(corrected_transcript) <> ''
@@ -84,7 +86,7 @@ func (s *Server) scheduleShadowing(ctx context.Context, userID string, recording
 		    shadowing_status IN ('pending', 'failed')
 		    OR (shadowing_status = 'processing' AND shadowing_updated_at < NOW() - INTERVAL '5 minutes')
 		  )
-		RETURNING corrected_transcript`, recordingID, userID).Scan(&correctedTranscript)
+		RETURNING corrected_transcript`, recordingID, userID, attemptID).Scan(&correctedTranscript)
 	if errors.Is(err, pgx.ErrNoRows) {
 		recording, loadErr := s.recordingForUser(ctx, userID, recordingID)
 		if loadErr != nil {
@@ -103,26 +105,25 @@ func (s *Server) scheduleShadowing(ctx context.Context, userID string, recording
 	if err != nil {
 		_, _ = s.db.Exec(context.Background(), `
 			UPDATE recordings
-			SET shadowing_status = 'failed', shadowing_error = $3, shadowing_updated_at = NOW()
-			WHERE id = $1 AND user_id = $2`, recordingID, userID, shadowingFailureMessage)
+			SET shadowing_status = 'failed', shadowing_error = $3, shadowing_updated_at = NOW(), shadowing_attempt_id = NULL
+			WHERE id = $1 AND user_id = $2 AND shadowing_attempt_id = $4`, recordingID, userID, shadowingFailureMessage, attemptID)
 		return recordingResponse{}, false, err
 	}
-	s.startShadowingJob(recordingID, userID, correctedTranscript)
+	s.startShadowingJob(recordingID, userID, correctedTranscript, attemptID)
 	return recording, true, nil
 }
 
-func (s *Server) startShadowingJob(recordingID string, userID string, correctedTranscript string) {
+func (s *Server) startShadowingJob(recordingID string, userID string, correctedTranscript string, attemptID string) {
 	ctx, cancel := context.WithTimeout(context.Background(), shadowingJobTimeout)
-	jobID := uuid.NewString()
-	s.registerShadowingProcessing(recordingID, shadowingJob{id: jobID, cancel: cancel})
+	s.registerShadowingProcessing(recordingID, shadowingJob{id: attemptID, cancel: cancel})
 	go func() {
 		defer cancel()
-		defer s.unregisterShadowingProcessing(recordingID, jobID)
-		s.runShadowing(ctx, recordingID, userID, correctedTranscript)
+		defer s.unregisterShadowingProcessing(recordingID, attemptID)
+		s.runShadowing(ctx, recordingID, userID, correctedTranscript, attemptID)
 	}()
 }
 
-func (s *Server) runShadowing(ctx context.Context, recordingID string, userID string, correctedTranscript string) {
+func (s *Server) runShadowing(ctx context.Context, recordingID string, userID string, correctedTranscript string, attemptID string) {
 	started := time.Now()
 	logger := logging.ForBackground("api.recordings.shadowing")
 	audio, err := s.synthesizer.Synthesize(ctx, correctedTranscript)
@@ -131,15 +132,15 @@ func (s *Server) runShadowing(ctx context.Context, recordingID string, userID st
 			logger.Info("shadowing.cancelled", map[string]any{"recordingId": recordingID})
 			return
 		}
-		s.failShadowing(recordingID, userID, logger)
+		s.failShadowing(recordingID, userID, attemptID, logger)
 		return
 	}
-	saved, err := saveShadowingAudio(userID, recordingID, audio)
+	saved, err := saveShadowingAudio(userID, recordingID, attemptID, audio)
 	if err != nil {
 		if errors.Is(ctx.Err(), context.Canceled) {
 			return
 		}
-		s.failShadowing(recordingID, userID, logger)
+		s.failShadowing(recordingID, userID, attemptID, logger)
 		return
 	}
 
@@ -148,12 +149,13 @@ func (s *Server) runShadowing(ctx context.Context, recordingID string, userID st
 		SET shadowing_status = 'ready',
 		    shadowing_audio_url = $2,
 		    shadowing_error = NULL,
-		    shadowing_updated_at = NOW()
-		WHERE id = $1 AND user_id = $3 AND shadowing_status = 'processing'`, recordingID, saved.publicURL, userID)
+		    shadowing_updated_at = NOW(),
+		    shadowing_attempt_id = NULL
+		WHERE id = $1 AND user_id = $3 AND shadowing_status = 'processing' AND shadowing_attempt_id = $4`, recordingID, saved.publicURL, userID, attemptID)
 	if err != nil || result.RowsAffected() == 0 {
 		_ = os.Remove(saved.absolutePath)
 		if !errors.Is(ctx.Err(), context.Canceled) {
-			s.failShadowing(recordingID, userID, logger)
+			s.failShadowing(recordingID, userID, attemptID, logger)
 		}
 		return
 	}
@@ -164,7 +166,7 @@ func (s *Server) runShadowing(ctx context.Context, recordingID string, userID st
 	})
 }
 
-func (s *Server) failShadowing(recordingID string, userID string, logger logging.Logger) {
+func (s *Server) failShadowing(recordingID string, userID string, attemptID string, logger logging.Logger) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_, err := s.db.Exec(ctx, `
@@ -172,8 +174,9 @@ func (s *Server) failShadowing(recordingID string, userID string, logger logging
 		SET shadowing_status = 'failed',
 		    shadowing_audio_url = NULL,
 		    shadowing_error = $3,
-		    shadowing_updated_at = NOW()
-		WHERE id = $1 AND user_id = $2 AND shadowing_status = 'processing'`, recordingID, userID, shadowingFailureMessage)
+		    shadowing_updated_at = NOW(),
+		    shadowing_attempt_id = NULL
+		WHERE id = $1 AND user_id = $2 AND shadowing_status = 'processing' AND shadowing_attempt_id = $4`, recordingID, userID, shadowingFailureMessage, attemptID)
 	meta := map[string]any{"recordingId": recordingID}
 	if err != nil {
 		meta["statusUpdate"] = "failed"
@@ -209,12 +212,13 @@ func (s *Server) cancelShadowingProcessing(recordingID string) {
 	}
 }
 
-func saveShadowingAudio(userID string, recordingID string, audio []byte) (savedAudioFile, error) {
+func saveShadowingAudio(userID string, recordingID string, attemptID string, audio []byte) (savedAudioFile, error) {
 	if len(audio) == 0 || len(audio) > maxShadowingAudioBytes {
 		return savedAudioFile{}, errors.New("shadowing audio payload is invalid")
 	}
 	userSegment := domain.SanitizePathSegment(userID)
 	recordingSegment := domain.SanitizePathSegment(recordingID)
+	attemptSegment := domain.SanitizePathSegment(attemptID)
 	directory := filepath.Join(resolveUploadsDir(), "shadowing", userSegment)
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		return savedAudioFile{}, err
@@ -244,7 +248,7 @@ func saveShadowingAudio(userID string, recordingID string, audio []byte) (savedA
 		return savedAudioFile{}, err
 	}
 
-	fileName := recordingSegment + ".mp3"
+	fileName := recordingSegment + "-" + attemptSegment + ".mp3"
 	absolutePath := filepath.Join(directory, fileName)
 	if err := os.Remove(absolutePath); err != nil && !os.IsNotExist(err) {
 		return savedAudioFile{}, err

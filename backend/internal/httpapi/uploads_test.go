@@ -62,6 +62,42 @@ func TestHandlerServesUploadsFromConfiguredDir(t *testing.T) {
 	}
 }
 
+func TestShadowingUploadRequiresAuthentication(t *testing.T) {
+	uploadsDir := t.TempDir()
+	t.Setenv("UPLOADS_DIR", uploadsDir)
+	audioPath := filepath.Join(uploadsDir, "shadowing", "user-123", "recording-456.mp3")
+	if err := os.MkdirAll(filepath.Dir(audioPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(audioPath, []byte("ID3"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/uploads/shadowing/user-123/recording-456.mp3", nil)
+	NewServer(Config{}).Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("status=%d body=%q", response.Code, response.Body.String())
+	}
+}
+
+func TestShadowingUploadRejectsDirectoryListing(t *testing.T) {
+	uploadsDir := t.TempDir()
+	t.Setenv("UPLOADS_DIR", uploadsDir)
+	if err := os.MkdirAll(filepath.Join(uploadsDir, "shadowing", "user-123"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/uploads/shadowing/", nil)
+	NewServer(Config{}).Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("status=%d body=%q", response.Code, response.Body.String())
+	}
+}
+
 func TestStoredUploadPathRejectsTraversalOutsideConfiguredDir(t *testing.T) {
 	uploadsDir := t.TempDir()
 	t.Setenv("UPLOADS_DIR", uploadsDir)
