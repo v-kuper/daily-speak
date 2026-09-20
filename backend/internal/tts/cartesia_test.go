@@ -110,8 +110,10 @@ func TestCartesiaSynthesizeRejectsUnsafeResponsesAndMissingConfiguration(t *test
 }
 
 func TestCartesiaSynthesizeHonorsHTTPTimeout(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
-		<-r.Context().Done()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(100 * time.Millisecond)
+		w.Header().Set("Content-Type", "audio/mpeg")
+		_, _ = w.Write([]byte("late audio"))
 	}))
 	defer server.Close()
 
