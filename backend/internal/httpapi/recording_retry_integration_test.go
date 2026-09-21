@@ -44,7 +44,7 @@ func (client *retryAIClient) PostChat(ctx context.Context, body any) (ai.ChatRes
 	prompt := retryPromptFromBody(body)
 	switch {
 	case strings.Contains(prompt, "adjudicator, not an error detector"):
-		return ai.ChatResponse{Response: `{"suggestions":[]}`}, nil
+		return ai.ChatResponse{Response: `{"decisions":{}}`}, nil
 	case strings.Contains(prompt, "Rewrite the transcript as natural conversational English"):
 		return ai.ChatResponse{Response: `{"correctedTranscript":"I went home yesterday."}`}, nil
 	default:

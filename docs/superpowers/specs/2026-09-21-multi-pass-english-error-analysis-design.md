@@ -116,27 +116,20 @@ The transcript is encoded as data within the user message. System prompts state 
 
 ### Reviewer response
 
-The reviewer receives the transcript and the merged detector candidates. It can reject false positives, merge duplicate or overlapping candidates, improve a correction or explanation, assign severity, and select a known `ruleId`. It cannot create a new error that is absent from the candidate set.
+The reviewer receives the transcript and the merged detector candidates. It has one narrow task: accept or reject each candidate and assign severity to accepted candidates. It does not repeat or rewrite detector-owned text, corrections, explanations, categories, or rule IDs.
 
 ```json
 {
-  "suggestions": [
-    {
-      "candidateIds": ["stable-server-candidate-id"],
-      "wrong": "exact text from the transcript",
-      "right": "the final correction",
-      "explanation": "a focused two-to-four-sentence explanation",
-      "category": "one-supported-category",
-      "severity": "major|medium|minor",
-      "ruleId": null
-    }
-  ]
+  "decisions": {
+    "verb_grammar-001": "major",
+    "naturalness-001": "reject"
+  }
 }
 ```
 
-Every result must cite one or more input `candidateIds`. The server uses those IDs to enforce that the reviewer did not invent a new issue. A merged result may cite candidates from multiple detector passes; the reviewer chooses the category that best describes the root cause.
+The decision map must contain every supplied candidate ID exactly once and no unknown IDs. Values are limited to `major`, `medium`, `minor`, and `reject`. The server copies the accepted candidate fields, applies the selected severity, removes duplicates and overlaps deterministically, and attaches curated learning-reference data. This keeps the model response flat and prevents a malformed repeated field from invalidating an otherwise correct review.
 
-For a Russian insertion, `wrong` must remain the exact Cyrillic phrase, `right` must contain no Cyrillic, and the item cannot be removed. For English errors, `wrong` must be an exact transcript substring and `right` must be meaningfully different.
+For a Russian insertion, the reviewer cannot return `reject`; the server also revalidates that `wrong` remains the exact Cyrillic phrase and `right` contains English text and no Cyrillic. For English errors, `wrong` must be an exact transcript substring and `right` must be meaningfully different.
 
 ## Severity Rules
 
@@ -148,7 +141,7 @@ Severity describes the communication impact, not the size of the corrected strin
 
 ## Learning References
 
-The model never writes a title, explanation, or URL for a learning reference. It may return only a `ruleId` from a closed server-side catalog. The server maps a recognized ID to:
+The model never writes a title, explanation, or URL for a learning reference. A detector may return only a `ruleId` from the closed list allowed for its category; the reviewer does not repeat it. The server maps a recognized ID to:
 
 ```json
 {
@@ -217,13 +210,13 @@ Server validation is authoritative:
 - required Cyrillic phrases must each have exactly one valid final correction;
 - a Russian correction must contain English text and no Cyrillic;
 - category and severity must be known enum values;
-- every reviewer item must reference existing detector candidate IDs;
-- a reviewer item may only use a `wrong` span represented by its cited candidates;
+- the reviewer decision map must contain every detector candidate ID exactly once and no unknown IDs;
+- reviewer decisions are limited to `major`, `medium`, `minor`, and `reject`, and `language_switch` candidates cannot be rejected;
 - `right` must be non-empty, different from `wrong`, and within existing domain length limits;
 - explanations must be non-empty and are normalized to a bounded length;
 - unknown `ruleId` values are removed rather than guessed;
 - exact duplicates are collapsed;
-- the reviewer merges overlapping candidates that describe the same root error; after review, a shorter phrase fully contained by a longer final phrase is suppressed, except that a mandatory Cyrillic correction always wins;
+- the server suppresses a shorter phrase fully contained by a longer accepted phrase, except that a mandatory Cyrillic correction always wins;
 - there is no numeric cap on valid suggestions.
 
 The initial release keeps phrase-based highlighting: a final `wrong` phrase highlights every exact case-insensitive occurrence in the transcript. This matches the existing UI contract. Position-aware occurrence metadata is deliberately deferred because it would require a separate transcript-span API and migration strategy; detectors must therefore prefer the smallest contextually safe phrase rather than a single common word.
@@ -308,7 +301,8 @@ Backend tests cover:
 - valid empty detector results;
 - malformed detector/reviewer JSON and second-attempt behavior;
 - bounded worker concurrency and deterministic output order;
-- reviewer rejection of invented candidate IDs and unsupported enums;
+- reviewer rejection of missing or invented candidate IDs and unsupported decisions;
+- server-side reconstruction of suggestions from accepted detector candidates;
 - conservative naturalness instructions;
 - all three severity definitions;
 - exact transcript membership, deduplication, and overlap resolution;
