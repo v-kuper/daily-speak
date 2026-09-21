@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -13,6 +14,41 @@ import (
 	"daily-speaking-practice/backend/internal/ai"
 	"daily-speaking-practice/backend/internal/logging"
 )
+
+func TestAnalysisLogMetadataContainsNoLearnerTextFields(t *testing.T) {
+	got := analysisLogMeta("recording-1", "verb_grammar", "valid", 2, 1500*time.Millisecond, 4)
+	want := map[string]any{
+		"recordingId":    "recording-1",
+		"pass":           "verb_grammar",
+		"attempt":        2,
+		"durationMs":     int64(1500),
+		"candidateCount": 4,
+		"outcome":        "valid",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("analysis metadata = %#v", got)
+	}
+	reviewer := reviewerLogMeta("recording-1", "valid", 1, 250*time.Millisecond, 8, 6)
+	reviewerWant := map[string]any{
+		"recordingId": "recording-1",
+		"attempt":     1,
+		"durationMs":  int64(250),
+		"inputCount":  8,
+		"outputCount": 6,
+		"outcome":     "valid",
+	}
+	if !reflect.DeepEqual(reviewer, reviewerWant) {
+		t.Fatalf("reviewer metadata = %#v", reviewer)
+	}
+	for _, key := range []string{"transcript", "prompt", "response"} {
+		if _, exists := got[key]; exists {
+			t.Fatalf("analysis metadata contains %q", key)
+		}
+		if _, exists := reviewer[key]; exists {
+			t.Fatalf("reviewer metadata contains %q", key)
+		}
+	}
+}
 
 func TestAnalysisConcurrencyDefaultsClampsAndAcceptsRange(t *testing.T) {
 	t.Setenv("AI_ANALYSIS_CONCURRENCY", "")

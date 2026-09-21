@@ -4,10 +4,43 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"daily-speaking-practice/backend/internal/ai"
 	"daily-speaking-practice/backend/internal/quota"
 )
+
+func TestMarshalSuggestionsDoesNotPersistDerivedReference(t *testing.T) {
+	value := marshalSuggestions([]suggestion{{
+		Wrong: "she go", Right: "she goes", Explanation: "The verb must agree with she.",
+		Category: categoryVerbGrammar, Severity: severityMedium, RuleID: "subject-verb-agreement",
+		LearningReference: learningReferenceFor("subject-verb-agreement", categoryVerbGrammar),
+	}})
+	if strings.Contains(value, "learningReference") {
+		t.Fatalf("derived reference was persisted: %s", value)
+	}
+	if !strings.Contains(value, `"ruleId":"subject-verb-agreement"`) {
+		t.Fatalf("ruleId missing: %s", value)
+	}
+}
+
+func TestNaturalRewritePromptOmitsAnalysisMetadata(t *testing.T) {
+	prompt := recordingNaturalVersionPrompt("She go home.", []suggestion{{Wrong: "She go", Right: "She goes", Explanation: "Agreement explanation.", Category: categoryVerbGrammar, Severity: severityMedium, RuleID: "subject-verb-agreement"}}, "b1")
+	for _, forbidden := range []string{"learningReference", "severity", "ruleId", "category"} {
+		if strings.Contains(prompt, forbidden) {
+			t.Fatalf("rewrite prompt contains %q", forbidden)
+		}
+	}
+	if !strings.Contains(prompt, `"wrong":"She go"`) || !strings.Contains(prompt, `"right":"She goes"`) {
+		t.Fatal("rewrite corrections missing")
+	}
+}
+
+func TestRecordingProcessingTimeoutAllowsMultiPassRetries(t *testing.T) {
+	if recordingProcessingTimeout != 30*time.Minute {
+		t.Fatalf("processing timeout = %s", recordingProcessingTimeout)
+	}
+}
 
 type stubChatClient struct {
 	post func(context.Context, any) (ai.ChatResponse, error)

@@ -10,8 +10,10 @@ import (
 	"daily-speaking-practice/backend/internal/transcription"
 )
 
+const recordingProcessingTimeout = 30 * time.Minute
+
 func (s *Server) processRecordingInBackground(recordingID string, userID string, audioPath string, topic string, practiceType string, photoObject *string, englishLevel string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), recordingProcessingTimeout)
 	s.registerRecordingProcessing(recordingID, cancel)
 	go func() {
 		defer cancel()

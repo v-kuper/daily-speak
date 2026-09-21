@@ -172,7 +172,11 @@ func (s *Server) handleCreateRecording(w http.ResponseWriter, r *http.Request) {
 }
 
 func marshalSuggestions(suggestions []suggestion) string {
-	suggestionJSON, _ := json.Marshal(suggestions)
+	stored := make([]suggestion, len(suggestions))
+	for index, item := range suggestions {
+		stored[index] = withoutLearningReference(item)
+	}
+	suggestionJSON, _ := json.Marshal(stored)
 	return string(suggestionJSON)
 }
 
@@ -259,7 +263,11 @@ func recordingTranscriptForPrompt(transcript string) string {
 
 func recordingNaturalVersionPrompt(transcript string, suggestions []suggestion, englishLevel string) string {
 	transcriptForPrompt := recordingTranscriptForPrompt(transcript)
-	suggestionsJSON, _ := json.Marshal(suggestions)
+	corrections := make([]rewriteCorrection, 0, len(suggestions))
+	for _, item := range suggestions {
+		corrections = append(corrections, rewriteCorrection{Wrong: item.Wrong, Right: item.Right})
+	}
+	suggestionsJSON, _ := json.Marshal(corrections)
 	parts := []string{
 		"Learner level: " + domain.FormatEnglishLevel(englishLevel) + ".",
 		recordingNaturalVersionLevelGuidance(englishLevel),
@@ -273,6 +281,11 @@ func recordingNaturalVersionPrompt(transcript string, suggestions []suggestion, 
 		`Transcript: """` + transcriptForPrompt + `""".`,
 	}
 	return strings.Join(parts, " ")
+}
+
+type rewriteCorrection struct {
+	Wrong string `json:"wrong"`
+	Right string `json:"right"`
 }
 
 func recordingNaturalVersionLevelGuidance(englishLevel string) string {

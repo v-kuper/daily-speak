@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"daily-speaking-practice/backend/internal/ai"
 	"daily-speaking-practice/backend/internal/domain"
@@ -134,6 +135,7 @@ func runRecordingDetectors(ctx context.Context, client ai.ChatClient, input reco
 func requestDetectorCandidates(ctx context.Context, client ai.ChatClient, settings ai.Settings, pass analysisPass, input recordingAnalysisInput, passIndex int, recordingID string, logger logging.Logger) ([]analysisCandidate, error) {
 	prompt := recordingDetectorPrompt(pass, input)
 	for attempt := 0; attempt < 2; attempt++ {
+		started := time.Now()
 		strictJSON := attempt > 0
 		body := map[string]any{
 			"model":  settings.Model,
@@ -156,6 +158,7 @@ func requestDetectorCandidates(ctx context.Context, client ai.ChatClient, settin
 		}
 		payload, err := client.PostChat(ctx, body)
 		if err != nil {
+			logger.Warn("recording.analysis_detector", analysisLogMeta(recordingID, string(pass.Category), "request_error", attempt+1, time.Since(started), 0))
 			continue
 		}
 		candidates, valid := parseDetectorCandidates(ai.ExtractMessageContent(payload), pass.Category, input.Transcript)
@@ -163,8 +166,10 @@ func requestDetectorCandidates(ctx context.Context, client ai.ChatClient, settin
 			for index := range candidates {
 				candidates[index].PassIndex = passIndex
 			}
+			logger.Info("recording.analysis_detector", analysisLogMeta(recordingID, string(pass.Category), "valid", attempt+1, time.Since(started), len(candidates)))
 			return candidates, nil
 		}
+		logger.Warn("recording.analysis_detector", analysisLogMeta(recordingID, string(pass.Category), "invalid_response", attempt+1, time.Since(started), 0))
 	}
 	return nil, errRecordingAnalysis
 }
@@ -172,6 +177,7 @@ func requestDetectorCandidates(ctx context.Context, client ai.ChatClient, settin
 func requestReviewedSuggestions(ctx context.Context, client ai.ChatClient, settings ai.Settings, transcript string, candidates []analysisCandidate, requiredRussian []string, recordingID string, logger logging.Logger) ([]suggestion, error) {
 	prompt := recordingReviewerPrompt(transcript, candidates, requiredRussian)
 	for attempt := 0; attempt < 2; attempt++ {
+		started := time.Now()
 		strictJSON := attempt > 0
 		body := map[string]any{
 			"model":  settings.Model,
@@ -191,12 +197,37 @@ func requestReviewedSuggestions(ctx context.Context, client ai.ChatClient, setti
 		}
 		payload, err := client.PostChat(ctx, body)
 		if err != nil {
+			logger.Warn("recording.analysis_reviewer", reviewerLogMeta(recordingID, "request_error", attempt+1, time.Since(started), len(candidates), 0))
 			continue
 		}
 		suggestions, valid := parseReviewedSuggestions(ai.ExtractMessageContent(payload), transcript, candidates, requiredRussian)
 		if valid {
+			logger.Info("recording.analysis_reviewer", reviewerLogMeta(recordingID, "valid", attempt+1, time.Since(started), len(candidates), len(suggestions)))
 			return suggestions, nil
 		}
+		logger.Warn("recording.analysis_reviewer", reviewerLogMeta(recordingID, "invalid_response", attempt+1, time.Since(started), len(candidates), 0))
 	}
 	return nil, errRecordingAnalysis
+}
+
+func analysisLogMeta(recordingID, pass, outcome string, attempt int, duration time.Duration, candidateCount int) map[string]any {
+	return map[string]any{
+		"recordingId":    recordingID,
+		"pass":           pass,
+		"attempt":        attempt,
+		"durationMs":     duration.Milliseconds(),
+		"candidateCount": candidateCount,
+		"outcome":        outcome,
+	}
+}
+
+func reviewerLogMeta(recordingID, outcome string, attempt int, duration time.Duration, inputCount, outputCount int) map[string]any {
+	return map[string]any{
+		"recordingId": recordingID,
+		"attempt":     attempt,
+		"durationMs":  duration.Milliseconds(),
+		"inputCount":  inputCount,
+		"outputCount": outputCount,
+		"outcome":     outcome,
+	}
 }
