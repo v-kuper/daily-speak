@@ -11,11 +11,21 @@ import (
 	"syscall"
 	"time"
 
+	"daily-speaking-practice/backend/internal/auth"
 	"daily-speaking-practice/backend/internal/db"
 	"daily-speaking-practice/backend/internal/httpapi"
 )
 
 func main() {
+	cors, err := httpapi.ParseCORSConfig(os.Getenv("CORS_ALLOWED_ORIGINS"))
+	if err != nil {
+		log.Fatalf("CORS configuration failed: %v", err)
+	}
+	sessionCookie, err := auth.CookieConfigFromEnv()
+	if err != nil {
+		log.Fatalf("session cookie configuration failed: %v", err)
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -32,7 +42,7 @@ func main() {
 	}
 
 	addr := envDefault("APP_ADDR", ":3000")
-	apiServer := httpapi.NewServer(httpapi.Config{DB: database})
+	apiServer := httpapi.NewServer(httpapi.Config{DB: database, CORS: cors, SessionCookie: sessionCookie})
 	apiServer.StartBackgroundWorkers(ctx)
 	server := &http.Server{
 		Addr:              addr,
