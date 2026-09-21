@@ -13,12 +13,9 @@ import {
 } from "../store/slices/appSlice";
 import AuthScreen from "./AuthScreen";
 import DetailsScreen from "./DetailsScreen";
-import FeedScreen from "./FeedScreen";
-import FeedThreadScreen from "./FeedThreadScreen";
 import HistoryScreen from "./HistoryScreen";
 import InterestsScreen from "./InterestsScreen";
 import ProfileScreen from "./ProfileScreen";
-import ShareScreen from "./ShareScreen";
 import SpeakScreen from "./SpeakScreen";
 
 export default function AppShell() {
@@ -83,13 +80,6 @@ export default function AppShell() {
                 </button>
               </li>
             )}
-            {isAuthenticated && (
-              <li>
-                <button className={activeTab === "feed" ? "active" : ""} onClick={() => dispatch(navigateToTab("feed"))}>
-                  Feed
-                </button>
-              </li>
-            )}
           </ul>
 
           {isAuthenticated ? (
@@ -117,10 +107,7 @@ export default function AppShell() {
       <main className="main-content">
         {currentScreen === "speak" && <SpeakScreen />}
         {currentScreen === "history" && <HistoryScreen />}
-        {currentScreen === "feed" && <FeedScreen />}
-        {currentScreen === "feedThread" && <FeedThreadScreen />}
         {currentScreen === "details" && <DetailsScreen />}
-        {currentScreen === "share" && <ShareScreen />}
         {currentScreen === "auth" && <AuthScreen />}
         {currentScreen === "profile" && <ProfileScreen />}
         {currentScreen === "interests" && <InterestsScreen />}

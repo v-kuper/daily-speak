@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
-import { apiFetch, readApiJSON } from "../lib/apiClient";
 import { buildTranscriptSegments } from "../lib/transcriptHighlight";
 import {
   recordingProcessingLabel,
@@ -21,28 +20,13 @@ import {
   clearRecordingDeleteError,
   deleteRecording,
   fetchRecording,
-  fetchFeedPosts,
   generateShadowingAudio,
-  openShareModal,
   resetPlaybackState,
   retryRecordingProcessing,
   setPlaybackPlaying,
   setPlaybackPosition,
 } from "../store/slices/appSlice";
-import ShareModal from "./ShareModal";
 import SuggestionCard from "./SuggestionCard";
-
-type FeedThreadReply = {
-  id: string;
-  duration: number;
-  audioDataUrl: string | null;
-  authorMaskedEmail: string;
-};
-
-type FeedThreadResponse = {
-  replies?: unknown;
-  error?: string;
-};
 
 const formatPracticeLabel = (value: "free_talk" | "topic" | "photo_description"): string => {
   switch (value) {
@@ -129,18 +113,12 @@ export default function DetailsScreen() {
   const autoShadowingRequestedRef = useRef(new Set<string>());
   const [audioSrc, setAudioSrc] = useState<string | null>(null);
   const [playbackError, setPlaybackError] = useState<string | null>(null);
-  const [sharedReplies, setSharedReplies] = useState<FeedThreadReply[]>([]);
-  const [sharedRepliesStatus, setSharedRepliesStatus] = useState<"idle" | "loading" | "ready" | "failed">("idle");
-  const [sharedRepliesError, setSharedRepliesError] = useState<string | null>(null);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const {
     recordings,
     currentRecordingId,
     isPlaying,
     playbackPosition,
-    copyMessage,
-    feedPosts,
-    feedPostsStatus,
     backgroundSaveRecordingId,
     recordingDeleteStatus,
     recordingDeleteError,
@@ -177,15 +155,6 @@ export default function DetailsScreen() {
 
     return buildTranscriptSegments(recording.transcript, recording.suggestions);
   }, [recording]);
-  const sharedFeedPost = useMemo(() => {
-    if (!recording) {
-      return null;
-    }
-
-    return feedPosts.find((item) => item.sourceRecordingId === recording.id) ?? null;
-  }, [feedPosts, recording]);
-  const sharedFeedPostId = sharedFeedPost?.id ?? null;
-  const isShareStatusLoading = Boolean(recording) && (feedPostsStatus === "idle" || feedPostsStatus === "loading");
   const isDeleteLoading = recordingDeleteStatus === "loading";
   const isRecordingRetryLoading = recordingId
     ? recordingRetryStatuses[recordingId] === "loading"
@@ -204,14 +173,6 @@ export default function DetailsScreen() {
     hasCorrectedTranscript &&
     (shadowingStatus === "failed" || shadowingIsStale || Boolean(shadowingRequestError));
   const canDelete = Boolean(recordingId) && recordingId !== backgroundSaveRecordingId;
-
-  useEffect(() => {
-    if (!recordingId || feedPostsStatus !== "idle") {
-      return;
-    }
-
-    void dispatch(fetchFeedPosts());
-  }, [dispatch, feedPostsStatus, recordingId]);
 
   useEffect(() => {
     if (!recordingId || !shouldPollRecording(recordingStatus ?? "", shadowingStatus)) {
@@ -253,74 +214,6 @@ export default function DetailsScreen() {
     recordingStatus,
     shadowingStatus,
   ]);
-
-  useEffect(() => {
-    if (!sharedFeedPostId) {
-      setSharedReplies([]);
-      setSharedRepliesStatus("idle");
-      setSharedRepliesError(null);
-      return;
-    }
-
-    let cancelled = false;
-    setSharedRepliesStatus("loading");
-    setSharedRepliesError(null);
-
-    void apiFetch(`/api/feed/posts/${encodeURIComponent(sharedFeedPostId)}`, { cache: "no-store" })
-      .then(async (response) => {
-        const payload = (await readApiJSON(response)) as FeedThreadResponse | null;
-
-        if (!response.ok) {
-          throw new Error(payload?.error ?? "Failed to load comments.");
-        }
-
-        const repliesRaw = Array.isArray(payload?.replies) ? payload?.replies : [];
-        const replies = repliesRaw
-          .map((item) => {
-            if (typeof item !== "object" || item === null) {
-              return null;
-            }
-            const candidate = item as Record<string, unknown>;
-            const id = typeof candidate.id === "string" ? candidate.id.trim() : "";
-            const authorMaskedEmail = typeof candidate.authorMaskedEmail === "string" ? candidate.authorMaskedEmail.trim() : "";
-            const duration = Number.parseInt(String(candidate.duration ?? 0), 10);
-            const audioDataUrlRaw = candidate.audioDataUrl;
-            const audioDataUrl = typeof audioDataUrlRaw === "string" && audioDataUrlRaw.trim() ? audioDataUrlRaw.trim() : null;
-
-            if (!id || !authorMaskedEmail || !Number.isFinite(duration) || duration < 0) {
-              return null;
-            }
-
-            return {
-              id,
-              duration: Math.max(0, duration),
-              audioDataUrl,
-              authorMaskedEmail
-            } as FeedThreadReply;
-          })
-          .filter((item): item is FeedThreadReply => item !== null);
-
-        if (cancelled) {
-          return;
-        }
-
-        setSharedReplies(replies);
-        setSharedRepliesStatus("ready");
-      })
-      .catch((error) => {
-        if (cancelled) {
-          return;
-        }
-
-        setSharedReplies([]);
-        setSharedRepliesStatus("failed");
-        setSharedRepliesError(error instanceof Error ? error.message : "Failed to load comments.");
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [sharedFeedPostId]);
 
   useEffect(() => {
     setPlaybackError(null);
@@ -545,7 +438,6 @@ export default function DetailsScreen() {
       </button>
       <h2>Recording</h2>
 
-      {copyMessage && <div className="notice">{copyMessage}</div>}
       {isProcessing && (
         <div className="notice">
           {recordingProcessingLabel(recording.processingStage)} You can leave this page and come back later.
@@ -713,8 +605,7 @@ export default function DetailsScreen() {
           <div className="modal-content" role="dialog" aria-modal="true" aria-label="Delete recording">
             <div className="modal-title">Delete recording?</div>
             <p>
-              This permanently deletes the recording and its audio file. If it was published, the Feed post, reactions,
-              comments, and comment audio files will also be deleted.
+              This permanently deletes the recording and its audio files.
             </p>
             {isProcessing && <p className="auth-hint">The background analysis for this recording will be stopped.</p>}
             {recordingDeleteError && <div className="auth-error top-spaced">{recordingDeleteError}</div>}
@@ -728,40 +619,6 @@ export default function DetailsScreen() {
             </div>
           </div>
         </div>
-      )}
-
-      {sharedFeedPost ? (
-        <div className="top-spaced">
-          <div className="notice">Already shared to Feed.</div>
-          <div className="section-title">People Comments</div>
-          {sharedRepliesError && <div className="auth-error top-spaced">{sharedRepliesError}</div>}
-          {sharedRepliesStatus === "loading" && <div className="empty-state">Loading comments...</div>}
-          {sharedRepliesStatus !== "loading" && sharedReplies.length === 0 && (
-            <div className="empty-state">No comments yet.</div>
-          )}
-          {sharedReplies.map((reply) => (
-            <div key={reply.id} className="feed-reply-card">
-              <div className="feed-reply-header">
-                <div className="feed-card-author">{reply.authorMaskedEmail}</div>
-                <div className="recording-duration">{formatTime(reply.duration)}</div>
-              </div>
-              {reply.audioDataUrl ? (
-                <audio controls preload="metadata" src={reply.audioDataUrl} className="feed-audio" />
-              ) : (
-                <div className="empty-state">Audio is unavailable for this comment.</div>
-              )}
-            </div>
-          ))}
-        </div>
-      ) : isShareStatusLoading ? (
-        <div className="empty-state">Checking share status...</div>
-      ) : (
-        <>
-          <button className="btn btn-primary btn-large" onClick={() => dispatch(openShareModal())}>
-            Publish to Feed
-          </button>
-          <ShareModal />
-        </>
       )}
     </section>
   );

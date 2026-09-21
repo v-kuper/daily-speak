@@ -42,22 +42,6 @@ export type Suggestion = {
 export type PracticeType = "free_talk" | "topic" | "photo_description";
 export type RecordingStatus = "processing" | "ready" | "failed";
 export type RecordingProcessingStage = "transcribing" | "suggestions" | "rewriting";
-export const FEED_REACTION_VALUES = ["like", "love", "fire", "laugh", "support"] as const;
-export type FeedReaction = (typeof FEED_REACTION_VALUES)[number];
-
-export const FEED_REACTION_EMOJI: Record<FeedReaction, string> = {
-  like: "👍",
-  love: "❤️",
-  fire: "🔥",
-  laugh: "😂",
-  support: "🙌"
-};
-
-export type FeedReactionSummary = {
-  counts: Record<FeedReaction, number>;
-  currentReaction: FeedReaction | null;
-};
-
 export type Recording = {
   id: string;
   topic: string;
@@ -77,34 +61,6 @@ export type Recording = {
   shadowingAudioUrl: string | null;
   shadowingError: string | null;
   shadowingUpdatedAt: string;
-};
-
-export type FeedPost = {
-  id: string;
-  sourceRecordingId: string;
-  topic: string;
-  duration: number;
-  transcript: string;
-  practiceType: PracticeType;
-  audioDataUrl: string | null;
-  photoDataUrl: string | null;
-  photoObject: string | null;
-  sourceTimestamp: string;
-  createdAt: string;
-  authorMaskedEmail: string;
-  replyCount: number;
-  reactions: FeedReactionSummary;
-};
-
-export type FeedReply = {
-  id: string;
-  postId: string;
-  duration: number;
-  audioDataUrl: string | null;
-  timestamp: string;
-  createdAt: string;
-  authorMaskedEmail: string;
-  reactions: FeedReactionSummary;
 };
 
 const TOPIC_DATABASE: Record<string, TopicData> = {

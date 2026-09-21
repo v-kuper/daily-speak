@@ -373,9 +373,6 @@ button {
 .auth-form,
 .calendar,
 .recording-card,
-.feed-card,
-.feed-reply-card,
-.feed-reply-composer,
 .details-photo-card,
 .player,
 .suggestion-item,
@@ -404,7 +401,6 @@ button {
 }
 
 .speak-section-header,
-.feed-header,
 .calendar-wrapper {
   display: flex;
   align-items: center;
@@ -552,16 +548,14 @@ button {
 .recorded-subtitle,
 .profile-subtitle,
 .profile-value,
-.recording-topic,
-.feed-card-topic {
+.recording-topic {
   color: var(--text-muted);
   font-size: 13px;
 }
 
 .topics-grid,
 .study-words-grid,
-.interest-chips,
-.feed-reactions {
+.interest-chips {
   display: flex;
   flex-wrap: wrap;
   gap: 9px;
@@ -577,7 +571,6 @@ button {
 .word-item,
 .study-word-chip,
 .interest-chip,
-.feed-reaction-btn,
 .profile-menu-item {
   border: 1px solid var(--border-soft);
   background: rgba(255, 255, 255, 0.48);
@@ -612,7 +605,6 @@ button {
 
 .study-word-chip,
 .interest-chip,
-.feed-reaction-btn,
 .recording-practice-tag {
   display: inline-flex;
   align-items: center;
@@ -893,9 +885,7 @@ button {
   border-color: var(--ink);
 }
 
-.recording-card,
-.feed-card,
-.feed-reply-card {
+.recording-card {
   width: 100%;
   padding: 15px;
   margin-bottom: 12px;
@@ -907,8 +897,6 @@ button {
 }
 
 .recording-card-header,
-.feed-card-header,
-.feed-reply-header,
 .details-metadata {
   display: flex;
   justify-content: space-between;
@@ -916,13 +904,11 @@ button {
   gap: 12px;
 }
 
-.recording-main,
-.feed-card-main {
+.recording-main {
   min-width: 0;
 }
 
-.recording-side,
-.feed-card-side {
+.recording-side {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
@@ -972,9 +958,6 @@ button {
 }
 
 .recording-duration,
-.feed-card-author,
-.feed-card-time,
-.feed-replies-count,
 .time-display {
   font-size: 12px;
   color: var(--text-muted);
@@ -1096,46 +1079,17 @@ button {
   }
 }
 
-.feed-player {
-  margin-bottom: 12px;
-}
-
-.feed-audio {
-  width: 100%;
-  filter: sepia(0.08) saturate(0.92);
-}
-
-.feed-post-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 10px;
-}
-
-.feed-transcript-accordion {
-  border-top: 1px solid rgba(87, 78, 67, 0.1);
-  margin-top: 10px;
-  padding-top: 10px;
-}
-
-.feed-reaction-btn {
-  cursor: pointer;
-}
-
-.feed-reaction-btn.active,
 .interest-chip.active {
   border-color: var(--ink);
   background: var(--ink);
   color: #fffaf5;
 }
 
-.feed-reaction-btn:disabled,
 .interest-chip:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
 
-.feed-replies-section,
 .transcript-section,
 .suggestions-section,
 .shadowing-section {
@@ -1175,10 +1129,6 @@ button {
 
 .processing-retry .auth-error {
   flex: 1 1 320px;
-}
-
-.feed-reply-composer {
-  padding: 16px;
 }
 
 .transcript-text {
@@ -1448,18 +1398,6 @@ button {
   font-size: 17px;
   font-weight: 780;
   margin-bottom: 16px;
-}
-
-.share-option {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 14px;
-  border: 1px solid var(--border-soft);
-  border-radius: 16px;
-  margin-bottom: 12px;
-  cursor: pointer;
-  background: rgba(255, 255, 255, 0.46);
 }
 
 .empty-state {
@@ -1740,9 +1678,6 @@ body {
 .profile-card,
 .auth-form,
 .calendar-wrapper,
-.feed-card,
-.feed-thread-post,
-.feed-reply-card,
 .details-photo-card,
 .player,
 .transcript-section,
@@ -1957,7 +1892,6 @@ input,
 select,
 textarea,
 .profile-menu-item,
-.share-option,
 .question-item,
 .word-item,
 .topic-item {

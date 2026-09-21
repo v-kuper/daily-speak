@@ -22,12 +22,3 @@ export const formatTimeOfDay = (isoDate: string): string => {
     minute: "2-digit"
   });
 };
-
-export const buildShareLink = (recordingId: string): string => {
-  if (typeof window === "undefined") {
-    return `?share=${recordingId}`;
-  }
-  const url = new URL(window.location.href);
-  url.searchParams.set("share", recordingId);
-  return url.toString();
-};

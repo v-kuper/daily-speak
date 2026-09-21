@@ -1,20 +1,14 @@
 import { createAsyncThunk, createSlice, type PayloadAction } from "@reduxjs/toolkit";
 import { apiFetch, readApiJSON } from "../../lib/apiClient";
 import {
-  FEED_REACTION_VALUES,
   parseRecordingMediaURL,
-  type FeedPost,
-  type FeedReaction,
-  type FeedReactionSummary,
-  type FeedReply,
   type PracticeType,
   type Recording,
   type RecordingStatus
 } from "../../lib/data";
 import {
-  filterDeletedFeedPosts,
   filterDeletedRecordings,
-  removeRecordingAndFeedPost
+  removeRecording
 } from "../../lib/recordingDeletion";
 import { parseRecordingProcessingStage } from "../../lib/recordingProcessing";
 import { parseShadowingStatus } from "../../lib/shadowing";
@@ -23,10 +17,9 @@ import { isCurrentInterviewGuidanceRequest } from "../../lib/interviewGuidance";
 import { formatTime, toDateKey } from "../../lib/utils";
 import { parseSuggestions } from "../../lib/suggestions";
 
-export type ScreenName = "speak" | "history" | "feed" | "feedThread" | "details" | "share" | "auth" | "profile" | "interests";
-export type TabName = "speak" | "history" | "feed";
+export type ScreenName = "speak" | "history" | "details" | "auth" | "profile" | "interests";
+export type TabName = "speak" | "history";
 export type SpeakMode = "idle" | "readyToRecord" | "recording" | "recorded";
-export type ShareAction = "copy" | "preview";
 export type AuthStatus = "idle" | "loading";
 export type QuestionsStatus = "idle" | "loading" | "ready" | "failed";
 export type InterestOption = {
@@ -148,14 +141,6 @@ export type AppState = {
   recordingDuration: number;
   recordings: Recording[];
   deletedRecordingIds: string[];
-  feedPosts: FeedPost[];
-  feedPostsStatus: QuestionsStatus;
-  feedPostsError: string | null;
-  feedThreadStatus: QuestionsStatus;
-  feedThreadError: string | null;
-  currentFeedPostId: string | null;
-  currentFeedPost: FeedPost | null;
-  currentFeedReplies: FeedReply[];
   selectedDate: string | null;
   currentRecordingId: string | null;
   backgroundSaveRecordingId: string | null;
@@ -167,9 +152,6 @@ export type AppState = {
   calendarVisible: boolean;
   calendarMonth: number;
   calendarYear: number;
-  shareModalOpen: boolean;
-  shareAction: ShareAction;
-  copyMessage: string | null;
   isAuthenticated: boolean;
   userEmail: string | null;
   authEmailDraft: string;
@@ -230,12 +212,6 @@ export type AppState = {
   subscriptionActionError: string | null;
   englishLevelSaveStatus: AuthStatus;
   englishLevelSaveError: string | null;
-  feedPublishStatus: AuthStatus;
-  feedPublishError: string | null;
-  feedReplyStatus: AuthStatus;
-  feedReplyError: string | null;
-  feedReactionStatus: AuthStatus;
-  feedReactionError: string | null;
 };
 
 export type RecordingSaveDraft = {
@@ -263,7 +239,6 @@ const PHOTO_PRACTICE_MAX_OBJECT_LENGTH = 120;
 const MAX_RECORDING_AUDIO_BYTES = 80 * 1024 * 1024;
 const AUDIO_DATA_URL_PATTERN = /^data:((?:audio|video)\/[a-z0-9.+-]+(?:;[^,]+)*);base64,([A-Za-z0-9+/_=-]+)$/i;
 const AUDIO_FILE_URL_PATTERN = /^\/uploads\/recordings\/[a-z0-9/_-]+\.[a-z0-9]{2,10}$/i;
-const ANY_AUDIO_FILE_URL_PATTERN = /^\/uploads\/[a-z0-9/_-]+\.[a-z0-9]{2,10}$/i;
 export const PHOTO_PRACTICE_MAX_BYTES = 4 * 1024 * 1024;
 const PHOTO_DATA_URL_PATTERN = /^data:image\/(png|jpeg|jpg|webp|gif);base64,([A-Za-z0-9+/=]+)$/i;
 const PRACTICE_TYPE_SET = new Set<PracticeType>(["free_talk", "topic", "photo_description"]);
@@ -364,33 +339,6 @@ type SaveRecordingResponse = {
 type DeleteRecordingResponse = {
   deletedRecordingId?: unknown;
   quota?: unknown;
-  error?: string;
-};
-
-type FeedPostsResponse = {
-  posts?: unknown;
-  error?: string;
-};
-
-type FeedThreadResponse = {
-  post?: unknown;
-  replies?: unknown;
-  error?: string;
-};
-
-type PublishFeedPostResponse = {
-  post?: unknown;
-  error?: string;
-};
-
-type CreateFeedReplyResponse = {
-  reply?: unknown;
-  quota?: unknown;
-  error?: string;
-};
-
-type FeedReactionResponse = {
-  reactions?: unknown;
   error?: string;
 };
 
@@ -748,163 +696,6 @@ const parseRecording = (value: unknown): Recording | null => {
     shadowingAudioUrl,
     shadowingError,
     shadowingUpdatedAt
-  };
-};
-
-const normalizeFeedAudioDataUrl = (value: unknown): string | null => {
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const normalized = value.trim();
-  if (ANY_AUDIO_FILE_URL_PATTERN.test(normalized)) {
-    return normalized;
-  }
-
-  return normalizeAudioDataUrl(normalized);
-};
-
-const FEED_REACTION_SET = new Set<FeedReaction>(FEED_REACTION_VALUES);
-
-const buildEmptyFeedReactionSummary = (): FeedReactionSummary => {
-  return {
-    counts: {
-      like: 0,
-      love: 0,
-      fire: 0,
-      laugh: 0,
-      support: 0
-    },
-    currentReaction: null
-  };
-};
-
-const parseFeedReaction = (value: unknown): FeedReaction | null => {
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const normalized = value.trim().toLowerCase() as FeedReaction;
-  return FEED_REACTION_SET.has(normalized) ? normalized : null;
-};
-
-const parseFeedReactionSummary = (value: unknown): FeedReactionSummary => {
-  if (typeof value !== "object" || value === null) {
-    return buildEmptyFeedReactionSummary();
-  }
-
-  const candidate = value as Record<string, unknown>;
-  const countsRaw =
-    typeof candidate.counts === "object" && candidate.counts !== null
-      ? (candidate.counts as Record<string, unknown>)
-      : {};
-  const counts = buildEmptyFeedReactionSummary().counts;
-
-  FEED_REACTION_VALUES.forEach((reaction) => {
-    const parsed = Number.parseInt(String(countsRaw[reaction] ?? 0), 10);
-    counts[reaction] = Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
-  });
-
-  return {
-    counts,
-    currentReaction: parseFeedReaction(candidate.currentReaction)
-  };
-};
-
-const parseFeedPost = (value: unknown): FeedPost | null => {
-  if (typeof value !== "object" || value === null) {
-    return null;
-  }
-
-  const candidate = value as Record<string, unknown>;
-  const id = typeof candidate.id === "string" ? candidate.id.trim() : "";
-  const sourceRecordingId = typeof candidate.sourceRecordingId === "string" ? candidate.sourceRecordingId.trim() : "";
-  const topic = typeof candidate.topic === "string" ? candidate.topic.trim() : "";
-  const transcript = typeof candidate.transcript === "string" ? candidate.transcript : "";
-  const sourceTimestampRaw = typeof candidate.sourceTimestamp === "string" ? candidate.sourceTimestamp : "";
-  const createdAtRaw = typeof candidate.createdAt === "string" ? candidate.createdAt : "";
-  const authorMaskedEmail = typeof candidate.authorMaskedEmail === "string" ? candidate.authorMaskedEmail.trim() : "";
-  const sourceTimestamp = new Date(sourceTimestampRaw);
-  const createdAt = new Date(createdAtRaw);
-  const duration = Number.parseInt(String(candidate.duration ?? 0), 10);
-  const replyCount = Number.parseInt(String(candidate.replyCount ?? 0), 10);
-  const audioDataUrl = normalizeFeedAudioDataUrl(candidate.audioDataUrl);
-  const photoDataUrl = normalizePhotoDataUrl(candidate.photoDataUrl);
-  const photoObject = normalizePhotoObject(candidate.photoObject);
-  const practiceType = parsePracticeType(candidate.practiceType, topic, Boolean(photoDataUrl));
-  const reactions = parseFeedReactionSummary(candidate.reactions);
-
-  if (
-    !id ||
-    !sourceRecordingId ||
-    !topic ||
-    !authorMaskedEmail ||
-    Number.isNaN(sourceTimestamp.getTime()) ||
-    Number.isNaN(createdAt.getTime()) ||
-    !Number.isFinite(duration) ||
-    duration < 0 ||
-    !Number.isFinite(replyCount) ||
-    replyCount < 0
-  ) {
-    return null;
-  }
-
-  return {
-    id,
-    sourceRecordingId,
-    topic,
-    duration: Math.max(0, duration),
-    transcript,
-    practiceType,
-    audioDataUrl,
-    photoDataUrl,
-    photoObject,
-    sourceTimestamp: sourceTimestamp.toISOString(),
-    createdAt: createdAt.toISOString(),
-    authorMaskedEmail,
-    replyCount: Math.max(0, replyCount),
-    reactions
-  };
-};
-
-const parseFeedReply = (value: unknown): FeedReply | null => {
-  if (typeof value !== "object" || value === null) {
-    return null;
-  }
-
-  const candidate = value as Record<string, unknown>;
-  const id = typeof candidate.id === "string" ? candidate.id.trim() : "";
-  const postId = typeof candidate.postId === "string" ? candidate.postId.trim() : "";
-  const authorMaskedEmail = typeof candidate.authorMaskedEmail === "string" ? candidate.authorMaskedEmail.trim() : "";
-  const timestampRaw = typeof candidate.timestamp === "string" ? candidate.timestamp : "";
-  const createdAtRaw = typeof candidate.createdAt === "string" ? candidate.createdAt : "";
-  const timestamp = new Date(timestampRaw);
-  const createdAt = new Date(createdAtRaw);
-  const duration = Number.parseInt(String(candidate.duration ?? 0), 10);
-  const audioDataUrl = normalizeFeedAudioDataUrl(candidate.audioDataUrl);
-  const reactions = parseFeedReactionSummary(candidate.reactions);
-
-  if (
-    !id ||
-    !postId ||
-    !authorMaskedEmail ||
-    Number.isNaN(timestamp.getTime()) ||
-    Number.isNaN(createdAt.getTime()) ||
-    !Number.isFinite(duration) ||
-    duration < 0
-  ) {
-    return null;
-  }
-
-  return {
-    id,
-    postId,
-    duration: Math.max(0, duration),
-    audioDataUrl,
-    timestamp: timestamp.toISOString(),
-    createdAt: createdAt.toISOString(),
-    authorMaskedEmail,
-    reactions
   };
 };
 
@@ -1583,261 +1374,6 @@ export const deleteRecording = createAsyncThunk<
   }
 });
 
-export const fetchFeedPosts = createAsyncThunk<FeedPost[], void, { rejectValue: string }>(
-  "app/fetchFeedPosts",
-  async (_, { rejectWithValue }) => {
-    try {
-      const response = await apiFetch("/api/feed/posts", {
-        cache: "no-store"
-      });
-      const payload = (await readApiJSON(response)) as FeedPostsResponse | null;
-
-      if (response.status === 401) {
-        return rejectWithValue("Unauthorized");
-      }
-
-      if (!response.ok) {
-        return rejectWithValue(payload?.error ?? "Failed to load feed posts.");
-      }
-
-      const postsRaw = Array.isArray(payload?.posts) ? payload.posts : [];
-      const posts = postsRaw
-        .map((item) => parseFeedPost(item))
-        .filter((item): item is FeedPost => item !== null)
-        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-
-      return posts;
-    } catch {
-      return rejectWithValue("Cannot connect to feed service.");
-    }
-  }
-);
-
-export const fetchFeedThread = createAsyncThunk<
-  { post: FeedPost; replies: FeedReply[] },
-  string,
-  { rejectValue: string }
->("app/fetchFeedThread", async (postId, { rejectWithValue }) => {
-  const normalizedPostId = postId.trim();
-  if (!normalizedPostId) {
-    return rejectWithValue("Feed post is missing.");
-  }
-
-  try {
-    const response = await apiFetch(`/api/feed/posts/${encodeURIComponent(normalizedPostId)}`, {
-      cache: "no-store"
-    });
-    const payload = (await readApiJSON(response)) as FeedThreadResponse | null;
-
-    if (response.status === 401) {
-      return rejectWithValue("Unauthorized");
-    }
-
-    if (!response.ok) {
-      return rejectWithValue(payload?.error ?? "Failed to load feed thread.");
-    }
-
-    const post = parseFeedPost(payload?.post);
-    if (!post) {
-      return rejectWithValue("Invalid feed post payload.");
-    }
-
-    const repliesRaw = Array.isArray(payload?.replies) ? payload.replies : [];
-    const replies = repliesRaw
-      .map((item) => parseFeedReply(item))
-      .filter((item): item is FeedReply => item !== null)
-      .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
-
-    return { post, replies };
-  } catch {
-    return rejectWithValue("Cannot connect to feed service.");
-  }
-});
-
-export const publishRecordingToFeed = createAsyncThunk<
-  FeedPost,
-  void,
-  { state: { app: AppState }; rejectValue: string }
->("app/publishRecordingToFeed", async (_, { getState, rejectWithValue }) => {
-  const { isAuthenticated, currentRecordingId } = getState().app;
-
-  if (!isAuthenticated) {
-    return rejectWithValue("Unauthorized");
-  }
-
-  if (!currentRecordingId) {
-    return rejectWithValue("Recording not found.");
-  }
-
-  try {
-    const response = await apiFetch("/api/feed/posts", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({ recordingId: currentRecordingId })
-    });
-    const payload = (await readApiJSON(response)) as PublishFeedPostResponse | null;
-
-    if (response.status === 401) {
-      return rejectWithValue("Unauthorized");
-    }
-
-    if (!response.ok) {
-      return rejectWithValue(payload?.error ?? "Failed to publish recording.");
-    }
-
-    const post = parseFeedPost(payload?.post);
-    if (!post) {
-      return rejectWithValue("Invalid feed post payload.");
-    }
-
-    return post;
-  } catch {
-    return rejectWithValue("Cannot connect to feed service.");
-  }
-});
-
-export const createFeedReply = createAsyncThunk<
-  { reply: FeedReply; quota: RecordingQuota | null },
-  { postId: string; duration: number; audioDataUrl: string },
-  { state: { app: AppState }; rejectValue: string }
->("app/createFeedReply", async ({ postId, duration, audioDataUrl }, { getState, rejectWithValue }) => {
-  if (!getState().app.isAuthenticated) {
-    return rejectWithValue("Unauthorized");
-  }
-
-  const normalizedPostId = postId.trim();
-  if (!normalizedPostId) {
-    return rejectWithValue("Feed post is missing.");
-  }
-
-  const normalizedDuration = Math.max(0, Math.floor(duration));
-  if (!normalizedDuration) {
-    return rejectWithValue("Reply duration is invalid.");
-  }
-
-  const normalizedAudioDataUrl = normalizeAudioDataUrl(audioDataUrl);
-  if (!normalizedAudioDataUrl) {
-    return rejectWithValue("Voice reply is required.");
-  }
-
-  try {
-    const response = await apiFetch(`/api/feed/posts/${encodeURIComponent(normalizedPostId)}/replies`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        duration: normalizedDuration,
-        audioDataUrl: normalizedAudioDataUrl,
-        timestamp: new Date().toISOString()
-      })
-    });
-    const payload = (await readApiJSON(response)) as CreateFeedReplyResponse | null;
-
-    if (response.status === 401) {
-      return rejectWithValue("Unauthorized");
-    }
-
-    if (!response.ok) {
-      return rejectWithValue(payload?.error ?? "Failed to save voice reply.");
-    }
-
-    const reply = parseFeedReply(payload?.reply);
-    if (!reply) {
-      return rejectWithValue("Invalid feed reply payload.");
-    }
-    const quota = parseRecordingQuota(payload?.quota);
-
-    return { reply, quota };
-  } catch {
-    return rejectWithValue("Cannot connect to feed service.");
-  }
-});
-
-export const reactToFeedPost = createAsyncThunk<
-  { postId: string; reactions: FeedReactionSummary },
-  { postId: string; reaction: FeedReaction | null },
-  { state: { app: AppState }; rejectValue: string }
->("app/reactToFeedPost", async ({ postId, reaction }, { getState, rejectWithValue }) => {
-  if (!getState().app.isAuthenticated) {
-    return rejectWithValue("Unauthorized");
-  }
-
-  const normalizedPostId = postId.trim();
-  if (!normalizedPostId) {
-    return rejectWithValue("Feed post is missing.");
-  }
-
-  try {
-    const response = await apiFetch(`/api/feed/posts/${encodeURIComponent(normalizedPostId)}/reactions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({ reaction })
-    });
-    const payload = (await readApiJSON(response)) as FeedReactionResponse | null;
-
-    if (response.status === 401) {
-      return rejectWithValue("Unauthorized");
-    }
-
-    if (!response.ok) {
-      return rejectWithValue(payload?.error ?? "Failed to update post reaction.");
-    }
-
-    return {
-      postId: normalizedPostId,
-      reactions: parseFeedReactionSummary(payload?.reactions)
-    };
-  } catch {
-    return rejectWithValue("Cannot connect to feed service.");
-  }
-});
-
-export const reactToFeedReply = createAsyncThunk<
-  { replyId: string; reactions: FeedReactionSummary },
-  { replyId: string; reaction: FeedReaction | null },
-  { state: { app: AppState }; rejectValue: string }
->("app/reactToFeedReply", async ({ replyId, reaction }, { getState, rejectWithValue }) => {
-  if (!getState().app.isAuthenticated) {
-    return rejectWithValue("Unauthorized");
-  }
-
-  const normalizedReplyId = replyId.trim();
-  if (!normalizedReplyId) {
-    return rejectWithValue("Feed reply is missing.");
-  }
-
-  try {
-    const response = await apiFetch(`/api/feed/replies/${encodeURIComponent(normalizedReplyId)}/reactions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({ reaction })
-    });
-    const payload = (await readApiJSON(response)) as FeedReactionResponse | null;
-
-    if (response.status === 401) {
-      return rejectWithValue("Unauthorized");
-    }
-
-    if (!response.ok) {
-      return rejectWithValue(payload?.error ?? "Failed to update comment reaction.");
-    }
-
-    return {
-      replyId: normalizedReplyId,
-      reactions: parseFeedReactionSummary(payload?.reactions)
-    };
-  } catch {
-    return rejectWithValue("Cannot connect to feed service.");
-  }
-});
-
 export const subscribeMonthly = createAsyncThunk<
   { subscription: SubscriptionState; quota: RecordingQuota | null },
   void,
@@ -1956,14 +1492,6 @@ const initialState: AppState = {
   recordingDuration: 0,
   recordings: [],
   deletedRecordingIds: [],
-  feedPosts: [],
-  feedPostsStatus: "idle",
-  feedPostsError: null,
-  feedThreadStatus: "idle",
-  feedThreadError: null,
-  currentFeedPostId: null,
-  currentFeedPost: null,
-  currentFeedReplies: [],
   selectedDate: null,
   currentRecordingId: null,
   backgroundSaveRecordingId: null,
@@ -1975,9 +1503,6 @@ const initialState: AppState = {
   calendarVisible: false,
   calendarMonth: today.getMonth(),
   calendarYear: today.getFullYear(),
-  shareModalOpen: false,
-  shareAction: "copy",
-  copyMessage: null,
   isAuthenticated: false,
   userEmail: null,
   authEmailDraft: "",
@@ -2038,12 +1563,6 @@ const initialState: AppState = {
   subscriptionActionError: null,
   englishLevelSaveStatus: "idle",
   englishLevelSaveError: null,
-  feedPublishStatus: "idle",
-  feedPublishError: null,
-  feedReplyStatus: "idle",
-  feedReplyError: null,
-  feedReactionStatus: "idle",
-  feedReactionError: null
 };
 
 const resetPlayback = (state: AppState): void => {
@@ -2101,27 +1620,6 @@ const clearStudyWordsState = (state: AppState): void => {
   state.studyEnglishLevel = state.selectedEnglishLevel;
 };
 
-const clearFeedThreadState = (state: AppState): void => {
-  state.currentFeedPostId = null;
-  state.currentFeedPost = null;
-  state.currentFeedReplies = [];
-  state.feedThreadStatus = "idle";
-  state.feedThreadError = null;
-  state.feedReplyStatus = "idle";
-  state.feedReplyError = null;
-  state.feedReactionStatus = "idle";
-  state.feedReactionError = null;
-};
-
-const clearFeedState = (state: AppState): void => {
-  state.feedPosts = [];
-  state.feedPostsStatus = "idle";
-  state.feedPostsError = null;
-  state.feedPublishStatus = "idle";
-  state.feedPublishError = null;
-  clearFeedThreadState(state);
-};
-
 const openAuthFlow = (state: AppState, pendingSaveAfterAuth: boolean): void => {
   state.screenBeforeAuth = state.activeTab;
   state.currentScreen = "auth";
@@ -2130,9 +1628,6 @@ const openAuthFlow = (state: AppState, pendingSaveAfterAuth: boolean): void => {
   state.authError = null;
   state.authStatus = "idle";
   state.pendingSaveAfterAuth = pendingSaveAfterAuth;
-  state.shareModalOpen = false;
-  clearFeedThreadState(state);
-  state.copyMessage = null;
   resetPlayback(state);
 };
 
@@ -2154,8 +1649,6 @@ const applySavedRecording = (state: AppState, recording: Recording): void => {
     state.backgroundSaveRecordingId = null;
     state.recordingSaveStatus = "idle";
     state.recordingSaveError = null;
-    state.feedPublishStatus = "idle";
-    state.feedPublishError = null;
     return;
   }
 
@@ -2174,7 +1667,6 @@ const applySavedRecording = (state: AppState, recording: Recording): void => {
   const recordingDate = new Date(recording.timestamp);
   state.calendarMonth = recordingDate.getMonth();
   state.calendarYear = recordingDate.getFullYear();
-  state.copyMessage = null;
   state.pendingSaveAfterAuth = false;
   state.recordingSaveStatus = "idle";
   state.recordingSaveError = null;
@@ -2183,8 +1675,6 @@ const applySavedRecording = (state: AppState, recording: Recording): void => {
   clearRecordingRetry(state, recording.id);
   clearRecordingRetry(state, backgroundSaveRecordingId);
   resetShadowingRequest(state);
-  state.feedPublishStatus = "idle";
-  state.feedPublishError = null;
   state.recordingPracticeType = "topic";
   state.pendingRecordingAudioDataUrl = null;
   state.recordingUploadSessionId = null;
@@ -2194,11 +1684,6 @@ const applySavedRecording = (state: AppState, recording: Recording): void => {
   state.pendingPhotoError = null;
   clearTopicGuidanceState(state);
   resetPlayback(state);
-};
-
-const upsertFeedPost = (state: AppState, post: FeedPost): void => {
-  const nextPosts = [post, ...state.feedPosts.filter((item) => item.id !== post.id)];
-  state.feedPosts = nextPosts.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 };
 
 const applySubscriptionState = (state: AppState, subscription: SubscriptionState | null): void => {
@@ -2267,8 +1752,6 @@ const completeAuthSuccess = (
   state.recordingDeleteError = null;
   resetRecordingRetry(state);
   resetShadowingRequest(state);
-  state.feedPublishStatus = "idle";
-  state.feedPublishError = null;
   state.pendingRecordingAudioDataUrl = null;
   state.recordingUploadSessionId = null;
   state.recordingInputError = null;
@@ -2278,7 +1761,6 @@ const completeAuthSuccess = (
   state.recordings = [];
   state.deletedRecordingIds = [];
   state.backgroundSaveRecordingId = null;
-  clearFeedState(state);
   state.currentRecordingId = null;
   state.selectedDate = null;
   state.currentScreen = state.screenBeforeAuth;
@@ -2297,8 +1779,6 @@ const clearAuthenticatedState = (state: AppState): void => {
   state.userEmail = null;
   state.activeTab = "speak";
   state.currentScreen = "speak";
-  state.shareModalOpen = false;
-  state.copyMessage = null;
   state.authPasswordDraft = "";
   state.authError = null;
   state.authStatus = "idle";
@@ -2323,7 +1803,6 @@ const clearAuthenticatedState = (state: AppState): void => {
   state.recordings = [];
   state.deletedRecordingIds = [];
   state.backgroundSaveRecordingId = null;
-  clearFeedState(state);
   state.currentRecordingId = null;
   state.selectedDate = null;
   state.userDataStatus = "idle";
@@ -2365,13 +1844,6 @@ const appSlice = createSlice({
       }
       state.activeTab = action.payload;
       state.currentScreen = action.payload;
-      state.shareModalOpen = false;
-      if (action.payload !== "feed") {
-        clearFeedThreadState(state);
-      }
-      if (action.payload === "speak") {
-        state.copyMessage = null;
-      }
       resetPlayback(state);
     },
     clearQuestionsError: (state) => {
@@ -2388,9 +1860,6 @@ const appSlice = createSlice({
         return;
       }
       state.currentScreen = "profile";
-      clearFeedThreadState(state);
-      state.shareModalOpen = false;
-      state.copyMessage = null;
       resetPlayback(state);
     },
     openInterests: (state) => {
@@ -2398,25 +1867,16 @@ const appSlice = createSlice({
         return;
       }
       state.currentScreen = "interests";
-      clearFeedThreadState(state);
-      state.shareModalOpen = false;
-      state.copyMessage = null;
       resetPlayback(state);
     },
     backToProfile: (state) => {
       if (!state.isAuthenticated) {
         state.currentScreen = "speak";
         state.activeTab = "speak";
-        state.shareModalOpen = false;
-        clearFeedThreadState(state);
-        state.copyMessage = null;
         resetPlayback(state);
         return;
       }
       state.currentScreen = "profile";
-      clearFeedThreadState(state);
-      state.shareModalOpen = false;
-      state.copyMessage = null;
       resetPlayback(state);
     },
     toggleInterest: (state, action: PayloadAction<string>) => {
@@ -2514,12 +1974,9 @@ const appSlice = createSlice({
       state.customTopicDraft = "";
       state.activeTab = "history";
       state.currentScreen = "details";
-      state.copyMessage = null;
       state.pendingSaveAfterAuth = false;
       state.recordingSaveStatus = "loading";
       state.recordingSaveError = null;
-      state.feedPublishStatus = "idle";
-      state.feedPublishError = null;
       state.recordingPracticeType = "topic";
       state.pendingRecordingAudioDataUrl = null;
       state.recordingUploadSessionId = null;
@@ -2588,7 +2045,6 @@ const appSlice = createSlice({
       state.showWords = false;
       state.showAddTopicInput = false;
       state.customTopicDraft = "";
-      state.copyMessage = null;
       state.recordingSaveError = null;
       state.pendingRecordingAudioDataUrl = null;
       state.recordingUploadSessionId = null;
@@ -2602,7 +2058,6 @@ const appSlice = createSlice({
       state.showWords = false;
       state.speakState = "recording";
       state.recordingDuration = 0;
-      state.copyMessage = null;
       state.recordingSaveError = null;
       state.pendingRecordingAudioDataUrl = null;
       state.recordingUploadSessionId = null;
@@ -2618,7 +2073,6 @@ const appSlice = createSlice({
       state.showWords = false;
       state.showAddTopicInput = false;
       state.customTopicDraft = "";
-      state.copyMessage = null;
       state.recordingSaveError = null;
       state.pendingRecordingAudioDataUrl = null;
       state.recordingUploadSessionId = null;
@@ -2638,7 +2092,6 @@ const appSlice = createSlice({
     startRecording: (state) => {
       state.speakState = "recording";
       state.recordingDuration = 0;
-      state.copyMessage = null;
       state.recordingSaveError = null;
       state.pendingRecordingAudioDataUrl = null;
       state.recordingUploadSessionId = null;
@@ -2759,55 +2212,17 @@ const appSlice = createSlice({
       state.activeTab = "history";
       state.currentScreen = "details";
       state.shadowingRequestError = null;
-      clearFeedThreadState(state);
-      state.copyMessage = null;
-      resetPlayback(state);
-    },
-    openFeedThread: (state, action: PayloadAction<string>) => {
-      if (!state.isAuthenticated) {
-        return;
-      }
-      state.currentFeedPostId = action.payload;
-      state.currentScreen = "feedThread";
-      state.activeTab = "feed";
-      state.shareModalOpen = false;
-      state.copyMessage = null;
-      state.feedThreadError = null;
-      state.feedReplyError = null;
-      resetPlayback(state);
-    },
-    backToFeed: (state) => {
-      if (!state.isAuthenticated) {
-        state.activeTab = "speak";
-        state.currentScreen = "speak";
-        state.shareModalOpen = false;
-        state.copyMessage = null;
-        clearFeedThreadState(state);
-        resetPlayback(state);
-        return;
-      }
-      state.activeTab = "feed";
-      state.currentScreen = "feed";
-      state.shareModalOpen = false;
-      state.copyMessage = null;
-      clearFeedThreadState(state);
       resetPlayback(state);
     },
     backToHistory: (state) => {
       if (!state.isAuthenticated) {
         state.activeTab = "speak";
         state.currentScreen = "speak";
-        state.shareModalOpen = false;
-        clearFeedThreadState(state);
-        state.copyMessage = null;
         resetPlayback(state);
         return;
       }
       state.activeTab = "history";
       state.currentScreen = "history";
-      state.shareModalOpen = false;
-      clearFeedThreadState(state);
-      state.copyMessage = null;
       resetPlayback(state);
     },
     togglePlayback: (state) => {
@@ -2845,34 +2260,6 @@ const appSlice = createSlice({
     },
     resetPlaybackState: (state) => {
       resetPlayback(state);
-    },
-    openShareModal: (state) => {
-      if (!state.isAuthenticated) {
-        return;
-      }
-      state.shareModalOpen = true;
-      state.feedPublishStatus = "idle";
-      state.feedPublishError = null;
-      state.copyMessage = null;
-    },
-    closeShareModal: (state) => {
-      state.shareModalOpen = false;
-    },
-    setShareAction: (state, action: PayloadAction<ShareAction>) => {
-      state.shareAction = action.payload;
-    },
-    openSharePreview: (state) => {
-      if (!state.isAuthenticated) {
-        return;
-      }
-      state.shareModalOpen = false;
-      state.currentScreen = "share";
-      state.activeTab = "history";
-      state.copyMessage = null;
-      resetPlayback(state);
-    },
-    setCopyMessage: (state, action: PayloadAction<string | null>) => {
-      state.copyMessage = action.payload;
     },
     openAuth: (state) => {
       if (state.isAuthenticated) {
@@ -2926,7 +2313,6 @@ const appSlice = createSlice({
           state.englishLevelSaveError = null;
           state.userDataStatus = "idle";
           state.userDataError = null;
-          clearFeedState(state);
           clearStudyWordsState(state);
           return;
         }
@@ -2945,7 +2331,6 @@ const appSlice = createSlice({
       state.selectedInterestIds = [];
       state.recordings = [];
       state.backgroundSaveRecordingId = null;
-      clearFeedState(state);
       clearTopicGuidanceState(state);
       clearStudyWordsState(state);
       })
@@ -2967,7 +2352,6 @@ const appSlice = createSlice({
       state.selectedInterestIds = [];
       state.recordings = [];
       state.backgroundSaveRecordingId = null;
-      clearFeedState(state);
       clearTopicGuidanceState(state);
       clearStudyWordsState(state);
       })
@@ -3120,15 +2504,8 @@ const appSlice = createSlice({
         if (!state.deletedRecordingIds.includes(recordingId)) {
           state.deletedRecordingIds.push(recordingId);
         }
-        const nextCollections = removeRecordingAndFeedPost(state.recordings, state.feedPosts, recordingId);
-        state.recordings = nextCollections.recordings;
-        state.feedPosts = nextCollections.feedPosts;
+        state.recordings = removeRecording(state.recordings, recordingId);
         clearRecordingRetry(state, recordingId);
-        state.feedPostsStatus = "idle";
-        state.feedPostsError = null;
-        if (state.currentFeedPost?.sourceRecordingId === recordingId) {
-          clearFeedThreadState(state);
-        }
         if (state.currentRecordingId === recordingId) {
           state.currentRecordingId = null;
           state.currentScreen = "history";
@@ -3137,8 +2514,6 @@ const appSlice = createSlice({
         if (state.backgroundSaveRecordingId === recordingId) {
           state.backgroundSaveRecordingId = null;
         }
-        state.shareModalOpen = false;
-        state.copyMessage = null;
         state.recordingDeleteStatus = "idle";
         state.recordingDeleteError = null;
         if (quota) {
@@ -3153,153 +2528,6 @@ const appSlice = createSlice({
           return;
         }
         state.recordingDeleteError = action.payload ?? "Failed to delete recording.";
-      })
-      .addCase(fetchFeedPosts.pending, (state) => {
-        state.feedPostsStatus = "loading";
-        state.feedPostsError = null;
-      })
-      .addCase(fetchFeedPosts.fulfilled, (state, action) => {
-        state.feedPostsStatus = "ready";
-        state.feedPostsError = null;
-        state.feedPosts = filterDeletedFeedPosts(action.payload, state.deletedRecordingIds);
-      })
-      .addCase(fetchFeedPosts.rejected, (state, action) => {
-        if (action.payload === "Unauthorized") {
-          clearAuthenticatedState(state);
-          return;
-        }
-        state.feedPostsStatus = state.feedPosts.length > 0 ? "ready" : "failed";
-        state.feedPostsError = action.payload ?? "Failed to load feed posts.";
-      })
-      .addCase(fetchFeedThread.pending, (state, action) => {
-        state.feedThreadStatus = "loading";
-        state.feedThreadError = null;
-        state.feedReplyError = null;
-        state.currentFeedPostId = action.meta.arg;
-      })
-      .addCase(fetchFeedThread.fulfilled, (state, action) => {
-        if (state.deletedRecordingIds.includes(action.payload.post.sourceRecordingId)) {
-          clearFeedThreadState(state);
-          return;
-        }
-        state.feedThreadStatus = "ready";
-        state.feedThreadError = null;
-        state.currentFeedPostId = action.payload.post.id;
-        state.currentFeedPost = action.payload.post;
-        state.currentFeedReplies = action.payload.replies;
-        upsertFeedPost(state, action.payload.post);
-      })
-      .addCase(fetchFeedThread.rejected, (state, action) => {
-        if (action.payload === "Unauthorized") {
-          clearAuthenticatedState(state);
-          return;
-        }
-        state.feedThreadStatus = state.currentFeedPost ? "ready" : "failed";
-        state.feedThreadError = action.payload ?? "Failed to load feed thread.";
-      })
-      .addCase(publishRecordingToFeed.pending, (state) => {
-        state.feedPublishStatus = "loading";
-        state.feedPublishError = null;
-      })
-      .addCase(publishRecordingToFeed.fulfilled, (state, action) => {
-        state.feedPublishStatus = "idle";
-        state.feedPublishError = null;
-        state.shareModalOpen = false;
-        if (state.deletedRecordingIds.includes(action.payload.sourceRecordingId)) {
-          state.copyMessage = null;
-          return;
-        }
-        state.copyMessage = "Recording published to Feed.";
-        upsertFeedPost(state, action.payload);
-      })
-      .addCase(publishRecordingToFeed.rejected, (state, action) => {
-        state.feedPublishStatus = "idle";
-        if (action.payload === "Unauthorized") {
-          clearAuthenticatedState(state);
-          return;
-        }
-        state.feedPublishError = action.payload ?? "Failed to publish recording.";
-      })
-      .addCase(createFeedReply.pending, (state) => {
-        state.feedReplyStatus = "loading";
-        state.feedReplyError = null;
-      })
-      .addCase(createFeedReply.fulfilled, (state, action) => {
-        state.feedReplyStatus = "idle";
-        state.feedReplyError = null;
-        applyRecordingQuotaState(state, action.payload.quota);
-
-        if (state.currentFeedPostId === action.payload.reply.postId) {
-          state.currentFeedReplies = [...state.currentFeedReplies, action.payload.reply].sort(
-            (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
-          );
-        }
-
-        if (state.currentFeedPost?.id === action.payload.reply.postId) {
-          state.currentFeedPost = {
-            ...state.currentFeedPost,
-            replyCount: state.currentFeedPost.replyCount + 1
-          };
-        }
-
-        state.feedPosts = state.feedPosts.map((item) =>
-          item.id === action.payload.reply.postId ? { ...item, replyCount: item.replyCount + 1 } : item
-        );
-      })
-      .addCase(createFeedReply.rejected, (state, action) => {
-        state.feedReplyStatus = "idle";
-        if (action.payload === "Unauthorized") {
-          clearAuthenticatedState(state);
-          return;
-        }
-        state.feedReplyError = action.payload ?? "Failed to save voice reply.";
-      })
-      .addCase(reactToFeedPost.pending, (state) => {
-        state.feedReactionStatus = "loading";
-        state.feedReactionError = null;
-      })
-      .addCase(reactToFeedPost.fulfilled, (state, action) => {
-        state.feedReactionStatus = "idle";
-        state.feedReactionError = null;
-
-        state.feedPosts = state.feedPosts.map((item) =>
-          item.id === action.payload.postId ? { ...item, reactions: action.payload.reactions } : item
-        );
-
-        if (state.currentFeedPost?.id === action.payload.postId) {
-          state.currentFeedPost = {
-            ...state.currentFeedPost,
-            reactions: action.payload.reactions
-          };
-        }
-      })
-      .addCase(reactToFeedPost.rejected, (state, action) => {
-        state.feedReactionStatus = "idle";
-        if (action.payload === "Unauthorized") {
-          clearAuthenticatedState(state);
-          return;
-        }
-        state.feedReactionError = action.payload ?? "Failed to update post reaction.";
-      })
-      .addCase(reactToFeedReply.pending, (state) => {
-        state.feedReactionStatus = "loading";
-        state.feedReactionError = null;
-      })
-      .addCase(reactToFeedReply.fulfilled, (state, action) => {
-        state.feedReactionStatus = "idle";
-        state.feedReactionError = null;
-
-        state.currentFeedReplies = state.currentFeedReplies.map((item) =>
-          item.id === action.payload.replyId ? { ...item, reactions: action.payload.reactions } : item
-        );
-      })
-      .addCase(reactToFeedReply.rejected, (state, action) => {
-        state.feedReactionStatus = "idle";
-        if (action.payload === "Unauthorized") {
-          clearAuthenticatedState(state);
-          return;
-        }
-        state.feedReactionError = action.payload ?? "Failed to update comment reaction.";
       })
       .addCase(subscribeMonthly.pending, (state) => {
         state.subscriptionActionStatus = "loading";
@@ -3479,19 +2707,12 @@ export const {
   previousMonth,
   nextMonth,
   openDetails,
-  openFeedThread,
-  backToFeed,
   backToHistory,
   togglePlayback,
   setPlaybackPlaying,
   tickPlayback,
   setPlaybackPosition,
   resetPlaybackState,
-  openShareModal,
-  closeShareModal,
-  setShareAction,
-  openSharePreview,
-  setCopyMessage,
   openAuth,
   cancelAuth,
   setAuthEmailDraft,
