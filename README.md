@@ -145,7 +145,14 @@ ollama pull gemma4:31b-cloud
 export OLLAMA_BASE_URL=http://127.0.0.1:11434
 export OLLAMA_MODEL=gemma4:31b-cloud
 export OLLAMA_THINKING_MODEL=true
+export AI_ANALYSIS_CONCURRENCY=3
 ```
+
+`AI_ANALYSIS_CONCURRENCY` controls how many independent error-detector requests
+can run at the same time. Values from 1 to 7 are accepted; missing or invalid
+values fall back to 3. Each detector keeps its own focused prompt rather than
+combining error types into one request. Raising the value can increase Ollama
+CPU, GPU, and memory load.
 
 ## Local Whisper setup (recording transcription)
 
@@ -162,13 +169,13 @@ in `tools/whisper/openai-models`.
 ```bash
 WHISPER_BACKEND=openai
 WHISPER_PYTHON_BIN=/opt/whisper/bin/python
-WHISPER_OPENAI_MODEL=base.en
+WHISPER_OPENAI_MODEL=base
 WHISPER_OPENAI_MODEL_DIR=/app/tools/whisper/openai-models
 WHISPER_OPENAI_CACHE_DIR=/app/tools/whisper/cache
 WHISPER_FFMPEG_BIN=/usr/bin/ffmpeg
 WHISPER_OPENAI_DEVICE=cpu
 WHISPER_OPENAI_FP16=false
-WHISPER_LANGUAGE=en
+WHISPER_LANGUAGE=auto
 ```
 
 Use `openai/whisper`:
@@ -188,11 +195,11 @@ Project-local env example:
 ```bash
 WHISPER_BACKEND=openai
 WHISPER_PYTHON_BIN=.venv/bin/python
-WHISPER_OPENAI_MODEL=base.en
+WHISPER_OPENAI_MODEL=base
 WHISPER_OPENAI_MODEL_DIR=tools/whisper/openai-models
 WHISPER_OPENAI_CACHE_DIR=tools/whisper/cache
 WHISPER_FFMPEG_BIN=tools/ffmpeg/bin/ffmpeg
-WHISPER_LANGUAGE=en
+WHISPER_LANGUAGE=auto
 ```
 
 `ffmpeg` is required for webm/m4a decoding. `npm run setup:whisper` installs a project-local copy via `imageio-ffmpeg`.
@@ -207,13 +214,16 @@ Use `whisper.cpp`:
 ```bash
 export WHISPER_BACKEND=cpp
 export WHISPER_BINARY_PATH=/absolute/path/to/whisper-cli
-export WHISPER_MODEL_PATH=/absolute/path/to/ggml-base.en.bin
-export WHISPER_LANGUAGE=en
+export WHISPER_MODEL_PATH=/absolute/path/to/ggml-base.bin
+export WHISPER_LANGUAGE=auto
 export WHISPER_THREADS=4
 ```
 
 If `WHISPER_BACKEND` is not set outside Docker, app tries `cpp` first, then
 falls back to local Python `openai/whisper`.
+The multilingual model and automatic language detection preserve occasional
+Russian words in otherwise English recordings so they can be corrected by the
+AI suggestions step.
 Detailed setup notes: `tools/whisper/README.md`.
 
 To remove everything Whisper-related from this project:

@@ -1,93 +1,84 @@
+import type { Suggestion, SuggestionSeverity } from "./data";
+
 export type TranscriptSegment = {
   text: string;
   isError: boolean;
+  severity: SuggestionSeverity | null;
 };
 
-type Match = {
-  start: number;
-  end: number;
-  length: number;
+type HighlightSuggestion = Pick<Suggestion, "wrong" | "severity">;
+
+const SEVERITY_RANK: Record<SuggestionSeverity, number> = {
+  major: 3,
+  medium: 2,
+  minor: 1
 };
 
-const collectMatches = (transcript: string, phrases: string[]): Match[] => {
-  const lowerTranscript = transcript.toLowerCase();
-  const uniquePhrases = [...new Set(phrases.map((value) => value.trim().toLowerCase()).filter((value) => value))];
-  const matches: Match[] = [];
-
-  for (const phrase of uniquePhrases) {
-    let fromIndex = 0;
-    while (fromIndex < lowerTranscript.length) {
-      const index = lowerTranscript.indexOf(phrase, fromIndex);
-      if (index === -1) {
-        break;
-      }
-
-      matches.push({
-        start: index,
-        end: index + phrase.length,
-        length: phrase.length
-      });
-      fromIndex = index + phrase.length;
-    }
-  }
-
-  return matches;
+const parseSeverity = (value: unknown): SuggestionSeverity | null => {
+  return value === "major" || value === "medium" || value === "minor" ? value : null;
 };
 
-const selectNonOverlappingMatches = (matches: Match[]): Match[] => {
-  const sorted = [...matches].sort((a, b) => {
-    if (a.start !== b.start) {
-      return a.start - b.start;
-    }
-    return b.length - a.length;
-  });
-
-  const selected: Match[] = [];
-  let currentEnd = -1;
-
-  for (const match of sorted) {
-    if (match.start >= currentEnd) {
-      selected.push(match);
-      currentEnd = match.end;
-    }
-  }
-
-  return selected;
-};
-
-export const buildTranscriptSegments = (transcript: string, wrongPhrases: string[]): TranscriptSegment[] => {
+export const buildTranscriptSegments = (
+  transcript: string,
+  suggestions: ReadonlyArray<HighlightSuggestion>
+): TranscriptSegment[] => {
   if (!transcript) {
     return [];
   }
 
-  const matches = selectNonOverlappingMatches(collectMatches(transcript, wrongPhrases));
-  if (matches.length === 0) {
-    return [{ text: transcript, isError: false }];
+  const isError = Array.from({ length: transcript.length }, () => false);
+  const severityRank = Array.from({ length: transcript.length }, () => -1);
+  const severities = Array.from<SuggestionSeverity | null>({ length: transcript.length }).fill(null);
+  const lowerTranscript = transcript.toLowerCase();
+
+  for (const suggestion of suggestions) {
+    const phrase = typeof suggestion.wrong === "string" ? suggestion.wrong.trim().toLowerCase() : "";
+    if (!phrase) {
+      continue;
+    }
+
+    const severity = parseSeverity(suggestion.severity);
+    const rank = severity ? SEVERITY_RANK[severity] : 0;
+    let fromIndex = 0;
+
+    while (fromIndex < lowerTranscript.length) {
+      const start = lowerTranscript.indexOf(phrase, fromIndex);
+      if (start === -1) {
+        break;
+      }
+
+      const end = start + phrase.length;
+      for (let index = start; index < end; index += 1) {
+        isError[index] = true;
+        if (rank > severityRank[index]) {
+          severityRank[index] = rank;
+          severities[index] = severity;
+        }
+      }
+
+      fromIndex = start + 1;
+    }
   }
 
   const segments: TranscriptSegment[] = [];
-  let cursor = 0;
+  let start = 0;
 
-  for (const match of matches) {
-    if (match.start > cursor) {
-      segments.push({
-        text: transcript.slice(cursor, match.start),
-        isError: false
-      });
+  for (let index = 1; index <= transcript.length; index += 1) {
+    const boundary =
+      index === transcript.length ||
+      isError[index] !== isError[start] ||
+      severities[index] !== severities[start];
+
+    if (!boundary) {
+      continue;
     }
 
     segments.push({
-      text: transcript.slice(match.start, match.end),
-      isError: true
+      text: transcript.slice(start, index),
+      isError: isError[start],
+      severity: isError[start] ? severities[start] : null
     });
-    cursor = match.end;
-  }
-
-  if (cursor < transcript.length) {
-    segments.push({
-      text: transcript.slice(cursor),
-      isError: false
-    });
+    start = index;
   }
 
   return segments;

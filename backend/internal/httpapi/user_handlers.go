@@ -214,7 +214,7 @@ func (s *Server) handleUserData(w http.ResponseWriter, r *http.Request) {
 			Status:              normalizeRecordingStatus(status),
 			Transcript:          transcript,
 			CorrectedTranscript: correctedTranscript,
-			Suggestions:         normalizeSuggestions(suggestionsBytes, 20),
+			Suggestions:         normalizeSuggestions(suggestionsBytes, 0),
 			ProcessingStage:     normalizeRecordingProcessingStage(processingStage),
 			PracticeType:        domain.NormalizePracticeType(practiceType),
 			AudioDataURL:        normalizeOptionalAudio(audioDataURL, true),

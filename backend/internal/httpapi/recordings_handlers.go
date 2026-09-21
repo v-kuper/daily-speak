@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -15,6 +16,11 @@ import (
 	"daily-speaking-practice/backend/internal/logging"
 	"daily-speaking-practice/backend/internal/quota"
 	"github.com/google/uuid"
+)
+
+var (
+	cyrillicPhrasePattern = regexp.MustCompile(`[\p{Cyrillic}]+(?:[- \t]+[\p{Cyrillic}]+)*`)
+	latinLetterPattern    = regexp.MustCompile(`[A-Za-z]`)
 )
 
 func (s *Server) handleCreateRecording(w http.ResponseWriter, r *http.Request) {
@@ -152,7 +158,7 @@ func (s *Server) handleCreateRecording(w http.ResponseWriter, r *http.Request) {
 		Status:              normalizeRecordingStatus(inserted.Status),
 		Transcript:          inserted.Transcript,
 		CorrectedTranscript: inserted.CorrectedTranscript,
-		Suggestions:         normalizeSuggestions(inserted.Suggestions, 8),
+		Suggestions:         normalizeSuggestions(inserted.Suggestions, 0),
 		ProcessingStage:     normalizeRecordingProcessingStage(inserted.ProcessingStage),
 		PracticeType:        domain.NormalizePracticeType(inserted.PracticeType),
 		AudioDataURL:        normalizeOptionalAudio(inserted.AudioDataURL, true),
@@ -169,50 +175,12 @@ func (s *Server) handleCreateRecording(w http.ResponseWriter, r *http.Request) {
 }
 
 func marshalSuggestions(suggestions []suggestion) string {
-	suggestionJSON, _ := json.Marshal(suggestions)
+	stored := make([]suggestion, len(suggestions))
+	for index, item := range suggestions {
+		stored[index] = withoutLearningReference(item)
+	}
+	suggestionJSON, _ := json.Marshal(stored)
 	return string(suggestionJSON)
-}
-
-func (s *Server) generateRecordingSuggestions(ctx context.Context, transcript string, topic string, interests []string, practiceType string, photoObject *string, englishLevel string, logger logging.Logger) ([]suggestion, error) {
-	if strings.TrimSpace(transcript) == "" {
-		return []suggestion{}, nil
-	}
-	settings := ai.ResolveSettingsForUser()
-	useJSONFormat := !settings.IsThinkingModel
-	seed := absMod(domain.HashString(strings.ToLower(topic))*131+domain.HashString(transcript)*17, 2147483647)
-	prompt := recordingSuggestionsPrompt(transcript, topic, interests, practiceType, photoObject, englishLevel)
-	for attempt := 0; attempt < 2; attempt++ {
-		strictJSON := attempt > 0
-		body := map[string]any{
-			"model":  settings.Model,
-			"stream": false,
-			"think":  ai.ThinkOption(settings.IsThinkingModel),
-			"messages": []map[string]string{
-				{"role": "system", "content": chooseString(strictJSON, "Return strict valid JSON only. No markdown. No prose.", "You analyze learner transcripts and output only grammar correction JSON.")},
-				{"role": "user", "content": prompt},
-			},
-			"options": map[string]any{
-				"temperature": chooseFloat(strictJSON, 0.1, 0.3),
-				"seed":        seed + attempt*97,
-			},
-		}
-		if useJSONFormat {
-			body["format"] = "json"
-		}
-		payload, _, err := ai.PostChat(ctx, body)
-		if err != nil {
-			logger.Warn("ollama.suggestions_request_failed", logging.ErrorMeta(err))
-			return nil, errors.New("AI suggestions could not be generated. Please try again later.")
-		}
-		suggestions, valid := parseSuggestionsResultFromContent(ai.ExtractMessageContent(payload))
-		if valid {
-			if len(suggestions) > 5 {
-				return suggestions[:5], nil
-			}
-			return suggestions, nil
-		}
-	}
-	return nil, errors.New("AI suggestions could not be generated. Please try again later.")
 }
 
 func (s *Server) generateNaturalTranscript(ctx context.Context, transcript string, suggestions []suggestion, englishLevel string, logger logging.Logger) (string, error) {
@@ -241,7 +209,7 @@ func (s *Server) generateNaturalTranscript(ctx context.Context, transcript strin
 		if useJSONFormat {
 			body["format"] = "json"
 		}
-		payload, _, err := ai.PostChat(ctx, body)
+		payload, err := s.aiClient.PostChat(ctx, body)
 		if err != nil {
 			logger.Warn("ollama.natural_transcript_request_failed", logging.ErrorMeta(err))
 			return "", errors.New("The natural English version could not be generated. Please try again later.")
@@ -251,33 +219,6 @@ func (s *Server) generateNaturalTranscript(ctx context.Context, transcript strin
 		}
 	}
 	return "", errors.New("The natural English version could not be generated. Please try again later.")
-}
-
-func parseSuggestionsFromContent(content string) []suggestion {
-	suggestions, _ := parseSuggestionsResultFromContent(content)
-	return suggestions
-}
-
-func parseSuggestionsResultFromContent(content string) ([]suggestion, bool) {
-	for _, candidate := range ai.ExtractJSONCandidates(content) {
-		var payload map[string]json.RawMessage
-		if json.Unmarshal([]byte(candidate), &payload) != nil {
-			continue
-		}
-		for _, key := range []string{"suggestions", "corrections", "mistakes", "errorAnalysis"} {
-			if raw, ok := payload[key]; ok {
-				var items []json.RawMessage
-				if json.Unmarshal(raw, &items) != nil {
-					continue
-				}
-				suggestions := normalizeSuggestions(raw, 5)
-				if len(items) == 0 || len(suggestions) > 0 {
-					return suggestions, true
-				}
-			}
-		}
-	}
-	return []suggestion{}, false
 }
 
 func parseNaturalTranscriptFromContent(content string) string {
@@ -293,7 +234,7 @@ func parseNaturalTranscriptFromContent(content string) string {
 			}
 			var value string
 			if json.Unmarshal(raw, &value) == nil {
-				if normalized := domain.NormalizeTranscript(value); normalized != "" {
+				if normalized := domain.NormalizeTranscript(value); normalized != "" && !containsCyrillic(normalized) {
 					return normalized
 				}
 			}
@@ -302,46 +243,43 @@ func parseNaturalTranscriptFromContent(content string) string {
 	return ""
 }
 
-func recordingSuggestionsPrompt(transcript string, topic string, interests []string, practiceType string, photoObject *string, englishLevel string) string {
-	transcriptForPrompt := domain.NormalizeTranscript(transcript)
-	if len([]rune(transcriptForPrompt)) > 6000 {
-		transcriptForPrompt = string([]rune(transcriptForPrompt)[:6000])
-	}
-	parts := []string{
-		`Topic: "` + topic + `".`,
-		"Learner level: " + domain.FormatEnglishLevel(englishLevel) + ".",
-		"Language difficulty: " + domain.EnglishLevelPromptGuidance(englishLevel),
-		"You receive an English learner transcript from a speaking practice recording.",
-		"Find up to 4 grammar or word-choice mistakes that clearly appear in the transcript.",
-		`Return only JSON with this exact shape: {"suggestions":[{"wrong":"...","right":"...","explanation":"..."}]}.`,
-		"Do not invent mistakes that are not present in the transcript.",
-		"No markdown and no extra keys.",
-		`Transcript: """` + transcriptForPrompt + `""".`,
-	}
-	if practiceType == "photo_description" {
-		parts = append(parts, "Practice mode: photo description.")
-		if photoObject != nil {
-			parts = append(parts, `Main photo object: "`+*photoObject+`".`)
+func extractRussianPhrases(transcript string) []string {
+	seen := map[string]struct{}{}
+	out := []string{}
+	for _, phrase := range cyrillicPhrasePattern.FindAllString(transcript, -1) {
+		if _, exists := seen[phrase]; exists {
+			continue
 		}
-	} else if practiceType == "free_talk" {
-		parts = append(parts, "Practice mode: free talk.")
+		seen[phrase] = struct{}{}
+		out = append(out, phrase)
 	}
-	if len(interests) > 0 {
-		parts = append(parts, "Learner interests context: "+strings.Join(interests, ", ")+".")
-	}
-	return strings.Join(parts, " ")
+	return out
+}
+
+func containsCyrillic(value string) bool {
+	return cyrillicPhrasePattern.MatchString(value)
+}
+
+func containsLatinLetter(value string) bool {
+	return latinLetterPattern.MatchString(value)
+}
+
+func recordingTranscriptForPrompt(transcript string) string {
+	return domain.NormalizeTranscript(transcript)
 }
 
 func recordingNaturalVersionPrompt(transcript string, suggestions []suggestion, englishLevel string) string {
-	transcriptForPrompt := domain.NormalizeTranscript(transcript)
-	if len([]rune(transcriptForPrompt)) > 6000 {
-		transcriptForPrompt = string([]rune(transcriptForPrompt)[:6000])
+	transcriptForPrompt := recordingTranscriptForPrompt(transcript)
+	corrections := make([]rewriteCorrection, 0, len(suggestions))
+	for _, item := range suggestions {
+		corrections = append(corrections, rewriteCorrection{Wrong: item.Wrong, Right: item.Right})
 	}
-	suggestionsJSON, _ := json.Marshal(suggestions)
+	suggestionsJSON, _ := json.Marshal(corrections)
 	parts := []string{
 		"Learner level: " + domain.FormatEnglishLevel(englishLevel) + ".",
 		recordingNaturalVersionLevelGuidance(englishLevel),
 		"Rewrite the transcript as natural conversational English while you preserve the speaker's meaning, intent, and factual details.",
+		"Replace every Russian word or phrase with its supplied English correction so the result is English-only.",
 		"Apply the supplied corrections, fix sentence structure and word order, and remove accidental repetitions or filler that make the thought unclear.",
 		"Do not invent new details, opinions, or events. Keep the result achievable and useful for a learner at the stated level.",
 		`Return only JSON with this exact shape: {"correctedTranscript":"..."}.`,
@@ -350,6 +288,11 @@ func recordingNaturalVersionPrompt(transcript string, suggestions []suggestion, 
 		`Transcript: """` + transcriptForPrompt + `""".`,
 	}
 	return strings.Join(parts, " ")
+}
+
+type rewriteCorrection struct {
+	Wrong string `json:"wrong"`
+	Right string `json:"right"`
 }
 
 func recordingNaturalVersionLevelGuidance(englishLevel string) string {

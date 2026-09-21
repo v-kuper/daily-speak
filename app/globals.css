@@ -1186,9 +1186,79 @@ button {
   padding: 1px 3px;
 }
 
+.transcript-error-mark-major {
+  background: rgba(154, 47, 47, 0.2);
+  color: #711c27;
+}
+
+.transcript-error-mark-medium {
+  background: rgba(206, 100, 21, 0.2);
+  color: #713300;
+}
+
+.transcript-error-mark-minor {
+  background: rgba(184, 134, 11, 0.2);
+  color: #604500;
+}
+
 .suggestion-item {
   padding: 15px;
   margin-bottom: 12px;
+}
+
+.suggestion-item.suggestion-severity-major {
+  border-color: rgba(154, 47, 47, 0.38);
+}
+
+.suggestion-item.suggestion-severity-medium {
+  border-color: rgba(206, 100, 21, 0.4);
+}
+
+.suggestion-item.suggestion-severity-minor {
+  border-color: rgba(184, 134, 11, 0.42);
+}
+
+.suggestion-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-bottom: 12px;
+}
+
+.suggestion-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 3px 9px;
+  border: 1px solid var(--border-muted);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.46);
+  color: var(--text-main);
+  font-size: 11px;
+  font-weight: 760;
+  line-height: 1.2;
+}
+
+.suggestion-category-badge {
+  color: var(--focus-blue);
+}
+
+.suggestion-severity-major .suggestion-severity-badge {
+  border-color: rgba(154, 47, 47, 0.42);
+  background: rgba(154, 47, 47, 0.13);
+  color: #711c27;
+}
+
+.suggestion-severity-medium .suggestion-severity-badge {
+  border-color: rgba(206, 100, 21, 0.45);
+  background: rgba(206, 100, 21, 0.14);
+  color: #713300;
+}
+
+.suggestion-severity-minor .suggestion-severity-badge {
+  border-color: rgba(184, 134, 11, 0.48);
+  background: rgba(184, 134, 11, 0.15);
+  color: #604500;
 }
 
 .suggestion-wrong,
@@ -1217,6 +1287,41 @@ button {
   margin-top: 8px;
   padding-top: 8px;
   border-top: 1px solid rgba(87, 78, 67, 0.1);
+}
+
+.suggestion-learning {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid rgba(73, 96, 110, 0.2);
+  border-radius: 14px;
+  background: rgba(73, 96, 110, 0.08);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.suggestion-learning-title {
+  color: var(--ink);
+  font-weight: 760;
+}
+
+.suggestion-learning-summary {
+  margin-top: 4px;
+  color: var(--text-muted);
+}
+
+.suggestion-learning a {
+  display: inline-flex;
+  margin-top: 8px;
+  color: #334f61;
+  font-weight: 760;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+.suggestion-learning a:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 3px;
 }
 
 .profile-screen,

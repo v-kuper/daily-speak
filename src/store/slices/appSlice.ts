@@ -7,8 +7,7 @@ import {
   type FeedReply,
   type PracticeType,
   type Recording,
-  type RecordingStatus,
-  type Suggestion
+  type RecordingStatus
 } from "../../lib/data";
 import {
   filterDeletedFeedPosts,
@@ -20,6 +19,7 @@ import { parseShadowingStatus } from "../../lib/shadowing";
 import { DEFAULT_ENGLISH_LEVEL, normalizeEnglishLevel, parseEnglishLevel, type EnglishLevel } from "../../lib/englishLevel";
 import { isCurrentInterviewGuidanceRequest } from "../../lib/interviewGuidance";
 import { formatTime, toDateKey } from "../../lib/utils";
+import { parseSuggestions } from "../../lib/suggestions";
 
 export type ScreenName = "speak" | "history" | "feed" | "feedThread" | "details" | "share" | "auth" | "profile" | "interests";
 export type TabName = "speak" | "history" | "feed";
@@ -605,23 +605,6 @@ const normalizeInterestIds = (value: unknown): string[] => {
   return normalized;
 };
 
-const parseSuggestion = (value: unknown): Suggestion | null => {
-  if (typeof value !== "object" || value === null) {
-    return null;
-  }
-
-  const candidate = value as Record<string, unknown>;
-  const wrong = typeof candidate.wrong === "string" ? candidate.wrong.trim() : "";
-  const right = typeof candidate.right === "string" ? candidate.right.trim() : "";
-  const explanation = typeof candidate.explanation === "string" ? candidate.explanation.trim() : "";
-
-  if (!wrong || !right || !explanation) {
-    return null;
-  }
-
-  return { wrong, right, explanation };
-};
-
 const parsePracticeType = (value: unknown, topic: string, hasPhoto: boolean): PracticeType => {
   if (typeof value === "string") {
     const normalized = value.trim().toLowerCase() as PracticeType;
@@ -721,11 +704,7 @@ const parseRecording = (value: unknown): Recording | null => {
   const timestampRaw = typeof candidate.timestamp === "string" ? candidate.timestamp : "";
   const timestamp = new Date(timestampRaw);
   const duration = Number.parseInt(String(candidate.duration ?? 0), 10);
-  const suggestionsRaw = Array.isArray(candidate.suggestions) ? candidate.suggestions : [];
-  const suggestions = suggestionsRaw
-    .map((item) => parseSuggestion(item))
-    .filter((item): item is Suggestion => item !== null)
-    .slice(0, 20);
+  const suggestions = parseSuggestions(candidate.suggestions);
   const audioDataUrl = normalizeAudioDataUrl(candidate.audioDataUrl);
   const photoDataUrl = normalizePhotoDataUrl(candidate.photoDataUrl);
   const photoObject = normalizePhotoObject(candidate.photoObject);

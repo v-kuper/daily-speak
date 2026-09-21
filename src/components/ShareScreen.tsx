@@ -5,6 +5,7 @@ import { buildTranscriptSegments } from "../lib/transcriptHighlight";
 import { formatTime } from "../lib/utils";
 import { useAppDispatch, useAppSelector } from "../store/hooks";
 import { backToHistory } from "../store/slices/appSlice";
+import SuggestionCard from "./SuggestionCard";
 
 const formatPracticeLabel = (value: "free_talk" | "topic" | "photo_description"): string => {
   switch (value) {
@@ -32,7 +33,7 @@ export default function ShareScreen() {
       return [];
     }
 
-    return buildTranscriptSegments(recording.transcript, recording.suggestions.map((item) => item.wrong));
+    return buildTranscriptSegments(recording.transcript, recording.suggestions);
   }, [recording]);
 
   if (!recording) {
@@ -87,7 +88,10 @@ export default function ShareScreen() {
           <div className="transcript-text">
             {transcriptSegments.map((segment, index) =>
               segment.isError ? (
-                <mark key={`segment-${index}`} className="transcript-error-mark">
+                <mark
+                  key={`segment-${index}`}
+                  className={`transcript-error-mark${segment.severity ? ` transcript-error-mark-${segment.severity}` : ""}`}
+                >
                   {segment.text}
                 </mark>
               ) : (
@@ -103,18 +107,11 @@ export default function ShareScreen() {
       <div className="suggestions-section">
         <div className="section-title">AI Suggestions</div>
         {hasSuggestions ? (
-          recording.suggestions.map((suggestion) => (
-            <div key={suggestion.wrong} className="suggestion-item">
-              <div className="suggestion-wrong">
-                <span className="suggestion-wrong-icon">❌</span>
-                <span>{suggestion.wrong}</span>
-              </div>
-              <div className="suggestion-right">
-                <span className="suggestion-right-icon">✅</span>
-                <span>{suggestion.right}</span>
-              </div>
-              <div className="suggestion-explanation">{suggestion.explanation}</div>
-            </div>
+          recording.suggestions.map((suggestion, index) => (
+            <SuggestionCard
+              key={`${suggestion.wrong}-${suggestion.right}-${suggestion.category ?? "legacy"}-${index}`}
+              suggestion={suggestion}
+            />
           ))
         ) : (
           <div className="empty-state">AI error analysis is in progress and will be available soon.</div>

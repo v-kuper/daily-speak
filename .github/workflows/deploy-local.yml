@@ -30,17 +30,18 @@ jobs:
       OLLAMA_BASE_URL: ${{ vars.OLLAMA_BASE_URL || 'http://host.docker.internal:11434' }}
       OLLAMA_MODEL: ${{ vars.OLLAMA_MODEL || 'gemma4:31b-cloud' }}
       OLLAMA_THINKING_MODEL: ${{ vars.OLLAMA_THINKING_MODEL || 'true' }}
+      AI_ANALYSIS_CONCURRENCY: 3
       WHISPER_BACKEND: openai
       WHISPER_BINARY_PATH: ${{ vars.WHISPER_BINARY_PATH || '' }}
       WHISPER_MODEL_PATH: ${{ vars.WHISPER_MODEL_PATH || '' }}
       WHISPER_PYTHON_BIN: /opt/whisper/bin/python
-      WHISPER_OPENAI_MODEL: ${{ vars.WHISPER_OPENAI_MODEL || 'base.en' }}
+      WHISPER_OPENAI_MODEL: base
       WHISPER_OPENAI_MODEL_DIR: /app/tools/whisper/openai-models
       WHISPER_OPENAI_CACHE_DIR: /app/tools/whisper/cache
       WHISPER_FFMPEG_BIN: /usr/bin/ffmpeg
       WHISPER_OPENAI_DEVICE: cpu
       WHISPER_OPENAI_FP16: false
-      WHISPER_LANGUAGE: ${{ vars.WHISPER_LANGUAGE || 'en' }}
+      WHISPER_LANGUAGE: auto
 
     steps:
       - name: Checkout

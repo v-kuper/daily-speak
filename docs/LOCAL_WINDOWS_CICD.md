@@ -124,6 +124,17 @@ Manual deploy:
 2. Select `Deploy Local Windows`.
 3. Click `Run workflow`.
 
+## AI analysis concurrency
+
+The deploy workflow sets `AI_ANALYSIS_CONCURRENCY: 3` directly in source, so a
+clean Windows runner does not need a repository variable or a local `.env`
+file. Docker Compose uses the same default.
+
+This setting controls how many independent error-detector requests can run at
+the same time; it does not combine their focused prompts. Accepted values are
+1 through 7, and missing or invalid values fall back to 3. Increasing the value
+can raise Ollama CPU, GPU, and memory load on the Windows machine.
+
 ## Cartesia credentials for shadowing audio
 
 The Windows CI/CD deployment receives Cartesia configuration directly from
@@ -336,19 +347,21 @@ The workflow uses GitHub repository variables when present:
 - `WHISPER_BINARY_PATH`
 - `WHISPER_MODEL_PATH`
 - `WHISPER_PYTHON_BIN`, default `/opt/whisper/bin/python`
-- `WHISPER_OPENAI_MODEL`, default `base.en`
 - `WHISPER_OPENAI_MODEL_DIR`, default `/app/tools/whisper/openai-models`
 - `WHISPER_OPENAI_CACHE_DIR`, default `/app/tools/whisper/cache`
 - `WHISPER_FFMPEG_BIN`, default `/usr/bin/ffmpeg`
 - `WHISPER_OPENAI_DEVICE`, default `cpu`
 - `WHISPER_OPENAI_FP16`, default `false`
-- `WHISPER_LANGUAGE`, default `en`
 - `CARTESIA_VOICE_ID`, required for shadowing pronunciation audio
 
 Set them in `Settings` -> `Secrets and variables` -> `Actions` -> `Variables`.
 
 The Cartesia API key is intentionally not in this Variables list. Store
 `CARTESIA_API_KEY` on the `Secrets` tab as described above.
+
+The Windows deploy workflow fixes `WHISPER_OPENAI_MODEL=base` and
+`WHISPER_LANGUAGE=auto` so an older repository variable cannot switch the
+deployment back to English-only transcription.
 
 If several projects deploy on the same Windows machine, give each project a
 unique `APP_PORT` and `POSTGRES_PORT` to avoid host-port conflicts. The deploy
