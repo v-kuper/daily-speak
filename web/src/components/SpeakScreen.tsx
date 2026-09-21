@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type ChangeEvent } from "react";
+import { useRouter } from "next/navigation";
+import { saveAndNavigate, startGuestSave } from "../lib/routeFlows";
 import { apiFetch, readApiJSON } from "../lib/apiClient";
 import {
   readBlobAsDataUrl,
@@ -12,7 +14,7 @@ import {
 } from "../lib/browserMedia";
 import { buildInterviewGuidanceRequestKey } from "../lib/interviewGuidance";
 import { formatTime, toDateKey } from "../lib/utils";
-import { useAppDispatch, useAppSelector } from "../store/hooks";
+import { useAppDispatch, useAppSelector, useAppStore } from "../store/hooks";
 import {
   backToQuestionsList,
   clearPhotoForPractice,
@@ -22,17 +24,14 @@ import {
   fetchDailyQuestions,
   fetchStudyWords,
   fetchTopicGuidance,
-  openAuthForSave,
   PHOTO_PRACTICE_MAX_BYTES,
   reRecord,
   type RecordingSaveDraft,
-  saveRecording,
   selectTopic,
   setCustomTopicDraft,
   setRecordingAudioDataUrl,
   setRecordingInputError,
   setRecordingUploadSessionId,
-  showBackgroundRecordingSave,
   setPhotoForPractice,
   setPhotoObjectDraft,
   setPhotoUploadError,
@@ -169,6 +168,8 @@ const buildStudyTextSegments = (text: string, words: string[]): StudyTextSegment
 
 export default function SpeakScreen() {
   const dispatch = useAppDispatch();
+  const store = useAppStore();
+  const router = useRouter();
   const [finalAudioUploadState, setFinalAudioUploadState] = useState<FinalAudioUploadState>("idle");
   const [recordingStarting, setRecordingStarting] = useState(false);
   const {
@@ -480,37 +481,18 @@ export default function SpeakScreen() {
 
   const onSaveRecording = useCallback(() => {
     if (!isAuthenticated) {
-      dispatch(openAuthForSave());
+      startGuestSave(store, router);
       return;
     }
 
     const draft = buildRecordingSaveDraft();
-    if (!draft) {
+    if (!draft?.localRecordingId) {
       dispatch(setRecordingInputError("Preparing audio, please wait a moment before saving."));
       return;
     }
 
-    const finalUpload = finalAudioUploadPromiseRef.current;
-    dispatch(showBackgroundRecordingSave(draft));
-
-    void (async () => {
-      try {
-        if (finalUpload) {
-          await finalUpload;
-        }
-        await dispatch(saveRecording(draft)).unwrap();
-      } catch {
-        if (!draft.audioDataUrl) {
-          return;
-        }
-        try {
-          await dispatch(saveRecording({ ...draft, recordingUploadSessionId: null })).unwrap();
-        } catch {
-          // The rejected thunk marks the optimistic recording as failed.
-        }
-      }
-    })();
-  }, [buildRecordingSaveDraft, dispatch, isAuthenticated]);
+    void saveAndNavigate(store, router, draft, finalAudioUploadPromiseRef.current);
+  }, [buildRecordingSaveDraft, dispatch, isAuthenticated, router, store]);
 
   const beginRecordingFromMicrophone = (onRecordingStarted: () => void) => {
     if (recordingStartingRef.current) {

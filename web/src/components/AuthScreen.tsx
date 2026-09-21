@@ -1,30 +1,31 @@
 "use client";
 
 import { FormEvent } from "react";
-import { useAppDispatch, useAppSelector } from "../store/hooks";
+import { useRouter } from "next/navigation";
+import { authenticateAndNavigate, cancelAuthentication } from "../lib/routeFlows";
+import { useAppDispatch, useAppSelector, useAppStore } from "../store/hooks";
 import {
-  cancelAuth,
   setAuthEmailDraft,
   setAuthPasswordDraft,
-  signIn,
-  signUp
 } from "../store/slices/appSlice";
 
-// The route supplies this destination; the authentication workflow consumes it in the next migration step.
-export default function AuthScreen(_props: { returnTo: string }) {
+export default function AuthScreen({ returnTo }: { returnTo: string }) {
   const dispatch = useAppDispatch();
-  const { authEmailDraft, authPasswordDraft, authError, authStatus, pendingSaveAfterAuth } = useAppSelector(
+  const store = useAppStore();
+  const router = useRouter();
+  const { authEmailDraft, authPasswordDraft, authError, authStatus, pendingSaveAfterAuth, recordingSaveStatus, recordingSaveError, isAuthenticated } = useAppSelector(
     (state) => state.app
   );
-  const isLoading = authStatus === "loading";
+  const isLoading = authStatus === "loading" || recordingSaveStatus === "loading";
+  const retryingSave = isAuthenticated && pendingSaveAfterAuth;
 
   const onSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    void dispatch(signIn());
+    void authenticateAndNavigate(store, router, "signIn", returnTo);
   };
 
   const onRegister = () => {
-    void dispatch(signUp());
+    void authenticateAndNavigate(store, router, "signUp", returnTo);
   };
 
   return (
@@ -59,13 +60,14 @@ export default function AuthScreen(_props: { returnTo: string }) {
         />
 
         {authError && <div className="auth-error">{authError}</div>}
+        {recordingSaveError && <div className="auth-error" role="alert">{recordingSaveError}</div>}
 
         <div className="auth-buttons">
-          <button type="button" className="btn btn-secondary" onClick={() => dispatch(cancelAuth())} disabled={isLoading}>
+          <button type="button" className="btn btn-secondary" onClick={() => cancelAuthentication(store, router)} disabled={isLoading}>
             Back
           </button>
           <button type="submit" className="btn btn-primary" disabled={isLoading}>
-            {isLoading ? "Please wait..." : "Sign in"}
+            {isLoading ? "Please wait..." : retryingSave ? "Retry save" : "Sign in"}
           </button>
         </div>
         <button

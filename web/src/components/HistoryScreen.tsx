@@ -1,19 +1,18 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { recordingPath } from "../lib/routes";
+import { historyDateFromSearch } from "../lib/routeFlows";
 
 import { useEffect } from "react";
 import { recordingProcessingLabel } from "../lib/recordingProcessing";
 import { formatTime, formatTimeOfDay, recordingDateKey } from "../lib/utils";
 import { useAppDispatch, useAppSelector } from "../store/hooks";
 import {
-  clearSelectedDate,
   fetchRecording,
   nextMonth,
-  selectRecording,
   previousMonth,
-  setSelectedDate,
   toggleCalendar
 } from "../store/slices/appSlice";
 
@@ -38,11 +37,14 @@ const formatPracticeLabel = (value: "free_talk" | "topic" | "photo_description")
 
 export default function HistoryScreen() {
   const dispatch = useAppDispatch();
-  const { recordings, selectedDate, calendarVisible, calendarMonth, calendarYear } = useAppSelector(
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const selectedDate = historyDateFromSearch(searchParams);
+  const { recordings, recordingSaveError, calendarVisible, calendarMonth, calendarYear } = useAppSelector(
     (state) => state.app
   );
   const processingRecordingKey = recordings
-    .filter((recording) => recording.status === "processing")
+    .filter((recording) => recording.status === "processing" && !recording.id.startsWith("local-"))
     .map((recording) => recording.id)
     .sort()
     .join(",");
@@ -80,6 +82,7 @@ export default function HistoryScreen() {
   return (
     <section>
       <h2>History</h2>
+      {recordingSaveError && <div className="auth-error" role="alert">{recordingSaveError}</div>}
 
       <div className="calendar-wrapper">
         <button className="btn btn-secondary btn-small" onClick={() => dispatch(toggleCalendar())}>
@@ -87,7 +90,7 @@ export default function HistoryScreen() {
         </button>
 
         {selectedDate && (
-          <button className="btn btn-secondary btn-small" onClick={() => dispatch(clearSelectedDate())}>
+          <button className="btn btn-secondary btn-small" onClick={() => router.replace("/history")}>
             Show latest
           </button>
         )}
@@ -122,7 +125,7 @@ export default function HistoryScreen() {
                   className={`calendar-day ${hasRecordings ? "has-recordings" : ""} ${
                     isSelected ? "selected" : ""
                   }`}
-                  onClick={() => dispatch(setSelectedDate(dateString))}
+                  onClick={() => router.replace(`/history?date=${dateString}`)}
                 >
                   {day}
                 </button>
@@ -136,7 +139,7 @@ export default function HistoryScreen() {
         <div className="empty-state">No recordings on this day.</div>
       ) : (
         visibleRecordings.map((recording) => (
-          <Link key={recording.id} className="recording-card" href={recordingPath(recording.id)} onClick={() => dispatch(selectRecording(recording.id))}>
+          <Link key={recording.id} className="recording-card" href={recordingPath(recording.id)}>
             <div className="recording-card-header">
               <div className="recording-main">
                 <div className="recording-time">{formatTimeOfDay(recording.timestamp)}</div>

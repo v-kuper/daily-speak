@@ -12,13 +12,13 @@ import { ENGLISH_LEVEL_OPTIONS, parseEnglishLevel } from "../lib/englishLevel";
 import { useAppDispatch, useAppSelector } from "../store/hooks";
 import { formatTime } from "../lib/utils";
 
-type ProfileView = "home" | "subscription" | "learning";
+type ProfileSection = "home" | "subscription" | "english-level";
 
 const resolveEnglishLevelOption = (value: string) => {
   return ENGLISH_LEVEL_OPTIONS.find((option) => option.value === value) ?? ENGLISH_LEVEL_OPTIONS[2];
 };
 
-export default function ProfileScreen() {
+export default function ProfileScreen({ section }: { section: ProfileSection }) {
   const dispatch = useAppDispatch();
   const {
     userEmail,
@@ -49,7 +49,6 @@ export default function ProfileScreen() {
       })
     : null;
 
-  const [view, setView] = useState<ProfileView>("home");
   const [englishLevelDraft, setEnglishLevelDraft] = useState(selectedEnglishLevel);
 
   useEffect(() => {
@@ -66,12 +65,12 @@ export default function ProfileScreen() {
       : `Pro до ${subscriptionEndsLabel ?? "даты окончания"}`
     : `Free: ${formatTime(freeRemaining)} из ${formatTime(freeLimit)} осталось`;
 
-  if (view === "subscription") {
+  if (section === "subscription") {
     return (
       <section className="profile-screen">
-        <button className="back-btn" onClick={() => setView("home")}>
+        <Link className="back-btn" href="/profile">
           ← Назад к профилю
-        </button>
+        </Link>
         <h2>План и подписка</h2>
 
         <div className="profile-card">
@@ -127,12 +126,12 @@ export default function ProfileScreen() {
     );
   }
 
-  if (view === "learning") {
+  if (section === "english-level") {
     return (
       <section className="profile-screen">
-        <button className="back-btn" onClick={() => setView("home")}>
+        <Link className="back-btn" href="/profile">
           ← Назад к профилю
-        </button>
+        </Link>
         <h2>Уровень английского</h2>
 
         <div className="profile-card">
@@ -191,21 +190,21 @@ export default function ProfileScreen() {
         </div>
 
         <div className="profile-menu">
-          <button className="profile-menu-item" onClick={() => setView("subscription")}>
+          <Link className="profile-menu-item" href="/profile/subscription">
             <div className="profile-menu-content">
               <span className="profile-menu-title">План и подписка</span>
               <span className="profile-menu-subtitle">{subscriptionSummary}</span>
             </div>
             <span className="profile-menu-arrow">→</span>
-          </button>
+          </Link>
 
-          <button className="profile-menu-item" onClick={() => setView("learning")}>
+          <Link className="profile-menu-item" href="/profile/english-level">
             <div className="profile-menu-content">
               <span className="profile-menu-title">Уровень английского</span>
               <span className="profile-menu-subtitle">{activeEnglishLevel.label}</span>
             </div>
             <span className="profile-menu-arrow">→</span>
-          </button>
+          </Link>
 
           <Link className="profile-menu-item" href="/profile/interests">
             <div className="profile-menu-content">

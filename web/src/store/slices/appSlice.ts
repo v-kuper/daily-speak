@@ -14,7 +14,7 @@ import { parseRecordingProcessingStage } from "../../lib/recordingProcessing";
 import { parseShadowingStatus } from "../../lib/shadowing";
 import { DEFAULT_ENGLISH_LEVEL, normalizeEnglishLevel, parseEnglishLevel, type EnglishLevel } from "../../lib/englishLevel";
 import { isCurrentInterviewGuidanceRequest } from "../../lib/interviewGuidance";
-import { formatTime, toDateKey } from "../../lib/utils";
+import { formatTime } from "../../lib/utils";
 import { parseSuggestions } from "../../lib/suggestions";
 
 export type SpeakMode = "idle" | "readyToRecord" | "recording" | "recorded";
@@ -137,7 +137,6 @@ export type AppState = {
   recordingDuration: number;
   recordings: Recording[];
   deletedRecordingIds: string[];
-  selectedDate: string | null;
   currentRecordingId: string | null;
   backgroundSaveRecordingId: string | null;
   isPlaying: boolean;
@@ -188,6 +187,8 @@ export type AppState = {
   userDataError: string | null;
   recordingSaveStatus: AuthStatus;
   recordingSaveError: string | null;
+  recordingFetchStatuses: Record<string, "loading" | "ready" | "failed">;
+  recordingFetchErrors: Record<string, string>;
   recordingDeleteStatus: AuthStatus;
   recordingDeleteError: string | null;
   recordingRetryStatuses: Record<string, AuthStatus>;
@@ -1155,7 +1156,7 @@ export const saveRecording = createAsyncThunk<
       return rejectWithValue("Unauthorized");
     }
 
-    const uploadSessionId = draft?.recordingUploadSessionId?.trim() || recordingUploadSessionId;
+    const uploadSessionId = draft ? draft.recordingUploadSessionId?.trim() || null : recordingUploadSessionId;
     const audioDataUrl = normalizeAudioDataUrl(draft ? draft.audioDataUrl : pendingRecordingAudioDataUrl);
     if (!uploadSessionId && !audioDataUrl) {
       return rejectWithValue("Record your voice first.");
@@ -1246,7 +1247,7 @@ export const saveRecording = createAsyncThunk<
   }
 );
 
-export const fetchRecording = createAsyncThunk<Recording, string, { rejectValue: string }>(
+export const fetchRecording = createAsyncThunk<Recording, string, { state: { app: AppState }; rejectValue: string }>(
   "app/fetchRecording",
   async (recordingId, { rejectWithValue }) => {
     try {
@@ -1268,6 +1269,13 @@ export const fetchRecording = createAsyncThunk<Recording, string, { rejectValue:
     } catch {
       return rejectWithValue("Cannot connect to recording service.");
     }
+  },
+  {
+    condition: (recordingId, { getState }) => {
+      const state = getState().app;
+      return !recordingId.startsWith("local-") && !state.deletedRecordingIds.includes(recordingId)
+        && state.recordingFetchStatuses[recordingId] !== "loading";
+    },
   }
 );
 
@@ -1485,7 +1493,6 @@ const initialState: AppState = {
   recordingDuration: 0,
   recordings: [],
   deletedRecordingIds: [],
-  selectedDate: null,
   currentRecordingId: null,
   backgroundSaveRecordingId: null,
   isPlaying: false,
@@ -1536,6 +1543,8 @@ const initialState: AppState = {
   userDataError: null,
   recordingSaveStatus: "idle",
   recordingSaveError: null,
+  recordingFetchStatuses: {},
+  recordingFetchErrors: {},
   recordingDeleteStatus: "idle",
   recordingDeleteError: null,
   recordingRetryStatuses: {},
@@ -1620,8 +1629,8 @@ const openAuthFlow = (state: AppState, pendingSaveAfterAuth: boolean): void => {
   resetPlayback(state);
 };
 
-const applySavedRecording = (state: AppState, recording: Recording): void => {
-  const backgroundSaveRecordingId = state.backgroundSaveRecordingId;
+const applySavedRecording = (state: AppState, recording: Recording, localRecordingId?: string): void => {
+  const backgroundSaveRecordingId = localRecordingId ?? state.backgroundSaveRecordingId;
   const isBackgroundSave = Boolean(backgroundSaveRecordingId);
   state.recordings = [
     recording,
@@ -1630,7 +1639,6 @@ const applySavedRecording = (state: AppState, recording: Recording): void => {
   if (isBackgroundSave) {
     if (state.currentRecordingId === backgroundSaveRecordingId) {
       state.currentRecordingId = recording.id;
-      state.selectedDate = toDateKey(new Date(recording.timestamp));
       const recordingDate = new Date(recording.timestamp);
       state.calendarMonth = recordingDate.getMonth();
       state.calendarYear = recordingDate.getFullYear();
@@ -1643,7 +1651,6 @@ const applySavedRecording = (state: AppState, recording: Recording): void => {
 
   state.currentRecordingId = recording.id;
   state.backgroundSaveRecordingId = null;
-  state.selectedDate = toDateKey(new Date(recording.timestamp));
   state.speakState = "idle";
   state.selectedTopic = null;
   state.showQuestions = false;
@@ -1739,17 +1746,20 @@ const completeAuthSuccess = (
   state.recordingDeleteError = null;
   resetRecordingRetry(state);
   resetShadowingRequest(state);
-  state.pendingRecordingAudioDataUrl = null;
-  state.recordingUploadSessionId = null;
-  state.recordingInputError = null;
-  state.pendingPhotoError = null;
+  if (!state.pendingSaveAfterAuth) {
+    state.pendingRecordingAudioDataUrl = null;
+    state.recordingUploadSessionId = null;
+    state.recordingInputError = null;
+    state.pendingPhotoError = null;
+  }
   state.selectedInterestIds = [];
   state.questionsEnglishLevel = englishLevel;
   state.recordings = [];
   state.deletedRecordingIds = [];
   state.backgroundSaveRecordingId = null;
   state.currentRecordingId = null;
-  state.selectedDate = null;
+  state.recordingFetchStatuses = {};
+  state.recordingFetchErrors = {};
   applySubscriptionState(state, {
     isSubscriber,
     subscriptionExpiresAt: null,
@@ -1786,7 +1796,8 @@ const clearAuthenticatedState = (state: AppState): void => {
   state.deletedRecordingIds = [];
   state.backgroundSaveRecordingId = null;
   state.currentRecordingId = null;
-  state.selectedDate = null;
+  state.recordingFetchStatuses = {};
+  state.recordingFetchErrors = {};
   state.userDataStatus = "idle";
   state.userDataError = null;
   state.recordingSaveStatus = "idle";
@@ -1906,7 +1917,6 @@ const appSlice = createSlice({
       ];
       state.currentRecordingId = localRecordingId;
       state.backgroundSaveRecordingId = localRecordingId;
-      state.selectedDate = toDateKey(recordingDate);
       state.calendarMonth = recordingDate.getMonth();
       state.calendarYear = recordingDate.getFullYear();
       state.speakState = "idle";
@@ -2124,12 +2134,6 @@ const appSlice = createSlice({
     toggleCalendar: (state) => {
       state.calendarVisible = !state.calendarVisible;
     },
-    setSelectedDate: (state, action: PayloadAction<string>) => {
-      state.selectedDate = action.payload;
-    },
-    clearSelectedDate: (state) => {
-      state.selectedDate = null;
-    },
     previousMonth: (state) => {
       if (state.calendarMonth === 0) {
         state.calendarMonth = 11;
@@ -2197,10 +2201,12 @@ const appSlice = createSlice({
       openAuthFlow(state, false);
     },
     cancelAuth: (state) => {
+      state.authEmailDraft = "";
       state.authPasswordDraft = "";
       state.authError = null;
       state.authStatus = "idle";
       state.pendingSaveAfterAuth = false;
+      state.recordingSaveError = null;
     },
     setAuthEmailDraft: (state, action: PayloadAction<string>) => {
       state.authEmailDraft = action.payload;
@@ -2319,8 +2325,9 @@ const appSlice = createSlice({
         state.userDataError = null;
         state.selectedInterestIds = action.payload.interestIds;
         state.selectedEnglishLevel = action.payload.englishLevel;
-        state.recordings = filterDeletedRecordings(action.payload.recordings, state.deletedRecordingIds);
-        state.backgroundSaveRecordingId = null;
+        // Local recordings are not yet in the server list, including failed saves.
+        const localRecordings = state.recordings.filter((recording) => recording.id.startsWith("local-"));
+        state.recordings = filterDeletedRecordings([...localRecordings, ...action.payload.recordings], state.deletedRecordingIds);
         applySubscriptionState(state, action.payload.subscription);
         applyRecordingQuotaState(state, action.payload.quota);
         clearStudyWordsState(state);
@@ -2351,25 +2358,28 @@ const appSlice = createSlice({
           state.interestsSaveError = action.payload;
         }
       })
-      .addCase(saveRecording.pending, (state) => {
+      .addCase(saveRecording.pending, (state, action) => {
         state.recordingSaveStatus = "loading";
         state.recordingSaveError = null;
+        const localRecordingId = action.meta.arg?.localRecordingId;
+        if (localRecordingId) {
+          state.backgroundSaveRecordingId = localRecordingId;
+          const recording = state.recordings.find((item) => item.id === localRecordingId);
+          if (recording) {
+            recording.status = "processing";
+            recording.processingError = null;
+          }
+        }
       })
       .addCase(saveRecording.fulfilled, (state, action) => {
-        applySavedRecording(state, action.payload.recording);
+        applySavedRecording(state, action.payload.recording, action.meta.arg?.localRecordingId);
         applyRecordingQuotaState(state, action.payload.quota);
       })
       .addCase(saveRecording.rejected, (state, action) => {
         state.recordingSaveStatus = "idle";
-        if (action.payload === "Unauthorized") {
-          state.backgroundSaveRecordingId = null;
-          clearAuthenticatedState(state);
-          openAuthFlow(state, true);
-          return;
-        }
-        if (action.payload && action.payload !== "Unauthorized") {
-          if (state.backgroundSaveRecordingId) {
-            const backgroundSaveRecordingId = state.backgroundSaveRecordingId;
+        if (action.payload) {
+          const backgroundSaveRecordingId = action.meta.arg?.localRecordingId ?? state.backgroundSaveRecordingId;
+          if (backgroundSaveRecordingId) {
             state.recordings = state.recordings.map((item) =>
               item.id === backgroundSaveRecordingId
                 ? { ...item, status: "failed", processingError: action.payload ?? "Failed to save recording." }
@@ -2380,13 +2390,18 @@ const appSlice = createSlice({
           state.recordingSaveError = action.payload;
         }
       })
+      .addCase(fetchRecording.pending, (state, action) => {
+        state.recordingFetchStatuses[action.meta.arg] = "loading";
+        delete state.recordingFetchErrors[action.meta.arg];
+      })
       .addCase(fetchRecording.fulfilled, (state, action) => {
+        state.recordingFetchStatuses[action.meta.arg] = "ready";
+        delete state.recordingFetchErrors[action.meta.arg];
         upsertRecording(state, action.payload);
       })
       .addCase(fetchRecording.rejected, (state, action) => {
-        if (action.payload === "Unauthorized") {
-          clearAuthenticatedState(state);
-        }
+        state.recordingFetchStatuses[action.meta.arg] = "failed";
+        state.recordingFetchErrors[action.meta.arg] = action.payload ?? "Failed to load recording.";
       })
       .addCase(retryRecordingProcessing.pending, (state, action) => {
         state.recordingRetryStatuses[action.meta.arg] = "loading";
@@ -2623,8 +2638,6 @@ export const {
   setCustomTopicDraft,
   useCustomTopic,
   toggleCalendar,
-  setSelectedDate,
-  clearSelectedDate,
   previousMonth,
   nextMonth,
   selectRecording,

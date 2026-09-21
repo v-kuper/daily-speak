@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
 import { runInThisContext } from "node:vm";
@@ -13,11 +13,20 @@ export function createTypeScriptLoader() {
     const loadedModule = { exports: {} };
     cache.set(filename, loadedModule);
     const require = createRequire(filename);
-    const localRequire = (specifier) => specifier.startsWith(".")
-      ? load(resolve(dirname(filename), `${specifier}.ts`))
-      : require(specifier);
+    const localRequire = (specifier) => {
+      if (!specifier.startsWith(".")) return require(specifier);
+      const base = resolve(dirname(filename), specifier);
+      const source = [base, `${base}.ts`, `${base}.tsx`, `${base}/index.ts`]
+        .find((candidate) => /\.tsx?$/.test(candidate) && existsSync(candidate));
+      if (!source) throw new Error(`Cannot resolve ${specifier} from ${filename}`);
+      return load(source);
+    };
     const { outputText } = ts.transpileModule(readFileSync(filename, "utf8"), {
-      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+      fileName: filename,
+      compilerOptions: {
+        module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022,
+        jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true,
+      },
     });
     runInThisContext(`(function(require, module, exports) {\n${outputText}\n})`, { filename })(localRequire, loadedModule, loadedModule.exports);
     return loadedModule.exports;

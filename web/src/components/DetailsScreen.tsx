@@ -1,6 +1,8 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { deleteAndNavigate, recordingDetailState } from "../lib/routeFlows";
 
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { buildTranscriptSegments } from "../lib/transcriptHighlight";
@@ -16,14 +18,14 @@ import {
   shouldScheduleShadowing,
 } from "../lib/shadowing";
 import { formatTime } from "../lib/utils";
-import { useAppDispatch, useAppSelector } from "../store/hooks";
+import { useAppDispatch, useAppSelector, useAppStore } from "../store/hooks";
 import {
   clearRecordingDeleteError,
-  deleteRecording,
   fetchRecording,
   generateShadowingAudio,
   resetPlaybackState,
   retryRecordingProcessing,
+  selectRecording,
   setPlaybackPlaying,
   setPlaybackPosition,
 } from "../store/slices/appSlice";
@@ -108,16 +110,16 @@ const waitForAudioCanPlay = (audio: HTMLAudioElement): Promise<void> => {
   });
 };
 
-export default function DetailsScreen() {
+export default function DetailsScreen({ recordingId: routeRecordingId }: { recordingId: string }) {
   const dispatch = useAppDispatch();
+  const store = useAppStore();
+  const router = useRouter();
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const autoShadowingRequestedRef = useRef(new Set<string>());
   const [audioSrc, setAudioSrc] = useState<string | null>(null);
   const [playbackError, setPlaybackError] = useState<string | null>(null);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const {
-    recordings,
-    currentRecordingId,
     isPlaying,
     playbackPosition,
     backgroundSaveRecordingId,
@@ -131,10 +133,19 @@ export default function DetailsScreen() {
     (state) => state.app
   );
 
-  const recording = useMemo(
-    () => recordings.find((item) => item.id === currentRecordingId),
-    [currentRecordingId, recordings]
+  const { recording, error: recordingError, shouldFetch } = useAppSelector(
+    (state) => recordingDetailState(state.app, routeRecordingId),
+    (previous, next) => previous.recording === next.recording && previous.error === next.error && previous.shouldFetch === next.shouldFetch,
   );
+
+  useEffect(() => {
+    dispatch(selectRecording(routeRecordingId));
+    setDeleteModalOpen(false);
+  }, [dispatch, routeRecordingId]);
+
+  useEffect(() => {
+    if (shouldFetch) void dispatch(fetchRecording(routeRecordingId));
+  }, [dispatch, routeRecordingId, shouldFetch]);
   const recordingId = recording?.id ?? null;
   const recordingAudioDataUrl = recording?.audioDataUrl ?? null;
   const recordingStatus = recording?.status;
@@ -176,7 +187,7 @@ export default function DetailsScreen() {
   const canDelete = Boolean(recordingId) && recordingId !== backgroundSaveRecordingId;
 
   useEffect(() => {
-    if (!recordingId || !shouldPollRecording(recordingStatus ?? "", shadowingStatus)) {
+    if (!recordingId || recordingId.startsWith("local-") || !shouldPollRecording(recordingStatus ?? "", shadowingStatus)) {
       return;
     }
 
@@ -356,7 +367,7 @@ export default function DetailsScreen() {
     if (!recordingId || !canDelete) {
       return;
     }
-    void dispatch(deleteRecording(recordingId)).unwrap().catch(() => undefined);
+    void deleteAndNavigate(store, router, recordingId);
   };
 
   const onRetryShadowing = () => {
@@ -427,7 +438,9 @@ export default function DetailsScreen() {
           ← Back
         </Link>
         <h2>Recording</h2>
-        <div className="empty-state">Recording not found.</div>
+        <div className="empty-state" role={recordingError ? "alert" : "status"}>
+          {recordingError ?? "Loading recording..."}
+        </div>
       </section>
     );
   }
