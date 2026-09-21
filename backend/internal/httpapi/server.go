@@ -236,7 +236,7 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request, scope string,
 	started := time.Now()
 	logger := logging.ForRequest(scope, r)
 	writeError := func(status int, message string) {
-		if clearInvalidSession {
+		if clearInvalidSession && status == http.StatusUnauthorized {
 			http.SetCookie(w, auth.ClearSessionCookieWithConfig(s.sessionCookie))
 		}
 		writeJSON(w, status, map[string]string{"error": message})

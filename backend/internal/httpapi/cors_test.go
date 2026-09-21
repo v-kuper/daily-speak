@@ -174,3 +174,20 @@ func TestCookieServerClearsConfiguredScopeAndDefaultsToLax(t *testing.T) {
 		})
 	}
 }
+
+func TestCookieServerPreservesSessionOnLookupFailure(t *testing.T) {
+	// An unconfigured DB returns a real lookup error without starting a service.
+	handler := NewServer(Config{
+		SessionCookie: auth.CookieConfig{Secure: true, SameSite: http.SameSiteNoneMode, Domain: ".example.com"},
+	}).Handler()
+	request := httptest.NewRequest(http.MethodGet, "/api/auth/session", nil)
+	request.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "potentially-valid-session"})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusInternalServerError {
+		t.Fatalf("expected lookup failure status 500, got %d", response.Code)
+	}
+	if cookies := response.Result().Header.Values("Set-Cookie"); len(cookies) != 0 {
+		t.Fatalf("lookup failure must preserve the existing session cookie, got Set-Cookie %v", cookies)
+	}
+}
