@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import test from "node:test";
@@ -182,6 +183,16 @@ test("repository forces LF endings for scripts used inside Linux containers", ()
 
   assert.match(gitAttributes, /\*\.sh\s+text\s+eol=lf/);
   assert.match(gitAttributes, /Dockerfile\s+text\s+eol=lf/);
+});
+
+test("repository keeps the generated OpenAPI document on LF checkouts", () => {
+  const attributes = execFileSync(
+    "git",
+    ["check-attr", "eol", "--", "backend/docs/openapi.json"],
+    { encoding: "utf8" },
+  );
+
+  assert.equal(attributes.trim(), "backend/docs/openapi.json: eol: lf");
 });
 
 test("Docker build creates public before copying it into the runtime image", () => {
