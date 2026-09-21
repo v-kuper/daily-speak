@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-21
 
-**Status:** Conversational design approved; pending written-spec review
+**Status:** Approved on 2026-09-21
 
 ## Intent
 
