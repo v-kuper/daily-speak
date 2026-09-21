@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { deleteAndNavigate, recordingDetailState } from "../lib/routeFlows";
+import { deleteAndNavigate, reconcileRecordingSaveRoute, recordingDetailState, startRecordingDetailLifecycle } from "../lib/routeFlows";
 
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { buildTranscriptSegments } from "../lib/transcriptHighlight";
@@ -14,22 +14,20 @@ import {
 import {
   isShadowingStale,
   shadowingProgressLabel,
-  shouldPollRecording,
   shouldScheduleShadowing,
 } from "../lib/shadowing";
 import { formatTime } from "../lib/utils";
 import { useAppDispatch, useAppSelector, useAppStore } from "../store/hooks";
 import {
   clearRecordingDeleteError,
-  fetchRecording,
   generateShadowingAudio,
   resetPlaybackState,
   retryRecordingProcessing,
-  selectRecording,
   setPlaybackPlaying,
   setPlaybackPosition,
 } from "../store/slices/appSlice";
 import SuggestionCard from "./SuggestionCard";
+import RecordingLoadError from "./RecordingLoadError";
 
 const formatPracticeLabel = (value: "free_talk" | "topic" | "photo_description"): string => {
   switch (value) {
@@ -133,19 +131,20 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
     (state) => state.app
   );
 
-  const { recording, error: recordingError, shouldFetch } = useAppSelector(
+  const { recording, error: recordingError } = useAppSelector(
     (state) => recordingDetailState(state.app, routeRecordingId),
     (previous, next) => previous.recording === next.recording && previous.error === next.error && previous.shouldFetch === next.shouldFetch,
   );
+  const saveResult = useAppSelector((state) => state.app.recordingSaveResults[routeRecordingId]);
 
   useEffect(() => {
-    dispatch(selectRecording(routeRecordingId));
+    reconcileRecordingSaveRoute(store, router, routeRecordingId, () => window.location.pathname);
+  }, [store, router, routeRecordingId, saveResult]);
+
+  useEffect(() => {
     setDeleteModalOpen(false);
-  }, [dispatch, routeRecordingId]);
-
-  useEffect(() => {
-    if (shouldFetch) void dispatch(fetchRecording(routeRecordingId));
-  }, [dispatch, routeRecordingId, shouldFetch]);
+    return startRecordingDetailLifecycle(store, routeRecordingId);
+  }, [store, routeRecordingId]);
   const recordingId = recording?.id ?? null;
   const recordingAudioDataUrl = recording?.audioDataUrl ?? null;
   const recordingStatus = recording?.status;
@@ -185,22 +184,6 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
     hasCorrectedTranscript &&
     (shadowingStatus === "failed" || shadowingIsStale || Boolean(shadowingRequestError));
   const canDelete = Boolean(recordingId) && recordingId !== backgroundSaveRecordingId;
-
-  useEffect(() => {
-    if (!recordingId || recordingId.startsWith("local-") || !shouldPollRecording(recordingStatus ?? "", shadowingStatus)) {
-      return;
-    }
-
-    const interval = window.setInterval(() => {
-      void dispatch(fetchRecording(recordingId));
-    }, 3000);
-
-    void dispatch(fetchRecording(recordingId));
-
-    return () => {
-      window.clearInterval(interval);
-    };
-  }, [dispatch, recordingId, recordingStatus, shadowingStatus]);
 
   useEffect(() => {
     if (
@@ -438,9 +421,7 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
           ← Back
         </Link>
         <h2>Recording</h2>
-        <div className="empty-state" role={recordingError ? "alert" : "status"}>
-          {recordingError ?? "Loading recording..."}
-        </div>
+        {recordingError ? <RecordingLoadError recordingId={routeRecordingId} /> : <div className="empty-state" role="status">Loading recording...</div>}
       </section>
     );
   }
@@ -451,6 +432,7 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
         ← Back
       </Link>
       <h2>Recording</h2>
+      <RecordingLoadError recordingId={routeRecordingId} />
 
       {isProcessing && (
         <div className="notice">

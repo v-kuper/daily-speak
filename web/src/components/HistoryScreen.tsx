@@ -3,14 +3,14 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { recordingPath } from "../lib/routes";
-import { historyDateFromSearch } from "../lib/routeFlows";
+import { historyDateFromSearch, startHistoryRecordingPolling } from "../lib/routeFlows";
 
 import { useEffect } from "react";
 import { recordingProcessingLabel } from "../lib/recordingProcessing";
 import { formatTime, formatTimeOfDay, recordingDateKey } from "../lib/utils";
-import { useAppDispatch, useAppSelector } from "../store/hooks";
+import { useAppDispatch, useAppSelector, useAppStore } from "../store/hooks";
+import RecordingLoadError from "./RecordingLoadError";
 import {
-  fetchRecording,
   nextMonth,
   previousMonth,
   toggleCalendar
@@ -37,34 +37,14 @@ const formatPracticeLabel = (value: "free_talk" | "topic" | "photo_description")
 
 export default function HistoryScreen() {
   const dispatch = useAppDispatch();
+  const store = useAppStore();
   const router = useRouter();
   const searchParams = useSearchParams();
   const selectedDate = historyDateFromSearch(searchParams);
-  const { recordings, recordingSaveError, calendarVisible, calendarMonth, calendarYear } = useAppSelector(
+  const { recordings, recordingSaveError, recordingFetchErrors, calendarVisible, calendarMonth, calendarYear } = useAppSelector(
     (state) => state.app
   );
-  const processingRecordingKey = recordings
-    .filter((recording) => recording.status === "processing" && !recording.id.startsWith("local-"))
-    .map((recording) => recording.id)
-    .sort()
-    .join(",");
-
-  useEffect(() => {
-    const recordingIds = processingRecordingKey ? processingRecordingKey.split(",") : [];
-    if (recordingIds.length === 0) {
-      return;
-    }
-
-    const refreshProcessingRecordings = () => {
-      recordingIds.forEach((recordingId) => {
-        void dispatch(fetchRecording(recordingId));
-      });
-    };
-
-    refreshProcessingRecordings();
-    const interval = window.setInterval(refreshProcessingRecordings, 5000);
-    return () => window.clearInterval(interval);
-  }, [dispatch, processingRecordingKey]);
+  useEffect(() => startHistoryRecordingPolling(store), [store]);
 
   const firstDay = new Date(calendarYear, calendarMonth, 1);
   const lastDay = new Date(calendarYear, calendarMonth + 1, 0);
@@ -83,6 +63,7 @@ export default function HistoryScreen() {
     <section>
       <h2>History</h2>
       {recordingSaveError && <div className="auth-error" role="alert">{recordingSaveError}</div>}
+      {Object.keys(recordingFetchErrors).map((recordingId) => <RecordingLoadError key={recordingId} recordingId={recordingId} />)}
 
       <div className="calendar-wrapper">
         <button className="btn btn-secondary btn-small" onClick={() => dispatch(toggleCalendar())}>

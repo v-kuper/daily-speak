@@ -114,6 +114,7 @@ test("recording requests resolve all server media and retain HTTP validation mes
   const slice = importTypeScriptModule("src/store/slices/appSlice.ts");
   const { configureStore } = require("@reduxjs/toolkit");
   const store = configureStore({ reducer: { app: slice.default } });
+  store.dispatch(slice.signIn.fulfilled({ email: "person@example.test", isSubscriber: false, englishLevel: "B1" }, "login"));
   const recording = {
     id: "recording-1", topic: "Travel", duration: 10, timestamp: "2026-09-21T10:00:00Z",
     status: "ready", transcript: "Hello", correctedTranscript: "Hello", suggestions: [],

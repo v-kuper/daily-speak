@@ -155,6 +155,7 @@ export type AppState = {
   authStatus: AuthStatus;
   authInitialized: boolean;
   pendingSaveAfterAuth: boolean;
+  pendingAuthSaveDraft: RecordingSaveDraft | null;
   questionsStatus: QuestionsStatus;
   questionsError: string | null;
   questionsDate: string | null;
@@ -187,8 +188,11 @@ export type AppState = {
   userDataError: string | null;
   recordingSaveStatus: AuthStatus;
   recordingSaveError: string | null;
+  // Local ID -> permanent ID, or null after terminal failure. Used when a route mounts after saving finishes.
+  recordingSaveResults: Record<string, string | null>;
   recordingFetchStatuses: Record<string, "loading" | "ready" | "failed">;
   recordingFetchErrors: Record<string, string>;
+  recordingFetchFailureKinds: Record<string, "transient" | "terminal">;
   recordingDeleteStatus: AuthStatus;
   recordingDeleteError: string | null;
   recordingRetryStatuses: Record<string, AuthStatus>;
@@ -1224,11 +1228,11 @@ export const saveRecording = createAsyncThunk<
             },
             body: JSON.stringify({ recording: recordingDraft })
           });
-      const payload = (await readApiJSON(response)) as SaveRecordingResponse | null;
-
       if (response.status === 401) {
         return rejectWithValue("Unauthorized");
       }
+
+      const payload = (await readApiJSON(response)) as SaveRecordingResponse | null;
 
       if (!response.ok) {
         return rejectWithValue(payload?.error ?? "Failed to save recording.");
@@ -1247,33 +1251,38 @@ export const saveRecording = createAsyncThunk<
   }
 );
 
-export const fetchRecording = createAsyncThunk<Recording, string, { state: { app: AppState }; rejectValue: string }>(
+export const fetchRecording = createAsyncThunk<Recording, string, {
+  state: { app: AppState };
+  rejectValue: string;
+  rejectedMeta: { failureKind: "transient" | "terminal" | "unauthorized" };
+}>(
   "app/fetchRecording",
   async (recordingId, { rejectWithValue }) => {
     try {
       const response = await apiFetch(`/api/recordings/${encodeURIComponent(recordingId)}`, {
         cache: "no-store"
       });
-      const payload = (await readApiJSON(response)) as { recording?: unknown; error?: string } | null;
       if (response.status === 401) {
-        return rejectWithValue("Unauthorized");
+        return rejectWithValue("Unauthorized", { failureKind: "unauthorized" });
       }
+      const failureKind = response.status === 403 || response.status === 404 ? "terminal" : "transient";
+      const payload = (await readApiJSON(response).catch(() => null)) as { recording?: unknown; error?: string } | null;
       if (!response.ok) {
-        return rejectWithValue(payload?.error ?? "Failed to load recording.");
+        return rejectWithValue(payload?.error ?? "Failed to load recording.", { failureKind });
       }
       const recording = parseRecording(payload?.recording);
       if (!recording) {
-        return rejectWithValue("Invalid recording payload from server.");
+        return rejectWithValue("Invalid recording payload from server.", { failureKind: "transient" });
       }
       return recording;
     } catch {
-      return rejectWithValue("Cannot connect to recording service.");
+      return rejectWithValue("Cannot connect to recording service.", { failureKind: "transient" });
     }
   },
   {
     condition: (recordingId, { getState }) => {
       const state = getState().app;
-      return !recordingId.startsWith("local-") && !state.deletedRecordingIds.includes(recordingId)
+      return state.isAuthenticated && !recordingId.startsWith("local-") && !state.deletedRecordingIds.includes(recordingId)
         && state.recordingFetchStatuses[recordingId] !== "loading";
     },
   }
@@ -1511,6 +1520,7 @@ const initialState: AppState = {
   authStatus: "idle",
   authInitialized: false,
   pendingSaveAfterAuth: false,
+  pendingAuthSaveDraft: null,
   questionsStatus: "idle",
   questionsError: null,
   questionsDate: null,
@@ -1543,8 +1553,10 @@ const initialState: AppState = {
   userDataError: null,
   recordingSaveStatus: "idle",
   recordingSaveError: null,
+  recordingSaveResults: {},
   recordingFetchStatuses: {},
   recordingFetchErrors: {},
+  recordingFetchFailureKinds: {},
   recordingDeleteStatus: "idle",
   recordingDeleteError: null,
   recordingRetryStatuses: {},
@@ -1637,6 +1649,11 @@ const applySavedRecording = (state: AppState, recording: Recording, localRecordi
     ...state.recordings.filter((item) => item.id !== recording.id && item.id !== backgroundSaveRecordingId)
   ];
   if (isBackgroundSave) {
+    if (backgroundSaveRecordingId) state.recordingSaveResults[backgroundSaveRecordingId] = recording.id;
+    if (state.pendingAuthSaveDraft?.localRecordingId === localRecordingId) {
+      state.pendingAuthSaveDraft = null;
+      state.pendingSaveAfterAuth = false;
+    }
     if (state.currentRecordingId === backgroundSaveRecordingId) {
       state.currentRecordingId = recording.id;
       const recordingDate = new Date(recording.timestamp);
@@ -1662,6 +1679,7 @@ const applySavedRecording = (state: AppState, recording: Recording, localRecordi
   state.calendarMonth = recordingDate.getMonth();
   state.calendarYear = recordingDate.getFullYear();
   state.pendingSaveAfterAuth = false;
+  state.pendingAuthSaveDraft = null;
   state.recordingSaveStatus = "idle";
   state.recordingSaveError = null;
   state.recordingDeleteStatus = "idle";
@@ -1746,7 +1764,7 @@ const completeAuthSuccess = (
   state.recordingDeleteError = null;
   resetRecordingRetry(state);
   resetShadowingRequest(state);
-  if (!state.pendingSaveAfterAuth) {
+  if (!state.pendingSaveAfterAuth && !state.pendingRecordingAudioDataUrl && state.speakState !== "recording") {
     state.pendingRecordingAudioDataUrl = null;
     state.recordingUploadSessionId = null;
     state.recordingInputError = null;
@@ -1760,6 +1778,8 @@ const completeAuthSuccess = (
   state.currentRecordingId = null;
   state.recordingFetchStatuses = {};
   state.recordingFetchErrors = {};
+  state.recordingFetchFailureKinds = {};
+  state.recordingSaveResults = {};
   applySubscriptionState(state, {
     isSubscriber,
     subscriptionExpiresAt: null,
@@ -1777,6 +1797,7 @@ const clearAuthenticatedState = (state: AppState): void => {
   state.authStatus = "idle";
   state.authInitialized = true;
   state.pendingSaveAfterAuth = false;
+  state.pendingAuthSaveDraft = null;
   state.selectedInterestIds = [];
   state.questionsInterestsKey = "";
   state.questionsDate = null;
@@ -1798,6 +1819,8 @@ const clearAuthenticatedState = (state: AppState): void => {
   state.currentRecordingId = null;
   state.recordingFetchStatuses = {};
   state.recordingFetchErrors = {};
+  state.recordingFetchFailureKinds = {};
+  state.recordingSaveResults = {};
   state.userDataStatus = "idle";
   state.userDataError = null;
   state.recordingSaveStatus = "idle";
@@ -1819,6 +1842,28 @@ const clearAuthenticatedState = (state: AppState): void => {
   clearTopicGuidanceState(state);
   clearStudyWordsState(state);
   resetPlayback(state);
+};
+
+// Session expiry is different from an intentional logout: keep unsent work for re-authentication.
+const expireSessionKeepingDraft = (state: AppState): void => {
+  const draft = {
+    speakState: state.speakState,
+    selectedTopic: state.selectedTopic,
+    recordingDuration: state.recordingDuration,
+    recordingPracticeType: state.recordingPracticeType,
+    pendingRecordingAudioDataUrl: state.pendingRecordingAudioDataUrl,
+    pendingPhotoDataUrl: state.pendingPhotoDataUrl,
+    pendingPhotoObjectDraft: state.pendingPhotoObjectDraft,
+    recordingInputError: state.recordingInputError,
+    pendingPhotoError: state.pendingPhotoError,
+    pendingSaveAfterAuth: state.pendingSaveAfterAuth,
+    pendingAuthSaveDraft: state.pendingAuthSaveDraft,
+    recordingSaveError: state.recordingSaveError,
+    authEmailDraft: state.authEmailDraft || state.userEmail || "",
+  };
+  clearAuthenticatedState(state);
+  Object.assign(state, draft);
+  state.authError = "Your session expired. Sign in again.";
 };
 
 const appSlice = createSlice({
@@ -1880,6 +1925,9 @@ const appSlice = createSlice({
     },
     clearRecordingDeleteError: (state) => {
       state.recordingDeleteError = null;
+    },
+    finishFailedRecordingSave: (state, action: PayloadAction<string>) => {
+      state.recordingSaveResults[action.payload] = null;
     },
     showBackgroundRecordingSave: (state, action: PayloadAction<RecordingSaveDraft>) => {
       const draft = action.payload;
@@ -2206,6 +2254,7 @@ const appSlice = createSlice({
       state.authError = null;
       state.authStatus = "idle";
       state.pendingSaveAfterAuth = false;
+      state.pendingAuthSaveDraft = null;
       state.recordingSaveError = null;
     },
     setAuthEmailDraft: (state, action: PayloadAction<string>) => {
@@ -2334,7 +2383,7 @@ const appSlice = createSlice({
       })
       .addCase(fetchUserData.rejected, (state, action) => {
         if (action.payload === "Unauthorized") {
-          clearAuthenticatedState(state);
+          expireSessionKeepingDraft(state);
           return;
         }
         state.userDataStatus = "failed";
@@ -2351,7 +2400,7 @@ const appSlice = createSlice({
       .addCase(saveInterests.rejected, (state, action) => {
         state.interestsSaveStatus = "idle";
         if (action.payload === "Unauthorized") {
-          clearAuthenticatedState(state);
+          expireSessionKeepingDraft(state);
           return;
         }
         if (action.payload && action.payload !== "Unauthorized") {
@@ -2377,6 +2426,16 @@ const appSlice = createSlice({
       })
       .addCase(saveRecording.rejected, (state, action) => {
         state.recordingSaveStatus = "idle";
+        if (action.payload === "Unauthorized") {
+          state.pendingSaveAfterAuth = true;
+          if (action.meta.arg) {
+            // Keep a failed background save separate from any newer speaking session.
+            state.pendingAuthSaveDraft = { ...action.meta.arg, recordingUploadSessionId: null };
+          }
+          state.recordingSaveError = "Your session expired. Sign in again to save your recording.";
+          expireSessionKeepingDraft(state);
+          return;
+        }
         if (action.payload) {
           const backgroundSaveRecordingId = action.meta.arg?.localRecordingId ?? state.backgroundSaveRecordingId;
           if (backgroundSaveRecordingId) {
@@ -2393,15 +2452,24 @@ const appSlice = createSlice({
       .addCase(fetchRecording.pending, (state, action) => {
         state.recordingFetchStatuses[action.meta.arg] = "loading";
         delete state.recordingFetchErrors[action.meta.arg];
+        delete state.recordingFetchFailureKinds[action.meta.arg];
       })
       .addCase(fetchRecording.fulfilled, (state, action) => {
+        if (!state.isAuthenticated) return;
         state.recordingFetchStatuses[action.meta.arg] = "ready";
         delete state.recordingFetchErrors[action.meta.arg];
+        delete state.recordingFetchFailureKinds[action.meta.arg];
         upsertRecording(state, action.payload);
       })
       .addCase(fetchRecording.rejected, (state, action) => {
+        if (action.meta.failureKind === "unauthorized") {
+          expireSessionKeepingDraft(state);
+          return;
+        }
+        if (!state.isAuthenticated) return;
         state.recordingFetchStatuses[action.meta.arg] = "failed";
         state.recordingFetchErrors[action.meta.arg] = action.payload ?? "Failed to load recording.";
+        state.recordingFetchFailureKinds[action.meta.arg] = action.meta.failureKind === "terminal" ? "terminal" : "transient";
       })
       .addCase(retryRecordingProcessing.pending, (state, action) => {
         state.recordingRetryStatuses[action.meta.arg] = "loading";
@@ -2415,7 +2483,7 @@ const appSlice = createSlice({
       .addCase(retryRecordingProcessing.rejected, (state, action) => {
         delete state.recordingRetryStatuses[action.meta.arg];
         if (action.payload === "Unauthorized") {
-          clearAuthenticatedState(state);
+          expireSessionKeepingDraft(state);
           return;
         }
         state.recordingRetryErrors[action.meta.arg] = action.payload ?? "Failed to retry recording processing.";
@@ -2432,7 +2500,7 @@ const appSlice = createSlice({
       .addCase(generateShadowingAudio.rejected, (state, action) => {
         state.shadowingRequestStatus = "idle";
         if (action.payload === "Unauthorized") {
-          clearAuthenticatedState(state);
+          expireSessionKeepingDraft(state);
           return;
         }
         state.shadowingRequestError = action.payload ?? "Failed to generate pronunciation audio.";
@@ -2464,7 +2532,7 @@ const appSlice = createSlice({
       .addCase(deleteRecording.rejected, (state, action) => {
         state.recordingDeleteStatus = "idle";
         if (action.payload === "Unauthorized") {
-          clearAuthenticatedState(state);
+          expireSessionKeepingDraft(state);
           return;
         }
         state.recordingDeleteError = action.payload ?? "Failed to delete recording.";
@@ -2482,7 +2550,7 @@ const appSlice = createSlice({
       .addCase(subscribeMonthly.rejected, (state, action) => {
         state.subscriptionActionStatus = "idle";
         if (action.payload === "Unauthorized") {
-          clearAuthenticatedState(state);
+          expireSessionKeepingDraft(state);
           return;
         }
         state.subscriptionActionError = action.payload ?? "Failed to activate subscription.";
@@ -2500,7 +2568,7 @@ const appSlice = createSlice({
       .addCase(cancelSubscription.rejected, (state, action) => {
         state.subscriptionActionStatus = "idle";
         if (action.payload === "Unauthorized") {
-          clearAuthenticatedState(state);
+          expireSessionKeepingDraft(state);
           return;
         }
         state.subscriptionActionError = action.payload ?? "Failed to cancel subscription.";
@@ -2518,7 +2586,7 @@ const appSlice = createSlice({
       .addCase(saveEnglishLevel.rejected, (state, action) => {
         state.englishLevelSaveStatus = "idle";
         if (action.payload === "Unauthorized") {
-          clearAuthenticatedState(state);
+          expireSessionKeepingDraft(state);
           return;
         }
         state.englishLevelSaveError = action.payload ?? "Failed to save English level.";
@@ -2619,6 +2687,7 @@ export const {
   setRecordingUploadSessionId,
   clearRecordingDeleteError,
   showBackgroundRecordingSave,
+  finishFailedRecordingSave,
   setPhotoForPractice,
   clearPhotoForPractice,
   setPhotoObjectDraft,

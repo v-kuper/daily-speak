@@ -491,7 +491,7 @@ export default function SpeakScreen() {
       return;
     }
 
-    void saveAndNavigate(store, router, draft, finalAudioUploadPromiseRef.current);
+    void saveAndNavigate(store, router, draft, finalAudioUploadPromiseRef.current, () => window.location.pathname);
   }, [buildRecordingSaveDraft, dispatch, isAuthenticated, router, store]);
 
   const beginRecordingFromMicrophone = (onRecordingStarted: () => void) => {
