@@ -73,8 +73,8 @@ services:
       - web
       - backend
     ports:
-      - "0.0.0.0:${HTTPS_PORT:-3443}:3443"
-      - "0.0.0.0:${API_HTTPS_PORT:-3444}:3444"
+      - "0.0.0.0:${HTTPS_PORT:-3443}:${HTTPS_PORT:-3443}"
+      - "0.0.0.0:${API_HTTPS_PORT:-3444}:${API_HTTPS_PORT:-3444}"
     volumes:
       - ./lan-https/Caddyfile:/etc/caddy/Caddyfile:ro
       - ./lan-https/certs:/certs:ro

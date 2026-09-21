@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const DEFAULT_APP_PORT = "3218";
+const DEFAULT_API_PORT = "3219";
 const DEFAULT_COMPOSE_PROJECT_NAME = "daily-speaking";
 
 export function getHostPort(env = process.env) {
@@ -11,6 +12,10 @@ export function getHostPort(env = process.env) {
   return typeof configuredPort === "string" && configuredPort.trim()
     ? configuredPort.trim()
     : DEFAULT_APP_PORT;
+}
+
+function getApiPort(env = process.env) {
+  return env.API_PORT?.trim() || DEFAULT_API_PORT;
 }
 
 export function getComposeProjectName(env = process.env) {
@@ -56,43 +61,49 @@ export function listLanUrls({
   interfaces = os.networkInterfaces(),
   port = getHostPort(),
 } = {}) {
-  const urls = [];
+  return listLanAddresses(interfaces).map((address) => `http://${address}:${port}`).sort();
+}
 
-  for (const entries of Object.values(interfaces)) {
+export function listLanAddresses(interfaces = os.networkInterfaces()) {
+  const addresses = [];
+  for (const [name, entries] of Object.entries(interfaces)) {
     for (const entry of entries ?? []) {
       if (isLanAddress(entry)) {
-        urls.push(`http://${entry.address}:${port}`);
+        const virtual = /docker|veth|wsl|virtual|vmware|vbox|hyper-v|utun|tun\d|tap\d|tailscale|wireguard|^wg\d|^br-/i.test(name);
+        const networkRank = entry.address.startsWith("192.168.") ? 0
+          : entry.address.startsWith("10.") ? 1 : 2;
+        addresses.push({ address: entry.address, rank: (virtual ? 10 : 0) + networkRank });
       }
     }
   }
-
-  return [...new Set(urls)].sort();
+  addresses.sort((a, b) => a.rank - b.rank || a.address.localeCompare(b.address));
+  return [...new Set(addresses.map(({ address }) => address))];
 }
 
 export function formatLanSummary({
-  port = getHostPort(),
-  lanUrls = listLanUrls({ port }),
+  webPort = getHostPort(),
+  apiPort = getApiPort(),
+  lanAddresses = listLanAddresses(),
 } = {}) {
+  const hostAddress = lanAddresses[0] ?? "localhost";
   const lines = [
     "",
-    "Daily Speaking Practice is running in Docker.",
-    `Local:  http://localhost:${port}`,
+    "Daily Speaking Practice Docker endpoints:",
+    `Web:     http://${hostAddress}:${webPort}`,
+    `API:     http://${hostAddress}:${apiPort}`,
+    `Health:  http://${hostAddress}:${apiPort}/healthz`,
+    `Swagger: http://${hostAddress}:${apiPort}/docs`,
+    `Local web: http://localhost:${webPort}`,
   ];
 
-  if (lanUrls.length > 0) {
-    lines.push("LAN:");
-    for (const url of lanUrls) {
-      lines.push(`  ${url}`);
-    }
-  } else {
+  if (lanAddresses.length === 0) {
     lines.push("LAN:    no non-internal IPv4 address detected");
-    lines.push(`        On Windows, run ipconfig and open http://<IPv4>:${port}`);
+    lines.push("        On Windows, run ipconfig and check the LAN adapter before deploying again.");
   }
 
-  lines.push(`Health: http://localhost:${port}/healthz`);
   lines.push("");
   lines.push(
-    `For Windows LAN access, allow inbound TCP port ${port} in Windows Defender Firewall / Docker Desktop if another device cannot connect.`,
+    `For Windows LAN access, allow inbound TCP ports ${webPort} and ${apiPort} in Windows Defender Firewall / Docker Desktop if another device cannot connect.`,
   );
   lines.push(
     "Microphone recording on LAN/remote URLs requires HTTPS or localhost; plain HTTP IP addresses can load the app but cannot show the browser microphone permission prompt.",
@@ -104,15 +115,35 @@ export function formatLanSummary({
   return lines.join(os.EOL);
 }
 
-function runDockerCompose({ port, env = process.env } = {}) {
-  const composeProjectName = getComposeProjectName(env);
+export function buildComposeCommand({ env = process.env, interfaces = os.networkInterfaces() } = {}) {
+  const webPort = getHostPort(env);
+  const apiPort = getApiPort(env);
+  const hostAddress = listLanAddresses(interfaces)[0] ?? "localhost";
+  return {
+    command: "docker",
+    args: ["compose", "up", "--build", "-d", "web", "backend", "postgres"],
+    env: {
+      ...env,
+      APP_PORT: webPort,
+      API_PORT: apiPort,
+      COMPOSE_PROJECT_NAME: getComposeProjectName(env),
+      PUBLIC_API_BASE_URL: `http://${hostAddress}:${apiPort}`,
+      CORS_ALLOWED_ORIGINS: [...new Set([
+        `http://${hostAddress}:${webPort}`,
+        `http://localhost:${webPort}`,
+        `http://127.0.0.1:${webPort}`,
+      ])].join(","),
+    },
+  };
+}
 
+function runDockerCompose({ command, args, env }) {
   return new Promise((resolve) => {
     const child = spawn(
-      "docker",
-      ["compose", "up", "--build", "-d", "app", "postgres"],
+      command,
+      args,
       {
-        env: { ...env, APP_PORT: port, COMPOSE_PROJECT_NAME: composeProjectName },
+        env,
         stdio: "inherit",
       },
     );
@@ -131,11 +162,12 @@ function runDockerCompose({ port, env = process.env } = {}) {
 function printHelp() {
   console.log(`Usage: npm run docker:lan
 
-Builds and starts the app and PostgreSQL with Docker Compose, then prints
+Builds and starts web, backend, and PostgreSQL with Docker Compose, then prints
 local-network URLs for this machine.
 
 Environment:
-  APP_PORT              Host port to expose, default ${DEFAULT_APP_PORT}
+  APP_PORT              Web host port, default ${DEFAULT_APP_PORT}
+  API_PORT              API host port, default ${DEFAULT_API_PORT}
   COMPOSE_PROJECT_NAME  Docker Compose project name, default ${DEFAULT_COMPOSE_PROJECT_NAME}
 
 Options:
@@ -144,7 +176,11 @@ Options:
 }
 
 export async function main(argv = process.argv.slice(2), env = process.env) {
-  const port = getHostPort(env);
+  const interfaces = os.networkInterfaces();
+  const summaryOptions = {
+    webPort: getHostPort(env), apiPort: getApiPort(env),
+    lanAddresses: listLanAddresses(interfaces),
+  };
 
   if (argv.includes("--help") || argv.includes("-h")) {
     printHelp();
@@ -152,17 +188,17 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
   }
 
   if (argv.includes("--print-only")) {
-    console.log(formatLanSummary({ port }));
+    console.log(formatLanSummary(summaryOptions));
     return 0;
   }
 
-  console.log(`Building and starting Docker app on host port ${port}...`);
-  const exitCode = await runDockerCompose({ port, env });
+  console.log(`Building and starting Docker web on port ${summaryOptions.webPort} and API on port ${summaryOptions.apiPort}...`);
+  const exitCode = await runDockerCompose(buildComposeCommand({ env, interfaces }));
   if (exitCode !== 0) {
     return exitCode;
   }
 
-  console.log(formatLanSummary({ port }));
+  console.log(formatLanSummary(summaryOptions));
   return 0;
 }
 
