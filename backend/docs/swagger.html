@@ -46,30 +46,24 @@
     <header class="docs-header">
       <h1>DailySpeak API</h1>
       <p>
-        Local Swagger UI. Source spec:
-        <a href="./openapi.json">docs/api/openapi.json</a>
+        API contract:
+        <a href="/openapi.json">/openapi.json</a>
       </p>
     </header>
     <div id="swagger-ui"></div>
 
-    <script src="./openapi.spec.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
     <script>
-      if (!window.DAILY_SPEAKING_OPENAPI) {
-        document.getElementById("swagger-ui").innerHTML =
-          '<div style="padding:24px;font-family:sans-serif">Missing openapi.spec.js. Run <code>npm run build:api-docs</code>.</div>';
-      } else {
-        window.ui = SwaggerUIBundle({
-          spec: window.DAILY_SPEAKING_OPENAPI,
-          dom_id: "#swagger-ui",
-          deepLinking: true,
-          persistAuthorization: true,
-          displayRequestDuration: true,
-          tryItOutEnabled: false,
-          docExpansion: "list",
-          defaultModelsExpandDepth: 2
-        });
-      }
+      window.ui = SwaggerUIBundle({
+        url: "/openapi.json",
+        dom_id: "#swagger-ui",
+        deepLinking: true,
+        persistAuthorization: true,
+        displayRequestDuration: true,
+        tryItOutEnabled: true,
+        docExpansion: "list",
+        defaultModelsExpandDepth: 2
+      });
     </script>
   </body>
 </html>

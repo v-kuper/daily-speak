@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	apidocs "daily-speaking-practice/backend/docs"
 	"daily-speaking-practice/backend/internal/ai"
 	"daily-speaking-practice/backend/internal/auth"
 	"daily-speaking-practice/backend/internal/db"
@@ -76,6 +77,22 @@ func NewServer(config Config) *Server {
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("/openapi.json", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
+			return
+		}
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		_, _ = w.Write(apidocs.OpenAPIJSON)
+	})
+	mux.HandleFunc("/docs", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write(apidocs.SwaggerHTML)
+	})
 	mux.HandleFunc("/healthz", s.healthz)
 	mux.HandleFunc("/api/", s.routeAPI)
 	mux.HandleFunc("/uploads/shadowing", s.handleShadowingUpload)
