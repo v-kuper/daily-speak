@@ -82,6 +82,10 @@ test("local deploy workflow defaults to the Docker-local Python Whisper backend"
   assert.match(deployWorkflow, /WHISPER_FFMPEG_BIN:\s+\/usr\/bin\/ffmpeg/);
   assert.match(deployWorkflow, /WHISPER_OPENAI_DEVICE:\s+cpu/);
   assert.match(deployWorkflow, /WHISPER_OPENAI_FP16:\s+false/);
+  assert.match(deployWorkflow, /WHISPER_OPENAI_MODEL:\s+base/);
+  assert.match(deployWorkflow, /WHISPER_LANGUAGE:\s+auto/);
+  assert.doesNotMatch(deployWorkflow, /vars\.WHISPER_OPENAI_MODEL/);
+  assert.doesNotMatch(deployWorkflow, /vars\.WHISPER_LANGUAGE/);
 });
 
 test("local deploy workflow verifies Whisper inside the Docker app container", () => {
@@ -176,6 +180,7 @@ test("Docker runtime includes the local Python Whisper backend", () => {
   assert.match(dockerfile, /openai-whisper/);
   assert.match(dockerfile, /WHISPER_BACKEND=openai/);
   assert.match(dockerfile, /WHISPER_PYTHON_BIN=\/opt\/whisper\/bin\/python/);
+  assert.match(dockerfile, /WHISPER_OPENAI_MODEL=base(?:\s|$)/);
   assert.match(dockerfile, /WHISPER_FFMPEG_BIN=\/usr\/bin\/ffmpeg/);
 });
 
@@ -196,5 +201,13 @@ test("Docker Compose defaults to the local Python Whisper backend", () => {
   assert.match(
     dockerCompose,
     /WHISPER_FFMPEG_BIN:\s+\$\{WHISPER_FFMPEG_BIN:-\/usr\/bin\/ffmpeg\}/,
+  );
+  assert.match(
+    dockerCompose,
+    /WHISPER_OPENAI_MODEL:\s+\$\{WHISPER_OPENAI_MODEL:-base\}/,
+  );
+  assert.match(
+    dockerCompose,
+    /WHISPER_LANGUAGE:\s+\$\{WHISPER_LANGUAGE:-auto\}/,
   );
 });

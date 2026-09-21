@@ -13,13 +13,13 @@ the Windows or macOS host across container rebuilds.
 ```bash
 WHISPER_BACKEND=openai
 WHISPER_PYTHON_BIN=/opt/whisper/bin/python
-WHISPER_OPENAI_MODEL=base.en
+WHISPER_OPENAI_MODEL=base
 WHISPER_OPENAI_MODEL_DIR=/app/tools/whisper/openai-models
 WHISPER_OPENAI_CACHE_DIR=/app/tools/whisper/cache
 WHISPER_FFMPEG_BIN=/usr/bin/ffmpeg
 WHISPER_OPENAI_DEVICE=cpu
 WHISPER_OPENAI_FP16=false
-WHISPER_LANGUAGE=en
+WHISPER_LANGUAGE=auto
 ```
 
 ## Option 2: Host `openai/whisper` (Python)
@@ -33,11 +33,11 @@ npm run setup:whisper
 ```bash
 WHISPER_BACKEND=openai
 WHISPER_PYTHON_BIN=.venv/bin/python
-WHISPER_OPENAI_MODEL=base.en
+WHISPER_OPENAI_MODEL=base
 WHISPER_OPENAI_MODEL_DIR=tools/whisper/openai-models
 WHISPER_OPENAI_CACHE_DIR=tools/whisper/cache
 WHISPER_FFMPEG_BIN=tools/ffmpeg/bin/ffmpeg
-WHISPER_LANGUAGE=en
+WHISPER_LANGUAGE=auto
 ```
 
 Optional:
@@ -63,7 +63,7 @@ tools/whisper/
   bin/
     whisper-cli      # or main
   models/
-    ggml-base.en.bin # or another ggml model
+    ggml-base.bin # multilingual model
 ```
 
 Env:
@@ -71,8 +71,13 @@ Env:
 ```bash
 WHISPER_BACKEND=cpp
 WHISPER_BINARY_PATH=/absolute/path/to/whisper-cli
-WHISPER_MODEL_PATH=/absolute/path/to/ggml-base.en.bin
-WHISPER_LANGUAGE=en
+WHISPER_MODEL_PATH=/absolute/path/to/ggml-base.bin
+WHISPER_LANGUAGE=auto
 WHISPER_THREADS=4
 WHISPER_TIMEOUT_MS=180000
 ```
+
+Use a multilingual model without the `.en` suffix for mixed English-Russian
+recordings. `WHISPER_LANGUAGE=auto` lets Whisper detect the spoken language;
+the app also supplies mixed-language context and preserves Russian words in
+Cyrillic for the correction step.

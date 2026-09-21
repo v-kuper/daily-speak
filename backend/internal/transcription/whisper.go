@@ -17,7 +17,8 @@ const (
 	defaultWhisperRoot      = "tools/whisper"
 	defaultWhisperTimeoutMS = 180000
 	maxTranscriptLength     = 20000
-	defaultOpenAIModel      = "base.en"
+	defaultOpenAIModel      = "base"
+	defaultInitialPrompt    = "English speaking practice transcript. Sometimes the speaker switches to Russian: русские слова. The transcript keeps Russian speech in Cyrillic."
 )
 
 type Error struct {
@@ -73,7 +74,7 @@ func transcribeWithCpp(ctx context.Context, audioFilePath string) (string, error
 	defer os.RemoveAll(tempDir)
 
 	outputPrefix := filepath.Join(tempDir, "transcript")
-	args := []string{"-m", modelPath, "-f", audioFilePath, "-l", normalizeLanguage(os.Getenv("WHISPER_LANGUAGE")), "-t", strconv.Itoa(resolveThreads()), "-otxt", "-of", outputPrefix}
+	args := cppTranscriptionArgs(modelPath, audioFilePath, outputPrefix)
 	output, err := runCommand(ctx, binaryPath, args, nil)
 	if err != nil {
 		return "", err
@@ -101,19 +102,7 @@ func transcribeWithOpenAI(ctx context.Context, audioFilePath string) (string, er
 	cacheDir := resolvePathEnv("WHISPER_OPENAI_CACHE_DIR", filepath.Join(defaultWhisperRoot, "cache"))
 	_ = os.MkdirAll(cacheDir, 0o755)
 
-	args := []string{
-		"-m", "whisper",
-		audioFilePath,
-		"--task", "transcribe",
-		"--model", envDefault("WHISPER_OPENAI_MODEL", defaultOpenAIModel),
-		"--model_dir", modelDir,
-		"--language", normalizeLanguage(os.Getenv("WHISPER_LANGUAGE")),
-		"--threads", strconv.Itoa(resolveThreads()),
-		"--output_dir", tempDir,
-		"--output_format", "txt",
-		"--verbose", "False",
-		"--fp16", resolveOpenAIFp16(),
-	}
+	args := openAITranscriptionArgs(audioFilePath, modelDir, tempDir)
 	if device := resolveOpenAIDevice(); device != "" {
 		args = append(args, "--device", device)
 	}
@@ -153,6 +142,40 @@ func transcribeWithOpenAI(ctx context.Context, audioFilePath string) (string, er
 		return "", lastErr
 	}
 	return "", Error{Message: "OpenAI Whisper backend is not configured. Set WHISPER_PYTHON_BIN and install openai-whisper.", Status: 500}
+}
+
+func openAITranscriptionArgs(audioFilePath string, modelDir string, outputDir string) []string {
+	args := []string{
+		"-m", "whisper",
+		audioFilePath,
+		"--task", "transcribe",
+		"--model", envDefault("WHISPER_OPENAI_MODEL", defaultOpenAIModel),
+		"--model_dir", modelDir,
+		"--threads", strconv.Itoa(resolveThreads()),
+		"--output_dir", outputDir,
+		"--output_format", "txt",
+		"--verbose", "False",
+		"--fp16", resolveOpenAIFp16(),
+		"--initial_prompt", resolveInitialPrompt(),
+		"--carry_initial_prompt", "True",
+	}
+	if language := normalizeLanguage(os.Getenv("WHISPER_LANGUAGE")); language != "" {
+		args = append(args, "--language", language)
+	}
+	return args
+}
+
+func cppTranscriptionArgs(modelPath string, audioFilePath string, outputPrefix string) []string {
+	return []string{
+		"-m", modelPath,
+		"-f", audioFilePath,
+		"-l", cppLanguage(),
+		"-t", strconv.Itoa(resolveThreads()),
+		"--prompt", resolveInitialPrompt(),
+		"--carry-initial-prompt",
+		"-otxt",
+		"-of", outputPrefix,
+	}
 }
 
 func readOpenAITranscript(transcriptPath string, _ string) (string, error) {
@@ -253,22 +276,40 @@ func resolveCppBinaryPath() (string, error) {
 func resolveCppModelPath() (string, error) {
 	if envPath := resolvePathEnv("WHISPER_MODEL_PATH", ""); envPath != "" {
 		if exists(envPath) {
+			if cppLanguage() == "auto" && isEnglishOnlyModel(envPath) {
+				return "", Error{Message: "WHISPER_MODEL_PATH must use a multilingual model without the .en suffix when WHISPER_LANGUAGE is auto.", Status: 500}
+			}
 			return envPath, nil
 		}
 		return "", Error{Message: "WHISPER_MODEL_PATH is set but file is missing: " + envPath + ".", Status: 500}
 	}
-	for _, candidate := range []string{
-		filepath.Join(defaultWhisperRoot, "models", "ggml-base.en.bin"),
-		filepath.Join(defaultWhisperRoot, "models", "ggml-base.bin"),
-		filepath.Join(defaultWhisperRoot, "models", "ggml-small.en.bin"),
-		filepath.Join("tools", "whisper.cpp", "models", "ggml-base.en.bin"),
-		filepath.Join("tools", "whisper.cpp", "models", "ggml-base.bin"),
-	} {
+	for _, candidate := range cppModelCandidates() {
 		if exists(candidate) {
 			return candidate, nil
 		}
 	}
-	return "", Error{Message: "Whisper model not found. Place ggml model in tools/whisper/models or set WHISPER_MODEL_PATH.", Status: 500}
+	return "", Error{Message: "Multilingual Whisper model not found. Place ggml-base.bin in tools/whisper/models or set WHISPER_MODEL_PATH.", Status: 500}
+}
+
+func cppModelCandidates() []string {
+	candidates := []string{
+		filepath.Join(defaultWhisperRoot, "models", "ggml-base.bin"),
+		filepath.Join(defaultWhisperRoot, "models", "ggml-small.bin"),
+		filepath.Join("tools", "whisper.cpp", "models", "ggml-base.bin"),
+		filepath.Join("tools", "whisper.cpp", "models", "ggml-small.bin"),
+	}
+	if cppLanguage() == "en" {
+		candidates = append(candidates,
+			filepath.Join(defaultWhisperRoot, "models", "ggml-base.en.bin"),
+			filepath.Join(defaultWhisperRoot, "models", "ggml-small.en.bin"),
+			filepath.Join("tools", "whisper.cpp", "models", "ggml-base.en.bin"),
+		)
+	}
+	return candidates
+}
+
+func isEnglishOnlyModel(modelPath string) bool {
+	return strings.Contains(strings.ToLower(filepath.Base(modelPath)), ".en.")
 }
 
 func pythonCandidates() []string {
@@ -283,9 +324,27 @@ func pythonCandidates() []string {
 func normalizeLanguage(value string) string {
 	normalized := strings.ToLower(strings.TrimSpace(value))
 	if regexp.MustCompile(`^[a-z]{2,12}$`).MatchString(normalized) {
+		if normalized == "auto" {
+			return ""
+		}
 		return normalized
 	}
-	return "en"
+	return ""
+}
+
+func cppLanguage() string {
+	if language := normalizeLanguage(os.Getenv("WHISPER_LANGUAGE")); language != "" {
+		return language
+	}
+	return "auto"
+}
+
+func resolveInitialPrompt() string {
+	prompt := strings.TrimSpace(os.Getenv("WHISPER_INITIAL_PROMPT"))
+	if prompt == "" {
+		prompt = defaultInitialPrompt
+	}
+	return truncate(prompt, 500)
 }
 
 func resolveOpenAIFp16() string {
