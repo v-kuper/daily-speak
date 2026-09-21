@@ -1,134 +1,150 @@
-# Technical Debt Audit
+# Technical Debt and Follow-up Epics
 
-Last updated: 2026-03-01
+Last updated: 2026-09-22
 
-## Scope
-Audit of maintainability/readability risks for `app/` and `src/` with focus on:
-- oversized files and mixed responsibilities
-- code duplication and drift risk
-- missing quality gates
-- refactorability without behavior changes
+## Current baseline
 
-## Snapshot Metrics
-Top large files by LOC:
-- `src/store/slices/appSlice.ts`: 2536
-- `app/globals.css`: 1275
-- `src/components/SpeakScreen.tsx`: 845
-- `app/api/user/recordings/route.ts`: 643
-- `src/server/whisper.ts`: 564
+The web/backend separation establishes these boundaries:
 
-## Prioritized Findings
+- `web/` and `backend/` install, test, build, and ship independently;
+- browsers call a runtime-configured API origin directly;
+- Next.js App Router URLs replace UI-only screen switching;
+- the backend serves its OpenAPI contract and Swagger UI;
+- Feed API/data remain in the backend while Feed UI is removed from web;
+- the one-host test deployment runs separate web and backend containers.
 
-### P1 - Quality Gates
-1. ESLint command is broken and cannot protect refactors.
-- File: `eslint.config.mjs`
-- Symptom: `npm run lint` fails because `eslint-config-next/core-web-vitals` import is unresolved in current setup.
-- Impact: No static quality gate before merge.
+Authentication intentionally remains the existing PostgreSQL-backed,
+HttpOnly session cookie. Existing session-token format, database rows, and
+cookie name remain supported. None of the epics below is implemented by the
+separation refactor, and none should be represented as completed until its own
+security, migration, and rollout acceptance has passed.
 
-2. No tests in repo (unit/integration/e2e).
-- File: `package.json` (no `test` script), no `*.test.*` / `*.spec.*` files.
-- Impact: high regression risk for auth/audio/AI/subscription flows.
+## Access/refresh token authentication with rotation and replay detection
 
-### P2 - Structural Hotspots
-3. `appSlice` is a god-file with mixed domains.
-- File: `src/store/slices/appSlice.ts`
-- Contains: domain constants, payload parsers, async thunks, reducers, UI state transitions.
-- Impact: hard onboarding, risky changes, low locality.
+Desired outcome: introduce short-lived access tokens and rotating refresh-token
+families suitable for independently deployed web and native clients. Define
+token audience/issuer, signing-key rotation, revocation, logout-all-devices,
+replay detection, expiry, and incident response before choosing browser storage.
 
-4. `POST /api/user/recordings` route is overloaded.
-- File: `app/api/user/recordings/route.ts`
-- One file does validation, quota checks, file IO, Whisper call, Ollama call, DB persistence.
-- Impact: hard to test, hard to reason about failures and rollback behavior.
+Acceptance boundary:
 
-5. Duplicated media validation/parsing logic.
-- Files:
-  - `app/api/user/recordings/route.ts`
-  - `app/api/user/data/route.ts`
-  - `src/store/slices/appSlice.ts`
-- Repeated regex and normalization for audio/photo URLs.
-- Impact: drift and inconsistent behavior client/server.
+- a reviewed threat model covers XSS, CSRF, token theft, replay, and key loss;
+- refresh reuse revokes the affected token family and produces an auditable
+  security event;
+- server-side revocation and signing-key rotation are integration-tested;
+- migration supports current cookie sessions during an explicit compatibility
+  window and defines forced sign-out behavior;
+- logs and error payloads never expose access or refresh tokens.
 
-### P3 - Readability/Scalability
-6. `SpeakScreen` mixes recording runtime, fetch orchestration, and multi-mode rendering.
-- File: `src/components/SpeakScreen.tsx`
-- Impact: difficult edits, accidental cross-mode regressions.
+This is not a rename of the current session cookie. Until this epic ships, the
+cookie flow and exact credentialed CORS configuration remain the supported web
+authentication contract.
 
-7. Global CSS monolith.
-- File: `app/globals.css`
-- Impact: low style locality, hard conflict resolution, fragile style evolution.
+## Native mobile authentication and secure token storage
 
-8. Ollama prompt/parse/retry pipeline duplicated across API routes.
-- Files:
-  - `app/api/daily-questions/route.ts`
-  - `app/api/topic-guidance/route.ts`
-  - `app/api/study-words/route.ts`
-- Impact: repeated fixes and behavior drift between endpoints.
+Desired outcome: let iOS/Android clients authenticate directly with the API
+without embedding browser assumptions or storing long-lived credentials in
+plain application storage. Choose OAuth/PKCE or another reviewed native flow
+only after the token-auth contract is defined.
 
-## Refactor Roadmap
+Acceptance boundary:
 
-### Phase 0 - Stabilize Tooling (required before large refactor)
-- Fix ESLint config and migrate lint script to a working CLI flow.
-- Add minimal CI checks: `tsc --noEmit` + lint.
-- Add initial smoke tests for critical API routes.
+- tokens are stored in Keychain/Keystore-class protected storage;
+- refresh, logout, revocation, device loss, clock skew, and offline recovery are
+  tested on supported platforms;
+- deep-link/callback validation prevents scheme and redirect hijacking;
+- the mobile client uses the published API contract without importing web code;
+- privacy, telemetry, and app-store requirements are documented.
 
-Acceptance:
-- `npm run lint` passes locally and in CI.
-- CI blocks merge on lint/type failures.
+## `/api/v1` versioning and deprecation policy
 
-### Phase 1 - Shared Validation/Parsing Modules
-- Extract media validators/parsers to `src/lib/mediaValidation.ts`.
-- Extract shared API parsing helpers for Ollama JSON extraction.
+Desired outcome: publish an explicitly versioned API contract that web and
+mobile releases can consume on independent schedules.
 
-Acceptance:
-- No duplicated audio/photo regex logic across client/server.
-- All three locations consume shared helper(s).
+Acceptance boundary:
 
-### Phase 2 - Store Decomposition
-Split `appSlice.ts` into feature slices:
-- `sessionSlice` (auth/session/profile basics)
-- `practiceSlice` (question/topic/study generation state)
-- `recordingsSlice` (recording lifecycle/playback/history)
-- `billingSlice` (quota/subscription)
+- versioning rules cover URLs, schemas, errors, pagination, and media paths;
+- compatibility and deprecation windows have owners and measurable dates;
+- CI compares the OpenAPI contract and blocks unintended breaking changes;
+- at least one compatibility strategy exists for clients unable to upgrade
+  immediately;
+- the migration from current `/api/*` routes has a tested rollback plan.
 
-Acceptance:
-- each slice < 800 LOC (target)
-- each async thunk colocated with its domain
-- selectors exported per slice
+## Rate limiting, security headers, metrics, tracing, and alerting
 
-### Phase 3 - Recording Route Service Layer
-- Extract `recordings` route internals into services:
-  - `recordingPayload.ts` (validation)
-  - `recordingStorage.ts` (file save/delete)
-  - `recordingAnalysis.ts` (Whisper + suggestions)
-  - `recordingRepository.ts` (DB persistence)
+Desired outcome: establish production abuse controls and observability for the
+independent API and web services.
 
-Acceptance:
-- route file focused on orchestration and HTTP mapping
-- unit tests for each service module
+Acceptance boundary:
 
-### Phase 4 - UI Composition and Styles
-- Split `SpeakScreen` by mode/components:
-  - `SpeakIdleView`, `SpeakReadyView`, `SpeakRecordingView`, `SpeakRecordedView`
-  - `useMicrophoneRecorder` hook for MediaRecorder state machine
-- Move screen-scoped styles into CSS Modules per component.
+- per-route/user/IP rate limits have documented limits, trusted-proxy behavior,
+  `429` responses, and distributed-state ownership;
+- CSP, HSTS, frame, content-type, and referrer policies are tested at the
+  correct web/API boundaries;
+- structured metrics and traces correlate via request IDs without recording
+  cookies, credentials, recordings, or transcript content;
+- dashboards and actionable SLO alerts cover availability, latency, errors,
+  queue/background work, database health, and external AI/TTS dependencies;
+- load and failure-injection results justify the selected thresholds.
 
-Acceptance:
-- `SpeakScreen.tsx` becomes thin composition shell
-- mode-specific changes do not require touching all branches
+## Feed product decision: redesign and restore or remove with a data migration
 
-## Suggested Execution Order (2-3 week safe path)
-1. Phase 0
-2. Phase 1
-3. Phase 2
-4. Phase 3
-5. Phase 4
+Desired outcome: make an explicit product decision about the retained Feed
+backend instead of leaving an indefinitely hidden surface.
 
-## Non-goals for this refactor wave
-- No UX redesign.
-- No schema changes unless required for testability.
-- No behavior changes for quota/subscription rules.
+Acceptance boundary for restoration:
 
-## Risk Notes
-- Any slice split without tests may silently break async flows.
-- Recording pipeline changes must preserve failure cleanup (audio file rollback).
-- Ollama/Whisper behavior is environment-sensitive; keep clear fallback/error messages.
+- product/privacy/moderation requirements are approved;
+- a new web or mobile experience is tested for publication consent, deletion,
+  reactions, replies, abuse handling, and accessibility;
+- authorization and OpenAPI coverage remain complete.
+
+Acceptance boundary for removal:
+
+- retention/export obligations are resolved;
+- a reviewed, reversible migration removes or archives Feed posts, replies,
+  reactions, media, handlers, schemas, and OpenAPI operations;
+- recording deletion behavior and rollback are verified against migrated data.
+
+Until then, do not delete Feed tables, migrations, handlers, data, or API docs;
+the current web client simply has no Feed entry points.
+
+## Feature-oriented split of the large Go HTTP package and Redux slice
+
+Desired outcome: reduce change coupling by moving auth, practice generation,
+recording lifecycle, profile/subscription, Feed, and shared transport concerns
+behind feature-owned packages/modules.
+
+Acceptance boundary:
+
+- dependency direction and ownership are documented before files move;
+- HTTP/OpenAPI behavior, persisted data, routes, and Redux-visible behavior do
+  not change unintentionally;
+- focused unit/contract tests protect each extracted feature boundary;
+- request orchestration, media cleanup, retries, and background workers retain
+  integration coverage;
+- no compatibility shims become a second permanent architecture.
+
+This epic includes decomposing `backend/internal/httpapi` and the remaining
+large Redux application slice; it is not required for web/backend deployment
+independence.
+
+## Separate-resource production deployment definitions
+
+Desired outcome: deploy immutable web and backend images on independently
+scalable production resources while preserving direct client-to-API traffic.
+
+Acceptance boundary:
+
+- target platform, domains, DNS, TLS, ingress, secrets, and least-privilege
+  identities are declared as reviewed infrastructure/configuration;
+- managed PostgreSQL, backup/restore, uploads/object storage, and Whisper model
+  persistence have tested disaster-recovery procedures;
+- web receives only the public API origin; backend receives explicit permitted
+  origins and no web build/runtime dependency;
+- readiness, rollout, rollback, schema compatibility, capacity, cost, and
+  observability are rehearsed in a production-like environment;
+- mobile and web clients can call the same published API origin concurrently.
+
+The current Compose/Caddy deployment is a one-host test topology, not this
+future production definition.

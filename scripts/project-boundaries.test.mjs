@@ -30,6 +30,12 @@ test("frontend source is not left at repository root", () => {
   assert.equal(existsSync("next.config.ts"), false);
 });
 
+test("web build traces are rooted in the standalone web project", () => {
+  const config = readFileSync("web/next.config.ts", "utf8");
+  assert.match(config, /outputFileTracingRoot:\s*projectRoot/);
+  assert.match(config, /fileURLToPath\(import\.meta\.url\)/);
+});
+
 test("backend source has no Next.js upstream", () => {
   const main = readFileSync("backend/cmd/api/main.go", "utf8");
   const server = readFileSync("backend/internal/httpapi/server.go", "utf8");

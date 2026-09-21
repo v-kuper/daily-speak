@@ -1,12 +1,22 @@
 # Local Windows CI/CD
 
-This project deploys as one Docker app container plus a PostgreSQL service. You
-need one GitHub Actions self-hosted runner for the whole project, not separate
-runners for the Next.js client and Go API.
+The Windows deployment runs two independent application containers plus shared
+infrastructure on one test host:
 
-This guide assumes a repo-level runner for this repository. If every repository
-has its own runner on the same Windows host, keep runner directories outside the
-project checkout. A clean layout is:
+- `web`: Next.js pages and `/web-healthz`;
+- `backend`: Go API, uploads, `/healthz`, `/openapi.json`, and `/docs`;
+- `postgres`: persistent application database;
+- `lan-https`: two independent Caddy HTTPS sites.
+
+The web container receives only the public API origin. The backend receives an
+exact web-origin CORS allowlist and does not know or proxy the web application.
+The same images can later move to different production resources by supplying
+their public origins through deployment configuration.
+
+## Host layout and prerequisites
+
+Use a repository-specific runner outside the developer checkout and keep uploads
+outside both locations:
 
 ```text
 D:\Projects\daily-speak
@@ -14,370 +24,266 @@ D:\Runners\daily-speaking
 D:\DailySpeaking\data\uploads
 ```
 
-Do not put the runner application inside `D:\Projects\daily-speak`. The runner
-stores service files, logs, credentials, work directories, and auto-update files
-that should not be mixed with repository files.
+The deploy job uses its own checkout under the runner work directory. The
+external uploads directory survives checkout cleanup and image replacement.
+PostgreSQL data stays in the named `postgres_data` Compose volume.
 
-Do not store uploaded recordings inside the Git checkout either. The deploy
-workflow uses `D:\DailySpeaking\data\uploads` by default for persistent media
-storage, then mounts that folder into the app container as `/app/uploads`.
+Install and start:
 
-`D:\Projects\daily-speak` is the developer checkout you edit manually. GitHub
-Actions jobs use their own checkout under the runner work directory, for
-example `D:\Runners\daily-speaking\_work\daily-speak\daily-speak`, after the
-workflow runs `actions/checkout`.
+1. Docker Desktop;
+2. Git for Windows;
+3. a GitHub Actions self-hosted Windows x64 runner;
+4. `winget`, or a preinstalled `mkcert` on the runner PATH.
 
-The deploy workflow is `.github/workflows/deploy-local.yml`. It targets:
-
-```yaml
-runs-on: [self-hosted, windows, daily-speaking]
-```
-
-GitHub routes a job only to a runner that has all requested labels. The runner
-will already have `self-hosted` and `windows`; add `daily-speaking` as the
-project-specific label.
-
-## Windows machine prerequisites
-
-1. Install Docker Desktop.
-2. Start Docker Desktop and keep it running.
-3. Make sure this works in PowerShell:
+Verify Docker from PowerShell:
 
 ```powershell
 docker version
 docker compose version
 ```
 
-4. Install Git for Windows if it is not already installed.
-5. Allow inbound TCP port `3218` in Windows Defender Firewall if you need to
-open the app from another device on the LAN.
+Node.js and Go are installed by the workflow and do not need to be permanent
+host installations.
 
-Node.js and Go are installed by the workflow with `actions/setup-node` and
-`actions/setup-go`, so they do not need to be permanently installed on the
-Windows host for GitHub Actions deploys.
+## Configure the self-hosted runner
 
-## Add the runner in GitHub
+Create the runner in GitHub under `Settings` -> `Actions` -> `Runners` and add
+the project label `daily-speaking`. The workflow requires all three labels:
 
-1. Open the GitHub repository.
-2. Go to `Settings` -> `Actions` -> `Runners`.
-3. Click `New self-hosted runner`.
-4. Choose `Windows` and `x64`.
-5. Copy the commands shown by GitHub into PowerShell on the Windows machine.
-6. When configuring the runner, add this custom label:
-
-```text
-daily-speaking
+```yaml
+runs-on: [self-hosted, windows, daily-speaking]
 ```
 
-If you configure via command flags, include:
+Example GitHub-provided setup command shape:
 
 ```powershell
-.\config.cmd --url https://github.com/v-kuper/daily-speak --token <token> --name daily-speaking-windows --labels daily-speaking
+.\config.cmd --url https://github.com/v-kuper/daily-speak --token <one-time-token> --name daily-speaking-windows --labels daily-speaking
 ```
 
-Use the real URL and one-time token from GitHub's runner setup page.
-
-Example local directory setup:
-
-```powershell
-New-Item -ItemType Directory -Force D:\Projects\daily-speak
-New-Item -ItemType Directory -Force D:\Runners\daily-speaking
-```
-
-Clone the project into `D:\Projects\daily-speak` for local development.
-Download and configure the GitHub Actions runner inside
-`D:\Runners\daily-speaking`.
-
-## Run as a service
-
-For unattended deploys, configure the runner as a Windows service during runner
-setup. GitHub's Windows runner setup asks about this during configuration. If
-the runner is already configured without service mode, remove it from GitHub
-and configure it again.
-
-After setup, check the service:
+Configure it as a Windows service for unattended deploys. The service account
+must be able to use Docker Desktop and write the uploads directory. Inspect the
+service with:
 
 ```powershell
 Get-Service "actions.runner.*"
 ```
 
-The runner service account must be able to use Docker Desktop. If deploy jobs
-fail with Docker connection errors, run the runner interactively first to verify
-the pipeline, then adjust the service account/Docker Desktop access.
+## GitHub configuration
 
-## Deploy
+The deployment workflow is `.github/workflows/deploy-local.yml`. It runs on a
+push to `main` or `master`, and can also be started with `workflow_dispatch`.
+It uses the stable Compose project name `daily-speaking`.
 
-Automatic deploy:
-- push to `main` or `master`
-- GitHub runs `.github/workflows/deploy-local.yml`
-- the Windows runner runs `npm run quality`
-- the runner runs `.\scripts\setup-lan-https-proxy.ps1`
-- the script creates `lan-https` cert/config files in the checkout
-- the script creates the persistent uploaded media directory
-- the script opens inbound TCP `HTTPS_PORT` in Windows Firewall
-- the script runs `docker compose up --build -d app postgres lan-https`
-- the workflow checks `http://127.0.0.1:3218/healthz`
-- the workflow verifies local Whisper inside the `app` container
+Required GitHub Actions values:
 
-Manual deploy:
-1. Open `Actions` in GitHub.
+- secret `CARTESIA_API_KEY`;
+- variable `CARTESIA_VOICE_ID`.
+
+The API key must remain in `Secrets`, never `Variables`, repository files,
+runner system variables, issue text, or logs. The workflow validates only that
+both Cartesia values are non-empty and does not print them.
+
+Optional repository variables and defaults:
+
+| Variable | Default | Owner |
+| --- | --- | --- |
+| `APP_PORT` | `3218` | web HTTP host port |
+| `API_PORT` | `3219` | API HTTP host port |
+| `HTTPS_PORT` | `3443` | web HTTPS host port |
+| `API_HTTPS_PORT` | `3444` | API HTTPS host port |
+| `POSTGRES_PORT` | `5433` | loopback-only database port |
+| `UPLOADS_HOST_DIR` | `D:\DailySpeaking\data\uploads` | backend media storage |
+| `OLLAMA_BASE_URL` | `http://host.docker.internal:11434` | backend AI service |
+| `OLLAMA_MODEL` | `gemma4:31b-cloud` | backend AI model |
+| `OLLAMA_THINKING_MODEL` | `true` | backend model behavior |
+| `WHISPER_BINARY_PATH` | empty | optional `whisper.cpp` binary |
+| `WHISPER_MODEL_PATH` | empty | optional `whisper.cpp` model |
+
+The workflow deliberately fixes `AI_ANALYSIS_CONCURRENCY=3`,
+`WHISPER_BACKEND=openai`, `WHISPER_OPENAI_MODEL=base`, and
+`WHISPER_LANGUAGE=auto` in source so old runner variables cannot silently alter
+the deployed transcription mode.
+
+## Deployment flow
+
+The workflow:
+
+1. checks out the same revision for both projects;
+2. installs from `web/package-lock.json` and runs the repository quality gates;
+3. validates Docker and Cartesia configuration;
+4. runs `.\scripts\setup-lan-https-proxy.ps1`;
+5. builds and starts `web`, `backend`, `postgres`, and `lan-https` together;
+6. runs `scripts/smoke-stack.mjs` against the separate HTTP origins;
+7. verifies the independent HTTPS health/docs endpoints;
+8. verifies Whisper and Cartesia inside `backend` only.
+
+The smoke uses a unique temporary account and verifies web health, `/speak`, API
+health, OpenAPI, Swagger, exact credentialed CORS, registration/session, a
+protected call, upload creation/serving/deletion, and logout. It never prints
+the session cookie.
+
+Manual deployment after the workflow is present on the selected branch:
+
+1. Open GitHub `Actions`.
 2. Select `Deploy Local Windows`.
-3. Click `Run workflow`.
+3. Select `Run workflow`.
 
-## AI analysis concurrency
+## HTTP and HTTPS endpoints
 
-The deploy workflow sets `AI_ANALYSIS_CONCURRENCY: 3` directly in source, so a
-clean Windows runner does not need a repository variable or a local `.env`
-file. Docker Compose uses the same default.
+For Windows address `<windows-ipv4>`:
 
-This setting controls how many independent error-detector requests can run at
-the same time; it does not combine their focused prompts. Accepted values are
-1 through 7, and missing or invalid values fall back to 3. Increasing the value
-can raise Ollama CPU, GPU, and memory load on the Windows machine.
+| Purpose | HTTP | HTTPS |
+| --- | --- | --- |
+| Web | `http://<windows-ipv4>:3218` | `https://<windows-ipv4>:3443` |
+| Web health | `http://<windows-ipv4>:3218/web-healthz` | `https://<windows-ipv4>:3443/web-healthz` |
+| API health | `http://<windows-ipv4>:3219/healthz` | `https://<windows-ipv4>:3444/healthz` |
+| Swagger | `http://<windows-ipv4>:3219/docs` | `https://<windows-ipv4>:3444/docs` |
+| OpenAPI | `http://<windows-ipv4>:3219/openapi.json` | `https://<windows-ipv4>:3444/openapi.json` |
 
-## Cartesia credentials for shadowing audio
+The generated web Caddy site proxies only to `web:3000`; the API site proxies
+only to `backend:3000`. The deployment sets:
 
-The Windows CI/CD deployment receives Cartesia configuration directly from
-GitHub Actions. Do not create or commit a `.env` file in the runner checkout.
-The workflow exposes the API key only to the validation and Docker deploy
-steps, and it never prints the key.
+- `PUBLIC_API_BASE_URL=https://<windows-ipv4>:3444` for the web container;
+- the matching HTTP and HTTPS web origins in `CORS_ALLOWED_ORIGINS`;
+- `SESSION_COOKIE_SECURE=true` and `SESSION_COOKIE_SAME_SITE=lax` for the API.
 
-Complete this checklist before the first Cartesia-enabled deploy:
+These LAN origins share a site (the same host), so the current HttpOnly session
+cookie can cross the two origins through `credentials: include`. If future web
+and API domains are genuinely cross-site, review the cookie threat model and use
+`SameSite=None` only with HTTPS, or complete the access/refresh-token epic.
 
-1. In Cartesia, create or copy an API key.
-2. In Cartesia Play, choose the natural female American voice you want and copy
-   its voice UUID. The UUID is configuration, not a secret.
-3. Open the GitHub repository, then go to `Settings` ->
-   `Secrets and variables` -> `Actions`.
-4. On the `Secrets` tab, click `New repository secret` and create:
+## Certificate and firewall setup
 
-   ```text
-   Name: CARTESIA_API_KEY
-   Secret: <paste the Cartesia API key>
-   ```
-
-5. On the `Variables` tab, click `New repository variable` and create:
-
-   ```text
-   Name: CARTESIA_VOICE_ID
-   Value: <paste the selected voice UUID>
-   ```
-
-6. Do not put `CARTESIA_API_KEY` in Variables, repository files, workflow
-   source, runner system variables, Docker image layers, issues, or chat.
-7. Push the workflow changes to `main`, or open `Actions` ->
-   `Deploy Local Windows` -> `Run workflow` after the changes are already on
-   `main`.
-8. Confirm these workflow steps pass:
-   - `Validate Cartesia configuration`
-   - `Build and start local Docker HTTPS app`
-   - `Verify Docker Cartesia configuration`
-9. Create one short recording in the live app. Open its details and wait for
-   `Shadowing practice` to change from processing to an MP3 player.
-10. Play the original recording and the pronunciation track independently,
-    reload the page, and confirm the pronunciation track still plays.
-
-The deploy workflow passes the two values to the PowerShell process that runs
-Docker Compose. `docker-compose.yml` then injects them into the `app` container.
-Changing the GitHub Secret or Variable requires another deploy so Docker
-Compose recreates the container with the new value.
-
-For safe troubleshooting on the Windows machine, verify only that both values
-are non-empty:
-
-```powershell
-docker compose exec -T app sh -lc 'test -n "$CARTESIA_API_KEY" && test -n "$CARTESIA_VOICE_ID" && echo cartesia-config-ok'
-```
-
-Do not run `env | grep CARTESIA`, `docker compose config`, or another command
-that could print the API key into the terminal or Actions logs.
-
-## Uploaded media storage
-
-Audio recordings are stored on the Windows host filesystem, not inside the
-Docker image and not inside PostgreSQL. The app container sees the media folder
-at:
-
-```text
-/app/uploads
-```
-
-The default Windows host folder is:
-
-```text
-D:\DailySpeaking\data\uploads
-```
-
-When a user saves a recording, the Go API writes the audio file under:
-
-```text
-D:\DailySpeaking\data\uploads\recordings\<user-id>\<recording-id>.<ext>
-```
-
-PostgreSQL stores only the public URL, for example:
-
-```text
-/uploads/recordings/<user-id>/<recording-id>.webm
-```
-
-The Go API serves `/uploads/...` directly before proxying other requests to
-Next.js. This keeps playback working for phones and other LAN clients after
-CI/CD redeploys. `actions/checkout` can clean the repo checkout, but it does
-not touch `D:\DailySpeaking\data\uploads`.
-
-To use a different media folder, set the repository variable
-`UPLOADS_HOST_DIR`, for example:
-
-```text
-E:\DailySpeaking\uploads
-```
-
-## Access from LAN
-
-After a successful deploy, open the app from another device on the same network:
-
-```text
-http://<windows-ipv4>:3218
-```
-
-On the Windows machine, find the IPv4 address with:
-
-```powershell
-ipconfig
-```
-
-The HTTP URL is enough for checking that the app loads, but browser microphone
-recording requires HTTPS. The deploy workflow runs
-`.\scripts\setup-lan-https-proxy.ps1` automatically on the Windows runner. The
-script creates certificates and a Caddy config inside the checked-out project,
-then starts a `lan-https` Caddy container through Docker Compose.
-
-If the checkout is the documented `D:\Projects\daily-speak`, the script creates:
-
-```text
-D:\Projects\daily-speak\lan-https
-```
-
-From PowerShell in `D:\Projects\daily-speak`, run:
-
-```powershell
-.\scripts\setup-lan-https-proxy.ps1 -HostIp <windows-ipv4>
-```
-
-Manual execution is only needed for local troubleshooting; CI/CD runs the same
-script during deploy.
-
-For example:
-
-```powershell
-.\scripts\setup-lan-https-proxy.ps1 -HostIp 192.168.0.115
-```
-
-The script writes:
-
-```text
-D:\Projects\daily-speak\lan-https\certs\daily-speaking.pem
-D:\Projects\daily-speak\lan-https\certs\daily-speaking-key.pem
-D:\Projects\daily-speak\lan-https\Caddyfile
-D:\DailySpeaking\data\uploads
-```
-
-It also runs:
-
-```powershell
-docker compose up --build -d app postgres lan-https
-```
-
-The script tries to allow the HTTPS port in Windows Firewall automatically:
-
-```powershell
-New-NetFirewallRule -DisplayName "Daily Speaking HTTPS 3443" -Direction Inbound -Protocol TCP -LocalPort 3443 -Action Allow
-```
-
-If the runner service account cannot create firewall rules, the script prints a
-warning and continues the deploy. LAN clients may still be blocked until you run
-the same command once from an elevated PowerShell or run the runner service with
-an account that can manage Windows Firewall.
-
-To restart the Docker app with HTTPS later:
+Run the same deployment helper manually only for setup or troubleshooting:
 
 ```powershell
 cd D:\Projects\daily-speak
-$env:HTTPS_PORT=3443
-$env:UPLOADS_HOST_DIR="D:\DailySpeaking\data\uploads"
-$env:UPLOADS_DIR="/app/uploads"
-docker compose up --build -d app postgres lan-https
+.\scripts\setup-lan-https-proxy.ps1 -HostIp <windows-ipv4>
 ```
 
-Then open the HTTPS URL from another LAN device:
+The script detects the LAN address when `-HostIp` is omitted, installs/uses
+`mkcert`, creates `lan-https\Caddyfile` and certificate files, prepares the
+uploads directory, sets the runtime origins, and starts all four services.
 
-```text
-https://<windows-ipv4>:3443
+Allow both HTTPS ports from an elevated PowerShell if the runner cannot create
+the rules:
+
+```powershell
+New-NetFirewallRule -DisplayName "Daily Speaking HTTPS 3443" -Direction Inbound -Protocol TCP -LocalPort 3443 -Action Allow
+New-NetFirewallRule -DisplayName "Daily Speaking HTTPS 3444" -Direction Inbound -Protocol TCP -LocalPort 3444 -Action Allow
 ```
 
-The Caddy container proxies HTTPS traffic to the Docker Compose `app` service
-at `app:3000`. Do not redirect clients to `localhost`.
+For optional plain-HTTP LAN diagnostics, also allow `3218` and `3219`. Browser
+microphone access on another device requires the HTTPS web URL.
 
-The script can install `mkcert` on the runner via `winget` when it is missing.
-The generated certificate is still a local certificate. Client machines must
-trust the runner's mkcert root CA once, otherwise their browser will show a
-certificate warning and microphone access may still be blocked. On the Windows
-runner, find that CA with:
+Client devices must trust the runner's local mkcert root CA. Locate it on the
+runner with:
 
 ```powershell
 mkcert -CAROOT
 ```
 
-Copy only `rootCA.pem` to client machines and import it into Trusted Root
-Certification Authorities. Do not copy `rootCA-key.pem`.
+Copy only `rootCA.pem` to each client and import it into the trusted root store.
+Never copy `rootCA-key.pem`.
 
-## Optional variables
+## Persistent uploads
 
-The workflow uses GitHub repository variables when present:
+The backend container sees uploaded files at `/app/uploads`; the default
+Windows host directory is:
 
-- `APP_PORT`, default `3218`
-- `HTTPS_PORT`, default `3443`
-- `POSTGRES_PORT`, default `5433`
-- `UPLOADS_HOST_DIR`, default `D:\DailySpeaking\data\uploads`
-- `UPLOADS_DIR`, default `/app/uploads`
-- `OLLAMA_BASE_URL`, default `http://host.docker.internal:11434`
-- `OLLAMA_MODEL`, default `gemma4:31b-cloud`
-- `OLLAMA_THINKING_MODEL`, default `true`
-- `WHISPER_BACKEND`, default `openai`
-- `WHISPER_BINARY_PATH`
-- `WHISPER_MODEL_PATH`
-- `WHISPER_PYTHON_BIN`, default `/opt/whisper/bin/python`
-- `WHISPER_OPENAI_MODEL_DIR`, default `/app/tools/whisper/openai-models`
-- `WHISPER_OPENAI_CACHE_DIR`, default `/app/tools/whisper/cache`
-- `WHISPER_FFMPEG_BIN`, default `/usr/bin/ffmpeg`
-- `WHISPER_OPENAI_DEVICE`, default `cpu`
-- `WHISPER_OPENAI_FP16`, default `false`
-- `CARTESIA_VOICE_ID`, required for shadowing pronunciation audio
-
-Set them in `Settings` -> `Secrets and variables` -> `Actions` -> `Variables`.
-
-The Cartesia API key is intentionally not in this Variables list. Store
-`CARTESIA_API_KEY` on the `Secrets` tab as described above.
-
-The Windows deploy workflow fixes `WHISPER_OPENAI_MODEL=base` and
-`WHISPER_LANGUAGE=auto` so an older repository variable cannot switch the
-deployment back to English-only transcription.
-
-If several projects deploy on the same Windows machine, give each project a
-unique `APP_PORT` and `POSTGRES_PORT` to avoid host-port conflicts. The deploy
-workflow also sets `COMPOSE_PROJECT_NAME=daily-speaking` so Docker Compose uses
-the same project name regardless of the runner checkout directory.
-
-## Useful commands on the Windows machine
-
-```powershell
-npm run docker:lan
-docker compose ps
-docker compose logs -f app
-docker compose down
+```text
+D:\DailySpeaking\data\uploads
 ```
 
+Recorded media is stored below `recordings\<user-id>`, Feed reply media below
+`feed-replies\<user-id>`, and generated pronunciation audio below
+`shadowing\<user-id>`. PostgreSQL stores `/uploads/...` URLs, and the backend
+serves those paths from the API origin. The web container has no upload mount.
+
+Set the `UPLOADS_HOST_DIR` repository variable to move media to another durable
+drive. Never point it at the Actions checkout. Do not use `docker compose down
+-v` in normal operations because `-v` removes the PostgreSQL volume.
+
+## Direct checks and logs
+
+Against an already-running local stack:
+
+```powershell
+$env:WEB_BASE_URL = "http://127.0.0.1:3218"
+$env:API_BASE_URL = "http://127.0.0.1:3219"
+node scripts/smoke-stack.mjs
+```
+
+Direct read-only API checks:
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:3219/healthz
+Invoke-WebRequest http://127.0.0.1:3219/openapi.json -UseBasicParsing
+Invoke-WebRequest http://127.0.0.1:3219/docs -UseBasicParsing
+```
+
+Inspect each failure boundary separately:
+
+```powershell
+docker compose ps
+docker compose logs -f web backend
+docker compose logs -f lan-https
+docker compose logs -f postgres
+```
+
+Safe Cartesia presence check (does not print values):
+
+```powershell
+docker compose exec -T backend sh -lc 'test -n "$CARTESIA_API_KEY" && test -n "$CARTESIA_VOICE_ID" && echo cartesia-config-ok'
+```
+
+Do not run `env | grep CARTESIA` or publish `docker compose config` output when a
+real API key is present.
+
+## Rollback
+
+Deploys are in-place Compose updates. To roll back, select the previously known
+good Git revision in a clean checkout/worktree, preserve the same
+`COMPOSE_PROJECT_NAME`, `UPLOADS_HOST_DIR`, ports, and secrets, then run the same
+setup command or:
+
+```powershell
+git switch --detach <previous-good-revision>
+$env:COMPOSE_PROJECT_NAME = "daily-speaking"
+$env:UPLOADS_HOST_DIR = "D:\DailySpeaking\data\uploads"
+.\scripts\setup-lan-https-proxy.ps1 -HostIp <windows-ipv4> -SkipCertificateGeneration
+```
+
+For HTTP-only recovery, with the required origins already set in the shell:
+
+```powershell
+docker compose up --build -d web backend postgres
+```
+
+Do not delete or recreate the uploads directory or PostgreSQL volume during a
+rollback. The split does not change the schema or session-token format, so no
+backfill or intentional sign-out is required.
+
+## Post-deploy acceptance
+
+The following runtime acceptance belongs to the remote Windows deployment and
+must not be inferred from static/local tests:
+
+- `/` redirects to `/speak`;
+- `/history`, recording details, and every profile route survive refresh;
+- protected routes return through a safe `/auth?returnTo=...` flow;
+- recording save replaces a temporary `local-*` URL with the permanent ID;
+- original/shadowing audio, photos, deletion, logout, and session restore work;
+- no Feed tab, publication button, comments, or `/feed` web page is exposed;
+- API Swagger still lists the retained Feed endpoints and targets port `3444`;
+- a second LAN device loads web HTTPS `3443` and calls API HTTPS `3444`.
+
+For this refactor, those checks are explicitly deferred to the first remote
+CI/CD deployment because the local development environment is not configured to
+run the stack.
+
 Official GitHub references:
+
 - [Hosting your own runners](https://docs.github.com/en/actions/how-tos/hosting-your-own-runners?platform=windows)
 - [Using self-hosted runners in a workflow](https://docs.github.com/en/actions/how-tos/manage-runners/self-hosted-runners/use-in-a-workflow)
 - [Configuring the runner application as a service](https://docs.github.com/en/actions/how-tos/manage-runners/self-hosted-runners/configure-the-application)

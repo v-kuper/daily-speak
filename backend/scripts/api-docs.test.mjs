@@ -162,8 +162,14 @@ test("shared externally visible schemas have representative examples", () => {
   for (const [name, fields] of expectedObjectSchemas) {
     const schema = openapi.components.schemas[name];
     assert.ok(schema, `missing ${name} schema`);
+    assert.ok(schema.properties && typeof schema.properties === "object", `${name} needs properties`);
+    assert.ok(Array.isArray(schema.required), `${name} needs a required field list`);
     assert.ok(schema.example && typeof schema.example === "object", `${name} needs an object example`);
-    for (const field of fields) assert.ok(Object.hasOwn(schema.example, field), `${name} example needs ${field}`);
+    for (const field of fields) {
+      assert.ok(Object.hasOwn(schema.properties, field), `${name} properties need ${field}`);
+      assert.ok(schema.required.includes(field), `${name} must require ${field}`);
+      assert.ok(Object.hasOwn(schema.example, field), `${name} example needs ${field}`);
+    }
   }
   const processingSchema = openapi.components.schemas.RecordingProcessingStage;
   assert.ok(processingSchema, "missing RecordingProcessingStage schema");

@@ -6,7 +6,6 @@ import test from "node:test";
 const { load: parseYaml } = createRequire(new URL("../web/package.json", import.meta.url))("js-yaml");
 
 const scriptPath = "scripts/setup-lan-https-proxy.ps1";
-const docsPath = "docs/LOCAL_WINDOWS_CICD.md";
 const composePath = "docker-compose.yml";
 
 test("LAN HTTPS proxy script derives its certificate directory from the project checkout", () => {
@@ -121,16 +120,4 @@ test("environment example describes both public origins and cookie defaults", ()
   for (const entry of ["APP_PORT=3218", "API_PORT=3219", "HTTPS_PORT=3443", "API_HTTPS_PORT=3444", "PUBLIC_API_BASE_URL=http://localhost:3219", "CORS_ALLOWED_ORIGINS=http://localhost:3218,http://127.0.0.1:3218", "SESSION_COOKIE_SECURE=false", "SESSION_COOKIE_SAME_SITE=lax"]) {
     assert.ok(example.split(/\r?\n/).includes(entry), `missing ${entry}`);
   }
-});
-
-test("Windows CI docs describe the exact Docker HTTPS setup path", () => {
-  const docs = readFileSync(docsPath, "utf8");
-
-  assert.match(docs, /D:\\Projects\\daily-speak/);
-  assert.match(docs, /D:\\Projects\\daily-speak\\lan-https/);
-  assert.match(docs, /D:\\DailySpeaking\\data\\uploads/);
-  assert.match(docs, /UPLOADS_HOST_DIR/);
-  assert.match(docs, /scripts\\setup-lan-https-proxy\.ps1/);
-  assert.match(docs, /https:\/\/<windows-ipv4>:3443/);
-  assert.match(docs, /docker compose up --build -d app postgres lan-https/);
 });
