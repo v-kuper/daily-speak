@@ -33,6 +33,9 @@ test("frontend source is not left at repository root", () => {
 test("backend source has no Next.js upstream", () => {
   const main = readFileSync("backend/cmd/api/main.go", "utf8");
   const server = readFileSync("backend/internal/httpapi/server.go", "utf8");
+  const smoke = readFileSync("scripts/smoke-api.mjs", "utf8");
   assert.doesNotMatch(main, /NEXT_UPSTREAM_URL|NextURL|proxying Next/);
   assert.doesNotMatch(server, /httputil|NewSingleHostReverseProxy|nextProxy|NextURL/);
+  assert.doesNotMatch(smoke, /NEXT_|next/i);
+  assert.match(smoke, /cwd:\s*"backend"/);
 });

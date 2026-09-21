@@ -17,9 +17,35 @@ const qualityWorkflow = readFileSync(
   ".github/workflows/quality-gates.yml",
   "utf8",
 );
+const deployWorkflow = readFileSync(
+  ".github/workflows/deploy-local.yml",
+  "utf8",
+);
 
-test("quality workflow runs the consolidated project quality command", () => {
-  assert.match(qualityWorkflow, /run:\s+npm run quality/);
+test("quality workflow installs and builds web independently", () => {
+  assert.match(qualityWorkflow, /cache-dependency-path:\s+web\/package-lock\.json/);
+  assert.match(qualityWorkflow, /npm ci --prefix web/);
+  assert.match(qualityWorkflow, /npm run quality --prefix web/);
+  assert.match(qualityWorkflow, /cd backend && go test \.\/\.\.\./);
+  assert.match(qualityWorkflow, /docker compose build web backend/);
+});
+
+test("Windows deploy checks both services", () => {
+  assert.match(deployWorkflow, /API_PORT:/);
+  assert.match(deployWorkflow, /API_HTTPS_PORT:/);
+  assert.match(deployWorkflow, /docker compose logs --tail 120 web/);
+  assert.match(deployWorkflow, /docker compose logs --tail 120 backend/);
+  assert.match(deployWorkflow, /docker compose exec -T backend/);
+  assert.match(deployWorkflow, /node scripts\/smoke-stack\.mjs/);
+});
+
+test("quality workflow runs explicit project and infrastructure gates", () => {
+  assert.match(qualityWorkflow, /run:\s+npm run test:api-docs/);
+  assert.match(qualityWorkflow, /run:\s+npm run test:infra/);
+  assert.match(qualityWorkflow, /run:\s+npm run test:smoke/);
+  assert.match(qualityWorkflow, /PUBLIC_API_BASE_URL:\s+http:\/\/localhost:3219/);
+  assert.match(qualityWorkflow, /run:\s+npm run build --prefix web/);
+  assert.doesNotMatch(qualityWorkflow, /run:\s+npm ci\s*$/m);
 });
 
 test("quality workflow provisions Go and PostgreSQL for smoke API checks", () => {
@@ -34,11 +60,6 @@ test("quality workflow provisions Go and PostgreSQL for smoke API checks", () =>
 });
 
 test("local deploy workflow targets the dedicated Windows self-hosted runner", () => {
-  const deployWorkflow = readFileSync(
-    ".github/workflows/deploy-local.yml",
-    "utf8",
-  );
-
   assert.match(deployWorkflow, /workflow_dispatch:/);
   assert.match(deployWorkflow, /branches:\s*\n\s+- main\s*\n\s+- master/);
   assert.match(deployWorkflow, /shell:\s+powershell/);
@@ -49,39 +70,33 @@ test("local deploy workflow targets the dedicated Windows self-hosted runner", (
 });
 
 test("local deploy workflow verifies quality, deploys the LAN Docker app, and checks health", () => {
-  const deployWorkflow = readFileSync(
-    ".github/workflows/deploy-local.yml",
-    "utf8",
-  );
-
   assert.match(deployWorkflow, /POSTGRES_PORT:\s+\$\{\{\s*vars\.POSTGRES_PORT/);
   assert.match(deployWorkflow, /HTTPS_PORT:\s+\$\{\{\s*vars\.HTTPS_PORT/);
+  assert.match(deployWorkflow, /API_PORT:\s+\$\{\{\s*vars\.API_PORT\s*\|\|\s*'3219'/);
+  assert.match(deployWorkflow, /API_HTTPS_PORT:\s+\$\{\{\s*vars\.API_HTTPS_PORT\s*\|\|\s*'3444'/);
   assert.match(deployWorkflow, /uses:\s+actions\/setup-go@v5/);
   assert.match(deployWorkflow, /go-version-file:\s+backend\/go\.mod/);
+  assert.match(deployWorkflow, /cache-dependency-path:\s+web\/package-lock\.json/);
+  assert.match(deployWorkflow, /run:\s+npm ci --prefix web/);
   assert.match(deployWorkflow, /run:\s+npm run quality/);
   assert.match(deployWorkflow, /\.\\scripts\\setup-lan-https-proxy\.ps1/);
   assert.match(deployWorkflow, /docker compose ps/);
-  assert.match(deployWorkflow, /http:\/\/127\.0\.0\.1:\$env:APP_PORT\/healthz/);
+  assert.match(deployWorkflow, /WEB_BASE_URL = "http:\/\/127\.0\.0\.1:\$env:APP_PORT"/);
+  assert.match(deployWorkflow, /API_BASE_URL = "http:\/\/127\.0\.0\.1:\$env:API_PORT"/);
+  assert.match(deployWorkflow, /https:\/\/127\.0\.0\.1:\$env:HTTPS_PORT\/web-healthz/);
+  assert.match(deployWorkflow, /https:\/\/127\.0\.0\.1:\$env:API_HTTPS_PORT\/healthz/);
   assert.doesNotMatch(deployWorkflow, /ServerCertificateValidationCallback/);
+  assert.match(deployWorkflow, /docker compose logs --tail 120 web/);
+  assert.match(deployWorkflow, /docker compose logs --tail 120 backend/);
   assert.match(deployWorkflow, /docker compose logs --tail 120 lan-https/);
 });
 
 test("local deploy uses a stable Docker Compose project name", () => {
-  const deployWorkflow = readFileSync(
-    ".github/workflows/deploy-local.yml",
-    "utf8",
-  );
-
   assert.match(deployWorkflow, /COMPOSE_PROJECT_NAME:\s+daily-speaking/);
   assert.match(dockerLanScript, /COMPOSE_PROJECT_NAME/);
 });
 
 test("local deploy workflow defaults to the Docker-local Python Whisper backend", () => {
-  const deployWorkflow = readFileSync(
-    ".github/workflows/deploy-local.yml",
-    "utf8",
-  );
-
   assert.match(deployWorkflow, /WHISPER_BACKEND:\s+openai/);
   assert.doesNotMatch(deployWorkflow, /vars\.WHISPER_BACKEND/);
   assert.match(deployWorkflow, /WHISPER_PYTHON_BIN:\s+\/opt\/whisper\/bin\/python/);
@@ -97,10 +112,6 @@ test("local deploy workflow defaults to the Docker-local Python Whisper backend"
 });
 
 test("multi-pass analysis concurrency is source-controlled for clean Windows deploys", () => {
-  const deployWorkflow = readFileSync(
-    ".github/workflows/deploy-local.yml",
-    "utf8",
-  );
   const envExample = readFileSync(".env.example", "utf8");
 
   assert.match(deployWorkflow, /AI_ANALYSIS_CONCURRENCY:\s+3/);
@@ -112,36 +123,21 @@ test("multi-pass analysis concurrency is source-controlled for clean Windows dep
   assert.match(envExample, /AI_ANALYSIS_CONCURRENCY=3/);
 });
 
-test("local deploy workflow verifies Whisper inside the Docker app container", () => {
-  const deployWorkflow = readFileSync(
-    ".github/workflows/deploy-local.yml",
-    "utf8",
-  );
-
+test("local deploy workflow verifies Whisper inside the backend container", () => {
   assert.match(deployWorkflow, /name:\s+Verify Docker Whisper runtime/);
-  assert.match(deployWorkflow, /docker compose exec -T app sh -lc/);
+  assert.match(deployWorkflow, /docker compose exec -T backend sh -lc/);
   assert.match(deployWorkflow, /test -x "\$WHISPER_PYTHON_BIN"/);
   assert.match(deployWorkflow, /\$WHISPER_PYTHON_BIN -m whisper --help/);
   assert.match(deployWorkflow, /echo whisper-ok/);
 });
 
 test("local deploy workflow configures persistent uploaded media storage", () => {
-  const deployWorkflow = readFileSync(
-    ".github/workflows/deploy-local.yml",
-    "utf8",
-  );
-
   assert.match(deployWorkflow, /UPLOADS_DIR:\s+\/app\/uploads/);
   assert.match(deployWorkflow, /UPLOADS_HOST_DIR:\s+\$\{\{\s*vars\.UPLOADS_HOST_DIR/);
   assert.match(deployWorkflow, /D:\\DailySpeaking\\data\\uploads/);
 });
 
 test("local deploy passes Cartesia credentials from the correct GitHub stores", () => {
-  const deployWorkflow = readFileSync(
-    ".github/workflows/deploy-local.yml",
-    "utf8",
-  );
-
   assert.match(
     deployWorkflow,
     /CARTESIA_API_KEY:\s+\$\{\{\s*secrets\.CARTESIA_API_KEY\s*\}\}/,
@@ -154,11 +150,6 @@ test("local deploy passes Cartesia credentials from the correct GitHub stores", 
 });
 
 test("local deploy stops before Docker when Cartesia configuration is missing", () => {
-  const deployWorkflow = readFileSync(
-    ".github/workflows/deploy-local.yml",
-    "utf8",
-  );
-
   assert.match(deployWorkflow, /name:\s+Validate Cartesia configuration/);
   assert.match(
     deployWorkflow,
@@ -171,12 +162,7 @@ test("local deploy stops before Docker when Cartesia configuration is missing", 
   assert.doesNotMatch(deployWorkflow, /Write-Host[^\n]*CARTESIA_API_KEY/);
 });
 
-test("local deploy verifies Cartesia variables reached the app container without printing them", () => {
-  const deployWorkflow = readFileSync(
-    ".github/workflows/deploy-local.yml",
-    "utf8",
-  );
-
+test("local deploy verifies Cartesia variables reached the backend container without printing them", () => {
   assert.match(deployWorkflow, /name:\s+Verify Docker Cartesia configuration/);
   assert.match(
     deployWorkflow,
@@ -279,7 +265,7 @@ test("project build contexts exclude secrets and generated files but retain sour
     }
     for (const file of project === "web"
       ? ["app/layout.tsx", "src/lib/apiConfig.ts", "package-lock.json", "public/logo.svg"]
-      : ["go.mod", "go.sum", "cmd/api/main.go", "migrations/001_init.sql", "docs/openapi.json", "tools/whisper/cache/.gitkeep"]) {
+      : ["go.mod", "go.sum", "cmd/api/main.go", "migrations/0001_init.sql", "docs/openapi.json", "tools/whisper/cache/.gitkeep"]) {
       assert.equal(excluded.ignores(file), false, `${project}: must retain ${file}`);
     }
     for (const file of project === "web"
