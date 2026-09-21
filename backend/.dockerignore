@@ -1,4 +1,11 @@
 .cache
+.git
+.env*
+node_modules
+coverage
+*.log
+.DS_Store
+daily-speaking-api
 .venv
 uploads
 tmp

@@ -1,9 +1,26 @@
 services:
-  app:
+  web:
     build:
-      context: .
+      context: ./web
       dockerfile: Dockerfile
-    container_name: daily-speaking-app
+    container_name: daily-speaking-web
+    restart: unless-stopped
+    environment:
+      PUBLIC_API_BASE_URL: ${PUBLIC_API_BASE_URL:-http://localhost:3219}
+    ports:
+      - "0.0.0.0:${APP_PORT:-3218}:3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/web-healthz').then(r => { if (!r.ok) process.exit(1); }).catch(() => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: daily-speaking-backend
     restart: unless-stopped
     depends_on:
       postgres:
@@ -11,6 +28,10 @@ services:
     environment:
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/daily_speaking
       SERVER_LOG_LEVEL: info
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3218,http://127.0.0.1:3218}
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
+      SESSION_COOKIE_SAME_SITE: ${SESSION_COOKIE_SAME_SITE:-lax}
+      SESSION_COOKIE_DOMAIN: ${SESSION_COOKIE_DOMAIN:-}
       UPLOADS_DIR: ${UPLOADS_DIR:-/app/uploads}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma4:31b-cloud}
@@ -33,19 +54,27 @@ services:
       CARTESIA_API_URL: ${CARTESIA_API_URL:-https://api.cartesia.ai/tts/bytes}
       CARTESIA_API_VERSION: ${CARTESIA_API_VERSION:-2026-08-14}
     ports:
-      - "0.0.0.0:${APP_PORT:-3218}:3000"
+      - "0.0.0.0:${API_PORT:-3219}:3000"
     volumes:
-      - ./tools:/app/tools
+      - ${WHISPER_TOOLS_HOST_DIR:-./backend/tools}:/app/tools
       - ${UPLOADS_HOST_DIR:-./.data/uploads}:/app/uploads
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "--show-error", "http://127.0.0.1:3000/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
 
   lan-https:
     image: caddy:2-alpine
     container_name: daily-speaking-lan-https
     restart: unless-stopped
     depends_on:
-      - app
+      - web
+      - backend
     ports:
       - "0.0.0.0:${HTTPS_PORT:-3443}:3443"
+      - "0.0.0.0:${API_HTTPS_PORT:-3444}:3444"
     volumes:
       - ./lan-https/Caddyfile:/etc/caddy/Caddyfile:ro
       - ./lan-https/certs:/certs:ro

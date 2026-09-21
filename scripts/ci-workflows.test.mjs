@@ -1,10 +1,18 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import test from "node:test";
 
 const dockerLanScript = readFileSync("scripts/docker-lan.mjs", "utf8");
-const dockerfile = readFileSync("Dockerfile", "utf8");
+const webRequire = createRequire(new URL("../web/package.json", import.meta.url));
+const { load: parseYaml } = webRequire("js-yaml");
+const ignore = webRequire("ignore");
+const webDockerfile = readFileSync("web/Dockerfile", "utf8");
+const dockerfile = readFileSync("backend/Dockerfile", "utf8");
 const dockerCompose = readFileSync("docker-compose.yml", "utf8");
+const compose = parseYaml(dockerCompose);
+const instructions = (source) => source.replace(/\\\r?\n\s*/g, " ").split(/\r?\n/)
+  .map((line) => line.trim()).filter((line) => line && !line.startsWith("#"));
 const qualityWorkflow = readFileSync(
   ".github/workflows/quality-gates.yml",
   "utf8",
@@ -185,12 +193,12 @@ test("repository forces LF endings for scripts used inside Linux containers", ()
 });
 
 test("Docker build creates public before copying it into the runtime image", () => {
-  assert.match(dockerfile, /RUN mkdir -p public && npm run build/);
-  assert.match(dockerfile, /COPY --from=next-build \/app\/public \.\/public/);
+  assert.match(webDockerfile, /RUN mkdir -p public && npm run build/);
+  assert.match(webDockerfile, /COPY --from=build \/app\/public \.\/public/);
 });
 
 test("Docker runtime includes the local Python Whisper backend", () => {
-  assert.match(dockerfile, /FROM node:22-bookworm-slim AS runtime/);
+  assert.match(dockerfile, /FROM debian:bookworm-slim AS runtime/);
   assert.match(dockerfile, /python3-venv/);
   assert.match(dockerfile, /ffmpeg/);
   assert.match(dockerfile, /openai-whisper/);
@@ -198,6 +206,99 @@ test("Docker runtime includes the local Python Whisper backend", () => {
   assert.match(dockerfile, /WHISPER_PYTHON_BIN=\/opt\/whisper\/bin\/python/);
   assert.match(dockerfile, /WHISPER_OPENAI_MODEL=base(?:\s|$)/);
   assert.match(dockerfile, /WHISPER_FFMPEG_BIN=\/usr\/bin\/ffmpeg/);
+});
+
+test("Compose gives independent contexts, ports and health to web and backend", () => {
+  assert.deepEqual(Object.keys(compose.services).sort(), ["backend", "lan-https", "postgres", "web"]);
+  const { web, backend } = compose.services;
+  assert.equal(web.build.context, "./web");
+  assert.equal(backend.build.context, "./backend");
+  assert.deepEqual(web.ports, ["0.0.0.0:${APP_PORT:-3218}:3000"]);
+  assert.deepEqual(backend.ports, ["0.0.0.0:${API_PORT:-3219}:3000"]);
+  assert.equal(web.depends_on, undefined);
+  assert.deepEqual(backend.depends_on, { postgres: { condition: "service_healthy" } });
+  assert.deepEqual(web.environment, { PUBLIC_API_BASE_URL: "${PUBLIC_API_BASE_URL:-http://localhost:3219}" });
+  assert.match(web.healthcheck.test.join(" "), /http:\/\/127\.0\.0\.1:3000\/web-healthz/);
+  assert.doesNotMatch(web.healthcheck.test.join(" "), /backend|3219|PUBLIC_API/);
+  assert.match(backend.healthcheck.test.join(" "), /http:\/\/127\.0\.0\.1:3000\/healthz/);
+  assert.deepEqual(compose.services["lan-https"].depends_on, ["web", "backend"]);
+  assert.equal(existsSync("Dockerfile"), false);
+  assert.equal(existsSync("docker-entrypoint.sh"), false);
+});
+
+test("Compose keeps backend credentials and persistent data with their owners", () => {
+  const { web, backend, postgres } = compose.services;
+  assert.ok(backend, "backend service is required");
+  assert.equal(web.volumes, undefined);
+  assert.deepEqual(backend.volumes, [
+    "${WHISPER_TOOLS_HOST_DIR:-./backend/tools}:/app/tools",
+    "${UPLOADS_HOST_DIR:-./.data/uploads}:/app/uploads",
+  ]);
+  assert.deepEqual(postgres.volumes, ["postgres_data:/var/lib/postgresql/data"]);
+  assert.deepEqual(postgres.ports, ["127.0.0.1:${POSTGRES_PORT:-5432}:5432"]);
+  assert.ok(Object.hasOwn(compose.volumes, "postgres_data"));
+  for (const [key, value] of Object.entries({
+    DATABASE_URL: "postgres://postgres:postgres@postgres:5432/daily_speaking",
+    CORS_ALLOWED_ORIGINS: "${CORS_ALLOWED_ORIGINS:-http://localhost:3218,http://127.0.0.1:3218}",
+    SESSION_COOKIE_SECURE: "${SESSION_COOKIE_SECURE:-false}",
+    SESSION_COOKIE_SAME_SITE: "${SESSION_COOKIE_SAME_SITE:-lax}",
+    SESSION_COOKIE_DOMAIN: "${SESSION_COOKIE_DOMAIN:-}",
+    CARTESIA_API_KEY: "${CARTESIA_API_KEY:-}",
+    CARTESIA_VOICE_ID: "${CARTESIA_VOICE_ID:-}",
+  })) assert.equal(backend.environment[key], value, key);
+});
+
+test("application images ship only their own production runtime and assets", () => {
+  const web = instructions(webDockerfile);
+  const backend = instructions(dockerfile);
+  assert.deepEqual(web.filter((line) => line.startsWith("FROM ")), [
+    "FROM node:22-alpine AS deps", "FROM deps AS build", "FROM node:22-alpine AS runtime",
+  ]);
+  assert.ok(web.includes("COPY --from=build /app/.next/standalone ./"));
+  assert.ok(web.includes("COPY --from=build /app/.next/static ./.next/static"));
+  assert.ok(web.includes("EXPOSE 3000"));
+  assert.ok(web.includes('CMD ["node", "server.js"]'));
+  assert.doesNotMatch(web.join("\n"), /golang|daily-speaking-api|whisper|ffmpeg|backend|PUBLIC_API_BASE_URL/);
+  assert.deepEqual(backend.filter((line) => line.startsWith("FROM ")), [
+    "FROM golang:1.26.2-alpine AS build", "FROM debian:bookworm-slim AS runtime",
+  ]);
+  assert.ok(backend.includes("RUN CGO_ENABLED=0 GOOS=linux go build -o /out/daily-speaking-api ./cmd/api"));
+  assert.ok(backend.includes("COPY --from=build /out/daily-speaking-api ./daily-speaking-api"));
+  assert.ok(backend.includes("ENV APP_ADDR=:3000"));
+  assert.ok(backend.includes("EXPOSE 3000"));
+  assert.ok(backend.includes('CMD ["./daily-speaking-api"]'));
+  assert.match(backend.join("\n"), /apt-get install[^\n]*ca-certificates curl ffmpeg python3 python3-venv/);
+  assert.doesNotMatch(backend.join("\n"), /node:|next-build|server\.js|COPY.*web/);
+});
+
+test("project build contexts exclude secrets and generated files but retain source assets", () => {
+  for (const project of ["web", "backend"]) {
+    const excluded = ignore().add(readFileSync(`${project}/.dockerignore`, "utf8"));
+    for (const file of [".env", ".env.local", ".git/config", "node_modules/pkg/index.js", "coverage/report.json", "tmp/output", ".cache/data"]) {
+      assert.equal(excluded.ignores(file), true, `${project}: must exclude ${file}`);
+    }
+    for (const file of project === "web"
+      ? ["app/layout.tsx", "src/lib/apiConfig.ts", "package-lock.json", "public/logo.svg"]
+      : ["go.mod", "go.sum", "cmd/api/main.go", "migrations/001_init.sql", "docs/openapi.json", "tools/whisper/cache/.gitkeep"]) {
+      assert.equal(excluded.ignores(file), false, `${project}: must retain ${file}`);
+    }
+    for (const file of project === "web"
+      ? [".next/server/app.js", "tsconfig.tsbuildinfo", "out/index.html"]
+      : [".venv/bin/python", "daily-speaking-api", "uploads/recording.webm", "tools/whisper/openai-models/base.pt"]) {
+      assert.equal(excluded.ignores(file), true, `${project}: must exclude ${file}`);
+    }
+  }
+});
+
+test("web health responds without API configuration or external requests", async () => {
+  const route = "web/app/web-healthz/route.ts";
+  assert.equal(existsSync(route), true, "web-only health route is required");
+  const { transpileModule, ModuleKind } = webRequire("typescript");
+  const { outputText } = transpileModule(readFileSync(route, "utf8"), { compilerOptions: { module: ModuleKind.ESNext } });
+  const { GET } = await import(`data:text/javascript,${encodeURIComponent(outputText)}`);
+  const response = await GET();
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { ok: true, service: "web" });
 });
 
 test("Docker runtime and Compose use persistent uploaded media storage", () => {
