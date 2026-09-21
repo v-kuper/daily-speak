@@ -88,6 +88,22 @@ test("local deploy workflow defaults to the Docker-local Python Whisper backend"
   assert.doesNotMatch(deployWorkflow, /vars\.WHISPER_LANGUAGE/);
 });
 
+test("multi-pass analysis concurrency is source-controlled for clean Windows deploys", () => {
+  const deployWorkflow = readFileSync(
+    ".github/workflows/deploy-local.yml",
+    "utf8",
+  );
+  const envExample = readFileSync(".env.example", "utf8");
+
+  assert.match(deployWorkflow, /AI_ANALYSIS_CONCURRENCY:\s+3/);
+  assert.doesNotMatch(deployWorkflow, /vars\.AI_ANALYSIS_CONCURRENCY/);
+  assert.match(
+    dockerCompose,
+    /AI_ANALYSIS_CONCURRENCY:\s+\$\{AI_ANALYSIS_CONCURRENCY:-3\}/,
+  );
+  assert.match(envExample, /AI_ANALYSIS_CONCURRENCY=3/);
+});
+
 test("local deploy workflow verifies Whisper inside the Docker app container", () => {
   const deployWorkflow = readFileSync(
     ".github/workflows/deploy-local.yml",

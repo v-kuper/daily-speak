@@ -145,7 +145,14 @@ ollama pull gemma4:31b-cloud
 export OLLAMA_BASE_URL=http://127.0.0.1:11434
 export OLLAMA_MODEL=gemma4:31b-cloud
 export OLLAMA_THINKING_MODEL=true
+export AI_ANALYSIS_CONCURRENCY=3
 ```
+
+`AI_ANALYSIS_CONCURRENCY` controls how many independent error-detector requests
+can run at the same time. Values from 1 to 7 are accepted; missing or invalid
+values fall back to 3. Each detector keeps its own focused prompt rather than
+combining error types into one request. Raising the value can increase Ollama
+CPU, GPU, and memory load.
 
 ## Local Whisper setup (recording transcription)
 

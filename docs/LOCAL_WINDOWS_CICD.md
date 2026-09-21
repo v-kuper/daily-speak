@@ -124,6 +124,17 @@ Manual deploy:
 2. Select `Deploy Local Windows`.
 3. Click `Run workflow`.
 
+## AI analysis concurrency
+
+The deploy workflow sets `AI_ANALYSIS_CONCURRENCY: 3` directly in source, so a
+clean Windows runner does not need a repository variable or a local `.env`
+file. Docker Compose uses the same default.
+
+This setting controls how many independent error-detector requests can run at
+the same time; it does not combine their focused prompts. Accepted values are
+1 through 7, and missing or invalid values fall back to 3. Increasing the value
+can raise Ollama CPU, GPU, and memory load on the Windows machine.
+
 ## Cartesia credentials for shadowing audio
 
 The Windows CI/CD deployment receives Cartesia configuration directly from
