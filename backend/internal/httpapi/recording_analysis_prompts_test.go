@@ -41,6 +41,9 @@ func TestParseDetectorCandidatesAcceptsEmptyAndRejectsIncompleteItems(t *testing
 	if _, ok := parseDetectorCandidates(`{"candidates":[{"wrong":"I go"}]}`, categoryVerbGrammar, "I go home."); ok {
 		t.Fatal("expected incomplete candidate response to fail")
 	}
+	if _, ok := parseDetectorCandidates(`{"candidates":null}`, categoryVerbGrammar, "I went home."); ok {
+		t.Fatal("expected null candidates to fail the array contract")
+	}
 }
 
 func TestParseDetectorCandidatesKeepsAllTwentyFiveItems(t *testing.T) {
@@ -80,5 +83,9 @@ func TestLanguageDetectorRequiresEveryRussianPhraseInEnglish(t *testing.T) {
 	remainingCyrillic := `{"candidates":[{"wrong":"капуста","right":"cabbage капуста","explanation":"Use English."},{"wrong":"я не знаю","right":"I do not know","explanation":"Use English."}]}`
 	if _, ok := parseDetectorCandidates(remainingCyrillic, categoryLanguageSwitch, transcript); ok {
 		t.Fatal("expected Cyrillic in translation to invalidate response")
+	}
+	punctuationOnly := `{"candidates":[{"wrong":"капуста","right":"...","explanation":"Use English."},{"wrong":"я не знаю","right":"I do not know","explanation":"Use English."}]}`
+	if _, ok := parseDetectorCandidates(punctuationOnly, categoryLanguageSwitch, transcript); ok {
+		t.Fatal("expected Russian translation without Latin text to invalidate response")
 	}
 }

@@ -70,7 +70,7 @@ func parseReviewedSuggestions(content string, transcript string, candidates []an
 			continue
 		}
 		raw, exists := envelope["suggestions"]
-		if !exists {
+		if !exists || strings.TrimSpace(string(raw)) == "null" {
 			continue
 		}
 		var wire []reviewerWireSuggestion
@@ -125,7 +125,8 @@ func normalizeReviewedItem(item reviewerWireSuggestion, transcript string, byID 
 		wrongMatched = wrongMatched || candidate.Wrong == wrong
 		categoryMatched = categoryMatched || candidate.Category == item.Category
 	}
-	if !wrongMatched || !categoryMatched || (item.Category == categoryLanguageSwitch && containsCyrillic(right)) {
+	if !wrongMatched || !categoryMatched ||
+		(item.Category == categoryLanguageSwitch && (containsCyrillic(right) || !containsLatinLetter(right))) {
 		return suggestion{}, false
 	}
 	ruleID := ""
@@ -158,7 +159,7 @@ func reviewedRussianCovered(items []suggestion, required []string) bool {
 	for _, phrase := range required {
 		matches := 0
 		for _, item := range items {
-			if item.Category == categoryLanguageSwitch && item.Wrong == phrase && item.Right != "" && !containsCyrillic(item.Right) {
+			if item.Category == categoryLanguageSwitch && item.Wrong == phrase && containsLatinLetter(item.Right) && !containsCyrillic(item.Right) {
 				matches++
 			}
 		}
@@ -178,7 +179,11 @@ func deduplicateReviewedSuggestions(transcript string, items []suggestion, requi
 	exact := make([]suggestion, 0, len(items))
 	seen := map[string]struct{}{}
 	for _, item := range items {
-		key := strings.ToLower(item.Wrong) + "\x00" + strings.ToLower(item.Right)
+		wrongKey := strings.ToLower(item.Wrong)
+		if _, isMandatory := mandatory[item.Wrong]; isMandatory {
+			wrongKey = item.Wrong
+		}
+		key := wrongKey + "\x00" + strings.ToLower(item.Right)
 		if _, exists := seen[key]; exists {
 			continue
 		}
@@ -203,7 +208,12 @@ func deduplicateReviewedSuggestions(transcript string, items []suggestion, requi
 	selected := make([]suggestion, 0, len(exact))
 	for _, item := range exact {
 		overlaps := false
+		_, itemMandatory := mandatory[item.Wrong]
 		for _, kept := range selected {
+			_, keptMandatory := mandatory[kept.Wrong]
+			if itemMandatory && keptMandatory {
+				continue
+			}
 			if strings.Contains(kept.Wrong, item.Wrong) || strings.Contains(item.Wrong, kept.Wrong) {
 				overlaps = true
 				break

@@ -39,7 +39,7 @@ func parseDetectorCandidates(content string, category suggestionCategory, transc
 			continue
 		}
 		raw, exists := envelope["candidates"]
-		if !exists {
+		if !exists || strings.TrimSpace(string(raw)) == "null" {
 			continue
 		}
 		var wire []detectorWireCandidate
@@ -92,7 +92,7 @@ func languageCandidatesCover(candidates []analysisCandidate, required []string) 
 	for _, phrase := range required {
 		matches := 0
 		for _, candidate := range candidates {
-			if candidate.Wrong == phrase && candidate.Right != "" && !containsCyrillic(candidate.Right) {
+			if candidate.Wrong == phrase && containsLatinLetter(candidate.Right) && !containsCyrillic(candidate.Right) {
 				matches++
 			}
 		}

@@ -18,6 +18,20 @@ func TestReviewerCannotInventCandidateOrRemoveRussian(t *testing.T) {
 	}
 }
 
+func TestReviewerRejectsNullSuggestions(t *testing.T) {
+	if _, ok := parseReviewedSuggestions(`{"suggestions":null}`, "I went home.", nil, nil); ok {
+		t.Fatal("expected null suggestions to fail the array contract")
+	}
+}
+
+func TestReviewerRejectsRussianCorrectionWithoutLatinText(t *testing.T) {
+	candidates := []analysisCandidate{{ID: "language_switch-001", Wrong: "капуста", Right: "...", Explanation: "Use English.", Category: categoryLanguageSwitch}}
+	content := `{"suggestions":[{"candidateIds":["language_switch-001"],"wrong":"капуста","right":"...","explanation":"Replace the Russian word with English. Keep the sentence in the target language.","category":"language_switch","severity":"medium","ruleId":null}]}`
+	if _, ok := parseReviewedSuggestions(content, "I bought капуста.", candidates, []string{"капуста"}); ok {
+		t.Fatal("expected Russian correction without Latin text to fail")
+	}
+}
+
 func TestReviewerRejectsStyleAsMinorAndUnsupportedEnums(t *testing.T) {
 	candidate := analysisCandidate{ID: "naturalness-001", Wrong: "I enjoyed the film", Right: "I liked the movie", Explanation: "Optional wording.", Category: categoryNaturalness}
 	content := `{"suggestions":[{"candidateIds":["naturalness-001"],"wrong":"I enjoyed the film","right":"I liked the movie","explanation":"This is only a stylistic alternative. Both versions are natural.","category":"naturalness","severity":"tiny","ruleId":null}]}`
@@ -75,6 +89,37 @@ func TestReviewedSuggestionsKeepMandatoryRussianOverLongerOverlap(t *testing.T) 
 	got, ok := parseReviewedSuggestions(content, transcript, candidates, []string{"капуста"})
 	if !ok || len(got) != 1 || got[0].Wrong != "капуста" {
 		t.Fatalf("expected mandatory Russian correction to win, got %#v, valid=%v", got, ok)
+	}
+}
+
+func TestReviewedSuggestionsPreserveDistinctNestedAndCaseVariantMandatoryRussian(t *testing.T) {
+	transcript := "I ate борщ. Then I cooked красный борщ. Борщ was delicious."
+	candidates := []analysisCandidate{
+		{ID: "language_switch-001", Wrong: "борщ", Right: "borscht", Explanation: "Use English.", Category: categoryLanguageSwitch},
+		{ID: "language_switch-002", Wrong: "красный борщ", Right: "red borscht", Explanation: "Use English.", Category: categoryLanguageSwitch},
+		{ID: "language_switch-003", Wrong: "Борщ", Right: "Borscht", Explanation: "Use English.", Category: categoryLanguageSwitch},
+	}
+	content := `{"suggestions":[
+		{"candidateIds":["language_switch-001"],"wrong":"борщ","right":"borscht","explanation":"Replace this Russian noun with its English equivalent. This keeps the sentence in the target language.","category":"language_switch","severity":"medium","ruleId":null},
+		{"candidateIds":["language_switch-002"],"wrong":"красный борщ","right":"red borscht","explanation":"Replace this Russian phrase with its English equivalent. This keeps the sentence in the target language.","category":"language_switch","severity":"medium","ruleId":null},
+		{"candidateIds":["language_switch-003"],"wrong":"Борщ","right":"Borscht","explanation":"Replace this capitalized Russian noun with its English equivalent. This keeps the sentence in the target language.","category":"language_switch","severity":"medium","ruleId":null}
+	]}`
+	required := []string{"борщ", "красный борщ", "Борщ"}
+
+	got, ok := parseReviewedSuggestions(content, transcript, candidates, required)
+	if !ok || len(got) != len(required) {
+		t.Fatalf("expected all distinct mandatory phrases, got %#v, valid=%v", got, ok)
+	}
+	for _, phrase := range required {
+		matches := 0
+		for _, item := range got {
+			if item.Wrong == phrase {
+				matches++
+			}
+		}
+		if matches != 1 {
+			t.Fatalf("mandatory phrase %q appears %d times in %#v", phrase, matches, got)
+		}
 	}
 }
 

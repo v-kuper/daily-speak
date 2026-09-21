@@ -18,7 +18,10 @@ import (
 	"github.com/google/uuid"
 )
 
-var cyrillicPhrasePattern = regexp.MustCompile(`[\p{Cyrillic}]+(?:[- \t]+[\p{Cyrillic}]+)*`)
+var (
+	cyrillicPhrasePattern = regexp.MustCompile(`[\p{Cyrillic}]+(?:[- \t]+[\p{Cyrillic}]+)*`)
+	latinLetterPattern    = regexp.MustCompile(`[A-Za-z]`)
+)
 
 func (s *Server) handleCreateRecording(w http.ResponseWriter, r *http.Request) {
 	started := time.Now()
@@ -255,6 +258,10 @@ func extractRussianPhrases(transcript string) []string {
 
 func containsCyrillic(value string) bool {
 	return cyrillicPhrasePattern.MatchString(value)
+}
+
+func containsLatinLetter(value string) bool {
+	return latinLetterPattern.MatchString(value)
 }
 
 func recordingTranscriptForPrompt(transcript string) string {
