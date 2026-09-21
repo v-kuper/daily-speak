@@ -5,10 +5,32 @@ export type TopicData = {
   words: string[];
 };
 
+export type SuggestionCategory =
+  | "language_switch"
+  | "verb_grammar"
+  | "nouns_determiners"
+  | "prepositions"
+  | "vocabulary"
+  | "sentence_structure"
+  | "naturalness";
+
+export type SuggestionSeverity = "major" | "medium" | "minor";
+
+export type LearningReference = {
+  id: string;
+  title: string;
+  summary: string;
+  url?: string;
+};
+
 export type Suggestion = {
   wrong: string;
   right: string;
   explanation: string;
+  category?: SuggestionCategory;
+  severity?: SuggestionSeverity;
+  ruleId?: string;
+  learningReference?: LearningReference;
 };
 
 export type PracticeType = "free_talk" | "topic" | "photo_description";

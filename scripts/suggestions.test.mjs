@@ -43,3 +43,44 @@ test("invalid suggestions are removed without limiting valid ones", () => {
     { wrong: "I go", right: "I went", explanation: "Use past tense." },
   ]);
 });
+
+test("valid metadata is kept and old suggestions stay metadata-free", () => {
+  const [modern, legacy] = suggestions.parseSuggestions([
+    {
+      wrong: "she go",
+      right: "she goes",
+      explanation: "Use agreement.",
+      category: "verb_grammar",
+      severity: "medium",
+      ruleId: "subject-verb-agreement",
+      learningReference: {
+        id: "subject-verb-agreement",
+        title: "Subject-verb agreement",
+        summary: "Match subject and verb.",
+        url: "https://dictionary.cambridge.org/us/grammar/british-grammar/subject-verb-agreement",
+      },
+    },
+    { wrong: "I go", right: "I went", explanation: "Use past tense." },
+  ]);
+
+  assert.equal(modern.severity, "medium");
+  assert.equal(modern.learningReference.id, "subject-verb-agreement");
+  assert.equal(legacy.severity, undefined);
+  assert.equal(legacy.learningReference, undefined);
+});
+
+test("unsafe reference URL is dropped without dropping the correction", () => {
+  const [parsed] = suggestions.parseSuggestions([
+    {
+      wrong: "she go",
+      right: "she goes",
+      explanation: "Use agreement.",
+      category: "verb_grammar",
+      severity: "medium",
+      learningReference: { id: "x", title: "X", summary: "X", url: "javascript:alert(1)" },
+    },
+  ]);
+
+  assert.equal(parsed.wrong, "she go");
+  assert.equal(parsed.learningReference, undefined);
+});

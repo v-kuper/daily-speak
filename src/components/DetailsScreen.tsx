@@ -166,7 +166,7 @@ export default function DetailsScreen() {
       return [];
     }
 
-    return buildTranscriptSegments(recording.transcript, recording.suggestions.map((item) => item.wrong));
+    return buildTranscriptSegments(recording.transcript, recording.suggestions);
   }, [recording]);
   const sharedFeedPost = useMemo(() => {
     if (!recording) {

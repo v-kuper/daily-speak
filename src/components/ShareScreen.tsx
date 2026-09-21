@@ -32,7 +32,7 @@ export default function ShareScreen() {
       return [];
     }
 
-    return buildTranscriptSegments(recording.transcript, recording.suggestions.map((item) => item.wrong));
+    return buildTranscriptSegments(recording.transcript, recording.suggestions);
   }, [recording]);
 
   if (!recording) {
