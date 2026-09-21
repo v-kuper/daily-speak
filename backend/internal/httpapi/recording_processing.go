@@ -99,7 +99,7 @@ func (s *Server) processSavedRecording(ctx context.Context, recordingID string, 
 		return err
 	}
 
-	suggestions, err := s.generateRecordingSuggestions(ctx, transcript, topic, interests, practiceType, photoObject, englishLevel, logger)
+	suggestions, err := s.generateRecordingSuggestions(ctx, recordingID, transcript, topic, interests, practiceType, photoObject, englishLevel, logger)
 	if err != nil {
 		return err
 	}
