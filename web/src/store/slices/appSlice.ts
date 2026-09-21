@@ -17,8 +17,6 @@ import { isCurrentInterviewGuidanceRequest } from "../../lib/interviewGuidance";
 import { formatTime, toDateKey } from "../../lib/utils";
 import { parseSuggestions } from "../../lib/suggestions";
 
-export type ScreenName = "speak" | "history" | "details" | "auth" | "profile" | "interests";
-export type TabName = "speak" | "history";
 export type SpeakMode = "idle" | "readyToRecord" | "recording" | "recorded";
 export type AuthStatus = "idle" | "loading";
 export type QuestionsStatus = "idle" | "loading" | "ready" | "failed";
@@ -132,8 +130,6 @@ export const INTEREST_OPTIONS: InterestOption[] = [
 ];
 
 export type AppState = {
-  currentScreen: ScreenName;
-  activeTab: TabName;
   speakState: SpeakMode;
   selectedTopic: string | null;
   showQuestions: boolean;
@@ -160,7 +156,6 @@ export type AppState = {
   authStatus: AuthStatus;
   authInitialized: boolean;
   pendingSaveAfterAuth: boolean;
-  screenBeforeAuth: TabName;
   questionsStatus: QuestionsStatus;
   questionsError: string | null;
   questionsDate: string | null;
@@ -1483,8 +1478,6 @@ export const saveEnglishLevel = createAsyncThunk<
 });
 
 const initialState: AppState = {
-  currentScreen: "speak",
-  activeTab: "speak",
   speakState: "idle",
   selectedTopic: null,
   showQuestions: false,
@@ -1511,7 +1504,6 @@ const initialState: AppState = {
   authStatus: "idle",
   authInitialized: false,
   pendingSaveAfterAuth: false,
-  screenBeforeAuth: "speak",
   questionsStatus: "idle",
   questionsError: null,
   questionsDate: null,
@@ -1621,9 +1613,6 @@ const clearStudyWordsState = (state: AppState): void => {
 };
 
 const openAuthFlow = (state: AppState, pendingSaveAfterAuth: boolean): void => {
-  state.screenBeforeAuth = state.activeTab;
-  state.currentScreen = "auth";
-  state.activeTab = "speak";
   state.authPasswordDraft = "";
   state.authError = null;
   state.authStatus = "idle";
@@ -1662,8 +1651,6 @@ const applySavedRecording = (state: AppState, recording: Recording): void => {
   state.recordingDuration = 0;
   state.showAddTopicInput = false;
   state.customTopicDraft = "";
-  state.activeTab = "history";
-  state.currentScreen = "details";
   const recordingDate = new Date(recording.timestamp);
   state.calendarMonth = recordingDate.getMonth();
   state.calendarYear = recordingDate.getFullYear();
@@ -1763,8 +1750,6 @@ const completeAuthSuccess = (
   state.backgroundSaveRecordingId = null;
   state.currentRecordingId = null;
   state.selectedDate = null;
-  state.currentScreen = state.screenBeforeAuth;
-  state.activeTab = state.screenBeforeAuth;
   applySubscriptionState(state, {
     isSubscriber,
     subscriptionExpiresAt: null,
@@ -1777,14 +1762,11 @@ const completeAuthSuccess = (
 const clearAuthenticatedState = (state: AppState): void => {
   state.isAuthenticated = false;
   state.userEmail = null;
-  state.activeTab = "speak";
-  state.currentScreen = "speak";
   state.authPasswordDraft = "";
   state.authError = null;
   state.authStatus = "idle";
   state.authInitialized = true;
   state.pendingSaveAfterAuth = false;
-  state.screenBeforeAuth = "speak";
   state.selectedInterestIds = [];
   state.questionsInterestsKey = "";
   state.questionsDate = null;
@@ -1832,20 +1814,6 @@ const appSlice = createSlice({
   name: "app",
   initialState,
   reducers: {
-    navigateToTab: (state, action: PayloadAction<TabName>) => {
-      if (action.payload !== "speak" && !state.isAuthenticated) {
-        return;
-      }
-      if (state.currentScreen === "auth") {
-        state.pendingSaveAfterAuth = false;
-        state.authPasswordDraft = "";
-        state.authError = null;
-        state.authStatus = "idle";
-      }
-      state.activeTab = action.payload;
-      state.currentScreen = action.payload;
-      resetPlayback(state);
-    },
     clearQuestionsError: (state) => {
       state.questionsError = null;
     },
@@ -1854,30 +1822,6 @@ const appSlice = createSlice({
     },
     clearStudyError: (state) => {
       state.studyError = null;
-    },
-    openProfile: (state) => {
-      if (!state.isAuthenticated) {
-        return;
-      }
-      state.currentScreen = "profile";
-      resetPlayback(state);
-    },
-    openInterests: (state) => {
-      if (!state.isAuthenticated) {
-        return;
-      }
-      state.currentScreen = "interests";
-      resetPlayback(state);
-    },
-    backToProfile: (state) => {
-      if (!state.isAuthenticated) {
-        state.currentScreen = "speak";
-        state.activeTab = "speak";
-        resetPlayback(state);
-        return;
-      }
-      state.currentScreen = "profile";
-      resetPlayback(state);
     },
     toggleInterest: (state, action: PayloadAction<string>) => {
       const interestId = action.payload;
@@ -1972,8 +1916,6 @@ const appSlice = createSlice({
       state.recordingDuration = 0;
       state.showAddTopicInput = false;
       state.customTopicDraft = "";
-      state.activeTab = "history";
-      state.currentScreen = "details";
       state.pendingSaveAfterAuth = false;
       state.recordingSaveStatus = "loading";
       state.recordingSaveError = null;
@@ -2204,25 +2146,12 @@ const appSlice = createSlice({
         state.calendarMonth += 1;
       }
     },
-    openDetails: (state, action: PayloadAction<string>) => {
+    selectRecording: (state, action: PayloadAction<string>) => {
       if (!state.isAuthenticated) {
         return;
       }
       state.currentRecordingId = action.payload;
-      state.activeTab = "history";
-      state.currentScreen = "details";
       state.shadowingRequestError = null;
-      resetPlayback(state);
-    },
-    backToHistory: (state) => {
-      if (!state.isAuthenticated) {
-        state.activeTab = "speak";
-        state.currentScreen = "speak";
-        resetPlayback(state);
-        return;
-      }
-      state.activeTab = "history";
-      state.currentScreen = "history";
       resetPlayback(state);
     },
     togglePlayback: (state) => {
@@ -2268,8 +2197,6 @@ const appSlice = createSlice({
       openAuthFlow(state, false);
     },
     cancelAuth: (state) => {
-      state.currentScreen = state.screenBeforeAuth;
-      state.activeTab = state.screenBeforeAuth;
       state.authPasswordDraft = "";
       state.authError = null;
       state.authStatus = "idle";
@@ -2508,8 +2435,6 @@ const appSlice = createSlice({
         clearRecordingRetry(state, recordingId);
         if (state.currentRecordingId === recordingId) {
           state.currentRecordingId = null;
-          state.currentScreen = "history";
-          state.activeTab = "history";
         }
         if (state.backgroundSaveRecordingId === recordingId) {
           state.backgroundSaveRecordingId = null;
@@ -2670,7 +2595,6 @@ const appSlice = createSlice({
 });
 
 export const {
-  navigateToTab,
   clearQuestionsError,
   clearTopicGuidanceError,
   clearStudyError,
@@ -2684,9 +2608,6 @@ export const {
   clearPhotoForPractice,
   setPhotoObjectDraft,
   startPhotoDescription,
-  openProfile,
-  openInterests,
-  backToProfile,
   toggleInterest,
   startFreeTalk,
   selectTopic,
@@ -2706,8 +2627,7 @@ export const {
   clearSelectedDate,
   previousMonth,
   nextMonth,
-  openDetails,
-  backToHistory,
+  selectRecording,
   togglePlayback,
   setPlaybackPlaying,
   tickPlayback,

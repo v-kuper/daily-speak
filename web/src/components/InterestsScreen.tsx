@@ -1,8 +1,9 @@
 "use client";
 
+import Link from "next/link";
+
 import { useEffect, useRef } from "react";
 import {
-  backToProfile,
   INTEREST_OPTIONS,
   MAX_SELECTED_INTERESTS,
   saveInterests,
@@ -31,9 +32,9 @@ export default function InterestsScreen() {
 
   return (
     <section className="profile-screen">
-      <button className="back-btn" onClick={() => dispatch(backToProfile())}>
+      <Link className="back-btn" href="/profile">
         ← Назад в профиль
-      </button>
+      </Link>
       <h2>Мои интересы</h2>
 
       <div className="section">

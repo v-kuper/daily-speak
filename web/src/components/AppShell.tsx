@@ -1,117 +1,68 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, type ReactNode } from "react";
+import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
 import { useAppDispatch, useAppSelector } from "../store/hooks";
-import {
-  fetchUserData,
-  logout,
-  navigateToTab,
-  openAuth,
-  openProfile,
-  restoreSession,
-  saveRecording
-} from "../store/slices/appSlice";
-import AuthScreen from "./AuthScreen";
-import DetailsScreen from "./DetailsScreen";
-import HistoryScreen from "./HistoryScreen";
-import InterestsScreen from "./InterestsScreen";
-import ProfileScreen from "./ProfileScreen";
-import SpeakScreen from "./SpeakScreen";
+import { fetchUserData, logout, restoreSession } from "../store/slices/appSlice";
 
-export default function AppShell() {
+export default function AppShell({ children }: { children: ReactNode }) {
   const dispatch = useAppDispatch();
-  const {
-    currentScreen,
-    activeTab,
-    isAuthenticated,
-    userEmail,
-    authInitialized,
-    authStatus,
-    userDataStatus,
-    pendingSaveAfterAuth,
-    speakState,
-    recordingSaveStatus
-  } = useAppSelector((state) => state.app);
+  const pathname = usePathname();
+  const router = useRouter();
+  const { isAuthenticated, userEmail, authInitialized, authStatus, userDataStatus, pendingSaveAfterAuth } =
+    useAppSelector((state) => state.app);
 
   useEffect(() => {
-    if (authInitialized || authStatus === "loading") {
-      return;
+    if (!authInitialized && authStatus !== "loading") {
+      void dispatch(restoreSession());
     }
-
-    void dispatch(restoreSession());
   }, [authInitialized, authStatus, dispatch]);
 
   useEffect(() => {
-    if (!isAuthenticated || pendingSaveAfterAuth || userDataStatus !== "idle") {
-      return;
+    if (isAuthenticated && !pendingSaveAfterAuth && userDataStatus === "idle") {
+      void dispatch(fetchUserData());
     }
-
-    void dispatch(fetchUserData());
   }, [dispatch, isAuthenticated, pendingSaveAfterAuth, userDataStatus]);
 
-  useEffect(() => {
-    if (!isAuthenticated || !pendingSaveAfterAuth || speakState !== "recorded" || recordingSaveStatus === "loading") {
-      return;
-    }
-
-    void dispatch(saveRecording());
-  }, [dispatch, isAuthenticated, pendingSaveAfterAuth, speakState, recordingSaveStatus]);
+  const onLogout = async () => {
+    await dispatch(logout());
+    router.replace("/speak");
+  };
+  const historyActive = pathname === "/history" || pathname.startsWith("/history/");
 
   return (
     <div className="app-container">
       <header className="header">
-        <button className="brand-title" onClick={() => dispatch(navigateToTab("speak"))}>
-          Daily Speaking
-        </button>
+        <Link className="brand-title" href="/speak">Daily Speaking</Link>
         <div className="header-actions">
           <ul className="nav-tabs" aria-label="Main navigation">
             <li>
-              <button className={activeTab === "speak" ? "active" : ""} onClick={() => dispatch(navigateToTab("speak"))}>
+              <Link className={pathname === "/speak" ? "active" : ""} aria-current={pathname === "/speak" ? "page" : undefined} href="/speak">
                 Speak
-              </button>
+              </Link>
             </li>
             {isAuthenticated && (
               <li>
-                <button
-                  className={activeTab === "history" ? "active" : ""}
-                  onClick={() => dispatch(navigateToTab("history"))}
-                >
+                <Link className={historyActive ? "active" : ""} aria-current={historyActive ? "page" : undefined} href="/history">
                   History
-                </button>
+                </Link>
               </li>
             )}
           </ul>
-
           {isAuthenticated ? (
             <div className="session-info">
-              <button type="button" className="session-email-btn" onClick={() => dispatch(openProfile())}>
-                {userEmail}
-              </button>
-              <button
-                type="button"
-                className="btn btn-secondary btn-small"
-                onClick={() => void dispatch(logout())}
-                disabled={authStatus === "loading"}
-              >
+              <Link className="session-email-btn" href="/profile">{userEmail}</Link>
+              <button type="button" className="btn btn-secondary btn-small" onClick={() => void onLogout()} disabled={authStatus === "loading"}>
                 Log out
               </button>
             </div>
           ) : (
-            <button className="btn btn-secondary btn-small" onClick={() => dispatch(openAuth())}>
-              Sign in / Register
-            </button>
+            <Link className="btn btn-secondary btn-small" href="/auth">Sign in / Register</Link>
           )}
         </div>
       </header>
-
-      <main className="main-content">
-        {currentScreen === "speak" && <SpeakScreen />}
-        {currentScreen === "history" && <HistoryScreen />}
-        {currentScreen === "details" && <DetailsScreen />}
-        {currentScreen === "auth" && <AuthScreen />}
-        {currentScreen === "profile" && <ProfileScreen />}
-        {currentScreen === "interests" && <InterestsScreen />}
-      </main>
+      <main className="main-content">{children}</main>
     </div>
   );
 }

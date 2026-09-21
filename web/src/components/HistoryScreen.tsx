@@ -1,5 +1,8 @@
 "use client";
 
+import Link from "next/link";
+import { recordingPath } from "../lib/routes";
+
 import { useEffect } from "react";
 import { recordingProcessingLabel } from "../lib/recordingProcessing";
 import { formatTime, formatTimeOfDay, recordingDateKey } from "../lib/utils";
@@ -8,7 +11,7 @@ import {
   clearSelectedDate,
   fetchRecording,
   nextMonth,
-  openDetails,
+  selectRecording,
   previousMonth,
   setSelectedDate,
   toggleCalendar
@@ -133,7 +136,7 @@ export default function HistoryScreen() {
         <div className="empty-state">No recordings on this day.</div>
       ) : (
         visibleRecordings.map((recording) => (
-          <button key={recording.id} className="recording-card" onClick={() => dispatch(openDetails(recording.id))}>
+          <Link key={recording.id} className="recording-card" href={recordingPath(recording.id)} onClick={() => dispatch(selectRecording(recording.id))}>
             <div className="recording-card-header">
               <div className="recording-main">
                 <div className="recording-time">{formatTimeOfDay(recording.timestamp)}</div>
@@ -156,7 +159,7 @@ export default function HistoryScreen() {
                 )}
               </div>
             </div>
-          </button>
+          </Link>
         ))
       )}
     </section>

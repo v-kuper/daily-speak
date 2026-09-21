@@ -1,9 +1,10 @@
 "use client";
 
+import Link from "next/link";
+
 import { useEffect, useState } from "react";
 import {
   cancelSubscription,
-  openInterests,
   saveEnglishLevel,
   subscribeMonthly
 } from "../store/slices/appSlice";
@@ -206,13 +207,13 @@ export default function ProfileScreen() {
             <span className="profile-menu-arrow">→</span>
           </button>
 
-          <button className="profile-menu-item" onClick={() => dispatch(openInterests())}>
+          <Link className="profile-menu-item" href="/profile/interests">
             <div className="profile-menu-content">
               <span className="profile-menu-title">Мои интересы</span>
               <span className="profile-menu-subtitle">{selectedInterestIds.length} выбрано</span>
             </div>
             <span className="profile-menu-arrow">→</span>
-          </button>
+          </Link>
         </div>
       </div>
     </section>

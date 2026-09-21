@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import Providers from "./providers";
+import AppShell from "../src/components/AppShell";
 import { resolvePublicApiBaseUrl } from "../src/lib/apiConfig";
 import "./globals.css";
 
@@ -20,7 +21,7 @@ export default function RootLayout({ children }: RootLayoutProps) {
   return (
     <html lang="en">
       <body>
-        <Providers apiBaseURL={apiBaseURL}>{children}</Providers>
+        <Providers apiBaseURL={apiBaseURL}><AppShell>{children}</AppShell></Providers>
       </body>
     </html>
   );

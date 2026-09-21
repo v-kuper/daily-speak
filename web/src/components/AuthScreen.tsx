@@ -10,7 +10,8 @@ import {
   signUp
 } from "../store/slices/appSlice";
 
-export default function AuthScreen() {
+// The route supplies this destination; the authentication workflow consumes it in the next migration step.
+export default function AuthScreen(_props: { returnTo: string }) {
   const dispatch = useAppDispatch();
   const { authEmailDraft, authPasswordDraft, authError, authStatus, pendingSaveAfterAuth } = useAppSelector(
     (state) => state.app

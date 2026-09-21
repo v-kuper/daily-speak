@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { buildTranscriptSegments } from "../lib/transcriptHighlight";
 import {
@@ -16,7 +18,6 @@ import {
 import { formatTime } from "../lib/utils";
 import { useAppDispatch, useAppSelector } from "../store/hooks";
 import {
-  backToHistory,
   clearRecordingDeleteError,
   deleteRecording,
   fetchRecording,
@@ -422,9 +423,9 @@ export default function DetailsScreen() {
   if (!recording) {
     return (
       <section>
-        <button className="back-btn" onClick={() => dispatch(backToHistory())}>
+        <Link className="back-btn" href="/history">
           ← Back
-        </button>
+        </Link>
         <h2>Recording</h2>
         <div className="empty-state">Recording not found.</div>
       </section>
@@ -433,9 +434,9 @@ export default function DetailsScreen() {
 
   return (
     <section>
-      <button className="back-btn" onClick={() => dispatch(backToHistory())}>
+      <Link className="back-btn" href="/history">
         ← Back
-      </button>
+      </Link>
       <h2>Recording</h2>
 
       {isProcessing && (

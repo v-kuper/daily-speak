@@ -1,5 +1,5 @@
-import AppShell from "../src/components/AppShell";
+import { redirect } from "next/navigation";
 
 export default function Page() {
-  return <AppShell />;
+  redirect("/speak");
 }

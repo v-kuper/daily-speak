@@ -1581,7 +1581,9 @@ body {
   display: flex;
 }
 
-.nav-tabs button {
+.nav-tabs a {
+  display: flex;
+  align-items: center;
   border: 0;
   padding: 0;
   background: transparent;
@@ -1591,18 +1593,18 @@ body {
   cursor: pointer;
 }
 
-.nav-tabs button:hover,
-.nav-tabs button:focus-visible,
-.nav-tabs button.active {
+.nav-tabs a:hover,
+.nav-tabs a:focus-visible,
+.nav-tabs a.active {
   color: var(--text-main);
   outline: none;
 }
 
-.nav-tabs button.active {
+.nav-tabs a.active {
   font-weight: 650;
 }
 
-.nav-tabs button.active::after {
+.nav-tabs a.active::after {
   content: "";
   position: absolute;
   right: 0;
@@ -1972,7 +1974,7 @@ textarea:focus {
     gap: 22px;
   }
 
-  .nav-tabs button.active::after {
+  .nav-tabs a.active::after {
     bottom: -16px;
   }
 
@@ -2018,4 +2020,19 @@ textarea:focus {
   .main-content {
     padding-inline: 14px;
   }
+}
+/* Preserve existing navigation styles when using route links. */
+a.brand-title,
+a.session-email-btn,
+a.btn,
+.nav-tabs a,
+a.back-btn,
+a.recording-card,
+a.profile-menu-item {
+  text-decoration: none;
+}
+
+a.recording-card,
+a.profile-menu-item {
+  color: inherit;
 }

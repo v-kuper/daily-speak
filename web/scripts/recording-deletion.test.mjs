@@ -31,8 +31,6 @@ const secondRecording = { ...firstRecording, id: "recording-2" };
 const recordingState = () => ({
   ...app.default(undefined, { type: "test/initialize" }),
   isAuthenticated: true,
-  currentScreen: "details",
-  activeTab: "history",
   currentRecordingId: "recording-1",
   recordings: [firstRecording, secondRecording],
   isPlaying: true,
@@ -46,15 +44,13 @@ test("recording deletion needs no publication or sharing state", () => {
   assert.deepEqual(Object.keys(state).filter((key) => /feed|share|copyMessage/i.test(key)), []);
 });
 
-test("successful deletion returns to history, resets playback, and ignores late recording responses", () => {
+test("successful deletion clears selection, resets playback, and ignores late recording responses", () => {
   let state = app.default(recordingState(), app.deleteRecording.fulfilled(
     { recordingId: "recording-1", quota: null }, "delete-request", "recording-1",
   ));
   assert.deepEqual(state.recordings, [secondRecording]);
   assert.deepEqual(state.deletedRecordingIds, ["recording-1"]);
   assert.equal(state.currentRecordingId, null);
-  assert.equal(state.currentScreen, "history");
-  assert.equal(state.activeTab, "history");
   assert.equal(state.isPlaying, false);
   assert.equal(state.playbackPosition, 0);
   assert.deepEqual(state.recordingRetryStatuses, { "recording-2": "loading" });
@@ -68,7 +64,6 @@ test("failed deletion preserves the recording and exposes the API error", () => 
     null, "delete-request", "recording-1", "Unable to delete recording",
   ));
   assert.deepEqual(state.recordings, [firstRecording, secondRecording]);
-  assert.equal(state.currentScreen, "details");
   assert.equal(state.currentRecordingId, "recording-1");
   assert.equal(state.recordingDeleteStatus, "idle");
   assert.equal(state.recordingDeleteError, "Unable to delete recording");
