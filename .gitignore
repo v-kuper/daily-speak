@@ -21,6 +21,7 @@ pnpm-debug.log*
 .env.*
 !.env.example
 /public/uploads/recordings/
+/backend/public/uploads/
 /backend/tools/whisper/bin/*
 /backend/tools/whisper/models/*
 /backend/tools/whisper/openai-models/*
