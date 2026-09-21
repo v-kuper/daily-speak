@@ -211,6 +211,8 @@ export type AppState = {
   recordingSaveError: string | null;
   recordingDeleteStatus: AuthStatus;
   recordingDeleteError: string | null;
+  recordingRetryStatuses: Record<string, AuthStatus>;
+  recordingRetryErrors: Record<string, string>;
   shadowingRequestStatus: AuthStatus;
   shadowingRequestError: string | null;
   interestsSaveStatus: AuthStatus;
@@ -1514,6 +1516,34 @@ export const generateShadowingAudio = createAsyncThunk<Recording, string, { reje
   },
 );
 
+export const retryRecordingProcessing = createAsyncThunk<Recording, string, { rejectValue: string }>(
+  "app/retryRecordingProcessing",
+  async (recordingId, { rejectWithValue }) => {
+    try {
+      const response = await fetch(`/api/recordings/${encodeURIComponent(recordingId)}/retry`, {
+        method: "POST",
+      });
+      const payload = (await response.json().catch(() => null)) as {
+        recording?: unknown;
+        error?: string;
+      } | null;
+      if (response.status === 401) {
+        return rejectWithValue("Unauthorized");
+      }
+      if (!response.ok) {
+        return rejectWithValue(payload?.error ?? "Failed to retry recording processing.");
+      }
+      const recording = parseRecording(payload?.recording);
+      if (!recording) {
+        return rejectWithValue("Invalid recording payload from server.");
+      }
+      return recording;
+    } catch {
+      return rejectWithValue("Cannot connect to recording service.");
+    }
+  },
+);
+
 export const deleteRecording = createAsyncThunk<
   { recordingId: string; quota: RecordingQuota | null },
   string,
@@ -1994,6 +2024,8 @@ const initialState: AppState = {
   recordingSaveError: null,
   recordingDeleteStatus: "idle",
   recordingDeleteError: null,
+  recordingRetryStatuses: {},
+  recordingRetryErrors: {},
   shadowingRequestStatus: "idle",
   shadowingRequestError: null,
   interestsSaveStatus: "idle",
@@ -2025,6 +2057,19 @@ const resetPlayback = (state: AppState): void => {
 const resetShadowingRequest = (state: AppState): void => {
   state.shadowingRequestStatus = "idle";
   state.shadowingRequestError = null;
+};
+
+const resetRecordingRetry = (state: AppState): void => {
+  state.recordingRetryStatuses = {};
+  state.recordingRetryErrors = {};
+};
+
+const clearRecordingRetry = (state: AppState, recordingId: string | null): void => {
+  if (!recordingId) {
+    return;
+  }
+  delete state.recordingRetryStatuses[recordingId];
+  delete state.recordingRetryErrors[recordingId];
 };
 
 const upsertRecording = (state: AppState, recording: Recording): void => {
@@ -2138,6 +2183,8 @@ const applySavedRecording = (state: AppState, recording: Recording): void => {
   state.recordingSaveError = null;
   state.recordingDeleteStatus = "idle";
   state.recordingDeleteError = null;
+  clearRecordingRetry(state, recording.id);
+  clearRecordingRetry(state, backgroundSaveRecordingId);
   resetShadowingRequest(state);
   state.feedPublishStatus = "idle";
   state.feedPublishError = null;
@@ -2221,6 +2268,7 @@ const completeAuthSuccess = (
   state.recordingSaveError = null;
   state.recordingDeleteStatus = "idle";
   state.recordingDeleteError = null;
+  resetRecordingRetry(state);
   resetShadowingRequest(state);
   state.feedPublishStatus = "idle";
   state.feedPublishError = null;
@@ -2287,6 +2335,7 @@ const clearAuthenticatedState = (state: AppState): void => {
   state.recordingSaveError = null;
   state.recordingDeleteStatus = "idle";
   state.recordingDeleteError = null;
+  resetRecordingRetry(state);
   resetShadowingRequest(state);
   state.interestsSaveStatus = "idle";
   state.interestsSaveError = null;
@@ -3031,6 +3080,23 @@ const appSlice = createSlice({
           clearAuthenticatedState(state);
         }
       })
+      .addCase(retryRecordingProcessing.pending, (state, action) => {
+        state.recordingRetryStatuses[action.meta.arg] = "loading";
+        delete state.recordingRetryErrors[action.meta.arg];
+      })
+      .addCase(retryRecordingProcessing.fulfilled, (state, action) => {
+        clearRecordingRetry(state, action.meta.arg);
+        resetShadowingRequest(state);
+        upsertRecording(state, action.payload);
+      })
+      .addCase(retryRecordingProcessing.rejected, (state, action) => {
+        delete state.recordingRetryStatuses[action.meta.arg];
+        if (action.payload === "Unauthorized") {
+          clearAuthenticatedState(state);
+          return;
+        }
+        state.recordingRetryErrors[action.meta.arg] = action.payload ?? "Failed to retry recording processing.";
+      })
       .addCase(generateShadowingAudio.pending, (state) => {
         state.shadowingRequestStatus = "loading";
         state.shadowingRequestError = null;
@@ -3060,6 +3126,7 @@ const appSlice = createSlice({
         const nextCollections = removeRecordingAndFeedPost(state.recordings, state.feedPosts, recordingId);
         state.recordings = nextCollections.recordings;
         state.feedPosts = nextCollections.feedPosts;
+        clearRecordingRetry(state, recordingId);
         state.feedPostsStatus = "idle";
         state.feedPostsError = null;
         if (state.currentFeedPost?.sourceRecordingId === recordingId) {

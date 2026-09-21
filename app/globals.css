@@ -1160,10 +1160,21 @@ button {
   outline-offset: 3px;
 }
 
-.shadowing-actions {
+.shadowing-actions,
+.processing-retry {
   display: flex;
   justify-content: flex-end;
   margin-top: 14px;
+}
+
+.processing-retry {
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.processing-retry .auth-error {
+  flex: 1 1 320px;
 }
 
 .feed-reply-composer {

@@ -1,4 +1,5 @@
-import type { RecordingProcessingStage } from "./data";
+import type { RecordingProcessingStage, RecordingStatus } from "./data";
+import type { ShadowingStatus } from "./shadowing";
 
 const RECORDING_PROCESSING_STAGES = new Set<RecordingProcessingStage>([
   "transcribing",
@@ -27,3 +28,29 @@ export const recordingProcessingLabel = (stage: RecordingProcessingStage | null)
       return "Processing recording...";
   }
 };
+
+export const recordingRetryLabel = (stage: RecordingProcessingStage | null): string | null => {
+  switch (stage) {
+    case "transcribing":
+      return "Retry transcription";
+    case "suggestions":
+      return "Retry AI analysis";
+    case "rewriting":
+      return "Retry natural version";
+    default:
+      return null;
+  }
+};
+
+export const shouldShowShadowingProgress = ({
+  recordingStatus,
+  correctedTranscript,
+  shadowingStatus,
+}: {
+  recordingStatus: RecordingStatus;
+  correctedTranscript: string;
+  shadowingStatus: ShadowingStatus;
+}): boolean =>
+  recordingStatus === "ready" &&
+  correctedTranscript.trim().length > 0 &&
+  (shadowingStatus === "pending" || shadowingStatus === "processing");

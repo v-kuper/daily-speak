@@ -700,6 +700,49 @@ window.DAILY_SPEAKING_OPENAPI = {
         }
       }
     },
+    "/api/recordings/{recordingId}/retry": {
+      "post": {
+        "tags": [
+          "Recordings"
+        ],
+        "summary": "Retry a failed recording-processing stage",
+        "description": "Atomically claims an owned failed recording and resumes from its stored processing stage. Transcription reuses saved audio; AI analysis reuses the transcript; the natural rewrite reuses both the transcript and accepted suggestions. An already-processing recording is returned without starting a duplicate job.",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RecordingIdPath"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current recording state and whether a new retry job was scheduled.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordingRetryResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      }
+    },
     "/api/recordings/{recordingId}/shadowing": {
       "post": {
         "tags": [
@@ -1776,6 +1819,21 @@ window.DAILY_SPEAKING_OPENAPI = {
         "properties": {
           "recording": {
             "$ref": "#/components/schemas/Recording"
+          }
+        }
+      },
+      "RecordingRetryResponse": {
+        "type": "object",
+        "required": [
+          "recording",
+          "scheduled"
+        ],
+        "properties": {
+          "recording": {
+            "$ref": "#/components/schemas/Recording"
+          },
+          "scheduled": {
+            "type": "boolean"
           }
         }
       },
