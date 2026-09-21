@@ -203,7 +203,7 @@ func (s *Server) generateRecordingSuggestions(ctx context.Context, transcript st
 		if useJSONFormat {
 			body["format"] = "json"
 		}
-		payload, _, err := ai.PostChat(ctx, body)
+		payload, err := s.aiClient.PostChat(ctx, body)
 		if err != nil {
 			logger.Warn("ollama.suggestions_request_failed", logging.ErrorMeta(err))
 			return nil, errors.New("AI suggestions could not be generated. Please try again later.")
@@ -242,7 +242,7 @@ func (s *Server) generateNaturalTranscript(ctx context.Context, transcript strin
 		if useJSONFormat {
 			body["format"] = "json"
 		}
-		payload, _, err := ai.PostChat(ctx, body)
+		payload, err := s.aiClient.PostChat(ctx, body)
 		if err != nil {
 			logger.Warn("ollama.natural_transcript_request_failed", logging.ErrorMeta(err))
 			return "", errors.New("The natural English version could not be generated. Please try again later.")

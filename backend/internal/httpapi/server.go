@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"daily-speaking-practice/backend/internal/ai"
 	"daily-speaking-practice/backend/internal/auth"
 	"daily-speaking-practice/backend/internal/db"
 	"daily-speaking-practice/backend/internal/logging"
@@ -21,6 +22,7 @@ type Config struct {
 	DB          *db.DB
 	NextURL     string
 	Synthesizer tts.Synthesizer
+	AIClient    ai.ChatClient
 }
 
 type shadowingJob struct {
@@ -39,6 +41,7 @@ type Server struct {
 	synthesizer                tts.Synthesizer
 	shadowingProcessingMu      sync.Mutex
 	shadowingProcessingJobs    map[string]shadowingJob
+	aiClient                   ai.ChatClient
 }
 
 func NewServer(config Config) *Server {
@@ -52,6 +55,10 @@ func NewServer(config Config) *Server {
 	if synthesizer == nil {
 		synthesizer = tts.NewCartesia(tts.ConfigFromEnv())
 	}
+	aiClient := config.AIClient
+	if aiClient == nil {
+		aiClient = ai.OllamaClient{}
+	}
 	return &Server{
 		db:                         config.DB,
 		nextProxy:                  proxy,
@@ -60,6 +67,7 @@ func NewServer(config Config) *Server {
 		removeStoredUploads:        removeStoredUploadFiles,
 		synthesizer:                synthesizer,
 		shadowingProcessingJobs:    map[string]shadowingJob{},
+		aiClient:                   aiClient,
 	}
 }
 
