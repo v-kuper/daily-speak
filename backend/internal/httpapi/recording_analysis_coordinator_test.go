@@ -188,7 +188,7 @@ func TestGenerateRecordingSuggestionsFailsWithoutPartialReview(t *testing.T) {
 			}
 			return `{"candidates":[]}`, nil
 		},
-		review: func() string { return `{"suggestions":[]}` },
+		review: func() string { return `{"decisions":{}}` },
 	}
 	server := NewServer(Config{AIClient: client})
 	_, err := server.generateRecordingSuggestions(context.Background(), "recording-1", "I went home.", "Home", nil, "free_talk", nil, "b1", logging.Logger{})
@@ -209,7 +209,7 @@ func TestGenerateRecordingSuggestionsRetriesThenReviews(t *testing.T) {
 			}
 			return `{"candidates":[]}`, nil
 		},
-		review: func() string { return `{"suggestions":[]}` },
+		review: func() string { return `{"decisions":{}}` },
 	}
 	server := NewServer(Config{AIClient: client})
 	got, err := server.generateRecordingSuggestions(context.Background(), "recording-1", "I went home.", "Home", nil, "free_talk", nil, "b1", logging.Logger{})
@@ -224,33 +224,17 @@ func TestGenerateRecordingSuggestionsRetriesThenReviews(t *testing.T) {
 func TestGenerateRecordingSuggestionsKeepsAllCandidatesAndFullTranscript(t *testing.T) {
 	englishWrong := make([]string, 25)
 	detectorItems := make([]map[string]any, 25)
-	reviewerItems := make([]map[string]any, 0, 26)
+	reviewerDecisions := make(map[string]string, 26)
 	for index := range englishWrong {
 		wrong := fmt.Sprintf("verb-error-%02d", index)
 		right := fmt.Sprintf("verb-fix-%02d", index)
 		englishWrong[index] = wrong
 		detectorItems[index] = map[string]any{"wrong": wrong, "right": right, "explanation": "Use the correct verb form.", "ruleId": "verb-forms"}
-		reviewerItems = append(reviewerItems, map[string]any{
-			"candidateIds": []string{fmt.Sprintf("verb_grammar-%03d", index+1)},
-			"wrong":        wrong,
-			"right":        right,
-			"explanation":  "This verb form is incorrect in context. Use the corrected verb form here.",
-			"category":     categoryVerbGrammar,
-			"severity":     severityMinor,
-			"ruleId":       "verb-forms",
-		})
+		reviewerDecisions[fmt.Sprintf("verb_grammar-%03d", index+1)] = string(severityMinor)
 	}
-	reviewerItems = append(reviewerItems, map[string]any{
-		"candidateIds": []string{"language_switch-001"},
-		"wrong":        "капуста",
-		"right":        "cabbage",
-		"explanation":  "Replace the Russian noun with its English equivalent. This keeps the sentence in the target language.",
-		"category":     categoryLanguageSwitch,
-		"severity":     severityMedium,
-		"ruleId":       nil,
-	})
+	reviewerDecisions["language_switch-001"] = string(severityMedium)
 	verbPayload, _ := json.Marshal(map[string]any{"candidates": detectorItems})
-	reviewerPayload, _ := json.Marshal(map[string]any{"suggestions": reviewerItems})
+	reviewerPayload, _ := json.Marshal(map[string]any{"decisions": reviewerDecisions})
 	client := &scriptedAnalysisClient{
 		byCategoryCall: map[suggestionCategory]int{},
 		respond: func(category suggestionCategory, _ int) (string, error) {
