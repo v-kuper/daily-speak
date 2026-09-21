@@ -22,6 +22,23 @@ func TestHealthz(t *testing.T) {
 	}
 }
 
+func TestBackendDoesNotServeOrProxyWebRoutes(t *testing.T) {
+	handler := NewServer(Config{}).Handler()
+
+	for _, path := range []string{"/", "/speak", "/history/demo"} {
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodGet, path, nil)
+		handler.ServeHTTP(recorder, request)
+
+		if recorder.Code != http.StatusNotFound {
+			t.Fatalf("%s: expected 404, got %d", path, recorder.Code)
+		}
+		if strings.TrimSpace(recorder.Body.String()) != `{"error":"Not found"}` {
+			t.Fatalf("%s: unexpected body %q", path, recorder.Body.String())
+		}
+	}
+}
+
 func TestUnauthorizedAPIContractWithoutCookie(t *testing.T) {
 	handler := NewServer(Config{}).Handler()
 	cases := []struct {

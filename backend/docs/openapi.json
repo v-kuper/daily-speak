@@ -1,0 +1,2726 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "DailySpeak API",
+    "version": "1.0.0",
+    "description": "HTTP API for DailySpeak. Authenticated endpoints use the `daily_speaking_session` HTTP-only cookie set by login/register."
+  },
+  "servers": [
+    {
+      "url": "/",
+      "description": "Current API origin"
+    },
+    {
+      "url": "http://localhost:3219",
+      "description": "Local API HTTP"
+    },
+    {
+      "url": "https://localhost:3444",
+      "description": "Local API HTTPS"
+    },
+    {
+      "url": "https://api.example.com",
+      "description": "Production API example"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Health"
+    },
+    {
+      "name": "Auth"
+    },
+    {
+      "name": "AI"
+    },
+    {
+      "name": "User"
+    },
+    {
+      "name": "Recordings"
+    },
+    {
+      "name": "Recording upload sessions"
+    },
+    {
+      "name": "Feed"
+    },
+    {
+      "name": "Uploads"
+    }
+  ],
+  "paths": {
+    "/healthz": {
+      "get": {
+        "tags": [
+          "Health"
+        ],
+        "summary": "Health check",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Service is alive.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                },
+                "example": {
+                  "ok": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/register": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Register a user and create a session",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AuthCredentials"
+              },
+              "example": {
+                "email": "student@example.com",
+                "password": "password123"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "$ref": "#/components/responses/AuthUserOK"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      }
+    },
+    "/api/auth/login": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Sign in and create a session",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AuthCredentials"
+              },
+              "example": {
+                "email": "student@example.com",
+                "password": "password123"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/AuthUserOK"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      }
+    },
+    "/api/auth/session": {
+      "get": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Read current session user",
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/AuthUserOK"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      }
+    },
+    "/api/auth/logout": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Delete current session cookie",
+        "responses": {
+          "200": {
+            "description": "Signed out.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkResponse"
+                },
+                "example": {
+                  "ok": true
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      }
+    },
+    "/api/daily-questions": {
+      "get": {
+        "tags": [
+          "AI"
+        ],
+        "summary": "Generate daily speaking questions",
+        "description": "Uses optional auth cookie. If authenticated, the user's saved English level overrides the `level` query parameter.",
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {}
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/DateQuery"
+          },
+          {
+            "$ref": "#/components/parameters/RefreshQuery"
+          },
+          {
+            "$ref": "#/components/parameters/InterestQuery"
+          },
+          {
+            "$ref": "#/components/parameters/EnglishLevelQuery"
+          },
+          {
+            "name": "avoid",
+            "in": "query",
+            "description": "Questions to avoid; may be repeated.",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "style": "form",
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Generated questions.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DailyQuestionsResponse"
+                },
+                "example": {
+                  "questions": [
+                    "How do you usually plan a short trip?",
+                    "What technology helps you study better?",
+                    "How do you keep a healthy morning routine?"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "502": {
+            "$ref": "#/components/responses/BadGateway"
+          }
+        }
+      }
+    },
+    "/api/topic-guidance": {
+      "get": {
+        "tags": [
+          "AI"
+        ],
+        "summary": "Generate follow-up questions and words for a topic",
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {}
+        ],
+        "parameters": [
+          {
+            "name": "topic",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 300
+            }
+          },
+          {
+            "$ref": "#/components/parameters/RefreshQuery"
+          },
+          {
+            "$ref": "#/components/parameters/InterestQuery"
+          },
+          {
+            "$ref": "#/components/parameters/EnglishLevelQuery"
+          },
+          {
+            "name": "avoidQuestion",
+            "in": "query",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "style": "form",
+            "explode": true
+          },
+          {
+            "name": "avoidWord",
+            "in": "query",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "style": "form",
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Topic guidance.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TopicGuidanceResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "502": {
+            "$ref": "#/components/responses/BadGateway"
+          }
+        }
+      }
+    },
+    "/api/study-words": {
+      "get": {
+        "tags": [
+          "AI"
+        ],
+        "summary": "Generate a vocabulary pack",
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {}
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RefreshQuery"
+          },
+          {
+            "$ref": "#/components/parameters/InterestQuery"
+          },
+          {
+            "$ref": "#/components/parameters/EnglishLevelQuery"
+          },
+          {
+            "name": "avoidWord",
+            "in": "query",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "style": "form",
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Study words and context text.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudyWordsResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "$ref": "#/components/responses/BadGateway"
+          }
+        }
+      }
+    },
+    "/api/user/data": {
+      "get": {
+        "tags": [
+          "User"
+        ],
+        "summary": "Load user profile data, recordings, quota and subscription",
+        "responses": {
+          "200": {
+            "description": "User data.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserDataResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      }
+    },
+    "/api/user/interests": {
+      "put": {
+        "tags": [
+          "User"
+        ],
+        "summary": "Replace selected user interests",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveInterestsRequest"
+              },
+              "example": {
+                "interestIds": [
+                  "technology",
+                  "travel",
+                  "fitness"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Saved interests.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SaveInterestsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      }
+    },
+    "/api/user/ollama-model": {
+      "get": {
+        "tags": [
+          "User"
+        ],
+        "summary": "Read configured Ollama model",
+        "responses": {
+          "200": {
+            "description": "Configured model.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OllamaModelResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/user/subscription": {
+      "get": {
+        "tags": [
+          "User"
+        ],
+        "summary": "Read subscription and recording quota",
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/SubscriptionOK"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "User"
+        ],
+        "summary": "Activate or extend subscription by one month",
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/SubscriptionOK"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "User"
+        ],
+        "summary": "Mark active subscription as cancelled",
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/SubscriptionOK"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      }
+    },
+    "/api/user/english-level": {
+      "get": {
+        "tags": [
+          "User"
+        ],
+        "summary": "Read saved English level",
+        "responses": {
+          "200": {
+            "description": "Current level.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnglishLevelResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "User"
+        ],
+        "summary": "Save English level",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EnglishLevelResponse"
+              },
+              "example": {
+                "level": "b2"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Saved level.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnglishLevelResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      }
+    },
+    "/api/user/recordings": {
+      "post": {
+        "tags": [
+          "Recordings"
+        ],
+        "summary": "Save a full base64 recording for background processing",
+        "description": "Legacy/fallback upload flow. Backend saves the recording immediately, returns it with `status=processing`, then runs transcription, AI suggestions, and the natural conversational rewrite in separate background steps.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateRecordingRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "$ref": "#/components/responses/RecordingWithQuotaCreated"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "402": {
+            "$ref": "#/components/responses/PaymentRequired"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      }
+    },
+    "/api/recordings/{recordingId}": {
+      "get": {
+        "tags": [
+          "Recordings"
+        ],
+        "summary": "Load one recording by id",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RecordingIdPath"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Recording.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordingResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Recordings"
+        ],
+        "summary": "Permanently delete a recording and related feed content",
+        "description": "Deletes the owned recording, its Feed publication, replies and reactions, and durably queues recording and reply audio files for removal from server storage.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RecordingIdPath"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Recording deleted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteRecordingResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      }
+    },
+    "/api/recordings/{recordingId}/retry": {
+      "post": {
+        "tags": [
+          "Recordings"
+        ],
+        "summary": "Retry a failed recording-processing stage",
+        "description": "Atomically claims an owned failed recording and resumes from its stored processing stage. Transcription reuses saved audio; AI analysis reuses the transcript; the natural rewrite reuses both the transcript and accepted suggestions. An already-processing recording is returned without starting a duplicate job.",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RecordingIdPath"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current recording state and whether a new retry job was scheduled.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordingRetryResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      }
+    },
+    "/api/recordings/{recordingId}/shadowing": {
+      "post": {
+        "tags": [
+          "Recordings"
+        ],
+        "summary": "Generate pronunciation audio for the corrected transcript",
+        "description": "Claims an owned recording for background Cartesia synthesis. Ready or recently processing recordings are returned without starting a duplicate job.",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RecordingIdPath"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current recording state after scheduling or deduplication.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordingResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      }
+    },
+    "/api/recording-sessions": {
+      "post": {
+        "tags": [
+          "Recording upload sessions"
+        ],
+        "summary": "Start chunked recording upload session",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateRecordingSessionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Upload session created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateRecordingSessionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      }
+    },
+    "/api/recording-sessions/{sessionId}/chunks": {
+      "post": {
+        "tags": [
+          "Recording upload sessions"
+        ],
+        "summary": "Upload one recording chunk",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/SessionIdPath"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/UploadRecordingChunkRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Chunk saved.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadRecordingChunkResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      }
+    },
+    "/api/recording-sessions/{sessionId}/audio": {
+      "post": {
+        "tags": [
+          "Recording upload sessions"
+        ],
+        "summary": "Upload the final complete recording audio",
+        "description": "Uploads the complete browser-created Blob for the session. Backend prefers this file over raw chunk concatenation when finishing the recording.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/SessionIdPath"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/UploadRecordingFinalAudioRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Final audio saved.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadRecordingFinalAudioResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      }
+    },
+    "/api/recording-sessions/{sessionId}/finish": {
+      "post": {
+        "tags": [
+          "Recording upload sessions"
+        ],
+        "summary": "Finish chunked upload and start background processing",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/SessionIdPath"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FinishRecordingSessionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Session was already finalized; existing recording returned.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordingResponse"
+                }
+              }
+            }
+          },
+          "201": {
+            "$ref": "#/components/responses/RecordingWithQuotaCreated"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "402": {
+            "$ref": "#/components/responses/PaymentRequired"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      }
+    },
+    "/api/feed/posts": {
+      "get": {
+        "tags": [
+          "Feed"
+        ],
+        "summary": "List feed posts",
+        "responses": {
+          "200": {
+            "description": "Feed posts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeedPostsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Feed"
+        ],
+        "summary": "Publish a saved recording to the feed",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateFeedPostRequest"
+              },
+              "example": {
+                "recordingId": "recording-uuid"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/FeedPostOK"
+          },
+          "201": {
+            "$ref": "#/components/responses/FeedPostOK"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      }
+    },
+    "/api/feed/posts/{postId}": {
+      "get": {
+        "tags": [
+          "Feed"
+        ],
+        "summary": "Load feed post and replies",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/PostIdPath"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Feed thread.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeedThreadResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      }
+    },
+    "/api/feed/posts/{postId}/replies": {
+      "post": {
+        "tags": [
+          "Feed"
+        ],
+        "summary": "Create a voice reply for a feed post",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/PostIdPath"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateFeedReplyRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Reply created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateFeedReplyResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "402": {
+            "$ref": "#/components/responses/PaymentRequired"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      }
+    },
+    "/api/feed/posts/{postId}/reactions": {
+      "post": {
+        "tags": [
+          "Feed"
+        ],
+        "summary": "Set or clear current user's reaction for a post",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/PostIdPath"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReactionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/ReactionSummaryOK"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      }
+    },
+    "/api/feed/replies/{replyId}/reactions": {
+      "post": {
+        "tags": [
+          "Feed"
+        ],
+        "summary": "Set or clear current user's reaction for a reply",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ReplyIdPath"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReactionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/ReactionSummaryOK"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      }
+    },
+    "/uploads/shadowing/{userId}/{fileName}": {
+      "get": {
+        "tags": [
+          "Uploads"
+        ],
+        "summary": "Serve owned shadowing pronunciation audio",
+        "description": "Returns a persisted shadowing MP3 only when the session user owns the recording whose active shadowing URL matches this path. Directory requests are rejected.",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-zA-Z0-9_-]+$"
+            }
+          },
+          {
+            "name": "fileName",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-zA-Z0-9_-]+\\.mp3$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Owned shadowing MP3.",
+            "content": {
+              "audio/mpeg": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      }
+    },
+    "/uploads/{path}": {
+      "get": {
+        "tags": [
+          "Uploads"
+        ],
+        "summary": "Serve non-shadowing uploaded media",
+        "description": "Serves recording and Feed media. Shadowing MP3s use the authenticated route documented separately.",
+        "security": [],
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "description": "Path under the configured uploads directory, for example `recordings/user-id/recording.webm`.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Uploaded media file.",
+            "content": {
+              "audio/webm": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "audio/mp4": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "audio/mpeg": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "cookieAuth": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "daily_speaking_session",
+        "description": "HTTP-only session cookie set by `/api/auth/register` and `/api/auth/login`."
+      }
+    },
+    "parameters": {
+      "DateQuery": {
+        "name": "date",
+        "in": "query",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "example": "2026-06-07"
+      },
+      "RefreshQuery": {
+        "name": "refresh",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "string"
+        }
+      },
+      "InterestQuery": {
+        "name": "interest",
+        "in": "query",
+        "required": false,
+        "description": "Interest ids; may be repeated. Backend keeps up to 10.",
+        "schema": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 10
+        },
+        "style": "form",
+        "explode": true
+      },
+      "EnglishLevelQuery": {
+        "name": "level",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "$ref": "#/components/schemas/EnglishLevel"
+        }
+      },
+      "RecordingIdPath": {
+        "name": "recordingId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string"
+        }
+      },
+      "SessionIdPath": {
+        "name": "sessionId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string"
+        }
+      },
+      "PostIdPath": {
+        "name": "postId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string"
+        }
+      },
+      "ReplyIdPath": {
+        "name": "replyId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string"
+        }
+      }
+    },
+    "responses": {
+      "AuthUserOK": {
+        "description": "Authenticated user. Response also sets `daily_speaking_session` on login/register.",
+        "headers": {
+          "Set-Cookie": {
+            "schema": {
+              "type": "string"
+            },
+            "description": "Session cookie for login/register responses."
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/AuthResponse"
+            }
+          }
+        }
+      },
+      "SubscriptionOK": {
+        "description": "Subscription and quota.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/SubscriptionResponse"
+            }
+          }
+        }
+      },
+      "RecordingWithQuotaCreated": {
+        "description": "Recording and updated quota.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/RecordingWithQuotaResponse"
+            }
+          }
+        }
+      },
+      "FeedPostOK": {
+        "description": "Feed post.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/FeedPostResponse"
+            }
+          }
+        }
+      },
+      "ReactionSummaryOK": {
+        "description": "Updated reaction summary.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ReactionSummaryResponse"
+            }
+          }
+        }
+      },
+      "BadRequest": {
+        "description": "Invalid request.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "Session cookie is missing or invalid.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            },
+            "example": {
+              "error": "Unauthorized"
+            }
+          }
+        }
+      },
+      "PaymentRequired": {
+        "description": "Recording quota exceeded.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "Resource not found.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        }
+      },
+      "Conflict": {
+        "description": "Resource conflict.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        }
+      },
+      "UnprocessableEntity": {
+        "description": "Valid request, but audio could not be transcribed.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        }
+      },
+      "InternalServerError": {
+        "description": "Server error.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        }
+      },
+      "BadGateway": {
+        "description": "Local AI/Whisper/Ollama backend failed.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "HealthResponse": {
+        "type": "object",
+        "required": [
+          "ok"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          }
+        }
+      },
+      "OkResponse": {
+        "type": "object",
+        "required": [
+          "ok"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        },
+        "example": {
+          "error": "Unauthorized"
+        }
+      },
+      "AuthCredentials": {
+        "type": "object",
+        "required": [
+          "email",
+          "password"
+        ],
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "password": {
+            "type": "string",
+            "minLength": 8
+          }
+        }
+      },
+      "User": {
+        "type": "object",
+        "required": [
+          "email",
+          "isSubscriber",
+          "englishLevel"
+        ],
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "isSubscriber": {
+            "type": "boolean"
+          },
+          "englishLevel": {
+            "$ref": "#/components/schemas/EnglishLevel"
+          }
+        },
+        "example": {
+          "email": "student@example.com",
+          "isSubscriber": false,
+          "englishLevel": "b1"
+        }
+      },
+      "AuthResponse": {
+        "type": "object",
+        "required": [
+          "user"
+        ],
+        "properties": {
+          "user": {
+            "$ref": "#/components/schemas/User"
+          }
+        }
+      },
+      "EnglishLevel": {
+        "type": "string",
+        "enum": [
+          "a1",
+          "a2",
+          "b1",
+          "b2",
+          "c1",
+          "c2"
+        ],
+        "default": "b1"
+      },
+      "PracticeType": {
+        "type": "string",
+        "enum": [
+          "free_talk",
+          "topic",
+          "photo_description"
+        ]
+      },
+      "RecordingStatus": {
+        "type": "string",
+        "enum": [
+          "processing",
+          "ready",
+          "failed"
+        ]
+      },
+      "ShadowingStatus": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "processing",
+          "ready",
+          "failed"
+        ]
+      },
+      "RecordingProcessingStage": {
+        "type": "string",
+        "enum": [
+          "transcribing",
+          "suggestions",
+          "rewriting"
+        ],
+        "example": "suggestions"
+      },
+      "AudioDataUrl": {
+        "type": "string",
+        "description": "A `data:audio/*;base64,...` payload for incoming requests, or `/uploads/...` URL in stored responses."
+      },
+      "PhotoDataUrl": {
+        "type": "string",
+        "description": "A `data:image/(png|jpeg|webp|gif);base64,...` payload, max 4MB."
+      },
+      "Suggestion": {
+        "type": "object",
+        "required": [
+          "wrong",
+          "right",
+          "explanation"
+        ],
+        "properties": {
+          "wrong": {
+            "type": "string"
+          },
+          "right": {
+            "type": "string"
+          },
+          "explanation": {
+            "type": "string"
+          }
+        },
+        "example": {
+          "wrong": "I goed home",
+          "right": "I went home",
+          "explanation": "Use the irregular past-tense form `went`."
+        }
+      },
+      "Recording": {
+        "type": "object",
+        "required": [
+          "id",
+          "topic",
+          "duration",
+          "timestamp",
+          "status",
+          "transcript",
+          "correctedTranscript",
+          "suggestions",
+          "practiceType",
+          "shadowingStatus",
+          "shadowingAudioUrl",
+          "shadowingError",
+          "shadowingUpdatedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "topic": {
+            "type": "string"
+          },
+          "duration": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Seconds."
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RecordingStatus"
+          },
+          "transcript": {
+            "type": "string"
+          },
+          "correctedTranscript": {
+            "type": "string"
+          },
+          "suggestions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Suggestion"
+            }
+          },
+          "practiceType": {
+            "$ref": "#/components/schemas/PracticeType"
+          },
+          "audioDataUrl": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AudioDataUrl"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "photoDataUrl": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PhotoDataUrl"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "photoObject": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 120
+          },
+          "processingStage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RecordingProcessingStage"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "processingError": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "shadowingStatus": {
+            "$ref": "#/components/schemas/ShadowingStatus"
+          },
+          "shadowingAudioUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^/uploads/shadowing/[a-zA-Z0-9_-]+/[a-zA-Z0-9_-]+\\.mp3$"
+          },
+          "shadowingError": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "shadowingUpdatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "example": {
+          "id": "recording-123",
+          "topic": "My weekend",
+          "duration": 42,
+          "timestamp": "2026-09-21T10:30:00Z",
+          "status": "ready",
+          "transcript": "I goed home after work.",
+          "correctedTranscript": "I went home after work.",
+          "suggestions": [
+            {
+              "wrong": "goed",
+              "right": "went",
+              "explanation": "Use the irregular past tense."
+            }
+          ],
+          "practiceType": "free_talk",
+          "audioDataUrl": "/uploads/recordings/user-123/recording-123.webm",
+          "photoDataUrl": null,
+          "photoObject": null,
+          "processingStage": null,
+          "processingError": null,
+          "shadowingStatus": "ready",
+          "shadowingAudioUrl": "/uploads/shadowing/user-123/recording-123.mp3",
+          "shadowingError": null,
+          "shadowingUpdatedAt": "2026-09-21T10:31:00Z"
+        }
+      },
+      "RecordingResponse": {
+        "type": "object",
+        "required": [
+          "recording"
+        ],
+        "properties": {
+          "recording": {
+            "$ref": "#/components/schemas/Recording"
+          }
+        }
+      },
+      "RecordingRetryResponse": {
+        "type": "object",
+        "required": [
+          "recording",
+          "scheduled"
+        ],
+        "properties": {
+          "recording": {
+            "$ref": "#/components/schemas/Recording"
+          },
+          "scheduled": {
+            "type": "boolean"
+          }
+        }
+      },
+      "DeleteRecordingResponse": {
+        "type": "object",
+        "required": [
+          "deletedRecordingId",
+          "quota"
+        ],
+        "properties": {
+          "deletedRecordingId": {
+            "type": "string"
+          },
+          "quota": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RecordingQuota"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "RecordingQuota": {
+        "type": "object",
+        "required": [
+          "isSubscriber",
+          "weeklyLimitSeconds",
+          "weeklyUsedSeconds",
+          "weeklyRemainingSeconds",
+          "maxSessionSeconds"
+        ],
+        "properties": {
+          "isSubscriber": {
+            "type": "boolean"
+          },
+          "weeklyLimitSeconds": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "weeklyUsedSeconds": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "weeklyRemainingSeconds": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "maxSessionSeconds": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "SubscriptionState": {
+        "type": "object",
+        "required": [
+          "isSubscriber",
+          "subscriptionExpiresAt",
+          "subscriptionCancelled"
+        ],
+        "properties": {
+          "isSubscriber": {
+            "type": "boolean"
+          },
+          "subscriptionExpiresAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "subscriptionCancelled": {
+            "type": "boolean"
+          }
+        },
+        "example": {
+          "isSubscriber": true,
+          "subscriptionExpiresAt": "2026-10-21T10:30:00Z",
+          "subscriptionCancelled": false
+        }
+      },
+      "SubscriptionResponse": {
+        "type": "object",
+        "required": [
+          "subscription",
+          "quota"
+        ],
+        "properties": {
+          "subscription": {
+            "$ref": "#/components/schemas/SubscriptionState"
+          },
+          "quota": {
+            "$ref": "#/components/schemas/RecordingQuota"
+          }
+        }
+      },
+      "UserDataResponse": {
+        "type": "object",
+        "required": [
+          "interestIds",
+          "recordings",
+          "quota",
+          "subscription",
+          "englishLevel"
+        ],
+        "properties": {
+          "interestIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "recordings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Recording"
+            }
+          },
+          "quota": {
+            "$ref": "#/components/schemas/RecordingQuota"
+          },
+          "subscription": {
+            "$ref": "#/components/schemas/SubscriptionState"
+          },
+          "englishLevel": {
+            "$ref": "#/components/schemas/EnglishLevel"
+          }
+        }
+      },
+      "SaveInterestsRequest": {
+        "type": "object",
+        "required": [
+          "interestIds"
+        ],
+        "properties": {
+          "interestIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 10
+          }
+        }
+      },
+      "SaveInterestsResponse": {
+        "type": "object",
+        "required": [
+          "interestIds"
+        ],
+        "properties": {
+          "interestIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "OllamaModelResponse": {
+        "type": "object",
+        "required": [
+          "selectedModel",
+          "isThinkingModel",
+          "warning"
+        ],
+        "properties": {
+          "selectedModel": {
+            "type": "string"
+          },
+          "isThinkingModel": {
+            "type": "boolean"
+          },
+          "warning": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "EnglishLevelResponse": {
+        "type": "object",
+        "required": [
+          "level"
+        ],
+        "properties": {
+          "level": {
+            "$ref": "#/components/schemas/EnglishLevel"
+          }
+        }
+      },
+      "DailyQuestionsResponse": {
+        "type": "object",
+        "required": [
+          "questions"
+        ],
+        "properties": {
+          "questions": {
+            "type": "array",
+            "minItems": 3,
+            "maxItems": 3,
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "TopicGuidanceResponse": {
+        "type": "object",
+        "required": [
+          "questions",
+          "words"
+        ],
+        "properties": {
+          "questions": {
+            "type": "array",
+            "minItems": 10,
+            "maxItems": 10,
+            "items": {
+              "type": "string"
+            }
+          },
+          "words": {
+            "type": "array",
+            "minItems": 8,
+            "maxItems": 8,
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "StudyWordsResponse": {
+        "type": "object",
+        "required": [
+          "words",
+          "text"
+        ],
+        "properties": {
+          "words": {
+            "type": "array",
+            "minItems": 10,
+            "maxItems": 10,
+            "items": {
+              "type": "string"
+            }
+          },
+          "text": {
+            "type": "string"
+          }
+        }
+      },
+      "RecordingDraft": {
+        "type": "object",
+        "required": [
+          "topic",
+          "duration",
+          "timestamp",
+          "practiceType",
+          "audioDataUrl"
+        ],
+        "properties": {
+          "topic": {
+            "type": "string",
+            "maxLength": 300
+          },
+          "duration": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "practiceType": {
+            "$ref": "#/components/schemas/PracticeType"
+          },
+          "audioDataUrl": {
+            "$ref": "#/components/schemas/AudioDataUrl"
+          },
+          "photoDataUrl": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PhotoDataUrl"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "photoObject": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 120
+          }
+        }
+      },
+      "CreateRecordingRequest": {
+        "type": "object",
+        "required": [
+          "recording"
+        ],
+        "properties": {
+          "recording": {
+            "$ref": "#/components/schemas/RecordingDraft"
+          }
+        }
+      },
+      "RecordingWithQuotaResponse": {
+        "type": "object",
+        "required": [
+          "recording"
+        ],
+        "properties": {
+          "recording": {
+            "$ref": "#/components/schemas/Recording"
+          },
+          "quota": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RecordingQuota"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "CreateRecordingSessionRequest": {
+        "type": "object",
+        "required": [
+          "topic"
+        ],
+        "properties": {
+          "topic": {
+            "type": "string",
+            "maxLength": 300
+          },
+          "duration": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 0
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "practiceType": {
+            "$ref": "#/components/schemas/PracticeType"
+          },
+          "photoDataUrl": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PhotoDataUrl"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "photoObject": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 120
+          }
+        }
+      },
+      "CreateRecordingSessionResponse": {
+        "type": "object",
+        "required": [
+          "sessionId",
+          "chunkSeconds"
+        ],
+        "properties": {
+          "sessionId": {
+            "type": "string"
+          },
+          "chunkSeconds": {
+            "type": "integer",
+            "example": 5
+          }
+        }
+      },
+      "UploadRecordingChunkRequest": {
+        "type": "object",
+        "required": [
+          "chunkIndex",
+          "audio"
+        ],
+        "properties": {
+          "chunkIndex": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "audio": {
+            "type": "string",
+            "format": "binary",
+            "description": "One MediaRecorder chunk; max 8MB."
+          }
+        }
+      },
+      "UploadRecordingChunkResponse": {
+        "type": "object",
+        "required": [
+          "sessionId",
+          "chunkIndex"
+        ],
+        "properties": {
+          "sessionId": {
+            "type": "string"
+          },
+          "chunkIndex": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "UploadRecordingFinalAudioRequest": {
+        "type": "object",
+        "required": [
+          "audio"
+        ],
+        "properties": {
+          "audio": {
+            "type": "string",
+            "format": "binary",
+            "description": "Complete MediaRecorder Blob; max 80MB."
+          }
+        }
+      },
+      "UploadRecordingFinalAudioResponse": {
+        "type": "object",
+        "required": [
+          "sessionId",
+          "extension"
+        ],
+        "properties": {
+          "sessionId": {
+            "type": "string"
+          },
+          "extension": {
+            "type": "string",
+            "example": "webm"
+          }
+        }
+      },
+      "FinishRecordingSessionRequest": {
+        "type": "object",
+        "properties": {
+          "duration": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "Reaction": {
+        "type": "string",
+        "enum": [
+          "like",
+          "love",
+          "fire",
+          "laugh",
+          "support"
+        ]
+      },
+      "ReactionCounts": {
+        "type": "object",
+        "required": [
+          "like",
+          "love",
+          "fire",
+          "laugh",
+          "support"
+        ],
+        "properties": {
+          "like": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "love": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "fire": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "laugh": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "support": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "ReactionSummary": {
+        "type": "object",
+        "required": [
+          "counts",
+          "currentReaction"
+        ],
+        "properties": {
+          "counts": {
+            "$ref": "#/components/schemas/ReactionCounts"
+          },
+          "currentReaction": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Reaction"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "ReactionRequest": {
+        "type": "object",
+        "required": [
+          "reaction"
+        ],
+        "properties": {
+          "reaction": {
+            "description": "Set one reaction. Use null or empty string to clear current reaction.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Reaction"
+              },
+              {
+                "type": "null"
+              },
+              {
+                "type": "string",
+                "maxLength": 0
+              }
+            ]
+          }
+        }
+      },
+      "ReactionSummaryResponse": {
+        "type": "object",
+        "required": [
+          "reactions"
+        ],
+        "properties": {
+          "reactions": {
+            "$ref": "#/components/schemas/ReactionSummary"
+          }
+        }
+      },
+      "FeedPost": {
+        "type": "object",
+        "required": [
+          "id",
+          "sourceRecordingId",
+          "topic",
+          "duration",
+          "transcript",
+          "practiceType",
+          "sourceTimestamp",
+          "createdAt",
+          "authorMaskedEmail",
+          "replyCount",
+          "reactions"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "sourceRecordingId": {
+            "type": "string"
+          },
+          "topic": {
+            "type": "string"
+          },
+          "duration": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "transcript": {
+            "type": "string"
+          },
+          "practiceType": {
+            "$ref": "#/components/schemas/PracticeType"
+          },
+          "audioDataUrl": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AudioDataUrl"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "photoDataUrl": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PhotoDataUrl"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "photoObject": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 120
+          },
+          "sourceTimestamp": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "authorMaskedEmail": {
+            "type": "string"
+          },
+          "replyCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "reactions": {
+            "$ref": "#/components/schemas/ReactionSummary"
+          }
+        },
+        "example": {
+          "id": "post-123",
+          "sourceRecordingId": "recording-123",
+          "topic": "My weekend",
+          "duration": 42,
+          "transcript": "I went home after work.",
+          "practiceType": "free_talk",
+          "audioDataUrl": "/uploads/recordings/user-123/recording-123.webm",
+          "photoDataUrl": null,
+          "photoObject": null,
+          "sourceTimestamp": "2026-09-21T10:30:00Z",
+          "createdAt": "2026-09-21T10:32:00Z",
+          "authorMaskedEmail": "s***@example.com",
+          "replyCount": 1,
+          "reactions": {
+            "counts": {
+              "like": 1,
+              "love": 0,
+              "fire": 0,
+              "laugh": 0,
+              "support": 0
+            },
+            "currentReaction": "like"
+          }
+        }
+      },
+      "FeedReply": {
+        "type": "object",
+        "required": [
+          "id",
+          "postId",
+          "duration",
+          "timestamp",
+          "createdAt",
+          "authorMaskedEmail",
+          "reactions"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "postId": {
+            "type": "string"
+          },
+          "duration": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "audioDataUrl": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AudioDataUrl"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "authorMaskedEmail": {
+            "type": "string"
+          },
+          "reactions": {
+            "$ref": "#/components/schemas/ReactionSummary"
+          }
+        },
+        "example": {
+          "id": "reply-123",
+          "postId": "post-123",
+          "duration": 16,
+          "audioDataUrl": "/uploads/feed-replies/user-456/reply-123.webm",
+          "timestamp": "2026-09-21T10:34:00Z",
+          "createdAt": "2026-09-21T10:34:01Z",
+          "authorMaskedEmail": "r***@example.com",
+          "reactions": {
+            "counts": {
+              "like": 0,
+              "love": 1,
+              "fire": 0,
+              "laugh": 0,
+              "support": 0
+            },
+            "currentReaction": null
+          }
+        }
+      },
+      "FeedPostsResponse": {
+        "type": "object",
+        "required": [
+          "posts"
+        ],
+        "properties": {
+          "posts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FeedPost"
+            }
+          }
+        }
+      },
+      "CreateFeedPostRequest": {
+        "type": "object",
+        "required": [
+          "recordingId"
+        ],
+        "properties": {
+          "recordingId": {
+            "type": "string"
+          }
+        }
+      },
+      "FeedPostResponse": {
+        "type": "object",
+        "required": [
+          "post"
+        ],
+        "properties": {
+          "post": {
+            "$ref": "#/components/schemas/FeedPost"
+          }
+        }
+      },
+      "FeedThreadResponse": {
+        "type": "object",
+        "required": [
+          "post",
+          "replies"
+        ],
+        "properties": {
+          "post": {
+            "$ref": "#/components/schemas/FeedPost"
+          },
+          "replies": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FeedReply"
+            }
+          }
+        }
+      },
+      "CreateFeedReplyRequest": {
+        "type": "object",
+        "required": [
+          "duration",
+          "audioDataUrl"
+        ],
+        "properties": {
+          "duration": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "audioDataUrl": {
+            "$ref": "#/components/schemas/AudioDataUrl"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "CreateFeedReplyResponse": {
+        "type": "object",
+        "required": [
+          "reply",
+          "quota"
+        ],
+        "properties": {
+          "reply": {
+            "$ref": "#/components/schemas/FeedReply"
+          },
+          "quota": {
+            "$ref": "#/components/schemas/RecordingQuota"
+          }
+        }
+      }
+    }
+  },
+  "security": [
+    {
+      "cookieAuth": []
+    }
+  ]
+}

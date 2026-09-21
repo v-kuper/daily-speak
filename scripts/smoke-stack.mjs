@@ -1,0 +1,356 @@
+#!/usr/bin/env node
+import { randomUUID } from "node:crypto";
+import path from "node:path";
+import process from "node:process";
+import { fileURLToPath } from "node:url";
+
+const DEFAULT_WEB_BASE_URL = "http://localhost:3218";
+const DEFAULT_API_BASE_URL = "http://localhost:3219";
+const STARTUP_TIMEOUT_MS = 120_000;
+const POLL_INTERVAL_MS = 1_500;
+const REQUEST_TIMEOUT_MS = 15_000;
+
+function normalizeBaseURL(value, label) {
+  const normalized = value.trim().replace(/\/+$/, "");
+  let parsed;
+  try {
+    parsed = new URL(normalized);
+  } catch {
+    throw new Error(`${label} must be an absolute http or https URL.`);
+  }
+  if ((parsed.protocol !== "http:" && parsed.protocol !== "https:") || parsed.username || parsed.password) {
+    throw new Error(`${label} must be an absolute http or https URL without credentials.`);
+  }
+  return normalized;
+}
+
+export function selectStackURLs(env = process.env) {
+  const webBaseURL = normalizeBaseURL(
+    env.WEB_BASE_URL?.trim() || DEFAULT_WEB_BASE_URL,
+    "WEB_BASE_URL",
+  );
+  const apiBaseURL = normalizeBaseURL(
+    env.API_BASE_URL?.trim() || DEFAULT_API_BASE_URL,
+    "API_BASE_URL",
+  );
+  return {
+    webBaseURL,
+    apiBaseURL,
+    webOrigin: new URL(webBaseURL).origin,
+  };
+}
+
+export function resolveApiUploadURL(value, apiBaseURL) {
+  if (typeof value !== "string" || value.trim() === "") {
+    throw new Error("Recording response did not include an audioDataUrl.");
+  }
+  const apiURL = new URL(apiBaseURL);
+  const uploadURL = new URL(value, `${apiURL.origin}/`);
+  if (uploadURL.origin !== apiURL.origin) {
+    throw new Error("Recording audioDataUrl must belong to the API origin.");
+  }
+  return uploadURL.href;
+}
+
+function splitCombinedSetCookie(value) {
+  return value.split(/,\s*(?=[^=;,]+=[^;,]+)/);
+}
+
+export function extractCookieHeader(headersOrResponse) {
+  const headers = headersOrResponse?.headers ?? headersOrResponse;
+  if (!headers) return "";
+
+  const setCookies = typeof headers.getSetCookie === "function"
+    ? headers.getSetCookie()
+    : splitCombinedSetCookie(headers.get?.("set-cookie") ?? "");
+
+  return setCookies
+    .map((cookie) => cookie.split(";", 1)[0]?.trim())
+    .filter(Boolean)
+    .join("; ");
+}
+
+function endpoint(baseURL, pathname) {
+  return new URL(pathname, `${baseURL}/`).href;
+}
+
+function safeExcerpt(body) {
+  return body.replace(/\s+/g, " ").trim().slice(0, 300);
+}
+
+async function fetchWithTimeout(fetchImpl, url, options = {}) {
+  return fetchImpl(url, {
+    ...options,
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
+}
+
+async function expectStatus(name, response, expectedStatus) {
+  if (response.status !== expectedStatus) {
+    const body = safeExcerpt(await response.text());
+    throw new Error(
+      `${name} failed: expected ${expectedStatus}, got ${response.status}. Body: ${body}`,
+    );
+  }
+  process.stdout.write(`✓ ${name}\n`);
+  return response;
+}
+
+async function expectJSON(name, response, expectedStatus) {
+  await expectStatus(name, response, expectedStatus);
+  try {
+    return await response.json();
+  } catch {
+    throw new Error(`${name} failed: response was not valid JSON.`);
+  }
+}
+
+async function waitForServices({ webBaseURL, apiBaseURL }, fetchImpl) {
+  const checks = [
+    ["web", endpoint(webBaseURL, "/web-healthz")],
+    ["API", endpoint(apiBaseURL, "/healthz")],
+  ];
+  const pending = new Map(checks);
+  const startedAt = Date.now();
+
+  while (pending.size > 0 && Date.now() - startedAt < STARTUP_TIMEOUT_MS) {
+    for (const [name, url] of pending) {
+      try {
+        const response = await fetchWithTimeout(fetchImpl, url);
+        if (response.ok) pending.delete(name);
+      } catch {
+        // The Compose services may still be starting.
+      }
+    }
+    if (pending.size > 0) {
+      await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+    }
+  }
+
+  if (pending.size > 0) {
+    throw new Error(`Services did not become ready: ${[...pending.keys()].join(", ")}.`);
+  }
+}
+
+async function request(fetchImpl, url, { origin, cookie, json, ...options } = {}) {
+  const headers = new Headers(options.headers);
+  if (origin) headers.set("Origin", origin);
+  if (cookie) headers.set("Cookie", cookie);
+  if (json !== undefined) headers.set("Content-Type", "application/json");
+  return fetchWithTimeout(fetchImpl, url, {
+    ...options,
+    headers,
+    body: json === undefined ? options.body : JSON.stringify(json),
+  });
+}
+
+async function cleanupSession({ fetchImpl, apiBaseURL, webOrigin, cookie, recordingID }) {
+  const errors = [];
+  if (recordingID) {
+    try {
+      const response = await request(
+        fetchImpl,
+        endpoint(apiBaseURL, `/api/recordings/${encodeURIComponent(recordingID)}`),
+        { method: "DELETE", origin: webOrigin, cookie },
+      );
+      if (response.status !== 200 && response.status !== 404) {
+        errors.push(`recording cleanup returned ${response.status}: ${safeExcerpt(await response.text())}`);
+      }
+    } catch (error) {
+      errors.push(`recording cleanup failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  if (cookie) {
+    try {
+      const response = await request(fetchImpl, endpoint(apiBaseURL, "/api/auth/logout"), {
+        method: "POST",
+        origin: webOrigin,
+        cookie,
+      });
+      if (response.status !== 200) {
+        errors.push(`logout cleanup returned ${response.status}: ${safeExcerpt(await response.text())}`);
+      }
+    } catch (error) {
+      errors.push(`logout cleanup failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  return errors;
+}
+
+export async function runStackSmoke({ env = process.env, fetchImpl = fetch } = {}) {
+  const urls = selectStackURLs(env);
+  const { webBaseURL, apiBaseURL, webOrigin } = urls;
+  await waitForServices(urls, fetchImpl);
+
+  let cookie = "";
+  let recordingID = "";
+  let primaryError;
+
+  try {
+    const webHealth = await expectJSON(
+      "web health",
+      await request(fetchImpl, endpoint(webBaseURL, "/web-healthz")),
+      200,
+    );
+    if (webHealth?.service !== "web") {
+      throw new Error(`web health failed: expected service=web, got ${JSON.stringify(webHealth).slice(0, 300)}.`);
+    }
+
+    await expectStatus(
+      "web speak route",
+      await request(fetchImpl, endpoint(webBaseURL, "/speak")),
+      200,
+    );
+
+    await expectStatus(
+      "API health",
+      await request(fetchImpl, endpoint(apiBaseURL, "/healthz")),
+      200,
+    );
+
+    const openapi = await expectJSON(
+      "API OpenAPI document",
+      await request(fetchImpl, endpoint(apiBaseURL, "/openapi.json")),
+      200,
+    );
+    if (openapi?.openapi !== "3.1.0") {
+      throw new Error(`API OpenAPI document failed: expected OpenAPI 3.1.0, got ${JSON.stringify(openapi?.openapi)}.`);
+    }
+
+    const docsResponse = await request(fetchImpl, endpoint(apiBaseURL, "/docs"));
+    await expectStatus("API Swagger UI", docsResponse, 200);
+    if (!(await docsResponse.text()).includes("SwaggerUIBundle")) {
+      throw new Error("API Swagger UI failed: response did not include SwaggerUIBundle.");
+    }
+
+    const preflightResponse = await request(
+      fetchImpl,
+      endpoint(apiBaseURL, "/api/auth/session"),
+      {
+        method: "OPTIONS",
+        origin: webOrigin,
+        headers: {
+          "Access-Control-Request-Method": "GET",
+          "Access-Control-Request-Headers": "Content-Type",
+        },
+      },
+    );
+    await expectStatus("credentialed CORS preflight", preflightResponse, 204);
+    if (
+      preflightResponse.headers.get("access-control-allow-origin") !== webOrigin
+      || preflightResponse.headers.get("access-control-allow-credentials") !== "true"
+    ) {
+      throw new Error("credentialed CORS preflight failed: expected exact origin and allow-credentials=true.");
+    }
+
+    const email = `stack-smoke-${Date.now()}-${randomUUID()}@example.com`;
+    const registerResponse = await request(fetchImpl, endpoint(apiBaseURL, "/api/auth/register"), {
+      method: "POST",
+      origin: webOrigin,
+      json: { email, password: "StackSmoke123!" },
+    });
+    await expectStatus("auth register", registerResponse, 201);
+    cookie = extractCookieHeader(registerResponse);
+    if (!cookie) throw new Error("auth register failed: response did not include a session cookie.");
+
+    await expectStatus(
+      "authenticated session",
+      await request(fetchImpl, endpoint(apiBaseURL, "/api/auth/session"), {
+        origin: webOrigin,
+        cookie,
+      }),
+      200,
+    );
+    await expectStatus(
+      "authenticated user data",
+      await request(fetchImpl, endpoint(apiBaseURL, "/api/user/data"), {
+        origin: webOrigin,
+        cookie,
+      }),
+      200,
+    );
+
+    const recordingPayload = await expectJSON(
+      "create disposable recording",
+      await request(fetchImpl, endpoint(apiBaseURL, "/api/user/recordings"), {
+        method: "POST",
+        origin: webOrigin,
+        cookie,
+        json: {
+          recording: {
+            topic: "Stack smoke",
+            duration: 1,
+            practiceType: "free_talk",
+            timestamp: new Date().toISOString(),
+            audioDataUrl: "data:audio/webm;base64,AAAA",
+          },
+        },
+      }),
+      201,
+    );
+    recordingID = recordingPayload?.recording?.id;
+    if (typeof recordingID !== "string" || recordingID === "") {
+      throw new Error("create disposable recording failed: response did not include a recording id.");
+    }
+
+    const uploadURL = resolveApiUploadURL(recordingPayload?.recording?.audioDataUrl, apiBaseURL);
+    const uploadResponse = await request(fetchImpl, uploadURL, { origin: webOrigin, cookie });
+    await expectStatus("serve disposable recording audio", uploadResponse, 200);
+    if ((await uploadResponse.arrayBuffer()).byteLength === 0) {
+      throw new Error("serve disposable recording audio failed: response was empty.");
+    }
+
+    await expectStatus(
+      "delete disposable recording",
+      await request(
+        fetchImpl,
+        endpoint(apiBaseURL, `/api/recordings/${encodeURIComponent(recordingID)}`),
+        { method: "DELETE", origin: webOrigin, cookie },
+      ),
+      200,
+    );
+    recordingID = "";
+
+    await expectStatus(
+      "auth logout",
+      await request(fetchImpl, endpoint(apiBaseURL, "/api/auth/logout"), {
+        method: "POST",
+        origin: webOrigin,
+        cookie,
+      }),
+      200,
+    );
+    cookie = "";
+  } catch (error) {
+    primaryError = error instanceof Error ? error : new Error(String(error));
+  }
+
+  const cleanupErrors = await cleanupSession({
+    fetchImpl,
+    apiBaseURL,
+    webOrigin,
+    cookie,
+    recordingID,
+  });
+  if (primaryError) {
+    if (cleanupErrors.length > 0) {
+      primaryError.message += ` Cleanup: ${cleanupErrors.join("; ")}`;
+    }
+    throw primaryError;
+  }
+  if (cleanupErrors.length > 0) {
+    throw new Error(`Stack smoke cleanup failed: ${cleanupErrors.join("; ")}`);
+  }
+
+  process.stdout.write("Separate web/backend stack smoke checks passed.\n");
+}
+
+const currentFile = fileURLToPath(import.meta.url);
+const invokedFile = process.argv[1] ? path.resolve(process.argv[1]) : "";
+
+if (invokedFile === currentFile) {
+  runStackSmoke().catch((error) => {
+    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+    process.exitCode = 1;
+  });
+}

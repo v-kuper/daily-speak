@@ -5,12 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"net/http/httputil"
-	"net/url"
 	"strings"
 	"sync"
 	"time"
 
+	apidocs "daily-speaking-practice/backend/docs"
 	"daily-speaking-practice/backend/internal/ai"
 	"daily-speaking-practice/backend/internal/auth"
 	"daily-speaking-practice/backend/internal/db"
@@ -19,10 +18,11 @@ import (
 )
 
 type Config struct {
-	DB          *db.DB
-	NextURL     string
-	Synthesizer tts.Synthesizer
-	AIClient    ai.ChatClient
+	DB            *db.DB
+	Synthesizer   tts.Synthesizer
+	AIClient      ai.ChatClient
+	SessionCookie auth.CookieConfig
+	CORS          CORSConfig
 }
 
 type shadowingJob struct {
@@ -37,7 +37,6 @@ type recordingProcessingJob struct {
 
 type Server struct {
 	db                      *db.DB
-	nextProxy               http.Handler
 	recordingProcessingMu   sync.Mutex
 	recordingProcessingJobs map[string]recordingProcessingJob
 	fileDeletionWorkerOnce  sync.Once
@@ -47,14 +46,13 @@ type Server struct {
 	shadowingProcessingMu   sync.Mutex
 	shadowingProcessingJobs map[string]shadowingJob
 	aiClient                ai.ChatClient
+	sessionCookie           auth.CookieConfig
+	cors                    CORSConfig
 }
 
 func NewServer(config Config) *Server {
-	var proxy http.Handler = http.NotFoundHandler()
-	if strings.TrimSpace(config.NextURL) != "" {
-		if parsed, err := url.Parse(config.NextURL); err == nil {
-			proxy = httputil.NewSingleHostReverseProxy(parsed)
-		}
+	if config.SessionCookie.SameSite == 0 {
+		config.SessionCookie.SameSite = http.SameSiteLaxMode
 	}
 	synthesizer := config.Synthesizer
 	if synthesizer == nil {
@@ -66,25 +64,51 @@ func NewServer(config Config) *Server {
 	}
 	return &Server{
 		db:                      config.DB,
-		nextProxy:               proxy,
 		recordingProcessingJobs: map[string]recordingProcessingJob{},
 		fileDeletionWake:        make(chan struct{}, 1),
 		removeStoredUploads:     removeStoredUploadFiles,
 		synthesizer:             synthesizer,
 		shadowingProcessingJobs: map[string]shadowingJob{},
 		aiClient:                aiClient,
+		sessionCookie:           config.SessionCookie,
+		cors:                    config.CORS,
 	}
 }
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("/openapi.json", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
+			return
+		}
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		_, _ = w.Write(apidocs.OpenAPIJSON)
+	})
+	mux.HandleFunc("/docs", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write(apidocs.SwaggerHTML)
+	})
 	mux.HandleFunc("/healthz", s.healthz)
 	mux.HandleFunc("/api/", s.routeAPI)
 	mux.HandleFunc("/uploads/shadowing", s.handleShadowingUpload)
 	mux.HandleFunc("/uploads/shadowing/", s.handleShadowingUpload)
 	mux.Handle(uploadsURLPrefix, uploadsHandler())
-	mux.Handle("/", s.nextProxy)
-	return mux
+	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Not found"})
+	})
+	corsHandler := s.cors.Wrap(mux)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if (r.URL.Path == "/openapi.json" || r.URL.Path == "/docs") && r.Method != http.MethodGet {
+			mux.ServeHTTP(w, r)
+			return
+		}
+		corsHandler.ServeHTTP(w, r)
+	})
 }
 
 func (s *Server) healthz(w http.ResponseWriter, r *http.Request) {
@@ -174,7 +198,7 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to register user."})
 		return
 	}
-	http.SetCookie(w, auth.NewSessionCookie(session.Token, session.ExpiresAt))
+	http.SetCookie(w, auth.NewSessionCookieWithConfig(s.sessionCookie, session.Token, session.ExpiresAt))
 	logger.Info("request.success", map[string]any{"status": 201, "durationMs": logging.ElapsedMs(started), "userId": user.ID})
 	writeJSON(w, http.StatusCreated, map[string]any{"user": user})
 }
@@ -202,7 +226,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to sign in."})
 		return
 	}
-	http.SetCookie(w, auth.NewSessionCookie(session.Token, session.ExpiresAt))
+	http.SetCookie(w, auth.NewSessionCookieWithConfig(s.sessionCookie, session.Token, session.ExpiresAt))
 	logger.Info("request.success", map[string]any{"status": 200, "durationMs": logging.ElapsedMs(started), "userId": user.ID})
 	writeJSON(w, http.StatusOK, map[string]any{"user": user})
 }
@@ -210,9 +234,8 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 	started := time.Now()
 	logger := logging.ForRequest("api.auth.session", r)
-	user, ok := s.authorizedUser(w, r, "api.auth.session")
+	user, ok := s.authorize(w, r, "api.auth.session", true)
 	if !ok {
-		http.SetCookie(w, auth.ClearSessionCookie())
 		return
 	}
 	logger.Info("request.success", map[string]any{"status": 200, "durationMs": logging.ElapsedMs(started), "userId": user.ID})
@@ -225,28 +248,38 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to sign out."})
 		return
 	}
-	http.SetCookie(w, auth.ClearSessionCookie())
+	http.SetCookie(w, auth.ClearSessionCookieWithConfig(s.sessionCookie))
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 func (s *Server) authorizedUser(w http.ResponseWriter, r *http.Request, scope string) (*auth.User, bool) {
+	return s.authorize(w, r, scope, false)
+}
+
+func (s *Server) authorize(w http.ResponseWriter, r *http.Request, scope string, clearInvalidSession bool) (*auth.User, bool) {
 	started := time.Now()
 	logger := logging.ForRequest(scope, r)
+	writeError := func(status int, message string) {
+		if clearInvalidSession && status == http.StatusUnauthorized {
+			http.SetCookie(w, auth.ClearSessionCookieWithConfig(s.sessionCookie))
+		}
+		writeJSON(w, status, map[string]string{"error": message})
+	}
 	token := sessionToken(r)
 	if token == "" {
 		logger.Info("request.unauthorized", map[string]any{"status": 401, "durationMs": logging.ElapsedMs(started)})
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
+		writeError(http.StatusUnauthorized, "Unauthorized")
 		return nil, false
 	}
 	user, err := auth.GetUserBySessionToken(r.Context(), s.db, token)
 	if err != nil {
 		logger.Error("request.failed", logging.ErrorMeta(err))
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to load session."})
+		writeError(http.StatusInternalServerError, "Failed to load session.")
 		return nil, false
 	}
 	if user == nil {
 		logger.Info("request.unauthorized", map[string]any{"status": 401, "durationMs": logging.ElapsedMs(started)})
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
+		writeError(http.StatusUnauthorized, "Unauthorized")
 		return nil, false
 	}
 	return user, true

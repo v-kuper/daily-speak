@@ -7,6 +7,7 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/mail"
 	"os"
@@ -208,28 +209,68 @@ func DeleteSessionByToken(ctx context.Context, database *db.DB, token string) er
 	return err
 }
 
+type CookieConfig struct {
+	Secure   bool
+	SameSite http.SameSite
+	Domain   string
+}
+
+func CookieConfigFromEnv() (CookieConfig, error) {
+	config := CookieConfig{
+		SameSite: http.SameSiteLaxMode,
+		Domain:   strings.TrimSpace(os.Getenv("SESSION_COOKIE_DOMAIN")),
+	}
+	if raw := strings.TrimSpace(os.Getenv("SESSION_COOKIE_SECURE")); raw != "" {
+		secure, err := strconv.ParseBool(raw)
+		if err != nil {
+			return CookieConfig{}, fmt.Errorf("SESSION_COOKIE_SECURE must be a boolean")
+		}
+		config.Secure = secure
+	}
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("SESSION_COOKIE_SAME_SITE"))) {
+	case "", "lax":
+	case "strict":
+		config.SameSite = http.SameSiteStrictMode
+	case "none":
+		config.SameSite = http.SameSiteNoneMode
+	default:
+		return CookieConfig{}, fmt.Errorf("SESSION_COOKIE_SAME_SITE must be lax, strict, or none")
+	}
+	if config.SameSite == http.SameSiteNoneMode && !config.Secure {
+		return CookieConfig{}, fmt.Errorf("SESSION_COOKIE_SAME_SITE=none requires SESSION_COOKIE_SECURE=true")
+	}
+	if err := NewSessionCookieWithConfig(config, "", time.Time{}).Valid(); err != nil {
+		return CookieConfig{}, fmt.Errorf("SESSION_COOKIE_DOMAIN must be a valid cookie domain")
+	}
+	return config, nil
+}
+
+// NewSessionCookie supplies explicit defaults for existing callers.
 func NewSessionCookie(token string, expiresAt time.Time) *http.Cookie {
+	return NewSessionCookieWithConfig(CookieConfig{SameSite: http.SameSiteLaxMode}, token, expiresAt)
+}
+
+func NewSessionCookieWithConfig(config CookieConfig, token string, expiresAt time.Time) *http.Cookie {
 	return &http.Cookie{
 		Name:     SessionCookieName,
 		Value:    token,
 		Path:     "/",
 		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
-		Secure:   os.Getenv("NODE_ENV") == "production",
+		SameSite: config.SameSite,
+		Secure:   config.Secure,
+		Domain:   config.Domain,
 		Expires:  expiresAt,
 	}
 }
 
 func ClearSessionCookie() *http.Cookie {
-	return &http.Cookie{
-		Name:     SessionCookieName,
-		Value:    "",
-		Path:     "/",
-		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
-		Secure:   os.Getenv("NODE_ENV") == "production",
-		MaxAge:   -1,
-	}
+	return ClearSessionCookieWithConfig(CookieConfig{SameSite: http.SameSiteLaxMode})
+}
+
+func ClearSessionCookieWithConfig(config CookieConfig) *http.Cookie {
+	cookie := NewSessionCookieWithConfig(config, "", time.Time{})
+	cookie.MaxAge = -1
+	return cookie
 }
 
 func hashSessionToken(token string) string {

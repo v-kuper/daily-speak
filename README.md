@@ -1,309 +1,183 @@
-# Daily Speaking Practice (Next.js client + Go API)
+# Daily Speaking Practice
 
-A demo speaking-practice app rewritten from static HTML into a modern React stack:
+Daily Speaking is a monorepo containing two independent applications:
 
-- Next.js (App Router) for the client
-- TypeScript
-- Redux Toolkit + React Redux
-- Go API gateway/backend
+- `web/`: a Next.js 15 client with its own dependency graph, build, tests, and
+  Docker image;
+- `backend/`: a Go HTTP API with its own module, tests, migrations, OpenAPI
+  contract, and Docker image.
 
-## Run locally
+The browser calls the configured API origin directly. The web application does
+not proxy API traffic, and the backend does not serve or proxy Next.js. A future
+mobile client can therefore consume the same API without depending on the web
+project.
 
-```bash
-npm install
-npm run dev
-```
-
-Open [http://localhost:3000](http://localhost:3000).
-
-The production backend now lives in `backend/` and serves the existing `/api/*`
-contract. For local API work, run PostgreSQL and start the Go API:
-
-```bash
-docker compose up -d postgres
-DATABASE_URL=postgres://postgres:postgres@localhost:5432/daily_speaking npm run dev:api
-```
-
-`npm run dev` starts the Next.js client only. In Docker, the Go gateway exposes
-one public port and proxies non-API requests to Next.js.
-
-## Docker app
-
-Run the full app container plus PostgreSQL:
-
-```bash
-npm run docker:app
-```
-
-Then open [http://localhost:3218](http://localhost:3218).
-
-Microphone recording works from `localhost` in modern browsers, but remote
-addresses must be served over HTTPS. If you open the Docker app from another
-machine as `http://<ip>:3218`, the page can load, but the browser will not show
-the microphone permission prompt.
-
-If you want a different host port:
-
-```bash
-APP_PORT=3000 npm run docker:app
-```
-
-## Windows/LAN hosting
-
-On a Windows machine on your local network:
-
-```bash
-npm install
-npm run docker:lan
-```
-
-This single command builds the Next.js client, builds the Go API, starts the
-app container, starts PostgreSQL, and prints local-network URLs for the host
-machine. From another device on the same LAN, open the printed address, for
-example:
+## Repository layout
 
 ```text
-http://192.168.1.42:3218
+web/                     Next.js application
+backend/                 Go API, migrations, OpenAPI, Whisper tooling
+scripts/                 repository and deployment utilities
+docs/                    operations and architecture documentation
+docker-compose.yml       local single-host orchestration
 ```
 
-Those LAN HTTP URLs are useful for checking layout and backend connectivity, but
-browser microphone recording requires `https://...` or `http://localhost`. For a
-phone or another computer, put the app behind an HTTPS reverse proxy or tunnel
-such as Caddy, nginx with TLS, Cloudflare Tunnel, or another trusted certificate
-setup, then open the HTTPS URL.
+The root `package.json` only orchestrates project commands. Runtime dependencies
+belong to `web/package.json` or `backend/go.mod`.
 
-You do not need to start the frontend, backend, or database separately. The app
-container exposes only the app port to the LAN. PostgreSQL stays inside Docker
-and is bound to `127.0.0.1` on the host for local admin tools.
+## Run one project
 
-If another device cannot connect:
-- make sure both devices are on the same Wi-Fi/LAN
-- allow inbound TCP port `3218` in Windows Defender Firewall / Docker Desktop
-- run `ipconfig` on Windows and use the IPv4 address of that machine
-
-PowerShell port override:
-
-```powershell
-$env:APP_PORT=8080; npm run docker:lan
-```
-
-CI/CD setup for the Windows LAN host is documented in
-`docs/LOCAL_WINDOWS_CICD.md`.
-
-## PostgreSQL setup (real auth)
-
-The Go API uses PostgreSQL for real authentication:
-- user registration (`email + password`)
-- sign-in
-- server-side session storage with HTTP-only cookie
-- persisted user interests
-- persisted recordings history
-
-Set these variables before running the app:
+Web only:
 
 ```bash
-export DATABASE_URL=postgres://user:password@localhost:5432/daily_speaking
-# Optional: use for managed PostgreSQL with SSL requirement
-export DATABASE_SSL=require
+npm ci --prefix web
+PUBLIC_API_BASE_URL=http://localhost:3219 npm run dev --prefix web
 ```
 
-Database schema is migrated automatically by the Go API at startup from
-`backend/migrations/0001_init.sql`.
-
-Quick local start with Docker:
+Backend only, with PostgreSQL supplied by Compose:
 
 ```bash
 docker compose up -d postgres
-cp .env.example .env.local
+cd backend
+DATABASE_URL=postgres://postgres:postgres@localhost:5432/daily_speaking \
+CORS_ALLOWED_ORIGINS=http://localhost:3000,http://localhost:3219 \
+APP_ADDR=:3219 go run ./cmd/api
 ```
 
-After creating/updating `.env.local`, restart the relevant process.
-
-## Ollama setup (daily questions)
-
-The Go API uses local/external Ollama to:
-- generate 3 speaking questions for each day
-- generate follow-up questions and useful words for a selected topic
-- generate grammar suggestions for transcripts
-- personalize generation using selected interests from the Profile screen
-
-Profile flow:
-- click the email in top bar to open Profile
-- click `My interests` to open a separate interest-selection screen
-- AI model selection is server-side only and is not shown in Profile
-
-1. Install and run Ollama locally.
-2. Pull or configure access to the default model (`gemma4:31b-cloud`):
+The backend command above must be run from `backend/` so its relative tool paths
+resolve correctly. Use the project environment examples as references before
+adding optional AI, transcription, or TTS configuration:
 
 ```bash
-ollama pull gemma4:31b-cloud
+cp web/.env.example web/.env.local
+cp backend/.env.example backend/.env
 ```
 
-3. (Optional) configure model/base URL via environment variables:
+Next.js reads `web/.env.local`. The Go binary does not load dotenv files on its
+own, so export/source backend values through the shell or process manager.
 
-```bash
-export OLLAMA_BASE_URL=http://127.0.0.1:11434
-export OLLAMA_MODEL=gemma4:31b-cloud
-export OLLAMA_THINKING_MODEL=true
-export AI_ANALYSIS_CONCURRENCY=3
-```
-
-`AI_ANALYSIS_CONCURRENCY` controls how many independent error-detector requests
-can run at the same time. Values from 1 to 7 are accepted; missing or invalid
-values fall back to 3. Each detector keeps its own focused prompt rather than
-combining error types into one request. Raising the value can increase Ollama
-CPU, GPU, and memory load.
-
-## Local Whisper setup (recording transcription)
-
-Saved recordings support two local backends:
-- `openai` (Python `openai/whisper`)
-- `cpp` (`whisper.cpp`)
-
-Docker deploys use the same local Python Whisper backend. The image installs
-Linux Python, `openai-whisper`, and `ffmpeg`; `docker-compose.yml` mounts
-`./tools` into `/app/tools` so downloaded models and cache survive rebuilds.
-The first transcription can download the configured model if it is not already
-in `tools/whisper/openai-models`.
-
-```bash
-WHISPER_BACKEND=openai
-WHISPER_PYTHON_BIN=/opt/whisper/bin/python
-WHISPER_OPENAI_MODEL=base
-WHISPER_OPENAI_MODEL_DIR=/app/tools/whisper/openai-models
-WHISPER_OPENAI_CACHE_DIR=/app/tools/whisper/cache
-WHISPER_FFMPEG_BIN=/usr/bin/ffmpeg
-WHISPER_OPENAI_DEVICE=cpu
-WHISPER_OPENAI_FP16=false
-WHISPER_LANGUAGE=auto
-```
-
-Use `openai/whisper`:
-
-```bash
-npm run setup:whisper
-```
-
-This creates everything inside the project:
-- `.venv` (python + openai-whisper)
-- `tools/whisper/openai-models` (downloaded models)
-- `tools/whisper/cache` (runtime cache)
-- `tools/ffmpeg/bin/ffmpeg` (local ffmpeg symlink)
-
-Project-local env example:
-
-```bash
-WHISPER_BACKEND=openai
-WHISPER_PYTHON_BIN=.venv/bin/python
-WHISPER_OPENAI_MODEL=base
-WHISPER_OPENAI_MODEL_DIR=tools/whisper/openai-models
-WHISPER_OPENAI_CACHE_DIR=tools/whisper/cache
-WHISPER_FFMPEG_BIN=tools/ffmpeg/bin/ffmpeg
-WHISPER_LANGUAGE=auto
-```
-
-`ffmpeg` is required for webm/m4a decoding. `npm run setup:whisper` installs a project-local copy via `imageio-ffmpeg`.
-Check setup:
-
-```bash
-npm run check:whisper
-```
-
-Use `whisper.cpp`:
-
-```bash
-export WHISPER_BACKEND=cpp
-export WHISPER_BINARY_PATH=/absolute/path/to/whisper-cli
-export WHISPER_MODEL_PATH=/absolute/path/to/ggml-base.bin
-export WHISPER_LANGUAGE=auto
-export WHISPER_THREADS=4
-```
-
-If `WHISPER_BACKEND` is not set outside Docker, app tries `cpp` first, then
-falls back to local Python `openai/whisper`.
-The multilingual model and automatic language detection preserve occasional
-Russian words in otherwise English recordings so they can be corrected by the
-AI suggestions step.
-Detailed setup notes: `tools/whisper/README.md`.
-
-To remove everything Whisper-related from this project:
-
-```bash
-rm -rf .venv tools/whisper/openai-models tools/whisper/cache tools/whisper/pip-cache tools/ffmpeg/bin
-```
-
-In Docker, Ollama remains external by default. Whisper runs inside the app
-container through local Python `openai-whisper`.
-
-## Cartesia shadowing audio
-
-The recording details screen can generate a separate pronunciation track for
-the corrected text. New recordings start synthesis automatically after the AI
-rewrite is ready; older recordings start synthesis when you open them.
-
-For the Docker setup, create a repository-root `.env` from the committed
-template:
+## Run the complete stack
 
 ```bash
 cp .env.example .env
+docker compose up --build -d --remove-orphans web backend postgres
 ```
 
-Open `.env`, paste the Cartesia API key after `CARTESIA_API_KEY=`, and paste the
-UUID of the chosen natural female American voice after `CARTESIA_VOICE_ID=`.
-Keep the remaining defaults unless your Cartesia account requires different
-values. Then rebuild and follow the app logs:
+Default HTTP endpoints:
+
+- web: [http://localhost:3218](http://localhost:3218)
+- web health: [http://localhost:3218/web-healthz](http://localhost:3218/web-healthz)
+- API: [http://localhost:3219](http://localhost:3219)
+- API health: [http://localhost:3219/healthz](http://localhost:3219/healthz)
+- OpenAPI: [http://localhost:3219/openapi.json](http://localhost:3219/openapi.json)
+- Swagger UI: [http://localhost:3219/docs](http://localhost:3219/docs)
+
+Open Swagger directly on macOS with:
 
 ```bash
-docker compose up --build -d app postgres
-docker compose logs -f app
+open http://localhost:3219/docs
 ```
 
-The repository ignores `.env`. Never post the API key in chat or commit it to
-Git. The key is server-only; there is no client-prefixed Cartesia variable.
+Compose starts separate `web`, `backend`, and `postgres` services. The web
+service has no dependency on backend startup and can serve pages while the API
+is unavailable. Uploaded audio belongs only to the backend and is stored outside
+the image through `UPLOADS_HOST_DIR`.
 
-The Windows GitHub Actions deployment does not need a `.env` file. It reads
-`CARTESIA_API_KEY` from GitHub Actions Secrets and `CARTESIA_VOICE_ID` from
-GitHub Actions Variables. See `docs/LOCAL_WINDOWS_CICD.md` for the exact setup
-and verification checklist.
+## Environment ownership
 
-## Available scripts
+- Web: `PUBLIC_API_BASE_URL` only. It is a public absolute HTTP(S) origin and is
+  read at runtime. Do not put server secrets in `web/.env.local`.
+- Backend: database, CORS, session-cookie, uploads, Ollama, Whisper, Cartesia,
+  logging, and listen-address variables. See `backend/.env.example`.
+- Root Compose: host ports, persistent host paths, and values passed to either
+  container. See `.env.example`.
 
-- `npm run dev` - start dev server
-- `npm run dev:api` - start the Go API gateway
-- `npm run backend:test` - run Go backend tests
-- `npm run docker:app` - build and start the full Docker app plus PostgreSQL
-- `npm run docker:lan` - build/start Docker app plus PostgreSQL and print LAN URLs
-- `npm run docker:build` - build the Docker app image only
-- `npm run docker:logs` - follow app container logs
-- `npm run docker:stop` - stop Docker Compose services
-- `npm run typecheck` - run TypeScript type checks
-- `npm run lint` - run ESLint
-- `npm run test:smoke` - run API smoke checks against `SMOKE_BASE_URL`, or start Go API on `SMOKE_PORT`
-- `npm run test:docker-lan` - run LAN helper unit tests
-- `npm run quality` - run typecheck + lint + Go backend tests
-- `npm run build` - production build
-- `npm run start` - run production server
+For credentialed browser requests, every web origin must appear exactly in
+`CORS_ALLOWED_ORIGINS`. Add each API origin that serves Swagger too, because
+Swagger `Try it out` sends mutations from that API origin. The current
+authentication remains a PostgreSQL-backed, HttpOnly session cookie. On HTTPS set
+`SESSION_COOKIE_SECURE=true`. Use
+`SESSION_COOKIE_SAME_SITE=none` only for genuinely cross-site web/API origins;
+it requires a secure cookie. Access and refresh tokens are a deferred epic, not
+part of this refactor.
 
-## Server logs
+## Routes and API contract
 
-API routes now use a structured logger with:
-- timestamp
-- log level
-- route scope
-- request id
-- compact JSON metadata (status, duration, model, attempt, etc.)
+Next.js App Router owns navigation for `/speak`, `/auth`, `/history`,
+`/history/[recordingId]`, `/profile`, `/profile/subscription`,
+`/profile/english-level`, and `/profile/interests`. Direct visits and refreshes
+preserve the URL-addressable screen and server-backed state.
 
-Log level can be configured with:
+The unfinished Feed UI and publication controls were removed from the web
+client. Feed handlers, persisted data, and OpenAPI operations remain in the
+backend so the product decision can be revisited without data loss.
+
+The canonical API contract is `backend/docs/openapi.json`. The backend serves
+it at `/openapi.json` and serves Swagger UI at `/docs`, independently of the web
+service.
+
+## Quality gates
+
+Commands that do not start the application stack:
 
 ```bash
-export SERVER_LOG_LEVEL=debug # debug | info | warn | error
+npm ci --prefix web
+npm run quality
+PUBLIC_API_BASE_URL=http://localhost:3219 npm run build --prefix web
 ```
 
-Defaults:
-- `development` -> `debug`
-- `production` -> `info`
+Useful project-specific commands:
 
-## Project docs
+```bash
+npm run quality --prefix web
+cd backend && go test ./...
+cd backend && node scripts/build-api-docs.mjs --check
+cd backend && node --test scripts/api-docs.test.mjs
+```
 
-- Local Windows CI/CD setup: `docs/LOCAL_WINDOWS_CICD.md`
-- Technical debt audit and refactor roadmap: `docs/TECH_DEBT.md`
+Runtime smoke against an already-running stack is explicit:
+
+```bash
+WEB_BASE_URL=http://localhost:3218 \
+API_BASE_URL=http://localhost:3219 \
+node scripts/smoke-stack.mjs
+```
+
+The smoke creates a unique temporary user and recording, verifies direct
+credentialed CORS and upload serving, and cleans up the recording/session.
+
+## LAN and Windows deployment
+
+`npm run docker:lan` starts the HTTP services and prints one canonical LAN
+hostname pair for web and API; do not mix that IP with `localhost` or
+`127.0.0.1` while using cookie authentication. Browser microphone recording
+from another device requires HTTPS. The
+Windows self-hosted deployment generates two Caddy sites:
+
+| Service | HTTP | HTTPS |
+| --- | --- | --- |
+| Web | `http://<windows-ipv4>:3218` | `https://<windows-ipv4>:3443` |
+| API | `http://<windows-ipv4>:3219` | `https://<windows-ipv4>:3444` |
+| Swagger | `http://<windows-ipv4>:3219/docs` | `https://<windows-ipv4>:3444/docs` |
+
+Certificate trust, firewall rules, persistent uploads, CI/CD variables,
+diagnostics, and rollback are documented in
+[`docs/LOCAL_WINDOWS_CICD.md`](docs/LOCAL_WINDOWS_CICD.md).
+
+## Operations
+
+```bash
+docker compose logs -f web backend
+docker compose logs -f lan-https
+docker compose --project-name daily-speaking down --remove-orphans
+```
+
+Stopping Compose without `-v` does not remove the named PostgreSQL volume or the
+configured uploads host directory. The explicit project name and
+`--remove-orphans` also make transitions to/from revisions with the legacy
+single `app` service safe. See the Windows runbook before rollback; the
+transition has downtime and requires a current database/uploads backup.
+
+Backend-specific Ollama, Whisper, and Cartesia instructions live in
+[`backend/README.md`](backend/README.md). Follow-up architecture work is tracked
+in [`docs/TECH_DEBT.md`](docs/TECH_DEBT.md).

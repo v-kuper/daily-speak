@@ -3,8 +3,8 @@ import process from "node:process";
 import { spawn } from "node:child_process";
 
 const port = Number.parseInt(process.env.SMOKE_PORT ?? "3217", 10);
-const externalBaseUrl = process.env.SMOKE_BASE_URL?.trim();
-const baseUrl = externalBaseUrl || `http://127.0.0.1:${port}`;
+const externalApiBaseURL = process.env.SMOKE_BASE_URL?.trim();
+const apiBaseURL = externalApiBaseURL || `http://127.0.0.1:${port}`;
 const startupTimeoutMs = 120_000;
 const pollIntervalMs = 1_500;
 const expectedChecks = [
@@ -133,7 +133,7 @@ const waitForServer = async () => {
 
   while (Date.now() - startedAt < startupTimeoutMs) {
     try {
-      const response = await fetch(`${baseUrl}/api/auth/session`, { method: "GET" });
+      const response = await fetch(`${apiBaseURL}/api/auth/session`, { method: "GET" });
       if (response.status === 401 || response.status === 200) {
         return;
       }
@@ -149,7 +149,7 @@ const waitForServer = async () => {
 
 const runChecks = async () => {
   for (const check of expectedChecks) {
-    const response = await fetch(`${baseUrl}${check.path}`, {
+    const response = await fetch(`${apiBaseURL}${check.path}`, {
       method: check.method,
       headers: check.body ? { "Content-Type": "application/json" } : undefined,
       body: check.body ? JSON.stringify(check.body) : undefined
@@ -168,7 +168,7 @@ const runChecks = async () => {
 
 const runHiddenModelSettingsCheck = async () => {
   const email = `smoke-model-${Date.now()}@example.com`;
-  const registerResponse = await fetch(`${baseUrl}/api/auth/register`, {
+  const registerResponse = await fetch(`${apiBaseURL}/api/auth/register`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email, password: "SmokeTest123!" })
@@ -184,7 +184,7 @@ const runHiddenModelSettingsCheck = async () => {
     throw new Error("auth/register model settings setup failed: missing session cookie.");
   }
 
-  const initialResponse = await fetch(`${baseUrl}/api/user/ollama-model`, {
+  const initialResponse = await fetch(`${apiBaseURL}/api/user/ollama-model`, {
     method: "GET",
     headers: {
       Cookie: cookieHeader
@@ -243,7 +243,7 @@ const stopServer = async (child) => {
 };
 
 const main = async () => {
-  const server = externalBaseUrl
+  const server = externalApiBaseURL
     ? null
     : spawn("go", ["run", "./cmd/api"], {
         cwd: "backend",
@@ -251,8 +251,7 @@ const main = async () => {
         detached: process.platform !== "win32",
         env: {
           ...process.env,
-          APP_ADDR: `:${port}`,
-          NEXT_UPSTREAM_URL: "http://127.0.0.1:9"
+          APP_ADDR: `:${port}`
         }
       });
 
