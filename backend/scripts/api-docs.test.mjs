@@ -1,6 +1,25 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { spawnSync } from "node:child_process";
 import test from "node:test";
+
+const buildAPIDocsScript = fileURLToPath(new URL("./build-api-docs.mjs", import.meta.url));
+
+function runOpenAPICheck(t, source) {
+  const workspace = mkdtempSync(join(tmpdir(), "daily-speaking-openapi-"));
+  const documentPath = join(workspace, "docs", "openapi.json");
+  mkdirSync(dirname(documentPath), { recursive: true });
+  writeFileSync(documentPath, source);
+  t.after(() => rmSync(workspace, { recursive: true, force: true }));
+
+  return spawnSync(process.execPath, [buildAPIDocsScript, "--check"], {
+    cwd: workspace,
+    encoding: "utf8",
+  });
+}
 
 const openapi = JSON.parse(readFileSync("docs/openapi.json", "utf8"));
 const swaggerHTML = readFileSync("docs/swagger.html", "utf8");
@@ -56,6 +75,19 @@ const expectedQueryParameters = new Map([
   ["/api/topic-guidance", ["topic", "refresh", "interest", "level", "avoidQuestion", "avoidWord"]],
   ["/api/study-words", ["refresh", "interest", "level", "avoidWord"]],
 ]);
+
+test("OpenAPI check accepts canonical JSON checked out with Windows line endings", (t) => {
+  const result = runOpenAPICheck(t, '{\r\n  "openapi": "3.1.0"\r\n}\r\n');
+
+  assert.equal(result.status, 0, result.stderr);
+});
+
+test("OpenAPI check still rejects genuinely noncanonical JSON formatting", (t) => {
+  const result = runOpenAPICheck(t, '{"openapi":"3.1.0"}\n');
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /OpenAPI formatting drifted/);
+});
 
 function operations() {
   return Object.entries(openapi.paths).flatMap(([path, pathItem]) => Object.entries(pathItem)
