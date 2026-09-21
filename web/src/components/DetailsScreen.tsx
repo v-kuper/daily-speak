@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
+import { apiFetch, readApiJSON } from "../lib/apiClient";
 import { buildTranscriptSegments } from "../lib/transcriptHighlight";
 import {
   recordingProcessingLabel,
@@ -265,9 +266,9 @@ export default function DetailsScreen() {
     setSharedRepliesStatus("loading");
     setSharedRepliesError(null);
 
-    void fetch(`/api/feed/posts/${encodeURIComponent(sharedFeedPostId)}`, { cache: "no-store" })
+    void apiFetch(`/api/feed/posts/${encodeURIComponent(sharedFeedPostId)}`, { cache: "no-store" })
       .then(async (response) => {
-        const payload = (await response.json().catch(() => null)) as FeedThreadResponse | null;
+        const payload = (await readApiJSON(response)) as FeedThreadResponse | null;
 
         if (!response.ok) {
           throw new Error(payload?.error ?? "Failed to load comments.");

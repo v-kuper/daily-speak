@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type ChangeEvent } from "react";
+import { apiFetch, readApiJSON } from "../lib/apiClient";
 import {
   readBlobAsDataUrl,
   resolveAudioFileExtension,
@@ -73,7 +74,7 @@ const uploadRecordingChunk = async (sessionId: string, chunkIndex: number, blob:
   const extension = resolveAudioFileExtension(blob.type);
   form.append("chunkIndex", String(chunkIndex));
   form.append("audio", blob, `chunk-${chunkIndex}.${extension}`);
-  const response = await fetch(`/api/recording-sessions/${encodeURIComponent(sessionId)}/chunks`, {
+  const response = await apiFetch(`/api/recording-sessions/${encodeURIComponent(sessionId)}/chunks`, {
     method: "POST",
     body: form
   });
@@ -86,7 +87,7 @@ const uploadRecordingFinalAudio = async (sessionId: string, blob: Blob): Promise
   const form = new FormData();
   const extension = resolveAudioFileExtension(blob.type);
   form.append("audio", blob, `recording.${extension}`);
-  const response = await fetch(`/api/recording-sessions/${encodeURIComponent(sessionId)}/audio`, {
+  const response = await apiFetch(`/api/recording-sessions/${encodeURIComponent(sessionId)}/audio`, {
     method: "POST",
     body: form
   });
@@ -296,7 +297,7 @@ export default function SpeakScreen() {
           ? `Photo description: ${photoObject}`
           : "Photo description"
         : selectedTopic ?? "Free talk";
-    const response = await fetch("/api/recording-sessions", {
+    const response = await apiFetch("/api/recording-sessions", {
       method: "POST",
       headers: {
         "Content-Type": "application/json"
@@ -310,7 +311,7 @@ export default function SpeakScreen() {
         photoObject
       })
     });
-    const payload = (await response.json().catch(() => null)) as { sessionId?: unknown; error?: string } | null;
+    const payload = (await readApiJSON(response)) as { sessionId?: unknown; error?: string } | null;
     if (!response.ok || typeof payload?.sessionId !== "string" || !payload.sessionId.trim()) {
       throw new Error(payload?.error ?? "Failed to start recording upload.");
     }

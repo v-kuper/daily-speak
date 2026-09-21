@@ -1,6 +1,8 @@
 import { createAsyncThunk, createSlice, type PayloadAction } from "@reduxjs/toolkit";
+import { apiFetch, readApiJSON } from "../../lib/apiClient";
 import {
   FEED_REACTION_VALUES,
+  parseRecordingMediaURL,
   type FeedPost,
   type FeedReaction,
   type FeedReactionSummary,
@@ -262,7 +264,6 @@ const MAX_RECORDING_AUDIO_BYTES = 80 * 1024 * 1024;
 const AUDIO_DATA_URL_PATTERN = /^data:((?:audio|video)\/[a-z0-9.+-]+(?:;[^,]+)*);base64,([A-Za-z0-9+/_=-]+)$/i;
 const AUDIO_FILE_URL_PATTERN = /^\/uploads\/recordings\/[a-z0-9/_-]+\.[a-z0-9]{2,10}$/i;
 const ANY_AUDIO_FILE_URL_PATTERN = /^\/uploads\/[a-z0-9/_-]+\.[a-z0-9]{2,10}$/i;
-const SHADOWING_AUDIO_FILE_URL_PATTERN = /^\/uploads\/shadowing\/[a-z0-9_-]+\/[a-z0-9_-]+\.mp3$/i;
 export const PHOTO_PRACTICE_MAX_BYTES = 4 * 1024 * 1024;
 const PHOTO_DATA_URL_PATTERN = /^data:image\/(png|jpeg|jpg|webp|gif);base64,([A-Za-z0-9+/=]+)$/i;
 const PRACTICE_TYPE_SET = new Set<PracticeType>(["free_talk", "topic", "photo_description"]);
@@ -707,16 +708,12 @@ const parseRecording = (value: unknown): Recording | null => {
   const timestamp = new Date(timestampRaw);
   const duration = Number.parseInt(String(candidate.duration ?? 0), 10);
   const suggestions = parseSuggestions(candidate.suggestions);
-  const audioDataUrl = normalizeAudioDataUrl(candidate.audioDataUrl);
-  const photoDataUrl = normalizePhotoDataUrl(candidate.photoDataUrl);
+  const audioDataUrl = parseRecordingMediaURL(candidate.audioDataUrl);
+  const photoDataUrl = parseRecordingMediaURL(candidate.photoDataUrl);
   const photoObject = normalizePhotoObject(candidate.photoObject);
   const processingError = typeof candidate.processingError === "string" ? candidate.processingError.trim() || null : null;
   const shadowingStatus = parseShadowingStatus(candidate.shadowingStatus);
-  const shadowingAudioUrlRaw =
-    typeof candidate.shadowingAudioUrl === "string" ? candidate.shadowingAudioUrl.trim() : "";
-  const shadowingAudioUrl = SHADOWING_AUDIO_FILE_URL_PATTERN.test(shadowingAudioUrlRaw)
-    ? shadowingAudioUrlRaw
-    : null;
+  const shadowingAudioUrl = parseRecordingMediaURL(candidate.shadowingAudioUrl);
   const shadowingError =
     typeof candidate.shadowingError === "string" ? candidate.shadowingError.trim() || null : null;
   const practiceType = parsePracticeType(candidate.practiceType, topic, Boolean(photoDataUrl));
@@ -941,10 +938,10 @@ export const fetchDailyQuestions = createAsyncThunk<
         .filter((item) => item.trim().length > 0)
         .forEach((item) => params.append("avoid", item.trim()));
 
-      const response = await fetch(`/api/daily-questions?${params.toString()}`, {
+      const response = await apiFetch(`/api/daily-questions?${params.toString()}`, {
         cache: "no-store"
       });
-      const payload = (await response.json().catch(() => null)) as DailyQuestionsResponse | null;
+      const payload = (await readApiJSON(response)) as DailyQuestionsResponse | null;
 
       if (!response.ok) {
         return rejectWithValue(payload?.error ?? "Failed to load daily questions from Ollama.");
@@ -1013,11 +1010,11 @@ export const fetchTopicGuidance = createAsyncThunk<
         .filter((item) => item.trim().length > 0)
         .forEach((item) => params.append("avoidWord", item.trim()));
 
-      const response = await fetch(`/api/topic-guidance?${params.toString()}`, {
+      const response = await apiFetch(`/api/topic-guidance?${params.toString()}`, {
         cache: "no-store",
         signal
       });
-      const payload = (await response.json().catch(() => null)) as TopicGuidanceResponse | null;
+      const payload = (await readApiJSON(response)) as TopicGuidanceResponse | null;
 
       if (!response.ok) {
         return rejectWithValue(payload?.error ?? "Failed to generate questions and useful words.");
@@ -1097,10 +1094,10 @@ export const fetchStudyWords = createAsyncThunk<
         .filter((item) => item.length > 0)
         .forEach((item) => params.append("avoidWord", item));
 
-      const response = await fetch(`/api/study-words?${params.toString()}`, {
+      const response = await apiFetch(`/api/study-words?${params.toString()}`, {
         cache: "no-store"
       });
-      const payload = (await response.json().catch(() => null)) as StudyWordsResponse | null;
+      const payload = (await readApiJSON(response)) as StudyWordsResponse | null;
 
       if (!response.ok) {
         return rejectWithValue(payload?.error ?? "Failed to generate study words.");
@@ -1149,10 +1146,10 @@ export const restoreSession = createAsyncThunk<
   { rejectValue: string }
 >("app/restoreSession", async (_, { rejectWithValue }) => {
   try {
-    const response = await fetch("/api/auth/session", {
+    const response = await apiFetch("/api/auth/session", {
       cache: "no-store"
     });
-    const payload = (await response.json().catch(() => null)) as AuthResponse | null;
+    const payload = (await readApiJSON(response)) as AuthResponse | null;
 
     if (response.status === 401) {
       return { email: null, isSubscriber: false, englishLevel: DEFAULT_ENGLISH_LEVEL };
@@ -1193,14 +1190,14 @@ export const signIn = createAsyncThunk<
     }
 
     try {
-      const response = await fetch("/api/auth/login", {
+      const response = await apiFetch("/api/auth/login", {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
         },
         body: JSON.stringify({ email, password })
       });
-      const payload = (await response.json().catch(() => null)) as AuthResponse | null;
+      const payload = (await readApiJSON(response)) as AuthResponse | null;
       const user = parseAuthUser(payload);
 
       if (!response.ok || !user) {
@@ -1234,14 +1231,14 @@ export const signUp = createAsyncThunk<
     }
 
     try {
-      const response = await fetch("/api/auth/register", {
+      const response = await apiFetch("/api/auth/register", {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
         },
         body: JSON.stringify({ email, password })
       });
-      const payload = (await response.json().catch(() => null)) as AuthResponse | null;
+      const payload = (await readApiJSON(response)) as AuthResponse | null;
       const user = parseAuthUser(payload);
 
       if (!response.ok || !user) {
@@ -1257,7 +1254,7 @@ export const signUp = createAsyncThunk<
 
 export const logout = createAsyncThunk("app/logout", async () => {
   try {
-    await fetch("/api/auth/logout", {
+    await apiFetch("/api/auth/logout", {
       method: "POST"
     });
   } catch {
@@ -1277,10 +1274,10 @@ export const fetchUserData = createAsyncThunk<
   { rejectValue: string }
 >("app/fetchUserData", async (_, { rejectWithValue }) => {
   try {
-    const response = await fetch("/api/user/data", {
+    const response = await apiFetch("/api/user/data", {
       cache: "no-store"
     });
-    const payload = (await response.json().catch(() => null)) as UserDataResponse | null;
+    const payload = (await readApiJSON(response)) as UserDataResponse | null;
 
     if (response.status === 401) {
       return rejectWithValue("Unauthorized");
@@ -1316,7 +1313,7 @@ export const saveInterests = createAsyncThunk<string[], void, { state: { app: Ap
     }
 
     try {
-      const response = await fetch("/api/user/interests", {
+      const response = await apiFetch("/api/user/interests", {
         method: "PUT",
         headers: {
           "Content-Type": "application/json"
@@ -1324,7 +1321,7 @@ export const saveInterests = createAsyncThunk<string[], void, { state: { app: Ap
         body: JSON.stringify({ interestIds: selectedInterestIds })
       });
 
-      const payload = (await response.json().catch(() => null)) as SaveInterestsResponse | null;
+      const payload = (await readApiJSON(response)) as SaveInterestsResponse | null;
 
       if (response.status === 401) {
         return rejectWithValue("Unauthorized");
@@ -1423,7 +1420,7 @@ export const saveRecording = createAsyncThunk<
 
     try {
       const response = uploadSessionId
-        ? await fetch(`/api/recording-sessions/${encodeURIComponent(uploadSessionId)}/finish`, {
+        ? await apiFetch(`/api/recording-sessions/${encodeURIComponent(uploadSessionId)}/finish`, {
             method: "POST",
             headers: {
               "Content-Type": "application/json"
@@ -1433,14 +1430,14 @@ export const saveRecording = createAsyncThunk<
               timestamp: recordingDraft.timestamp
             })
           })
-        : await fetch("/api/user/recordings", {
+        : await apiFetch("/api/user/recordings", {
             method: "POST",
             headers: {
               "Content-Type": "application/json"
             },
             body: JSON.stringify({ recording: recordingDraft })
           });
-      const payload = (await response.json().catch(() => null)) as SaveRecordingResponse | null;
+      const payload = (await readApiJSON(response)) as SaveRecordingResponse | null;
 
       if (response.status === 401) {
         return rejectWithValue("Unauthorized");
@@ -1467,10 +1464,10 @@ export const fetchRecording = createAsyncThunk<Recording, string, { rejectValue:
   "app/fetchRecording",
   async (recordingId, { rejectWithValue }) => {
     try {
-      const response = await fetch(`/api/recordings/${encodeURIComponent(recordingId)}`, {
+      const response = await apiFetch(`/api/recordings/${encodeURIComponent(recordingId)}`, {
         cache: "no-store"
       });
-      const payload = (await response.json().catch(() => null)) as { recording?: unknown; error?: string } | null;
+      const payload = (await readApiJSON(response)) as { recording?: unknown; error?: string } | null;
       if (response.status === 401) {
         return rejectWithValue("Unauthorized");
       }
@@ -1492,10 +1489,10 @@ export const generateShadowingAudio = createAsyncThunk<Recording, string, { reje
   "app/generateShadowingAudio",
   async (recordingId, { rejectWithValue }) => {
     try {
-      const response = await fetch(`/api/recordings/${encodeURIComponent(recordingId)}/shadowing`, {
+      const response = await apiFetch(`/api/recordings/${encodeURIComponent(recordingId)}/shadowing`, {
         method: "POST",
       });
-      const payload = (await response.json().catch(() => null)) as {
+      const payload = (await readApiJSON(response)) as {
         recording?: unknown;
         error?: string;
       } | null;
@@ -1520,10 +1517,10 @@ export const retryRecordingProcessing = createAsyncThunk<Recording, string, { re
   "app/retryRecordingProcessing",
   async (recordingId, { rejectWithValue }) => {
     try {
-      const response = await fetch(`/api/recordings/${encodeURIComponent(recordingId)}/retry`, {
+      const response = await apiFetch(`/api/recordings/${encodeURIComponent(recordingId)}/retry`, {
         method: "POST",
       });
-      const payload = (await response.json().catch(() => null)) as {
+      const payload = (await readApiJSON(response)) as {
         recording?: unknown;
         error?: string;
       } | null;
@@ -1562,10 +1559,10 @@ export const deleteRecording = createAsyncThunk<
   }
 
   try {
-    const response = await fetch(`/api/recordings/${encodeURIComponent(normalizedRecordingId)}`, {
+    const response = await apiFetch(`/api/recordings/${encodeURIComponent(normalizedRecordingId)}`, {
       method: "DELETE"
     });
-    const payload = (await response.json().catch(() => null)) as DeleteRecordingResponse | null;
+    const payload = (await readApiJSON(response)) as DeleteRecordingResponse | null;
     if (response.status === 401) {
       return rejectWithValue("Unauthorized");
     }
@@ -1590,10 +1587,10 @@ export const fetchFeedPosts = createAsyncThunk<FeedPost[], void, { rejectValue: 
   "app/fetchFeedPosts",
   async (_, { rejectWithValue }) => {
     try {
-      const response = await fetch("/api/feed/posts", {
+      const response = await apiFetch("/api/feed/posts", {
         cache: "no-store"
       });
-      const payload = (await response.json().catch(() => null)) as FeedPostsResponse | null;
+      const payload = (await readApiJSON(response)) as FeedPostsResponse | null;
 
       if (response.status === 401) {
         return rejectWithValue("Unauthorized");
@@ -1627,10 +1624,10 @@ export const fetchFeedThread = createAsyncThunk<
   }
 
   try {
-    const response = await fetch(`/api/feed/posts/${encodeURIComponent(normalizedPostId)}`, {
+    const response = await apiFetch(`/api/feed/posts/${encodeURIComponent(normalizedPostId)}`, {
       cache: "no-store"
     });
-    const payload = (await response.json().catch(() => null)) as FeedThreadResponse | null;
+    const payload = (await readApiJSON(response)) as FeedThreadResponse | null;
 
     if (response.status === 401) {
       return rejectWithValue("Unauthorized");
@@ -1673,14 +1670,14 @@ export const publishRecordingToFeed = createAsyncThunk<
   }
 
   try {
-    const response = await fetch("/api/feed/posts", {
+    const response = await apiFetch("/api/feed/posts", {
       method: "POST",
       headers: {
         "Content-Type": "application/json"
       },
       body: JSON.stringify({ recordingId: currentRecordingId })
     });
-    const payload = (await response.json().catch(() => null)) as PublishFeedPostResponse | null;
+    const payload = (await readApiJSON(response)) as PublishFeedPostResponse | null;
 
     if (response.status === 401) {
       return rejectWithValue("Unauthorized");
@@ -1726,7 +1723,7 @@ export const createFeedReply = createAsyncThunk<
   }
 
   try {
-    const response = await fetch(`/api/feed/posts/${encodeURIComponent(normalizedPostId)}/replies`, {
+    const response = await apiFetch(`/api/feed/posts/${encodeURIComponent(normalizedPostId)}/replies`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json"
@@ -1737,7 +1734,7 @@ export const createFeedReply = createAsyncThunk<
         timestamp: new Date().toISOString()
       })
     });
-    const payload = (await response.json().catch(() => null)) as CreateFeedReplyResponse | null;
+    const payload = (await readApiJSON(response)) as CreateFeedReplyResponse | null;
 
     if (response.status === 401) {
       return rejectWithValue("Unauthorized");
@@ -1774,14 +1771,14 @@ export const reactToFeedPost = createAsyncThunk<
   }
 
   try {
-    const response = await fetch(`/api/feed/posts/${encodeURIComponent(normalizedPostId)}/reactions`, {
+    const response = await apiFetch(`/api/feed/posts/${encodeURIComponent(normalizedPostId)}/reactions`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json"
       },
       body: JSON.stringify({ reaction })
     });
-    const payload = (await response.json().catch(() => null)) as FeedReactionResponse | null;
+    const payload = (await readApiJSON(response)) as FeedReactionResponse | null;
 
     if (response.status === 401) {
       return rejectWithValue("Unauthorized");
@@ -1815,14 +1812,14 @@ export const reactToFeedReply = createAsyncThunk<
   }
 
   try {
-    const response = await fetch(`/api/feed/replies/${encodeURIComponent(normalizedReplyId)}/reactions`, {
+    const response = await apiFetch(`/api/feed/replies/${encodeURIComponent(normalizedReplyId)}/reactions`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json"
       },
       body: JSON.stringify({ reaction })
     });
-    const payload = (await response.json().catch(() => null)) as FeedReactionResponse | null;
+    const payload = (await readApiJSON(response)) as FeedReactionResponse | null;
 
     if (response.status === 401) {
       return rejectWithValue("Unauthorized");
@@ -1851,10 +1848,10 @@ export const subscribeMonthly = createAsyncThunk<
   }
 
   try {
-    const response = await fetch("/api/user/subscription", {
+    const response = await apiFetch("/api/user/subscription", {
       method: "POST"
     });
-    const payload = (await response.json().catch(() => null)) as SubscriptionResponse | null;
+    const payload = (await readApiJSON(response)) as SubscriptionResponse | null;
 
     if (response.status === 401) {
       return rejectWithValue("Unauthorized");
@@ -1886,10 +1883,10 @@ export const cancelSubscription = createAsyncThunk<
   }
 
   try {
-    const response = await fetch("/api/user/subscription", {
+    const response = await apiFetch("/api/user/subscription", {
       method: "DELETE"
     });
-    const payload = (await response.json().catch(() => null)) as SubscriptionResponse | null;
+    const payload = (await readApiJSON(response)) as SubscriptionResponse | null;
 
     if (response.status === 401) {
       return rejectWithValue("Unauthorized");
@@ -1926,14 +1923,14 @@ export const saveEnglishLevel = createAsyncThunk<
   }
 
   try {
-    const response = await fetch("/api/user/english-level", {
+    const response = await apiFetch("/api/user/english-level", {
       method: "PUT",
       headers: {
         "Content-Type": "application/json"
       },
       body: JSON.stringify({ level: normalizedLevel })
     });
-    const payload = (await response.json().catch(() => null)) as EnglishLevelResponse | null;
+    const payload = (await readApiJSON(response)) as EnglishLevelResponse | null;
 
     if (response.status === 401) {
       return rejectWithValue("Unauthorized");

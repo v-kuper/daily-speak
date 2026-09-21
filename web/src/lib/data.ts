@@ -1,4 +1,10 @@
 import type { ShadowingStatus } from "./shadowing";
+import { resolveApiAssetURL } from "./apiClient";
+
+export const parseRecordingMediaURL = (value: unknown): string | null => {
+  const url = typeof value === "string" ? value.trim() : "";
+  return resolveApiAssetURL(url || null);
+};
 
 export type TopicData = {
   questions: string[];

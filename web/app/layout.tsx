@@ -1,7 +1,10 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import Providers from "./providers";
+import { resolvePublicApiBaseUrl } from "../src/lib/apiConfig";
 import "./globals.css";
+
+export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   title: "Daily Speaking Practice",
@@ -13,10 +16,11 @@ type RootLayoutProps = {
 };
 
 export default function RootLayout({ children }: RootLayoutProps) {
+  const apiBaseURL = resolvePublicApiBaseUrl(process.env.PUBLIC_API_BASE_URL, process.env.NODE_ENV);
   return (
     <html lang="en">
       <body>
-        <Providers>{children}</Providers>
+        <Providers apiBaseURL={apiBaseURL}>{children}</Providers>
       </body>
     </html>
   );
