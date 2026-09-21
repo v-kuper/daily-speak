@@ -157,7 +157,13 @@ func TestSelectRecordingSuggestionsSkipsInvalidDuplicateRussianTranslation(t *te
 
 func TestRecordingPromptsKeepRussianTextAfterSixThousandRunes(t *testing.T) {
 	transcript := strings.Repeat("a", 6001) + " капуста"
-	suggestionsPrompt := recordingSuggestionsPrompt(transcript, "Long talk", nil, "free_talk", nil, "b1")
+	suggestionsPrompt := recordingDetectorPrompt(findAnalysisPass(categoryLanguageSwitch), recordingAnalysisInput{
+		Transcript:   transcript,
+		Topic:        "Long talk",
+		PracticeType: "free_talk",
+		EnglishLevel: "b1",
+		Russian:      extractRussianPhrases(transcript),
+	})
 	naturalPrompt := recordingNaturalVersionPrompt(
 		transcript,
 		[]suggestion{{Wrong: "капуста", Right: "cabbage", Explanation: "Use English."}},
