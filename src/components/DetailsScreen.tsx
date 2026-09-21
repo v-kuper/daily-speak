@@ -2,7 +2,11 @@
 
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { buildTranscriptSegments } from "../lib/transcriptHighlight";
-import { recordingProcessingLabel } from "../lib/recordingProcessing";
+import {
+  recordingProcessingLabel,
+  recordingRetryLabel,
+  shouldShowShadowingProgress,
+} from "../lib/recordingProcessing";
 import {
   isShadowingStale,
   shadowingProgressLabel,
@@ -20,6 +24,7 @@ import {
   generateShadowingAudio,
   openShareModal,
   resetPlaybackState,
+  retryRecordingProcessing,
   setPlaybackPlaying,
   setPlaybackPosition,
 } from "../store/slices/appSlice";
@@ -138,6 +143,8 @@ export default function DetailsScreen() {
     backgroundSaveRecordingId,
     recordingDeleteStatus,
     recordingDeleteError,
+    recordingRetryStatuses,
+    recordingRetryErrors,
     shadowingRequestStatus,
     shadowingRequestError,
   } = useAppSelector(
@@ -179,10 +186,22 @@ export default function DetailsScreen() {
   const sharedFeedPostId = sharedFeedPost?.id ?? null;
   const isShareStatusLoading = Boolean(recording) && (feedPostsStatus === "idle" || feedPostsStatus === "loading");
   const isDeleteLoading = recordingDeleteStatus === "loading";
+  const isRecordingRetryLoading = recordingId
+    ? recordingRetryStatuses[recordingId] === "loading"
+    : false;
+  const recordingRetryError = recordingId ? recordingRetryErrors[recordingId] ?? null : null;
   const isShadowingRequestLoading = shadowingRequestStatus === "loading";
   const shadowingIsStale = isShadowingStale(shadowingStatus, shadowingUpdatedAt);
+  const retryLabel = recordingRetryLabel(recording?.processingStage ?? null);
+  const showShadowingProgress = shouldShowShadowingProgress({
+    recordingStatus: recording?.status ?? "failed",
+    correctedTranscript,
+    shadowingStatus,
+  });
   const canRetryShadowing =
-    shadowingStatus === "failed" || shadowingIsStale || Boolean(shadowingRequestError);
+    recordingStatus === "ready" &&
+    hasCorrectedTranscript &&
+    (shadowingStatus === "failed" || shadowingIsStale || Boolean(shadowingRequestError));
   const canDelete = Boolean(recordingId) && recordingId !== backgroundSaveRecordingId;
 
   useEffect(() => {
@@ -452,6 +471,34 @@ export default function DetailsScreen() {
     void dispatch(generateShadowingAudio(recording.id)).unwrap().catch(() => undefined);
   };
 
+  const onRetryRecordingProcessing = () => {
+    if (!recording || isRecordingRetryLoading || !retryLabel) {
+      return;
+    }
+    void dispatch(retryRecordingProcessing(recording.id)).unwrap().catch(() => undefined);
+  };
+
+  const renderProcessingRetry = (stage: "transcribing" | "suggestions" | "rewriting") => {
+    if (!recording || !isFailed || recording.processingStage !== stage || !retryLabel) {
+      return null;
+    }
+
+    return (
+      <div className="processing-retry">
+        <div className="auth-error">
+          {recordingRetryError ?? recording.processingError ?? "Recording processing failed. Please try again."}
+        </div>
+        <button
+          className="btn btn-secondary"
+          onClick={onRetryRecordingProcessing}
+          disabled={isRecordingRetryLoading}
+        >
+          {isRecordingRetryLoading ? "Retrying..." : retryLabel}
+        </button>
+      </div>
+    );
+  };
+
   const onDeleteModalKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key === "Escape") {
       event.preventDefault();
@@ -506,7 +553,7 @@ export default function DetailsScreen() {
           </div>
         </div>
       )}
-      {isFailed && (
+      {isFailed && !retryLabel && (
         <div className="auth-error">{recording.processingError ?? "Recording processing failed. Try recording again."}</div>
       )}
 
@@ -572,6 +619,7 @@ export default function DetailsScreen() {
         ) : (
           <div className="empty-state">Transcript is unavailable for this recording.</div>
         )}
+        {renderProcessingRetry("transcribing")}
       </div>
 
       <div className="suggestions-section">
@@ -592,6 +640,7 @@ export default function DetailsScreen() {
         ) : (
           <div className="empty-state">No clear corrections were needed.</div>
         )}
+        {renderProcessingRetry("suggestions")}
       </div>
 
       <div className="shadowing-section">
@@ -610,6 +659,7 @@ export default function DetailsScreen() {
         ) : (
           <div className="empty-state">The natural version is unavailable for this recording.</div>
         )}
+        {renderProcessingRetry("rewriting")}
         {recording.shadowingStatus === "ready" && recording.shadowingAudioUrl && (
           <audio
             className="shadowing-audio"
@@ -618,19 +668,19 @@ export default function DetailsScreen() {
             src={recording.shadowingAudioUrl}
           />
         )}
-        {(recording.shadowingStatus === "pending" || recording.shadowingStatus === "processing") &&
-          !shadowingRequestError && (
+        {showShadowingProgress && !shadowingRequestError && (
             <div className={shadowingIsStale ? "auth-error" : "empty-state"}>
               {shadowingProgressLabel(recording.shadowingStatus, shadowingIsStale)}
             </div>
           )}
-        {(recording.shadowingStatus === "failed" || shadowingRequestError) && (
+        {recordingStatus === "ready" && hasCorrectedTranscript &&
+          (recording.shadowingStatus === "failed" || shadowingRequestError) && (
           <div className="auth-error">
             {shadowingRequestError ??
               recording.shadowingError ??
               "Pronunciation audio could not be generated. Please try again."}
           </div>
-        )}
+          )}
         {canRetryShadowing && (
           <div className="shadowing-actions">
             <button

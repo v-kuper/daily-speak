@@ -30,6 +30,7 @@ const documentedPaths = [
   "/api/user/english-level",
   "/api/user/recordings",
   "/api/recordings/{recordingId}",
+  "/api/recordings/{recordingId}/retry",
   "/api/recordings/{recordingId}/shadowing",
   "/api/recording-sessions",
   "/api/recording-sessions/{sessionId}/chunks",
@@ -83,6 +84,10 @@ test("OpenAPI stays aligned with server.go route literals", () => {
     ["/api/user/english-level", /path == "\/api\/user\/english-level"/],
     ["/api/user/recordings", /path == "\/api\/user\/recordings"/],
     ["/api/recordings/{recordingId}", /strings\.HasPrefix\(path, "\/api\/recordings\/"\)/],
+    [
+      "/api/recordings/{recordingId}/retry",
+      /strings\.HasSuffix\(path, "\/retry"\)/,
+    ],
     [
       "/api/recordings/{recordingId}/shadowing",
       /strings\.HasSuffix\(path, "\/shadowing"\)/,

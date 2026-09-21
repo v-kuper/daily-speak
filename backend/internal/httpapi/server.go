@@ -30,18 +30,23 @@ type shadowingJob struct {
 	cancel context.CancelFunc
 }
 
+type recordingProcessingJob struct {
+	id     string
+	cancel context.CancelFunc
+}
+
 type Server struct {
-	db                         *db.DB
-	nextProxy                  http.Handler
-	recordingProcessingMu      sync.Mutex
-	recordingProcessingCancels map[string]func()
-	fileDeletionWorkerOnce     sync.Once
-	fileDeletionWake           chan struct{}
-	removeStoredUploads        func([]string) error
-	synthesizer                tts.Synthesizer
-	shadowingProcessingMu      sync.Mutex
-	shadowingProcessingJobs    map[string]shadowingJob
-	aiClient                   ai.ChatClient
+	db                      *db.DB
+	nextProxy               http.Handler
+	recordingProcessingMu   sync.Mutex
+	recordingProcessingJobs map[string]recordingProcessingJob
+	fileDeletionWorkerOnce  sync.Once
+	fileDeletionWake        chan struct{}
+	removeStoredUploads     func([]string) error
+	synthesizer             tts.Synthesizer
+	shadowingProcessingMu   sync.Mutex
+	shadowingProcessingJobs map[string]shadowingJob
+	aiClient                ai.ChatClient
 }
 
 func NewServer(config Config) *Server {
@@ -60,14 +65,14 @@ func NewServer(config Config) *Server {
 		aiClient = ai.OllamaClient{}
 	}
 	return &Server{
-		db:                         config.DB,
-		nextProxy:                  proxy,
-		recordingProcessingCancels: map[string]func(){},
-		fileDeletionWake:           make(chan struct{}, 1),
-		removeStoredUploads:        removeStoredUploadFiles,
-		synthesizer:                synthesizer,
-		shadowingProcessingJobs:    map[string]shadowingJob{},
-		aiClient:                   aiClient,
+		db:                      config.DB,
+		nextProxy:               proxy,
+		recordingProcessingJobs: map[string]recordingProcessingJob{},
+		fileDeletionWake:        make(chan struct{}, 1),
+		removeStoredUploads:     removeStoredUploadFiles,
+		synthesizer:             synthesizer,
+		shadowingProcessingJobs: map[string]shadowingJob{},
+		aiClient:                aiClient,
 	}
 }
 
@@ -121,6 +126,8 @@ func (s *Server) routeAPI(w http.ResponseWriter, r *http.Request) {
 		s.handlePutEnglishLevel(w, r)
 	case path == "/api/user/recordings" && r.Method == http.MethodPost:
 		s.handleCreateRecording(w, r)
+	case strings.HasPrefix(path, "/api/recordings/") && strings.HasSuffix(path, "/retry") && r.Method == http.MethodPost:
+		s.routeRecordingRetryPath(w, r, strings.TrimPrefix(path, "/api/recordings/"))
 	case strings.HasPrefix(path, "/api/recordings/") && strings.HasSuffix(path, "/shadowing") && r.Method == http.MethodPost:
 		s.routeShadowingPath(w, r, strings.TrimPrefix(path, "/api/recordings/"))
 	case strings.HasPrefix(path, "/api/recordings/") && r.Method == http.MethodGet:

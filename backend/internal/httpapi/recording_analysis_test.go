@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -9,6 +10,10 @@ import (
 	"daily-speaking-practice/backend/internal/ai"
 	"daily-speaking-practice/backend/internal/quota"
 )
+
+func stringPointer(value string) *string {
+	return &value
+}
 
 func TestMarshalSuggestionsDoesNotPersistDerivedReference(t *testing.T) {
 	value := marshalSuggestions([]suggestion{{
@@ -39,6 +44,109 @@ func TestNaturalRewritePromptOmitsAnalysisMetadata(t *testing.T) {
 func TestRecordingProcessingTimeoutAllowsMultiPassRetries(t *testing.T) {
 	if recordingProcessingTimeout != 30*time.Minute {
 		t.Fatalf("processing timeout = %s", recordingProcessingTimeout)
+	}
+}
+
+func TestRecordingRetryWorkResumesTheStoredFailedStage(t *testing.T) {
+	uploadsDir := t.TempDir()
+	t.Setenv("UPLOADS_DIR", uploadsDir)
+	tests := []struct {
+		name      string
+		recording recordingResponse
+		wantStage string
+		wantAudio string
+	}{
+		{
+			name: "transcription uses saved audio",
+			recording: recordingResponse{
+				Status: "failed", ProcessingStage: stringPointer("transcribing"),
+				AudioDataURL: stringPointer("/uploads/recordings/user-1/recording-1.webm"),
+			},
+			wantStage: "transcribing",
+			wantAudio: filepath.Join(uploadsDir, "recordings", "user-1", "recording-1.webm"),
+		},
+		{
+			name: "analysis reuses transcript",
+			recording: recordingResponse{
+				Status: "failed", ProcessingStage: stringPointer("suggestions"), Transcript: "I go yesterday.",
+			},
+			wantStage: "suggestions",
+		},
+		{
+			name: "rewrite reuses reviewed suggestions",
+			recording: recordingResponse{
+				Status: "failed", ProcessingStage: stringPointer("rewriting"), Transcript: "I go yesterday.",
+				Suggestions: []suggestion{{Wrong: "go", Right: "went", Explanation: "Use past tense."}},
+			},
+			wantStage: "rewriting",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			work, err := recordingRetryWorkFor(tc.recording, "b1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if work.Stage != tc.wantStage || work.AudioPath != tc.wantAudio || work.Transcript != tc.recording.Transcript {
+				t.Fatalf("work=%#v", work)
+			}
+		})
+	}
+}
+
+func TestRecordingRetryWorkRejectsUnavailableInput(t *testing.T) {
+	tests := []recordingResponse{
+		{Status: "ready", ProcessingStage: stringPointer("suggestions"), Transcript: "I went home."},
+		{Status: "failed", ProcessingStage: nil, Transcript: "I went home."},
+		{Status: "failed", ProcessingStage: stringPointer("suggestions"), Transcript: "   "},
+		{Status: "failed", ProcessingStage: stringPointer("transcribing"), AudioDataURL: nil},
+	}
+	for _, recording := range tests {
+		if _, err := recordingRetryWorkFor(recording, "b1"); err == nil {
+			t.Fatalf("expected retry input to be rejected: %#v", recording)
+		}
+	}
+}
+
+func TestRecordingAfterRetryClaimReturnsTheImmediateProcessingState(t *testing.T) {
+	startedAt := time.Date(2026, time.September, 21, 12, 30, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		stage               string
+		wantTranscript      string
+		wantSuggestionCount int
+	}{
+		{stage: "transcribing", wantTranscript: "", wantSuggestionCount: 0},
+		{stage: "suggestions", wantTranscript: "I go yesterday.", wantSuggestionCount: 0},
+		{stage: "rewriting", wantTranscript: "I go yesterday.", wantSuggestionCount: 1},
+	} {
+		t.Run(tc.stage, func(t *testing.T) {
+			recording := recordingResponse{
+				Status:              "failed",
+				ProcessingStage:     stringPointer(tc.stage),
+				ProcessingError:     stringPointer("failed"),
+				Transcript:          "I go yesterday.",
+				CorrectedTranscript: "stale correction",
+				Suggestions:         []suggestion{{Wrong: "go", Right: "went"}},
+				ShadowingStatus:     "failed",
+				ShadowingAudioURL:   stringPointer("/uploads/shadowing/stale.mp3"),
+				ShadowingError:      stringPointer("failed"),
+			}
+
+			updated := recordingAfterRetryClaim(recording, startedAt)
+			if updated.Status != "processing" || updated.ProcessingError != nil {
+				t.Fatalf("status was not reset: %#v", updated)
+			}
+			if updated.Transcript != tc.wantTranscript || len(updated.Suggestions) != tc.wantSuggestionCount {
+				t.Fatalf("upstream artifacts were not preserved correctly: %#v", updated)
+			}
+			if updated.CorrectedTranscript != "" || updated.ShadowingStatus != "pending" || updated.ShadowingAudioURL != nil || updated.ShadowingError != nil {
+				t.Fatalf("downstream artifacts were not reset: %#v", updated)
+			}
+			if updated.ShadowingUpdatedAt != startedAt.Format(time.RFC3339Nano) {
+				t.Fatalf("shadowingUpdatedAt=%q", updated.ShadowingUpdatedAt)
+			}
+		})
 	}
 }
 

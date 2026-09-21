@@ -34,3 +34,37 @@ test("only supported server processing stages are accepted", () => {
   assert.equal(processing.parseRecordingProcessingStage("unexpected"), null);
   assert.equal(processing.parseRecordingProcessingStage(undefined), null);
 });
+
+test("failed stages have block-specific retry labels", () => {
+  assert.equal(processing.recordingRetryLabel("transcribing"), "Retry transcription");
+  assert.equal(processing.recordingRetryLabel("suggestions"), "Retry AI analysis");
+  assert.equal(processing.recordingRetryLabel("rewriting"), "Retry natural version");
+  assert.equal(processing.recordingRetryLabel(null), null);
+});
+
+test("shadowing progress is hidden until a natural version is ready", () => {
+  assert.equal(processing.shouldShowShadowingProgress({
+    recordingStatus: "failed",
+    correctedTranscript: "",
+    shadowingStatus: "pending",
+  }), false);
+  assert.equal(processing.shouldShowShadowingProgress({
+    recordingStatus: "ready",
+    correctedTranscript: "I went home.",
+    shadowingStatus: "pending",
+  }), true);
+  assert.equal(processing.shouldShowShadowingProgress({
+    recordingStatus: "ready",
+    correctedTranscript: "I went home.",
+    shadowingStatus: "ready",
+  }), false);
+});
+
+test("details offers retry in the block that owns the failed stage", () => {
+  const detailsSource = readFileSync("src/components/DetailsScreen.tsx", "utf8");
+
+  assert.match(detailsSource, /dispatch\(retryRecordingProcessing\(recording\.id\)\)/);
+  assert.match(detailsSource, /renderProcessingRetry\("transcribing"\)/);
+  assert.match(detailsSource, /renderProcessingRetry\("suggestions"\)/);
+  assert.match(detailsSource, /renderProcessingRetry\("rewriting"\)/);
+});
