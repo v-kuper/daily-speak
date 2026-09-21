@@ -104,6 +104,10 @@ if ([string]::IsNullOrWhiteSpace($HostIp)) {
   $HostIp = Get-PrivateIPv4Address
 }
 
+if ([string]::IsNullOrWhiteSpace($env:COMPOSE_PROJECT_NAME)) {
+  $env:COMPOSE_PROJECT_NAME = "daily-speaking"
+}
+
 $docker = Get-Command docker -ErrorAction SilentlyContinue
 if (-not $docker) {
   throw "Docker is not installed or is not on PATH. Start Docker Desktop and make sure 'docker compose version' works."
@@ -123,16 +127,16 @@ try {
   if (-not $SkipCertificateGeneration) {
     Install-MkcertIfMissing
     mkcert -install
-    mkcert -cert-file $certPath -key-file $keyPath $HostIp localhost 127.0.0.1
+    mkcert -cert-file $certPath -key-file $keyPath $HostIp
   }
 
   $caddyfile = @"
-https://${HostIp}:${HttpsPort}, https://localhost:${HttpsPort}, https://127.0.0.1:${HttpsPort} {
+https://${HostIp}:${HttpsPort} {
   tls /certs/daily-speaking.pem /certs/daily-speaking-key.pem
   reverse_proxy web:3000
 }
 
-https://${HostIp}:${ApiHttpsPort}, https://localhost:${ApiHttpsPort}, https://127.0.0.1:${ApiHttpsPort} {
+https://${HostIp}:${ApiHttpsPort} {
   tls /certs/daily-speaking.pem /certs/daily-speaking-key.pem
   reverse_proxy backend:3000
 }
@@ -148,12 +152,16 @@ https://${HostIp}:${ApiHttpsPort}, https://localhost:${ApiHttpsPort}, https://12
   $env:HTTPS_PORT = "$HttpsPort"
   $env:API_HTTPS_PORT = "$ApiHttpsPort"
   $env:PUBLIC_API_BASE_URL = "https://${HostIp}:${ApiHttpsPort}"
-  $env:CORS_ALLOWED_ORIGINS = "https://${HostIp}:${HttpsPort},https://localhost:${HttpsPort},https://127.0.0.1:${HttpsPort},http://${HostIp}:${AppPort},http://localhost:${AppPort},http://127.0.0.1:${AppPort}"
+  $env:CORS_ALLOWED_ORIGINS = "https://${HostIp}:${HttpsPort},https://${HostIp}:${ApiHttpsPort},http://${HostIp}:${AppPort},http://${HostIp}:${ApiPort}"
   $env:SESSION_COOKIE_SECURE = "true"
   $env:SESSION_COOKIE_SAME_SITE = "lax"
 
+  if (-not [string]::IsNullOrWhiteSpace($env:GITHUB_ENV)) {
+    "LAN_HOST_IP=$HostIp" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+  }
+
   if (-not $SkipDockerComposeUp) {
-    docker compose up --build -d web backend postgres lan-https
+    docker compose up --build -d --remove-orphans web backend postgres lan-https
   }
 
   Write-Host ""

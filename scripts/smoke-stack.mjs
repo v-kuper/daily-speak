@@ -4,8 +4,8 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
-const DEFAULT_WEB_BASE_URL = "http://127.0.0.1:3218";
-const DEFAULT_API_BASE_URL = "http://127.0.0.1:3219";
+const DEFAULT_WEB_BASE_URL = "http://localhost:3218";
+const DEFAULT_API_BASE_URL = "http://localhost:3219";
 const STARTUP_TIMEOUT_MS = 120_000;
 const POLL_INTERVAL_MS = 1_500;
 const REQUEST_TIMEOUT_MS = 15_000;

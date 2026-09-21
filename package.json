@@ -14,7 +14,7 @@
     "test:smoke": "node scripts/smoke-api.mjs",
     "test:stack-smoke": "node scripts/smoke-stack.mjs",
     "quality": "npm run web:quality && npm run backend:test && npm run test:api-docs && npm run test:infra",
-    "docker:app": "docker compose up --build -d web backend postgres",
+    "docker:app": "docker compose up --build -d --remove-orphans web backend postgres",
     "docker:lan": "node scripts/docker-lan.mjs",
     "docker:build": "docker compose build web backend",
     "docker:logs": "docker compose logs -f web backend",

@@ -9,7 +9,8 @@ infrastructure on one test host:
 - `lan-https`: two independent Caddy HTTPS sites.
 
 The web container receives only the public API origin. The backend receives an
-exact web-origin CORS allowlist and does not know or proxy the web application.
+exact browser-origin CORS allowlist for the web and Swagger/API origins and does
+not know or proxy the web application.
 The same images can later move to different production resources by supplying
 their public origins through deployment configuration.
 
@@ -112,7 +113,8 @@ The workflow:
 2. installs from `web/package-lock.json` and runs the repository quality gates;
 3. validates Docker and Cartesia configuration;
 4. runs `.\scripts\setup-lan-https-proxy.ps1`;
-5. builds and starts `web`, `backend`, `postgres`, and `lan-https` together;
+5. builds and starts `web`, `backend`, `postgres`, and `lan-https` together with
+   `--remove-orphans` under the stable `daily-speaking` Compose project;
 6. runs `scripts/smoke-stack.mjs` against the separate HTTP origins;
 7. verifies the independent HTTPS health/docs endpoints;
 8. verifies Whisper and Cartesia inside `backend` only.
@@ -121,6 +123,12 @@ The smoke uses a unique temporary account and verifies web health, `/speak`, API
 health, OpenAPI, Swagger, exact credentialed CORS, registration/session, a
 protected call, upload creation/serving/deletion, and logout. It never prints
 the session cookie.
+
+`--remove-orphans` is the one-time-safe migration from the former `app` service
+as well as the normal update behavior. Compose removes the old
+`daily-speaking-app` container before converging the new services, so it cannot
+retain `APP_PORT`. This does not pass `-v`: the named PostgreSQL volume and the
+external `UPLOADS_HOST_DIR` remain intact.
 
 Manual deployment after the workflow is present on the selected branch:
 
@@ -141,10 +149,14 @@ For Windows address `<windows-ipv4>`:
 | OpenAPI | `http://<windows-ipv4>:3219/openapi.json` | `https://<windows-ipv4>:3444/openapi.json` |
 
 The generated web Caddy site proxies only to `web:3000`; the API site proxies
-only to `backend:3000`. The deployment sets:
+only to `backend:3000`. Both sites and the generated certificate use the same
+detected `<windows-ipv4>` hostname; the LAN helper intentionally does not add
+`localhost` or `127.0.0.1` aliases. Use the displayed hostname consistently for
+both origins. The deployment sets:
 
 - `PUBLIC_API_BASE_URL=https://<windows-ipv4>:3444` for the web container;
-- the matching HTTP and HTTPS web origins in `CORS_ALLOWED_ORIGINS`;
+- the matching HTTP and HTTPS web origins and API/Swagger origins in
+  `CORS_ALLOWED_ORIGINS`;
 - `SESSION_COOKIE_SECURE=true` and `SESSION_COOKIE_SAME_SITE=lax` for the API.
 
 These LAN origins share a site (the same host), so the current HttpOnly session
@@ -206,20 +218,22 @@ drive. Never point it at the Actions checkout. Do not use `docker compose down
 
 ## Direct checks and logs
 
-Against an already-running local stack:
+Against an already-running Windows LAN stack, use the same hostname that the
+setup helper printed and placed in `LAN_HOST_IP` for CI:
 
 ```powershell
-$env:WEB_BASE_URL = "http://127.0.0.1:3218"
-$env:API_BASE_URL = "http://127.0.0.1:3219"
+$HostIp = "<windows-ipv4>"
+$env:WEB_BASE_URL = "http://${HostIp}:3218"
+$env:API_BASE_URL = "http://${HostIp}:3219"
 node scripts/smoke-stack.mjs
 ```
 
 Direct read-only API checks:
 
 ```powershell
-Invoke-RestMethod http://127.0.0.1:3219/healthz
-Invoke-WebRequest http://127.0.0.1:3219/openapi.json -UseBasicParsing
-Invoke-WebRequest http://127.0.0.1:3219/docs -UseBasicParsing
+Invoke-RestMethod "http://${HostIp}:3219/healthz"
+Invoke-WebRequest "http://${HostIp}:3219/openapi.json" -UseBasicParsing
+Invoke-WebRequest "http://${HostIp}:3219/docs" -UseBasicParsing
 ```
 
 Inspect each failure boundary separately:
@@ -242,27 +256,40 @@ real API key is present.
 
 ## Rollback
 
-Deploys are in-place Compose updates. To roll back, select the previously known
-good Git revision in a clean checkout/worktree, preserve the same
-`COMPOSE_PROJECT_NAME`, `UPLOADS_HOST_DIR`, ports, and secrets, then run the same
-setup command or:
+An ordinary deployment is an in-place Compose update, but crossing the service
+split boundary needs an explicit transition. Before rollback, take a current
+PostgreSQL backup and a filesystem backup of `UPLOADS_HOST_DIR`, and confirm the
+older binary is compatible with the current schema. Expect downtime from the
+`down` command until the older stack passes its health checks.
+
+Select the previously known-good revision in a clean checkout/worktree and
+preserve the same project name, uploads path, ports, and secrets. After checking
+out that older revision, stop both its declared services and any newer orphaned
+`web`, `backend`, or `lan-https` containers, without deleting volumes:
 
 ```powershell
 git switch --detach <previous-good-revision>
 $env:COMPOSE_PROJECT_NAME = "daily-speaking"
 $env:UPLOADS_HOST_DIR = "D:\DailySpeaking\data\uploads"
+docker compose --project-name daily-speaking down --remove-orphans
 .\scripts\setup-lan-https-proxy.ps1 -HostIp <windows-ipv4> -SkipCertificateGeneration
 ```
+
+The `down --remove-orphans` step is required before starting a pre-split
+revision; otherwise the newer `web` container can keep `APP_PORT` while the old
+`app` container starts. Do not add `-v`: the `daily-speaking` PostgreSQL volume
+is preserved, and Compose never deletes the external uploads directory.
 
 For HTTP-only recovery, with the required origins already set in the shell:
 
 ```powershell
-docker compose up --build -d web backend postgres
+docker compose up --build -d --remove-orphans web backend postgres
 ```
 
 Do not delete or recreate the uploads directory or PostgreSQL volume during a
-rollback. The split does not change the schema or session-token format, so no
-backfill or intentional sign-out is required.
+rollback. The split itself does not change the schema or session-token format,
+so no backfill or intentional sign-out is required; this does not replace the
+backup and schema-compatibility check for later revisions.
 
 ## Post-deploy acceptance
 

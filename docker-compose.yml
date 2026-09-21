@@ -28,7 +28,7 @@ services:
     environment:
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/daily_speaking
       SERVER_LOG_LEVEL: info
-      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3218,http://127.0.0.1:3218}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3218,http://localhost:3219}
       SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
       SESSION_COOKIE_SAME_SITE: ${SESSION_COOKIE_SAME_SITE:-lax}
       SESSION_COOKIE_DOMAIN: ${SESSION_COOKIE_DOMAIN:-}

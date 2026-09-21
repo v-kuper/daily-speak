@@ -29,7 +29,7 @@ Then run the API from its own project directory:
 ```bash
 cd backend
 DATABASE_URL=postgres://postgres:postgres@localhost:5432/daily_speaking \
-CORS_ALLOWED_ORIGINS=http://localhost:3000 \
+CORS_ALLOWED_ORIGINS=http://localhost:3000,http://localhost:3219 \
 APP_ADDR=:3219 go run ./cmd/api
 ```
 
@@ -52,8 +52,9 @@ manager or shell.
 Required for a useful local API:
 
 - `DATABASE_URL`: PostgreSQL connection string;
-- `CORS_ALLOWED_ORIGINS`: comma-separated exact web origins allowed to make
-  credentialed browser requests.
+- `CORS_ALLOWED_ORIGINS`: comma-separated exact browser origins allowed to make
+  credentialed requests. Include the web origin and every API origin used to
+  open Swagger, so `/docs` can use `Try it out` for POST/PUT/DELETE operations.
 
 Runtime and storage:
 

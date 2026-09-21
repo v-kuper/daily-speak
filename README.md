@@ -40,7 +40,7 @@ Backend only, with PostgreSQL supplied by Compose:
 docker compose up -d postgres
 cd backend
 DATABASE_URL=postgres://postgres:postgres@localhost:5432/daily_speaking \
-CORS_ALLOWED_ORIGINS=http://localhost:3000 \
+CORS_ALLOWED_ORIGINS=http://localhost:3000,http://localhost:3219 \
 APP_ADDR=:3219 go run ./cmd/api
 ```
 
@@ -60,7 +60,7 @@ own, so export/source backend values through the shell or process manager.
 
 ```bash
 cp .env.example .env
-docker compose up --build -d web backend postgres
+docker compose up --build -d --remove-orphans web backend postgres
 ```
 
 Default HTTP endpoints:
@@ -93,8 +93,10 @@ the image through `UPLOADS_HOST_DIR`.
   container. See `.env.example`.
 
 For credentialed browser requests, every web origin must appear exactly in
-`CORS_ALLOWED_ORIGINS`. The current authentication remains a PostgreSQL-backed,
-HttpOnly session cookie. On HTTPS set `SESSION_COOKIE_SECURE=true`. Use
+`CORS_ALLOWED_ORIGINS`. Add each API origin that serves Swagger too, because
+Swagger `Try it out` sends mutations from that API origin. The current
+authentication remains a PostgreSQL-backed, HttpOnly session cookie. On HTTPS set
+`SESSION_COOKIE_SECURE=true`. Use
 `SESSION_COOKIE_SAME_SITE=none` only for genuinely cross-site web/API origins;
 it requires a secure cookie. Access and refresh tokens are a deferred epic, not
 part of this refactor.
@@ -136,8 +138,8 @@ cd backend && node --test scripts/api-docs.test.mjs
 Runtime smoke against an already-running stack is explicit:
 
 ```bash
-WEB_BASE_URL=http://127.0.0.1:3218 \
-API_BASE_URL=http://127.0.0.1:3219 \
+WEB_BASE_URL=http://localhost:3218 \
+API_BASE_URL=http://localhost:3219 \
 node scripts/smoke-stack.mjs
 ```
 
@@ -146,8 +148,10 @@ credentialed CORS and upload serving, and cleans up the recording/session.
 
 ## LAN and Windows deployment
 
-`npm run docker:lan` starts the HTTP services and prints their independent LAN
-URLs. Browser microphone recording from another device requires HTTPS. The
+`npm run docker:lan` starts the HTTP services and prints one canonical LAN
+hostname pair for web and API; do not mix that IP with `localhost` or
+`127.0.0.1` while using cookie authentication. Browser microphone recording
+from another device requires HTTPS. The
 Windows self-hosted deployment generates two Caddy sites:
 
 | Service | HTTP | HTTPS |
@@ -165,11 +169,14 @@ diagnostics, and rollback are documented in
 ```bash
 docker compose logs -f web backend
 docker compose logs -f lan-https
-docker compose down
+docker compose --project-name daily-speaking down --remove-orphans
 ```
 
-Stopping Compose does not remove the named PostgreSQL volume or the configured
-uploads host directory. Do not add `-v` during ordinary deploys or rollbacks.
+Stopping Compose without `-v` does not remove the named PostgreSQL volume or the
+configured uploads host directory. The explicit project name and
+`--remove-orphans` also make transitions to/from revisions with the legacy
+single `app` service safe. See the Windows runbook before rollback; the
+transition has downtime and requires a current database/uploads backup.
 
 Backend-specific Ollama, Whisper, and Cartesia instructions live in
 [`backend/README.md`](backend/README.md). Follow-up architecture work is tracked

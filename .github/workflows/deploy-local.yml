@@ -95,15 +95,15 @@ jobs:
 
       - name: Smoke separate HTTP services
         run: |
-          $env:WEB_BASE_URL = "http://127.0.0.1:$env:APP_PORT"
-          $env:API_BASE_URL = "http://127.0.0.1:$env:API_PORT"
+          $env:WEB_BASE_URL = "http://${env:LAN_HOST_IP}:${env:APP_PORT}"
+          $env:API_BASE_URL = "http://${env:LAN_HOST_IP}:${env:API_PORT}"
           node scripts/smoke-stack.mjs
 
       - name: Verify trusted HTTPS endpoints
         run: |
-          $webHealthUrl = "https://127.0.0.1:$env:HTTPS_PORT/web-healthz"
-          $apiHealthUrl = "https://127.0.0.1:$env:API_HTTPS_PORT/healthz"
-          $apiDocsUrl = "https://127.0.0.1:$env:API_HTTPS_PORT/docs"
+          $webHealthUrl = "https://${env:LAN_HOST_IP}:${env:HTTPS_PORT}/web-healthz"
+          $apiHealthUrl = "https://${env:LAN_HOST_IP}:${env:API_HTTPS_PORT}/healthz"
+          $apiDocsUrl = "https://${env:LAN_HOST_IP}:${env:API_HTTPS_PORT}/docs"
 
           $webHealth = Invoke-RestMethod -Uri $webHealthUrl -TimeoutSec 10
           if ($webHealth.ok -ne $true -or $webHealth.service -ne "web") {

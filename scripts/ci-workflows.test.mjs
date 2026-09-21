@@ -11,6 +11,7 @@ const webDockerfile = readFileSync("web/Dockerfile", "utf8");
 const dockerfile = readFileSync("backend/Dockerfile", "utf8");
 const dockerCompose = readFileSync("docker-compose.yml", "utf8");
 const compose = parseYaml(dockerCompose);
+const rootPackage = JSON.parse(readFileSync("package.json", "utf8"));
 const instructions = (source) => source.replace(/\\\r?\n\s*/g, " ").split(/\r?\n/)
   .map((line) => line.trim()).filter((line) => line && !line.startsWith("#"));
 const qualityWorkflow = readFileSync(
@@ -81,10 +82,10 @@ test("local deploy workflow verifies quality, deploys the LAN Docker app, and ch
   assert.match(deployWorkflow, /run:\s+npm run quality/);
   assert.match(deployWorkflow, /\.\\scripts\\setup-lan-https-proxy\.ps1/);
   assert.match(deployWorkflow, /docker compose ps/);
-  assert.match(deployWorkflow, /WEB_BASE_URL = "http:\/\/127\.0\.0\.1:\$env:APP_PORT"/);
-  assert.match(deployWorkflow, /API_BASE_URL = "http:\/\/127\.0\.0\.1:\$env:API_PORT"/);
-  assert.match(deployWorkflow, /https:\/\/127\.0\.0\.1:\$env:HTTPS_PORT\/web-healthz/);
-  assert.match(deployWorkflow, /https:\/\/127\.0\.0\.1:\$env:API_HTTPS_PORT\/healthz/);
+  assert.match(deployWorkflow, /WEB_BASE_URL = "http:\/\/\$\{env:LAN_HOST_IP\}:\$\{env:APP_PORT\}"/);
+  assert.match(deployWorkflow, /API_BASE_URL = "http:\/\/\$\{env:LAN_HOST_IP\}:\$\{env:API_PORT\}"/);
+  assert.match(deployWorkflow, /https:\/\/\$\{env:LAN_HOST_IP\}:\$\{env:HTTPS_PORT\}\/web-healthz/);
+  assert.match(deployWorkflow, /https:\/\/\$\{env:LAN_HOST_IP\}:\$\{env:API_HTTPS_PORT\}\/healthz/);
   assert.doesNotMatch(deployWorkflow, /ServerCertificateValidationCallback/);
   assert.match(deployWorkflow, /docker compose logs --tail 120 web/);
   assert.match(deployWorkflow, /docker compose logs --tail 120 backend/);
@@ -94,6 +95,11 @@ test("local deploy workflow verifies quality, deploys the LAN Docker app, and ch
 test("local deploy uses a stable Docker Compose project name", () => {
   assert.match(deployWorkflow, /COMPOSE_PROJECT_NAME:\s+daily-speaking/);
   assert.match(dockerLanScript, /COMPOSE_PROJECT_NAME/);
+  assert.match(dockerLanScript, /"--remove-orphans"/);
+  const httpsSetup = readFileSync("scripts/setup-lan-https-proxy.ps1", "utf8");
+  assert.match(httpsSetup, /docker compose up --build -d --remove-orphans web backend postgres lan-https/);
+  assert.doesNotMatch(httpsSetup, /docker compose down[^\r\n]*-v/);
+  assert.match(rootPackage.scripts["docker:app"], /up --build -d --remove-orphans web backend postgres/);
 });
 
 test("local deploy workflow defaults to the Docker-local Python Whisper backend", () => {
@@ -225,7 +231,7 @@ test("Compose keeps backend credentials and persistent data with their owners", 
   assert.ok(Object.hasOwn(compose.volumes, "postgres_data"));
   for (const [key, value] of Object.entries({
     DATABASE_URL: "postgres://postgres:postgres@postgres:5432/daily_speaking",
-    CORS_ALLOWED_ORIGINS: "${CORS_ALLOWED_ORIGINS:-http://localhost:3218,http://127.0.0.1:3218}",
+    CORS_ALLOWED_ORIGINS: "${CORS_ALLOWED_ORIGINS:-http://localhost:3218,http://localhost:3219}",
     SESSION_COOKIE_SECURE: "${SESSION_COOKIE_SECURE:-false}",
     SESSION_COOKIE_SAME_SITE: "${SESSION_COOKIE_SAME_SITE:-lax}",
     SESSION_COOKIE_DOMAIN: "${SESSION_COOKIE_DOMAIN:-}",

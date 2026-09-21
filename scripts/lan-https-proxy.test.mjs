@@ -23,11 +23,11 @@ test("LAN HTTPS proxy script writes independent Caddy sites and starts separate 
 
   assert.match(script, /mkcert -cert-file \$certPath -key-file \$keyPath/);
   assert.match(script, /https:\/\/\$\{HostIp\}:\$\{HttpsPort\}/);
-  assert.match(script, /https:\/\/127\.0\.0\.1:\$\{HttpsPort\}/);
+  assert.doesNotMatch(script, /https:\/\/(?:localhost|127\.0\.0\.1):\$\{(?:HttpsPort|ApiHttpsPort)\}/);
   assert.match(script, /reverse_proxy web:3000/);
   assert.match(script, /reverse_proxy backend:3000/);
   assert.doesNotMatch(script, /reverse_proxy app:|handle_path/);
-  assert.match(script, /docker compose up --build -d web backend postgres lan-https/);
+  assert.match(script, /docker compose up --build -d --remove-orphans web backend postgres lan-https/);
   assert.match(script, /function Ensure-FirewallRule/);
   assert.match(script, /Get-NetFirewallRule -DisplayName \$displayName/);
   assert.match(script, /New-NetFirewallRule -DisplayName \$displayName/);
@@ -35,7 +35,8 @@ test("LAN HTTPS proxy script writes independent Caddy sites and starts separate 
   assert.match(script, /Ensure-FirewallRule -Port \$HttpsPort/);
   assert.match(script, /Ensure-FirewallRule -Port \$ApiHttpsPort/);
   assert.match(script, /-LocalPort \$Port -Action Allow/);
-  assert.match(script, /mkcert -cert-file \$certPath -key-file \$keyPath \$HostIp localhost 127\.0\.0\.1/);
+  assert.match(script, /mkcert -cert-file \$certPath -key-file \$keyPath \$HostIp(?:\r?\n|\s*$)/m);
+  assert.doesNotMatch(script, /mkcert -cert-file[^\r\n]*(?:localhost|127\.0\.0\.1)/);
 });
 
 test("LAN HTTPS proxy script keeps deployment running when firewall rule creation is denied", () => {
@@ -88,8 +89,8 @@ test("generated Caddy listeners and Compose mappings agree for default and overr
       tls: body.match(/tls (.+)/)?.[1],
     }));
     assert.deepEqual(sites, [
-      { addresses: [`https://192.168.1.42:${webPort}`, `https://localhost:${webPort}`, `https://127.0.0.1:${webPort}`], upstream: "web:3000", tls: "/certs/daily-speaking.pem /certs/daily-speaking-key.pem" },
-      { addresses: [`https://192.168.1.42:${apiPort}`, `https://localhost:${apiPort}`, `https://127.0.0.1:${apiPort}`], upstream: "backend:3000", tls: "/certs/daily-speaking.pem /certs/daily-speaking-key.pem" },
+      { addresses: [`https://192.168.1.42:${webPort}`], upstream: "web:3000", tls: "/certs/daily-speaking.pem /certs/daily-speaking-key.pem" },
+      { addresses: [`https://192.168.1.42:${apiPort}`], upstream: "backend:3000", tls: "/certs/daily-speaking.pem /certs/daily-speaking-key.pem" },
     ]);
     const env = webPort === "3443" ? {} : { HTTPS_PORT: webPort, API_HTTPS_PORT: apiPort };
     const compose = parseYaml(readFileSync(composePath, "utf8").replace(/\$\{(\w+):-([^}]*)\}/g, (_, key, fallback) => env[key] || fallback));
@@ -100,24 +101,28 @@ test("generated Caddy listeners and Compose mappings agree for default and overr
   }
 });
 
-test("HTTPS setup supplies runtime origins and secure cookies before Compose starts", () => {
+test("HTTPS setup supplies one same-site hostname pair and secure cookies before Compose starts", () => {
   const script = readFileSync(scriptPath, "utf8");
   for (const [name, variable, fallback] of [["AppPort", "APP_PORT", 3218], ["ApiPort", "API_PORT", 3219], ["HttpsPort", "HTTPS_PORT", 3443], ["ApiHttpsPort", "API_HTTPS_PORT", 3444]]) {
     assert.ok(script.includes(`[int]$${name} = $(if ($env:${variable}) { [int]$env:${variable} } else { ${fallback} })`));
   }
-  const beforeCompose = script.split("docker compose up --build -d")[0];
+  const beforeCompose = script.split("docker compose up --build -d --remove-orphans")[0];
   const variables = Object.fromEntries([...beforeCompose.matchAll(/\$env:(\w+) = "([^"\n]*)"/g)].map(([, name, value]) => [name, value]));
   assert.deepEqual(Object.fromEntries(["APP_PORT", "API_PORT", "HTTPS_PORT", "API_HTTPS_PORT", "PUBLIC_API_BASE_URL", "CORS_ALLOWED_ORIGINS", "SESSION_COOKIE_SECURE", "SESSION_COOKIE_SAME_SITE"].map((name) => [name, variables[name]])), {
     APP_PORT: "$AppPort", API_PORT: "$ApiPort", HTTPS_PORT: "$HttpsPort", API_HTTPS_PORT: "$ApiHttpsPort",
     PUBLIC_API_BASE_URL: "https://${HostIp}:${ApiHttpsPort}",
-    CORS_ALLOWED_ORIGINS: "https://${HostIp}:${HttpsPort},https://localhost:${HttpsPort},https://127.0.0.1:${HttpsPort},http://${HostIp}:${AppPort},http://localhost:${AppPort},http://127.0.0.1:${AppPort}",
+    CORS_ALLOWED_ORIGINS: "https://${HostIp}:${HttpsPort},https://${HostIp}:${ApiHttpsPort},http://${HostIp}:${AppPort},http://${HostIp}:${ApiPort}",
     SESSION_COOKIE_SECURE: "true", SESSION_COOKIE_SAME_SITE: "lax",
   });
+  assert.match(script, /if \(-not \[string\]::IsNullOrWhiteSpace\(\$env:GITHUB_ENV\)\)/);
+  assert.match(script, /"LAN_HOST_IP=\$HostIp" \| Out-File -FilePath \$env:GITHUB_ENV/);
+  assert.match(script, /if \(\[string\]::IsNullOrWhiteSpace\(\$env:COMPOSE_PROJECT_NAME\)\)/);
+  assert.match(script, /\$env:COMPOSE_PROJECT_NAME = "daily-speaking"/);
 });
 
-test("environment example describes both public origins and cookie defaults", () => {
+test("environment example describes the same-host local pair and cookie defaults", () => {
   const example = readFileSync(".env.example", "utf8");
-  for (const entry of ["APP_PORT=3218", "API_PORT=3219", "HTTPS_PORT=3443", "API_HTTPS_PORT=3444", "PUBLIC_API_BASE_URL=http://localhost:3219", "CORS_ALLOWED_ORIGINS=http://localhost:3218,http://127.0.0.1:3218", "SESSION_COOKIE_SECURE=false", "SESSION_COOKIE_SAME_SITE=lax"]) {
+  for (const entry of ["APP_PORT=3218", "API_PORT=3219", "HTTPS_PORT=3443", "API_HTTPS_PORT=3444", "PUBLIC_API_BASE_URL=http://localhost:3219", "CORS_ALLOWED_ORIGINS=http://localhost:3218,http://localhost:3219", "SESSION_COOKIE_SECURE=false", "SESSION_COOKIE_SAME_SITE=lax"]) {
     assert.ok(example.split(/\r?\n/).includes(entry), `missing ${entry}`);
   }
 });

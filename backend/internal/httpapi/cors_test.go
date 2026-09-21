@@ -40,6 +40,43 @@ func TestCORSAllowsConfiguredCredentialedOrigin(t *testing.T) {
 	}
 }
 
+func TestCORSAllowsSwaggerMutationsFromConfiguredAPIOriginOnly(t *testing.T) {
+	config, err := ParseCORSConfig("https://app.example.com,https://api.example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := config.Wrap(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+	}))
+
+	for _, method := range []string{http.MethodOptions, http.MethodPost, http.MethodPut, http.MethodDelete} {
+		t.Run("allowed "+method, func(t *testing.T) {
+			request := httptest.NewRequest(method, "/api/user/recordings", nil)
+			request.Header.Set("Origin", "https://api.example.com")
+			if method == http.MethodOptions {
+				request.Header.Set("Access-Control-Request-Method", http.MethodPost)
+			}
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			wantStatus := http.StatusCreated
+			if method == http.MethodOptions {
+				wantStatus = http.StatusNoContent
+			}
+			if response.Code != wantStatus || response.Header().Get("Access-Control-Allow-Origin") != "https://api.example.com" || response.Header().Get("Access-Control-Allow-Credentials") != "true" {
+				t.Fatalf("configured API docs origin failed: status=%d headers=%v", response.Code, response.Header())
+			}
+		})
+	}
+
+	request := httptest.NewRequest(http.MethodPost, "/api/user/recordings", nil)
+	request.Header.Set("Origin", "https://evil.example")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusForbidden || response.Header().Get("Access-Control-Allow-Origin") != "" {
+		t.Fatalf("untrusted docs origin received mutation access: status=%d headers=%v", response.Code, response.Header())
+	}
+}
+
 func TestCORSRejectsUnsafeRequestFromUnknownOrigin(t *testing.T) {
 	config, err := ParseCORSConfig("https://app.example.com")
 	if err != nil {

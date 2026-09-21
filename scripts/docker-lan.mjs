@@ -93,7 +93,6 @@ export function formatLanSummary({
     `API:     http://${hostAddress}:${apiPort}`,
     `Health:  http://${hostAddress}:${apiPort}/healthz`,
     `Swagger: http://${hostAddress}:${apiPort}/docs`,
-    `Local web: http://localhost:${webPort}`,
   ];
 
   if (lanAddresses.length === 0) {
@@ -121,7 +120,7 @@ export function buildComposeCommand({ env = process.env, interfaces = os.network
   const hostAddress = listLanAddresses(interfaces)[0] ?? "localhost";
   return {
     command: "docker",
-    args: ["compose", "up", "--build", "-d", "web", "backend", "postgres"],
+    args: ["compose", "up", "--build", "-d", "--remove-orphans", "web", "backend", "postgres"],
     env: {
       ...env,
       APP_PORT: webPort,
@@ -130,8 +129,7 @@ export function buildComposeCommand({ env = process.env, interfaces = os.network
       PUBLIC_API_BASE_URL: `http://${hostAddress}:${apiPort}`,
       CORS_ALLOWED_ORIGINS: [...new Set([
         `http://${hostAddress}:${webPort}`,
-        `http://localhost:${webPort}`,
-        `http://127.0.0.1:${webPort}`,
+        `http://${hostAddress}:${apiPort}`,
       ])].join(","),
     },
   };

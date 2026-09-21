@@ -18,8 +18,9 @@ PUBLIC_API_BASE_URL=http://localhost:3219
 
 `PUBLIC_API_BASE_URL` must be an absolute `http` or `https` URL without
 credentials, a query, or a fragment. It is public runtime configuration, not a
-secret. Production must set it explicitly. The API must list the web origin in
-its `CORS_ALLOWED_ORIGINS` and allow credentialed requests.
+secret. Production must set it explicitly. The API must list the web origin and
+its own Swagger origin in `CORS_ALLOWED_ORIGINS` and allow credentialed
+requests.
 
 ## Install and run
 

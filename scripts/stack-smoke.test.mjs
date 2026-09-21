@@ -9,9 +9,9 @@ import {
 
 test("stack smoke selects independent default and configured service URLs", () => {
   assert.deepEqual(selectStackURLs({}), {
-    webBaseURL: "http://127.0.0.1:3218",
-    apiBaseURL: "http://127.0.0.1:3219",
-    webOrigin: "http://127.0.0.1:3218",
+    webBaseURL: "http://localhost:3218",
+    apiBaseURL: "http://localhost:3219",
+    webOrigin: "http://localhost:3218",
   });
 
   assert.deepEqual(selectStackURLs({

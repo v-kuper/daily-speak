@@ -104,7 +104,7 @@ All web API requests go through one client module that:
 - normalizes JSON and network failures into user-safe errors;
 - never silently redirects a request to another origin.
 
-The backend adds a CORS middleware with an exact, comma-separated `CORS_ALLOWED_ORIGINS` allowlist. It supports credentials and only the methods and headers used by the documented API. Preflight responses use the request origin only when it is explicitly allowed; wildcard origins are forbidden with credentials. Browser requests from disallowed origins receive no CORS permission, and state-changing requests with a present but disallowed `Origin` are rejected rather than merely having response headers omitted.
+The backend adds a CORS middleware with an exact, comma-separated `CORS_ALLOWED_ORIGINS` allowlist. It contains every browser web origin and every API origin used to serve Swagger, so Swagger `Try it out` can perform documented mutations. It supports credentials and only the methods and headers used by the documented API. Preflight responses use the request origin only when it is explicitly allowed; wildcard origins are forbidden with credentials. Browser requests from disallowed origins receive no CORS permission, and state-changing requests with a present but disallowed `Origin` are rejected rather than merely having response headers omitted.
 
 Cookie attributes become explicit backend configuration instead of depending on the Node-specific `NODE_ENV` variable:
 
@@ -176,9 +176,9 @@ Default host exposure is:
 - API HTTPS: `0.0.0.0:3444`;
 - PostgreSQL remains bound to loopback only.
 
-The generated Caddy configuration has independent web and API sites. The web HTTPS site proxies only to `web:3000`; the API HTTPS site proxies only to `backend:3000`. The certificate contains the detected LAN address, `localhost`, and `127.0.0.1`, as it does today. Caddy is deployment infrastructure, not an application-level dependency between web and backend.
+The generated Caddy configuration has independent web and API sites. The web HTTPS site proxies only to `web:3000`; the API HTTPS site proxies only to `backend:3000`. Both sites and the certificate use one detected LAN address. The LAN deployment does not advertise `localhost` or `127.0.0.1` aliases, because mixing those hosts with the LAN IP would make the current `SameSite=Lax` cookie unusable. The ordinary standalone local pair remains `http://localhost:3218` and `http://localhost:3219`. Caddy is deployment infrastructure, not an application-level dependency between web and backend.
 
-The Windows setup script detects the LAN address, builds the public API URL, supplies matching CORS origins, creates firewall rules for both HTTPS ports, and runs all required Compose services. It retains explicit overrides for ports and upload storage. Existing `UPLOADS_HOST_DIR` data is reused without moving, deleting, or recreating recordings.
+The Windows setup script detects the LAN address, builds the public API URL, supplies matching web and API/Swagger CORS origins for that same hostname, creates firewall rules for both HTTPS ports, and runs all required Compose services. It retains explicit overrides for ports and upload storage. Existing `UPLOADS_HOST_DIR` data is reused without moving, deleting, or recreating recordings.
 
 ## CI/CD and rollout
 
@@ -203,7 +203,7 @@ The Windows deployment workflow preserves its `main`/`master` triggers, runner l
 - both web and API HTTPS endpoints after Caddy starts;
 - Whisper and Cartesia configuration inside the backend container only.
 
-The deployment remains an in-place Compose update. PostgreSQL volumes and the external uploads directory are not recreated. Service names and documentation change from the former combined `app` container to `web` and `backend`. Failures print separate logs for those services and Caddy so the broken boundary is obvious.
+The deployment remains an in-place Compose update under the stable `daily-speaking` project and uses scoped orphan removal so the former combined `app` container cannot retain the web port. PostgreSQL volumes and the external uploads directory are not recreated or deleted. Service names and documentation change from `app` to `web` and `backend`. Rollback across that boundary explicitly stops the stable project with orphan removal but without `-v` before the older deployment starts. Failures print separate logs for those services and Caddy so the broken boundary is obvious.
 
 Because the database schema and session token format do not change in this refactor, no data backfill or forced sign-out is planned. The route and container split must be released together through Compose; a partially deployed old web/new backend combination is not a supported intermediate state.
 

@@ -45,11 +45,11 @@ test("LAN summary reports independent web, API, health, and Swagger URLs", () =>
     lanAddresses: ["192.168.1.42"],
   });
 
-  assert.match(summary, /http:\/\/localhost:8080/);
   assert.match(summary, /Web:\s+http:\/\/192\.168\.1\.42:8080/);
   assert.match(summary, /API:\s+http:\/\/192\.168\.1\.42:8081/);
   assert.match(summary, /Health:\s+http:\/\/192\.168\.1\.42:8081\/healthz/);
   assert.match(summary, /Swagger:\s+http:\/\/192\.168\.1\.42:8081\/docs/);
+  assert.doesNotMatch(summary, /https?:\/\/(?:localhost|127\.0\.0\.1)/);
   assert.match(summary, /Microphone recording on LAN\/remote URLs requires HTTPS or localhost/);
   assert.match(summary, /Windows Defender Firewall/);
   assert.match(summary, /PostgreSQL stays inside Docker/);
@@ -69,11 +69,11 @@ test("HTTP deployment selects a physical LAN adapter and preserves provider/stor
     WiFi: [{ family: "IPv4", address: "10.1.2.3", internal: false }],
   } });
   assert.equal(command.command, "docker");
-  assert.deepEqual(command.args, ["compose", "up", "--build", "-d", "web", "backend", "postgres"]);
+  assert.deepEqual(command.args, ["compose", "up", "--build", "-d", "--remove-orphans", "web", "backend", "postgres"]);
   assert.deepEqual(command.env, {
     ...env, APP_PORT: "8080", API_PORT: "8081",
     PUBLIC_API_BASE_URL: "http://10.1.2.3:8081",
-    CORS_ALLOWED_ORIGINS: "http://10.1.2.3:8080,http://localhost:8080,http://127.0.0.1:8080",
+    CORS_ALLOWED_ORIGINS: "http://10.1.2.3:8080,http://10.1.2.3:8081",
   });
   assert.equal(env.PUBLIC_API_BASE_URL, "https://stale.example");
 });
@@ -85,7 +85,7 @@ test("HTTP deployment defaults to separate ports and loopback when LAN detection
   assert.equal(env.API_PORT, "3219");
   assert.equal(env.COMPOSE_PROJECT_NAME, "daily-speaking");
   assert.equal(env.PUBLIC_API_BASE_URL, "http://localhost:3219");
-  assert.equal(env.CORS_ALLOWED_ORIGINS, "http://localhost:3218,http://127.0.0.1:3218");
+  assert.equal(env.CORS_ALLOWED_ORIGINS, "http://localhost:3218,http://localhost:3219");
   const summary = formatLanSummary({ webPort: "3218", apiPort: "3219", lanAddresses: [] });
   assert.match(summary, /no .*IPv4 address detected/);
   assert.match(summary, /API:\s+http:\/\/localhost:3219/);
