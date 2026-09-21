@@ -32,8 +32,7 @@ func main() {
 	}
 
 	addr := envDefault("APP_ADDR", ":3000")
-	nextURL := envDefault("NEXT_UPSTREAM_URL", "http://127.0.0.1:3001")
-	apiServer := httpapi.NewServer(httpapi.Config{DB: database, NextURL: nextURL})
+	apiServer := httpapi.NewServer(httpapi.Config{DB: database})
 	apiServer.StartBackgroundWorkers(ctx)
 	server := &http.Server{
 		Addr:              addr,
@@ -42,7 +41,7 @@ func main() {
 	}
 
 	go func() {
-		log.Printf("daily-speaking Go gateway listening on %s, proxying Next to %s", addr, nextURL)
+		log.Printf("daily-speaking API listening on %s", addr)
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("server failed: %v", err)
 		}

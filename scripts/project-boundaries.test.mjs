@@ -29,3 +29,10 @@ test("frontend source is not left at repository root", () => {
   assert.equal(existsSync("src"), false);
   assert.equal(existsSync("next.config.ts"), false);
 });
+
+test("backend source has no Next.js upstream", () => {
+  const main = readFileSync("backend/cmd/api/main.go", "utf8");
+  const server = readFileSync("backend/internal/httpapi/server.go", "utf8");
+  assert.doesNotMatch(main, /NEXT_UPSTREAM_URL|NextURL|proxying Next/);
+  assert.doesNotMatch(server, /httputil|NewSingleHostReverseProxy|nextProxy|NextURL/);
+});

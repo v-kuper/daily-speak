@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"net/http/httputil"
-	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -20,7 +18,6 @@ import (
 
 type Config struct {
 	DB          *db.DB
-	NextURL     string
 	Synthesizer tts.Synthesizer
 	AIClient    ai.ChatClient
 }
@@ -37,7 +34,6 @@ type recordingProcessingJob struct {
 
 type Server struct {
 	db                      *db.DB
-	nextProxy               http.Handler
 	recordingProcessingMu   sync.Mutex
 	recordingProcessingJobs map[string]recordingProcessingJob
 	fileDeletionWorkerOnce  sync.Once
@@ -50,12 +46,6 @@ type Server struct {
 }
 
 func NewServer(config Config) *Server {
-	var proxy http.Handler = http.NotFoundHandler()
-	if strings.TrimSpace(config.NextURL) != "" {
-		if parsed, err := url.Parse(config.NextURL); err == nil {
-			proxy = httputil.NewSingleHostReverseProxy(parsed)
-		}
-	}
 	synthesizer := config.Synthesizer
 	if synthesizer == nil {
 		synthesizer = tts.NewCartesia(tts.ConfigFromEnv())
@@ -66,7 +56,6 @@ func NewServer(config Config) *Server {
 	}
 	return &Server{
 		db:                      config.DB,
-		nextProxy:               proxy,
 		recordingProcessingJobs: map[string]recordingProcessingJob{},
 		fileDeletionWake:        make(chan struct{}, 1),
 		removeStoredUploads:     removeStoredUploadFiles,
@@ -83,7 +72,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/uploads/shadowing", s.handleShadowingUpload)
 	mux.HandleFunc("/uploads/shadowing/", s.handleShadowingUpload)
 	mux.Handle(uploadsURLPrefix, uploadsHandler())
-	mux.Handle("/", s.nextProxy)
+	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Not found"})
+	})
 	return mux
 }
 

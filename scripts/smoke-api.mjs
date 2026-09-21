@@ -251,8 +251,7 @@ const main = async () => {
         detached: process.platform !== "win32",
         env: {
           ...process.env,
-          APP_ADDR: `:${port}`,
-          NEXT_UPSTREAM_URL: "http://127.0.0.1:9"
+          APP_ADDR: `:${port}`
         }
       });
 
