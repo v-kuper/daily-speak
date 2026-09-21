@@ -44,3 +44,9 @@ export const protectedRouteDestination = (
   returnTo: unknown
 ): string | null =>
   !authInitialized || isAuthenticated ? null : `/auth?returnTo=${encodeURIComponent(safeReturnTo(returnTo))}`;
+
+export const claimRouteRedirect = (issued: { current: string | null }, destination: string | null): boolean => {
+  const shouldRedirect = destination !== null && issued.current !== destination;
+  issued.current = destination;
+  return shouldRedirect;
+};

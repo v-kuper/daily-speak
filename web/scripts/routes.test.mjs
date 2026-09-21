@@ -50,3 +50,24 @@ test("App Router owns every supported screen (boundary backstop)", () => {
   const appSlice = readFileSync("src/store/slices/appSlice.ts", "utf8");
   assert.doesNotMatch(appSlice, /currentScreen|activeTab|navigateToTab|screenBeforeAuth/);
 });
+
+test("recording links retain full-width block card layout", () => {
+  const css = readFileSync("app/globals.css", "utf8");
+  const rules = [...css.matchAll(/(?:^|\n)\.recording-card\s*\{([^{}]*)\}/g)];
+  assert.ok(rules.length > 0, "recording-card rule must exist");
+  const declarations = new Map(rules.flatMap(([, body]) => body.split(";")
+    .filter((declaration) => declaration.includes(":"))
+    .map((declaration) => declaration.split(":").map((part) => part.trim()))));
+  assert.equal(declarations.get("display") ?? "inline", "block");
+});
+
+test("authentication redirect claims suppress effect replay and reset for later redirects", () => {
+  const issued = { current: null };
+  assert.equal(routes.claimRouteRedirect(issued, "/auth?returnTo=%2Fhistory"), true);
+  assert.equal(routes.claimRouteRedirect(issued, "/auth?returnTo=%2Fhistory"), false);
+  assert.equal(routes.claimRouteRedirect(issued, null), false);
+  assert.equal(issued.current, null);
+  assert.equal(routes.claimRouteRedirect(issued, "/auth?returnTo=%2Fhistory"), true);
+  assert.equal(routes.claimRouteRedirect(issued, "/auth?returnTo=%2Fprofile"), true);
+  assert.equal(routes.claimRouteRedirect(issued, "/auth?returnTo=%2Fprofile"), false);
+});
