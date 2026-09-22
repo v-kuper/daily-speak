@@ -101,21 +101,59 @@ jobs:
 
       - name: Verify trusted HTTPS endpoints
         run: |
+          [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+          function Invoke-TrustedHttpsWithRetry {
+            param(
+              [Parameter(Mandatory = $true)]
+              [string]$Name,
+              [Parameter(Mandatory = $true)]
+              [scriptblock]$Request,
+              [Parameter(Mandatory = $true)]
+              [scriptblock]$IsReady,
+              [int]$MaxAttempts = 6,
+              [int]$DelaySeconds = 2
+            )
+
+            for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+              try {
+                $response = & $Request
+                if (& $IsReady $response) {
+                  return $response
+                }
+              } catch {
+                # Caddy may still be accepting connections immediately after startup.
+              }
+
+              if ($attempt -lt $MaxAttempts) {
+                Start-Sleep -Seconds $DelaySeconds
+              }
+            }
+
+            throw "HTTPS check '$Name' did not become ready after $MaxAttempts attempts."
+          }
+
           $webHealthUrl = "https://${env:LAN_HOST_IP}:${env:HTTPS_PORT}/web-healthz"
           $apiHealthUrl = "https://${env:LAN_HOST_IP}:${env:API_HTTPS_PORT}/healthz"
           $apiDocsUrl = "https://${env:LAN_HOST_IP}:${env:API_HTTPS_PORT}/docs"
 
-          $webHealth = Invoke-RestMethod -Uri $webHealthUrl -TimeoutSec 10
+          $webHealth = Invoke-TrustedHttpsWithRetry -Name "web health" `
+            -Request { Invoke-RestMethod -Uri $webHealthUrl -TimeoutSec 10 } `
+            -IsReady { param($response) $response.ok -eq $true -and $response.service -eq "web" }
           if ($webHealth.ok -ne $true -or $webHealth.service -ne "web") {
             throw "HTTPS web health check failed."
           }
 
-          $apiHealth = Invoke-RestMethod -Uri $apiHealthUrl -TimeoutSec 10
+          $apiHealth = Invoke-TrustedHttpsWithRetry -Name "API health" `
+            -Request { Invoke-RestMethod -Uri $apiHealthUrl -TimeoutSec 10 } `
+            -IsReady { param($response) $response.ok -eq $true }
           if ($apiHealth.ok -ne $true) {
             throw "HTTPS API health check failed."
           }
 
-          $apiDocs = Invoke-WebRequest -Uri $apiDocsUrl -UseBasicParsing -TimeoutSec 10
+          $apiDocs = Invoke-TrustedHttpsWithRetry -Name "API documentation" `
+            -Request { Invoke-WebRequest -Uri $apiDocsUrl -UseBasicParsing -TimeoutSec 10 } `
+            -IsReady { param($response) $response.StatusCode -eq 200 -and $response.Content -match "SwaggerUIBundle" }
           if ($apiDocs.StatusCode -ne 200 -or $apiDocs.Content -notmatch "SwaggerUIBundle") {
             throw "HTTPS API documentation check failed."
           }

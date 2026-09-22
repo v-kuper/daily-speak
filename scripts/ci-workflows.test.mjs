@@ -23,6 +23,10 @@ const deployWorkflow = readFileSync(
   ".github/workflows/deploy-local.yml",
   "utf8",
 );
+const parsedDeployWorkflow = parseYaml(deployWorkflow);
+const deployStep = (name) => parsedDeployWorkflow.jobs.deploy.steps.find(
+  (step) => step.name === name,
+);
 
 test("quality workflow installs and builds web independently", () => {
   assert.match(qualityWorkflow, /cache-dependency-path:\s+web\/package-lock\.json/);
@@ -91,6 +95,41 @@ test("local deploy workflow verifies quality, deploys the LAN Docker app, and ch
   assert.match(deployWorkflow, /docker compose logs --tail 120 web/);
   assert.match(deployWorkflow, /docker compose logs --tail 120 backend/);
   assert.match(deployWorkflow, /docker compose logs --tail 120 lan-https/);
+});
+
+test("trusted HTTPS verification selects TLS 1.2 before its first request without bypassing trust", () => {
+  const run = deployStep("Verify trusted HTTPS endpoints")?.run;
+  assert.equal(typeof run, "string");
+
+  const tlsSelection = run.indexOf("[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12");
+  const firstRequest = Math.min(
+    ...["Invoke-RestMethod", "Invoke-WebRequest"]
+      .map((command) => run.indexOf(command))
+      .filter((index) => index >= 0),
+  );
+
+  assert.ok(tlsSelection >= 0, "the HTTPS step must explicitly select TLS 1.2");
+  assert.ok(Number.isFinite(firstRequest), "the HTTPS step must make a web request");
+  assert.ok(firstRequest > tlsSelection, "TLS 1.2 must be selected before any HTTPS request");
+  assert.doesNotMatch(run, /SkipCertificateCheck|ServerCertificateValidationCallback|TrustAllCertsPolicy|curl(?:\.exe)?\s+[^\r\n]*-k\b/i);
+});
+
+test("trusted HTTPS verification retries bounded readiness checks for web, API, and docs", () => {
+  const run = deployStep("Verify trusted HTTPS endpoints")?.run;
+  assert.equal(typeof run, "string");
+
+  assert.match(run, /function Invoke-TrustedHttpsWithRetry/);
+  assert.match(run, /\[int\]\$MaxAttempts\s*=\s*6/);
+  assert.match(run, /for \(\$attempt = 1; \$attempt -le \$MaxAttempts; \$attempt\+\+\)/);
+  assert.match(run, /if \(& \$IsReady \$response\)\s*\{\s*return \$response/s);
+  assert.match(run, /if \(\$attempt -lt \$MaxAttempts\)\s*\{\s*Start-Sleep -Seconds \$DelaySeconds/s);
+  assert.match(run, /throw "HTTPS check '\$Name' did not become ready after \$MaxAttempts attempts\."/);
+
+  const helperCalls = run.match(/Invoke-TrustedHttpsWithRetry -Name/g) ?? [];
+  assert.equal(helperCalls.length, 3);
+  assert.match(run, /\$response\.ok -eq \$true -and \$response\.service -eq "web"/);
+  assert.match(run, /\$response\.ok -eq \$true/);
+  assert.match(run, /\$response\.StatusCode -eq 200 -and \$response\.Content -match "SwaggerUIBundle"/);
 });
 
 test("local deploy uses a stable Docker Compose project name", () => {
