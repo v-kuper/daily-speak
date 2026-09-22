@@ -131,7 +131,8 @@ test("local deploy uses a stable Docker Compose project name", () => {
   assert.match(dockerLanScript, /COMPOSE_PROJECT_NAME/);
   assert.match(dockerLanScript, /"--remove-orphans"/);
   const httpsSetup = readFileSync("scripts/setup-lan-https-proxy.ps1", "utf8");
-  assert.match(httpsSetup, /docker compose up --build -d --remove-orphans web backend postgres lan-https/);
+  assert.match(httpsSetup, /docker compose up --build -d --remove-orphans web backend postgres(?:\r?\n|\s*$)/m);
+  assert.match(httpsSetup, /docker compose up -d --force-recreate --no-deps lan-https(?:\r?\n|\s*$)/m);
   assert.doesNotMatch(httpsSetup, /docker compose down[^\r\n]*-v/);
   assert.match(rootPackage.scripts["docker:app"], /up --build -d --remove-orphans web backend postgres/);
 });

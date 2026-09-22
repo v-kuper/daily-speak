@@ -161,7 +161,8 @@ https://${HostIp}:${ApiHttpsPort} {
   }
 
   if (-not $SkipDockerComposeUp) {
-    docker compose up --build -d --remove-orphans web backend postgres lan-https
+    docker compose up --build -d --remove-orphans web backend postgres
+    docker compose up -d --force-recreate --no-deps lan-https
   }
 
   Write-Host ""

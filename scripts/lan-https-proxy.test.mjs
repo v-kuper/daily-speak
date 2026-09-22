@@ -27,7 +27,6 @@ test("LAN HTTPS proxy script writes independent Caddy sites and starts separate 
   assert.match(script, /reverse_proxy web:3000/);
   assert.match(script, /reverse_proxy backend:3000/);
   assert.doesNotMatch(script, /reverse_proxy app:|handle_path/);
-  assert.match(script, /docker compose up --build -d --remove-orphans web backend postgres lan-https/);
   assert.match(script, /function Ensure-FirewallRule/);
   assert.match(script, /Get-NetFirewallRule -DisplayName \$displayName/);
   assert.match(script, /New-NetFirewallRule -DisplayName \$displayName/);
@@ -37,6 +36,26 @@ test("LAN HTTPS proxy script writes independent Caddy sites and starts separate 
   assert.match(script, /-LocalPort \$Port -Action Allow/);
   assert.match(script, /mkcert -cert-file \$certPath -key-file \$keyPath \$HostIp(?:\r?\n|\s*$)/m);
   assert.doesNotMatch(script, /mkcert -cert-file[^\r\n]*(?:localhost|127\.0\.0\.1)/);
+});
+
+test("LAN HTTPS deployment recreates only Caddy after starting the application stack", () => {
+  const script = readFileSync(scriptPath, "utf8");
+  const composeBlock = script.match(/if \(-not \$SkipDockerComposeUp\) \{([\s\S]*?)\r?\n  \}/)?.[1];
+  assert.ok(composeBlock, "Compose commands must remain guarded by SkipDockerComposeUp");
+
+  const primaryUp = "docker compose up --build -d --remove-orphans web backend postgres";
+  const caddyRecreate = "docker compose up -d --force-recreate --no-deps lan-https";
+  const primaryIndex = composeBlock.indexOf(primaryUp);
+  const recreateIndex = composeBlock.indexOf(caddyRecreate);
+
+  assert.ok(primaryIndex >= 0, "the application services must use the stable project orphan-cleanup deployment");
+  assert.ok(recreateIndex > primaryIndex, "Caddy must be force-recreated after the application services start");
+  assert.doesNotMatch(composeBlock, /--force-recreate[^\r\n]*(?:web|backend|postgres)/);
+  assert.doesNotMatch(script, /docker compose (?:down|rm)\b|docker volume rm\b|docker system prune\b|(?:^|\s)-v(?:\s|$)/m);
+
+  const projectName = script.indexOf('$env:COMPOSE_PROJECT_NAME = "daily-speaking"');
+  const deployment = script.indexOf(primaryUp);
+  assert.ok(projectName >= 0 && projectName < deployment, "the stable Compose project name must be set before deployment");
 });
 
 test("LAN HTTPS proxy script keeps deployment running when firewall rule creation is denied", () => {
