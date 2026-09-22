@@ -131,6 +131,10 @@ try {
   }
 
   $caddyfile = @"
+{
+  default_sni ${HostIp}
+}
+
 https://${HostIp}:${HttpsPort} {
   tls /certs/daily-speaking.pem /certs/daily-speaking-key.pem
   reverse_proxy web:3000

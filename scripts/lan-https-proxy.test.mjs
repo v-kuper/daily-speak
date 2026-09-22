@@ -38,6 +38,17 @@ test("LAN HTTPS proxy script writes independent Caddy sites and starts separate 
   assert.doesNotMatch(script, /mkcert -cert-file[^\r\n]*(?:localhost|127\.0\.0\.1)/);
 });
 
+test("generated Caddy config selects the LAN IP certificate when clients omit IP SNI", () => {
+  const script = readFileSync(scriptPath, "utf8");
+  const template = script.match(/\$caddyfile = @"\r?\n([\s\S]*?)\r?\n"@/)?.[1];
+
+  assert.ok(template, "Caddy here-string is required");
+  assert.match(
+    template,
+    /^\{\r?\n\s*default_sni \$\{HostIp\}\r?\n\}\r?\n\r?\nhttps:\/\/\$\{HostIp\}:\$\{HttpsPort\}/,
+  );
+});
+
 test("LAN HTTPS deployment recreates only Caddy after starting the application stack", () => {
   const script = readFileSync(scriptPath, "utf8");
   const composeBlock = script.match(/if \(-not \$SkipDockerComposeUp\) \{([\s\S]*?)\r?\n  \}/)?.[1];
