@@ -9,6 +9,7 @@ const DEFAULT_API_BASE_URL = "http://localhost:3219";
 const STARTUP_TIMEOUT_MS = 120_000;
 const POLL_INTERVAL_MS = 1_500;
 const REQUEST_TIMEOUT_MS = 15_000;
+const MAX_FAILURE_DETAIL_LENGTH = 240;
 
 function normalizeBaseURL(value, label) {
   const normalized = value.trim().replace(/\/+$/, "");
@@ -78,6 +79,43 @@ function safeExcerpt(body) {
   return body.replace(/\s+/g, " ").trim().slice(0, 300);
 }
 
+function safeFailureDetail(error) {
+  const parts = [];
+  const seen = new Set();
+  let current = error;
+
+  while (current != null && parts.length < 3 && !seen.has(current)) {
+    if (typeof current === "object" || typeof current === "function") {
+      seen.add(current);
+    }
+    if (current instanceof Error) {
+      parts.push(`${current.name || "Error"}: ${current.message || "No message supplied."}`);
+      current = current.cause;
+    } else {
+      parts.push(String(current));
+      break;
+    }
+  }
+
+  let detail = parts.join("; caused by ") || "request failed without an error description";
+  detail = detail.replace(/(https?:\/\/)[^/\s@]+@/gi, "$1");
+  detail = detail.replace(/(https?:\/\/[^\s?#]+)\?[^\s#]*/gi, "$1?[redacted]");
+  detail = detail.replace(
+    /\b(response\s+body|response\s+headers?|headers?|cookie\s+jar|body)\s*[:=]\s*[^\r\n]*/gi,
+    "$1=[redacted]",
+  );
+  detail = detail.replace(
+    /\b(authorization|proxy-authorization|set-cookie|cookie)\s*[:=]\s*[^\r\n]*/gi,
+    "$1=[redacted]",
+  );
+  detail = detail.replace(
+    /\b(access[_-]?token|refresh[_-]?token|token|api[_-]?key)\s*[:=]\s*(?:"[^"]*"|'[^']*'|[^\s,;]+)/gi,
+    "$1=[redacted]",
+  );
+  detail = detail.replace(/\s+/g, " ").trim();
+  return detail.slice(0, MAX_FAILURE_DETAIL_LENGTH);
+}
+
 async function fetchWithTimeout(fetchImpl, url, options = {}) {
   return fetchImpl(url, {
     ...options,
@@ -105,30 +143,50 @@ async function expectJSON(name, response, expectedStatus) {
   }
 }
 
-async function waitForServices({ webBaseURL, apiBaseURL }, fetchImpl) {
+export async function waitForServices(
+  { webBaseURL, apiBaseURL },
+  fetchImpl,
+  {
+    startupTimeoutMs = STARTUP_TIMEOUT_MS,
+    pollIntervalMs = POLL_INTERVAL_MS,
+    now = Date.now,
+    sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
+  } = {},
+) {
   const checks = [
     ["web", endpoint(webBaseURL, "/web-healthz")],
     ["API", endpoint(apiBaseURL, "/healthz")],
   ];
   const pending = new Map(checks);
-  const startedAt = Date.now();
+  const lastFailures = new Map();
+  const startedAt = now();
 
-  while (pending.size > 0 && Date.now() - startedAt < STARTUP_TIMEOUT_MS) {
+  while (pending.size > 0 && now() - startedAt < startupTimeoutMs) {
     for (const [name, url] of pending) {
       try {
         const response = await fetchWithTimeout(fetchImpl, url);
-        if (response.ok) pending.delete(name);
-      } catch {
-        // The Compose services may still be starting.
+        if (response.ok) {
+          pending.delete(name);
+          lastFailures.delete(name);
+        }
+      } catch (error) {
+        lastFailures.set(name, safeFailureDetail(error));
       }
     }
     if (pending.size > 0) {
-      await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+      await sleep(pollIntervalMs);
     }
   }
 
   if (pending.size > 0) {
-    throw new Error(`Services did not become ready: ${[...pending.keys()].join(", ")}.`);
+    const pendingNames = [...pending.keys()];
+    const failureDetails = pendingNames
+      .filter((name) => lastFailures.has(name))
+      .map((name) => `${name}: ${lastFailures.get(name)}`);
+    const detailSuffix = failureDetails.length > 0
+      ? ` Last failures: ${failureDetails.join("; ")}.`
+      : "";
+    throw new Error(`Services did not become ready: ${pendingNames.join(", ")}.${detailSuffix}`);
   }
 }
 
