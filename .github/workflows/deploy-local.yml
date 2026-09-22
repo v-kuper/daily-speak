@@ -103,6 +103,28 @@ jobs:
         run: |
           [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
+          function ConvertTo-SafeHttpsFailure {
+            param(
+              [Parameter(Mandatory = $true)]
+              [System.Management.Automation.ErrorRecord]$ErrorRecord
+            )
+
+            $exceptionType = $ErrorRecord.Exception.GetType().FullName
+            $exceptionMessage = [string]$ErrorRecord.Exception.Message
+            $exceptionMessage = ($exceptionMessage -replace '[\r\n]+', ' ').Trim()
+            $exceptionMessage = $exceptionMessage -replace '(?i)(https?://[^:/\s]+):[^@\s/]+@', '$1:[redacted]@'
+            $exceptionMessage = $exceptionMessage -replace '(?i)(https?://[^\s?#]+)\?[^\s#]*', '$1?[redacted]'
+            $exceptionMessage = $exceptionMessage -replace '(?i)\b(authorization|cookie|set-cookie|token|api[_-]?key)\s*[:=]\s*[^\s,;]+', '$1=[redacted]'
+            if ([string]::IsNullOrWhiteSpace($exceptionMessage)) {
+              $exceptionMessage = "No message supplied."
+            }
+            if ($exceptionMessage.Length -gt 240) {
+              $exceptionMessage = $exceptionMessage.Substring(0, 240) + "..."
+            }
+
+            return "${exceptionType}: $exceptionMessage"
+          }
+
           function Invoke-TrustedHttpsWithRetry {
             param(
               [Parameter(Mandatory = $true)]
@@ -115,14 +137,16 @@ jobs:
               [int]$DelaySeconds = 2
             )
 
+            $lastFailure = "request was not completed."
             for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
               try {
                 $response = & $Request
                 if (& $IsReady $response) {
                   return $response
                 }
+                $lastFailure = "request returned a response that failed readiness validation."
               } catch {
-                # Caddy may still be accepting connections immediately after startup.
+                $lastFailure = ConvertTo-SafeHttpsFailure -ErrorRecord $_
               }
 
               if ($attempt -lt $MaxAttempts) {
@@ -130,7 +154,7 @@ jobs:
               }
             }
 
-            throw "HTTPS check '$Name' did not become ready after $MaxAttempts attempts."
+            throw "HTTPS check '$Name' did not become ready after $MaxAttempts attempts. Last failure: $lastFailure"
           }
 
           $webHealthUrl = "https://${env:LAN_HOST_IP}:${env:HTTPS_PORT}/web-healthz"

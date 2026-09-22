@@ -123,13 +123,30 @@ test("trusted HTTPS verification retries bounded readiness checks for web, API, 
   assert.match(run, /for \(\$attempt = 1; \$attempt -le \$MaxAttempts; \$attempt\+\+\)/);
   assert.match(run, /if \(& \$IsReady \$response\)\s*\{\s*return \$response/s);
   assert.match(run, /if \(\$attempt -lt \$MaxAttempts\)\s*\{\s*Start-Sleep -Seconds \$DelaySeconds/s);
-  assert.match(run, /throw "HTTPS check '\$Name' did not become ready after \$MaxAttempts attempts\."/);
+  assert.match(run, /throw "HTTPS check '\$Name' did not become ready after \$MaxAttempts attempts\. Last failure: \$lastFailure"/);
 
   const helperCalls = run.match(/Invoke-TrustedHttpsWithRetry -Name/g) ?? [];
   assert.equal(helperCalls.length, 3);
   assert.match(run, /\$response\.ok -eq \$true -and \$response\.service -eq "web"/);
   assert.match(run, /\$response\.ok -eq \$true/);
   assert.match(run, /\$response\.StatusCode -eq 200 -and \$response\.Content -match "SwaggerUIBundle"/);
+});
+
+test("trusted HTTPS retries retain bounded sanitized failure diagnostics only", () => {
+  const run = deployStep("Verify trusted HTTPS endpoints")?.run;
+  assert.equal(typeof run, "string");
+
+  assert.match(run, /function ConvertTo-SafeHttpsFailure/);
+  assert.match(run, /\$exceptionType = \$ErrorRecord\.Exception\.GetType\(\)\.FullName/);
+  assert.match(run, /\$exceptionMessage = \[string\]\$ErrorRecord\.Exception\.Message/);
+  assert.match(run, /\$exceptionMessage = \(\$exceptionMessage -replace '\[\\r\\n\]\+', ' '\)\.Trim\(\)/);
+  assert.match(run, /authorization\|cookie\|set-cookie\|token\|api\[_-\]\?key/);
+  assert.match(run, /if \(\$exceptionMessage\.Length -gt 240\)/);
+  assert.match(run, /\$lastFailure = ConvertTo-SafeHttpsFailure -ErrorRecord \$_/);
+  assert.match(run, /\$lastFailure = "request returned a response that failed readiness validation\."/);
+
+  assert.doesNotMatch(run, /Write-(?:Host|Output|Warning|Error|Verbose|Debug)/i);
+  assert.doesNotMatch(run, /throw[^\r\n]*(?:\$response|\$_\.|\.Headers|\.Cookies|\.Content)/i);
 });
 
 test("local deploy uses a stable Docker Compose project name", () => {
