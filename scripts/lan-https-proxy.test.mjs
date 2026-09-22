@@ -149,8 +149,9 @@ test("HTTPS setup supplies one same-site hostname pair and secure cookies before
   }
   const beforeCompose = script.split("docker compose up --build -d --remove-orphans")[0];
   const variables = Object.fromEntries([...beforeCompose.matchAll(/\$env:(\w+) = "([^"\n]*)"/g)].map(([, name, value]) => [name, value]));
-  assert.deepEqual(Object.fromEntries(["APP_PORT", "API_PORT", "HTTPS_PORT", "API_HTTPS_PORT", "PUBLIC_API_BASE_URL", "CORS_ALLOWED_ORIGINS", "SESSION_COOKIE_SECURE", "SESSION_COOKIE_SAME_SITE"].map((name) => [name, variables[name]])), {
+  assert.deepEqual(Object.fromEntries(["APP_PORT", "API_PORT", "HTTPS_PORT", "API_HTTPS_PORT", "PUBLIC_WEB_BASE_URL", "PUBLIC_API_BASE_URL", "CORS_ALLOWED_ORIGINS", "SESSION_COOKIE_SECURE", "SESSION_COOKIE_SAME_SITE"].map((name) => [name, variables[name]])), {
     APP_PORT: "$AppPort", API_PORT: "$ApiPort", HTTPS_PORT: "$HttpsPort", API_HTTPS_PORT: "$ApiHttpsPort",
+    PUBLIC_WEB_BASE_URL: "https://${HostIp}:${HttpsPort}",
     PUBLIC_API_BASE_URL: "https://${HostIp}:${ApiHttpsPort}",
     CORS_ALLOWED_ORIGINS: "https://${HostIp}:${HttpsPort},https://${HostIp}:${ApiHttpsPort},http://${HostIp}:${AppPort},http://${HostIp}:${ApiPort}",
     SESSION_COOKIE_SECURE: "true", SESSION_COOKIE_SAME_SITE: "lax",
@@ -163,7 +164,7 @@ test("HTTPS setup supplies one same-site hostname pair and secure cookies before
 
 test("environment example describes the same-host local pair and cookie defaults", () => {
   const example = readFileSync(".env.example", "utf8");
-  for (const entry of ["APP_PORT=3218", "API_PORT=3219", "HTTPS_PORT=3443", "API_HTTPS_PORT=3444", "PUBLIC_API_BASE_URL=http://localhost:3219", "CORS_ALLOWED_ORIGINS=http://localhost:3218,http://localhost:3219", "SESSION_COOKIE_SECURE=false", "SESSION_COOKIE_SAME_SITE=lax"]) {
+  for (const entry of ["APP_PORT=3218", "API_PORT=3219", "HTTPS_PORT=3443", "API_HTTPS_PORT=3444", "PUBLIC_WEB_BASE_URL=", "PUBLIC_API_BASE_URL=http://localhost:3219", "CORS_ALLOWED_ORIGINS=http://localhost:3218,http://localhost:3219", "SESSION_COOKIE_SECURE=false", "SESSION_COOKIE_SAME_SITE=lax"]) {
     assert.ok(example.split(/\r?\n/).includes(entry), `missing ${entry}`);
   }
 });

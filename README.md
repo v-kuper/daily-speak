@@ -85,8 +85,10 @@ the image through `UPLOADS_HOST_DIR`.
 
 ## Environment ownership
 
-- Web: `PUBLIC_API_BASE_URL` only. It is a public absolute HTTP(S) origin and is
-  read at runtime. Do not put server secrets in `web/.env.local`.
+- Web: `PUBLIC_API_BASE_URL` is the public absolute HTTP(S) API origin.
+  `PUBLIC_WEB_BASE_URL` is an optional canonical web origin used by HTTPS
+  deployments to redirect direct HTTP access before cookie authentication.
+  Both are read at runtime. Do not put server secrets in `web/.env.local`.
 - Backend: database, CORS, session-cookie, uploads, Ollama, Whisper, Cartesia,
   logging, and listen-address variables. See `backend/.env.example`.
 - Root Compose: host ports, persistent host paths, and values passed to either

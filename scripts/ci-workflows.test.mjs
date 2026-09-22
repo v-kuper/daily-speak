@@ -254,7 +254,10 @@ test("Compose gives independent contexts, ports and health to web and backend", 
   assert.deepEqual(backend.ports, ["0.0.0.0:${API_PORT:-3219}:3000"]);
   assert.equal(web.depends_on, undefined);
   assert.deepEqual(backend.depends_on, { postgres: { condition: "service_healthy" } });
-  assert.deepEqual(web.environment, { PUBLIC_API_BASE_URL: "${PUBLIC_API_BASE_URL:-http://localhost:3219}" });
+  assert.deepEqual(web.environment, {
+    PUBLIC_WEB_BASE_URL: "${PUBLIC_WEB_BASE_URL:-}",
+    PUBLIC_API_BASE_URL: "${PUBLIC_API_BASE_URL:-http://localhost:3219}",
+  });
   assert.match(web.healthcheck.test.join(" "), /http:\/\/127\.0\.0\.1:3000\/web-healthz/);
   assert.doesNotMatch(web.healthcheck.test.join(" "), /backend|3219|PUBLIC_API/);
   assert.match(backend.healthcheck.test.join(" "), /http:\/\/127\.0\.0\.1:3000\/healthz/);

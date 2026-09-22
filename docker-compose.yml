@@ -6,6 +6,7 @@ services:
     container_name: daily-speaking-web
     restart: unless-stopped
     environment:
+      PUBLIC_WEB_BASE_URL: ${PUBLIC_WEB_BASE_URL:-}
       PUBLIC_API_BASE_URL: ${PUBLIC_API_BASE_URL:-http://localhost:3219}
     ports:
       - "0.0.0.0:${APP_PORT:-3218}:3000"

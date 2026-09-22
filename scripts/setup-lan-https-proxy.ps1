@@ -155,6 +155,7 @@ https://${HostIp}:${ApiHttpsPort} {
   $env:API_PORT = "$ApiPort"
   $env:HTTPS_PORT = "$HttpsPort"
   $env:API_HTTPS_PORT = "$ApiHttpsPort"
+  $env:PUBLIC_WEB_BASE_URL = "https://${HostIp}:${HttpsPort}"
   $env:PUBLIC_API_BASE_URL = "https://${HostIp}:${ApiHttpsPort}"
   $env:CORS_ALLOWED_ORIGINS = "https://${HostIp}:${HttpsPort},https://${HostIp}:${ApiHttpsPort},http://${HostIp}:${AppPort},http://${HostIp}:${ApiPort}"
   $env:SESSION_COOKIE_SECURE = "true"

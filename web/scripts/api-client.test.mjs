@@ -26,6 +26,7 @@ function importTypeScriptModule(file) {
 
 const apiConfig = importTypeScriptModule("src/lib/apiConfig.ts");
 const apiClient = importTypeScriptModule("src/lib/apiClient.ts");
+const webMiddleware = importTypeScriptModule("middleware.ts");
 
 test("production requires an absolute HTTP API URL", () => {
   for (const value of [undefined, "", "   "]) {
@@ -40,6 +41,81 @@ test("production requires an absolute HTTP API URL", () => {
 
 test("development defaults to the standalone API port", () => {
   assert.equal(apiConfig.resolvePublicApiBaseUrl(undefined, "development"), "http://localhost:3219");
+});
+
+test("LAN HTTP requests redirect to the canonical HTTPS web origin", () => {
+  const redirect = apiConfig.resolveCanonicalWebRedirect?.({
+    requestURL: "http://192.168.0.115:3218/speak?mode=free",
+    host: "192.168.0.115:3218",
+  }, "https://192.168.0.115:3443");
+
+  assert.equal(redirect, "https://192.168.0.115:3443/speak?mode=free");
+});
+
+test("canonical web redirect trusts proxy origin and preserves internal health checks", () => {
+  const resolveRedirect = apiConfig.resolveCanonicalWebRedirect;
+  assert.equal(typeof resolveRedirect, "function");
+
+  assert.equal(resolveRedirect({
+    requestURL: "http://web:3000/history/recording-1?date=2026-09-22",
+    host: "web:3000",
+    forwardedHost: "192.168.0.115:3443",
+    forwardedProto: "https",
+  }, "https://192.168.0.115:3443"), null);
+
+  assert.equal(resolveRedirect({
+    requestURL: "http://127.0.0.1:3000/web-healthz",
+    host: "127.0.0.1:3000",
+  }, "https://192.168.0.115:3443"), null);
+
+  assert.equal(resolveRedirect({
+    requestURL: "http://localhost:3218/speak",
+    host: "localhost:3218",
+  }, undefined), null);
+});
+
+test("canonical web redirect keeps double-slash paths on the configured origin", () => {
+  assert.equal(apiConfig.resolveCanonicalWebRedirect({
+    requestURL: "http://192.168.0.115:3218//evil.example/path?q=1",
+    host: "192.168.0.115:3218",
+  }, "https://192.168.0.115:3443"), "https://192.168.0.115:3443//evil.example/path?q=1");
+});
+
+test("middleware enforces the runtime canonical web origin without breaking proxy or health traffic", (t) => {
+  const { NextRequest } = require("next/server");
+  const previous = process.env.PUBLIC_WEB_BASE_URL;
+  t.after(() => {
+    if (previous === undefined) delete process.env.PUBLIC_WEB_BASE_URL;
+    else process.env.PUBLIC_WEB_BASE_URL = previous;
+  });
+
+  process.env.PUBLIC_WEB_BASE_URL = "https://192.168.0.115:3443";
+  const redirect = webMiddleware.middleware(new NextRequest("http://192.168.0.115:3218/speak?mode=free"));
+  assert.equal(redirect.status, 308);
+  assert.equal(redirect.headers.get("location"), "https://192.168.0.115:3443/speak?mode=free");
+
+  const proxyPass = webMiddleware.middleware(new NextRequest("http://web:3000/speak", { headers: {
+    host: "web:3000",
+    "x-forwarded-host": "192.168.0.115:3443",
+    "x-forwarded-proto": "https",
+  } }));
+  assert.equal(proxyPass.status, 200);
+  assert.equal(proxyPass.headers.get("location"), null);
+
+  const healthPass = webMiddleware.middleware(new NextRequest("http://127.0.0.1:3000/web-healthz"));
+  assert.equal(healthPass.status, 200);
+  assert.equal(healthPass.headers.get("location"), null);
+
+  delete process.env.PUBLIC_WEB_BASE_URL;
+  const localPass = webMiddleware.middleware(new NextRequest("http://localhost:3218/speak"));
+  assert.equal(localPass.status, 200);
+  assert.equal(localPass.headers.get("location"), null);
+
+  process.env.PUBLIC_WEB_BASE_URL = "https://192.168.0.115:3443/not-an-origin";
+  assert.throws(
+    () => webMiddleware.middleware(new NextRequest("http://192.168.0.115:3218/speak")),
+    /PUBLIC_WEB_BASE_URL/,
+  );
 });
 
 test("API requests preserve multipart chunks, blobs, JSON, options and response bodies", async () => {

@@ -22,6 +22,10 @@ secret. Production must set it explicitly. The API must list the web origin and
 its own Swagger origin in `CORS_ALLOWED_ORIGINS` and allow credentialed
 requests.
 
+`PUBLIC_WEB_BASE_URL` is optional. When set to a canonical origin, browser
+requests received through another host or scheme redirect there while
+`/web-healthz` remains available to the container health check.
+
 ## Install and run
 
 From the repository root:
@@ -70,9 +74,10 @@ is built only from this directory:
 docker build -t daily-speaking-web web
 ```
 
-At container runtime, supply `PUBLIC_API_BASE_URL`; the image does not contain
-backend source or server credentials. The web-only health endpoint is
-`/web-healthz` and returns `service: "web"` without probing the API.
+At container runtime, supply `PUBLIC_API_BASE_URL` and optionally
+`PUBLIC_WEB_BASE_URL`; the image does not contain backend source or server
+credentials. The web-only health endpoint is `/web-healthz` and returns
+`service: "web"` without probing the API.
 
 ## Authentication boundary
 

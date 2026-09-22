@@ -8,9 +8,11 @@ infrastructure on one test host:
 - `postgres`: persistent application database;
 - `lan-https`: two independent Caddy HTTPS sites.
 
-The web container receives only the public API origin. The backend receives an
-exact browser-origin CORS allowlist for the web and Swagger/API origins and does
-not know or proxy the web application.
+The web container receives the public API origin and the canonical HTTPS web
+origin. The latter redirects direct HTTP browser access before session-cookie
+authentication begins. The backend receives an exact browser-origin CORS
+allowlist for the web and Swagger/API origins and does not know or proxy the web
+application.
 The same images can later move to different production resources by supplying
 their public origins through deployment configuration.
 
@@ -148,13 +150,16 @@ For Windows address `<windows-ipv4>`:
 | Swagger | `http://<windows-ipv4>:3219/docs` | `https://<windows-ipv4>:3444/docs` |
 | OpenAPI | `http://<windows-ipv4>:3219/openapi.json` | `https://<windows-ipv4>:3444/openapi.json` |
 
-The generated web Caddy site proxies only to `web:3000`; the API site proxies
+Direct browser visits to the HTTP web address redirect to the HTTPS web address;
+the HTTP `/web-healthz` endpoint remains available to deployment checks. The
+generated web Caddy site proxies only to `web:3000`; the API site proxies
 only to `backend:3000`. Both sites and the generated certificate use the same
 detected `<windows-ipv4>` hostname; the LAN helper intentionally does not add
 `localhost` or `127.0.0.1` aliases. Use the displayed hostname consistently for
 both origins. The deployment sets:
 
-- `PUBLIC_API_BASE_URL=https://<windows-ipv4>:3444` for the web container;
+- `PUBLIC_WEB_BASE_URL=https://<windows-ipv4>:3443` and
+  `PUBLIC_API_BASE_URL=https://<windows-ipv4>:3444` for the web container;
 - the matching HTTP and HTTPS web origins and API/Swagger origins in
   `CORS_ALLOWED_ORIGINS`;
 - `SESSION_COOKIE_SECURE=true` and `SESSION_COOKIE_SAME_SITE=lax` for the API.
