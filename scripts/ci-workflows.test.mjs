@@ -131,8 +131,8 @@ test("local deploy uses a stable Docker Compose project name", () => {
   assert.match(dockerLanScript, /COMPOSE_PROJECT_NAME/);
   assert.match(dockerLanScript, /"--remove-orphans"/);
   const httpsSetup = readFileSync("scripts/setup-lan-https-proxy.ps1", "utf8");
-  assert.match(httpsSetup, /docker compose up --build -d --remove-orphans web backend postgres(?:\r?\n|\s*$)/m);
-  assert.match(httpsSetup, /docker compose up -d --force-recreate --no-deps lan-https(?:\r?\n|\s*$)/m);
+  assert.match(httpsSetup, /docker compose up --build -d --remove-orphans web backend postgres\r?\n\s*if \(\$LASTEXITCODE -ne 0\) \{\r?\n\s*throw "Failed to build or start web, backend, and postgres services\."/);
+  assert.match(httpsSetup, /docker compose up -d --force-recreate --no-deps lan-https\r?\n\s*if \(\$LASTEXITCODE -ne 0\) \{\r?\n\s*throw "Failed to recreate lan-https service with current TLS configuration\."/);
   assert.doesNotMatch(httpsSetup, /docker compose down[^\r\n]*-v/);
   assert.match(rootPackage.scripts["docker:app"], /up --build -d --remove-orphans web backend postgres/);
 });

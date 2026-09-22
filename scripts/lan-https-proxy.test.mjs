@@ -45,9 +45,20 @@ test("LAN HTTPS deployment recreates only Caddy after starting the application s
 
   const primaryUp = "docker compose up --build -d --remove-orphans web backend postgres";
   const caddyRecreate = "docker compose up -d --force-recreate --no-deps lan-https";
+  const composeStatements = composeBlock.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   const primaryIndex = composeBlock.indexOf(primaryUp);
   const recreateIndex = composeBlock.indexOf(caddyRecreate);
 
+  assert.deepEqual(composeStatements, [
+    primaryUp,
+    "if ($LASTEXITCODE -ne 0) {",
+    'throw "Failed to build or start web, backend, and postgres services."',
+    "}",
+    caddyRecreate,
+    "if ($LASTEXITCODE -ne 0) {",
+    'throw "Failed to recreate lan-https service with current TLS configuration."',
+    "}",
+  ], "each native Compose command must be followed immediately by its own exit-code guard");
   assert.ok(primaryIndex >= 0, "the application services must use the stable project orphan-cleanup deployment");
   assert.ok(recreateIndex > primaryIndex, "Caddy must be force-recreated after the application services start");
   assert.doesNotMatch(composeBlock, /--force-recreate[^\r\n]*(?:web|backend|postgres)/);
