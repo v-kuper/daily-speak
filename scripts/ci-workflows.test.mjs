@@ -89,64 +89,41 @@ test("local deploy workflow verifies quality, deploys the LAN Docker app, and ch
   assert.match(deployWorkflow, /docker compose ps/);
   assert.match(deployWorkflow, /WEB_BASE_URL = "http:\/\/\$\{env:LAN_HOST_IP\}:\$\{env:APP_PORT\}"/);
   assert.match(deployWorkflow, /API_BASE_URL = "http:\/\/\$\{env:LAN_HOST_IP\}:\$\{env:API_PORT\}"/);
-  assert.match(deployWorkflow, /https:\/\/\$\{env:LAN_HOST_IP\}:\$\{env:HTTPS_PORT\}\/web-healthz/);
-  assert.match(deployWorkflow, /https:\/\/\$\{env:LAN_HOST_IP\}:\$\{env:API_HTTPS_PORT\}\/healthz/);
   assert.doesNotMatch(deployWorkflow, /ServerCertificateValidationCallback/);
   assert.match(deployWorkflow, /docker compose logs --tail 120 web/);
   assert.match(deployWorkflow, /docker compose logs --tail 120 backend/);
   assert.match(deployWorkflow, /docker compose logs --tail 120 lan-https/);
 });
 
-test("trusted HTTPS verification selects TLS 1.2 before its first request without bypassing trust", () => {
+test("trusted HTTPS verification starts Node with the explicit mkcert root CA and HTTPS origins", () => {
   const run = deployStep("Verify trusted HTTPS endpoints")?.run;
   assert.equal(typeof run, "string");
 
-  const tlsSelection = run.indexOf("[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12");
-  const firstRequest = Math.min(
-    ...["Invoke-RestMethod", "Invoke-WebRequest"]
-      .map((command) => run.indexOf(command))
-      .filter((index) => index >= 0),
-  );
+  assert.match(run, /mkcert -CAROOT/);
+  assert.match(run, /Join-Path[^\r\n]+["']rootCA\.pem["']/);
+  assert.match(run, /Test-Path -LiteralPath \$mkcertRootCaPath -PathType Leaf/);
+  assert.match(run, /\$env:NODE_EXTRA_CA_CERTS\s*=\s*\(Resolve-Path -LiteralPath \$mkcertRootCaPath\)\.Path/);
+  assert.match(run, /\$env:WEB_BASE_URL\s*=\s*"https:\/\/\$\{env:LAN_HOST_IP\}:\$\{env:HTTPS_PORT\}"/);
+  assert.match(run, /\$env:API_BASE_URL\s*=\s*"https:\/\/\$\{env:LAN_HOST_IP\}:\$\{env:API_HTTPS_PORT\}"/);
+  assert.match(run, /node scripts\/smoke-stack\.mjs/);
 
-  assert.ok(tlsSelection >= 0, "the HTTPS step must explicitly select TLS 1.2");
-  assert.ok(Number.isFinite(firstRequest), "the HTTPS step must make a web request");
-  assert.ok(firstRequest > tlsSelection, "TLS 1.2 must be selected before any HTTPS request");
-  assert.doesNotMatch(run, /SkipCertificateCheck|ServerCertificateValidationCallback|TrustAllCertsPolicy|curl(?:\.exe)?\s+[^\r\n]*-k\b/i);
+  const caCheck = run.indexOf("Test-Path -LiteralPath $mkcertRootCaPath -PathType Leaf");
+  const caExport = run.indexOf("$env:NODE_EXTRA_CA_CERTS");
+  const webUrlExport = run.indexOf("$env:WEB_BASE_URL");
+  const apiUrlExport = run.indexOf("$env:API_BASE_URL");
+  const nodeStart = run.indexOf("node scripts/smoke-stack.mjs");
+  assert.ok(caCheck >= 0 && caCheck < caExport, "the mkcert root must exist before it is exported");
+  assert.ok(caExport < nodeStart, "the CA must be exported before Node starts");
+  assert.ok(webUrlExport < nodeStart, "the web HTTPS origin must be exported before Node starts");
+  assert.ok(apiUrlExport < nodeStart, "the API HTTPS origin must be exported before Node starts");
 });
 
-test("trusted HTTPS verification retries bounded readiness checks for web, API, and docs", () => {
+test("trusted HTTPS verification does not bypass trust or use the legacy PowerShell HTTP client", () => {
   const run = deployStep("Verify trusted HTTPS endpoints")?.run;
   assert.equal(typeof run, "string");
 
-  assert.match(run, /function Invoke-TrustedHttpsWithRetry/);
-  assert.match(run, /\[int\]\$MaxAttempts\s*=\s*6/);
-  assert.match(run, /for \(\$attempt = 1; \$attempt -le \$MaxAttempts; \$attempt\+\+\)/);
-  assert.match(run, /if \(& \$IsReady \$response\)\s*\{\s*return \$response/s);
-  assert.match(run, /if \(\$attempt -lt \$MaxAttempts\)\s*\{\s*Start-Sleep -Seconds \$DelaySeconds/s);
-  assert.match(run, /throw "HTTPS check '\$Name' did not become ready after \$MaxAttempts attempts\. Last failure: \$lastFailure"/);
-
-  const helperCalls = run.match(/Invoke-TrustedHttpsWithRetry -Name/g) ?? [];
-  assert.equal(helperCalls.length, 3);
-  assert.match(run, /\$response\.ok -eq \$true -and \$response\.service -eq "web"/);
-  assert.match(run, /\$response\.ok -eq \$true/);
-  assert.match(run, /\$response\.StatusCode -eq 200 -and \$response\.Content -match "SwaggerUIBundle"/);
-});
-
-test("trusted HTTPS retries retain bounded sanitized failure diagnostics only", () => {
-  const run = deployStep("Verify trusted HTTPS endpoints")?.run;
-  assert.equal(typeof run, "string");
-
-  assert.match(run, /function ConvertTo-SafeHttpsFailure/);
-  assert.match(run, /\$exceptionType = \$ErrorRecord\.Exception\.GetType\(\)\.FullName/);
-  assert.match(run, /\$exceptionMessage = \[string\]\$ErrorRecord\.Exception\.Message/);
-  assert.match(run, /\$exceptionMessage = \(\$exceptionMessage -replace '\[\\r\\n\]\+', ' '\)\.Trim\(\)/);
-  assert.match(run, /authorization\|cookie\|set-cookie\|token\|api\[_-\]\?key/);
-  assert.match(run, /if \(\$exceptionMessage\.Length -gt 240\)/);
-  assert.match(run, /\$lastFailure = ConvertTo-SafeHttpsFailure -ErrorRecord \$_/);
-  assert.match(run, /\$lastFailure = "request returned a response that failed readiness validation\."/);
-
-  assert.doesNotMatch(run, /Write-(?:Host|Output|Warning|Error|Verbose|Debug)/i);
-  assert.doesNotMatch(run, /throw[^\r\n]*(?:\$response|\$_\.|\.Headers|\.Cookies|\.Content)/i);
+  assert.doesNotMatch(run, /NODE_TLS_REJECT_UNAUTHORIZED|SkipCertificateCheck|ServerCertificateValidationCallback|TrustAllCertsPolicy|curl(?:\.exe)?\s+[^\r\n]*-k\b/i);
+  assert.doesNotMatch(run, /Invoke-RestMethod|Invoke-WebRequest|ServicePointManager|Invoke-TrustedHttpsWithRetry/);
 });
 
 test("local deploy uses a stable Docker Compose project name", () => {

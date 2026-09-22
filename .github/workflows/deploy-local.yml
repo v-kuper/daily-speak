@@ -101,86 +101,20 @@ jobs:
 
       - name: Verify trusted HTTPS endpoints
         run: |
-          [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-
-          function ConvertTo-SafeHttpsFailure {
-            param(
-              [Parameter(Mandatory = $true)]
-              [System.Management.Automation.ErrorRecord]$ErrorRecord
-            )
-
-            $exceptionType = $ErrorRecord.Exception.GetType().FullName
-            $exceptionMessage = [string]$ErrorRecord.Exception.Message
-            $exceptionMessage = ($exceptionMessage -replace '[\r\n]+', ' ').Trim()
-            $exceptionMessage = $exceptionMessage -replace '(?i)(https?://[^:/\s]+):[^@\s/]+@', '$1:[redacted]@'
-            $exceptionMessage = $exceptionMessage -replace '(?i)(https?://[^\s?#]+)\?[^\s#]*', '$1?[redacted]'
-            $exceptionMessage = $exceptionMessage -replace '(?i)\b(authorization|cookie|set-cookie|token|api[_-]?key)\s*[:=]\s*[^\s,;]+', '$1=[redacted]'
-            if ([string]::IsNullOrWhiteSpace($exceptionMessage)) {
-              $exceptionMessage = "No message supplied."
-            }
-            if ($exceptionMessage.Length -gt 240) {
-              $exceptionMessage = $exceptionMessage.Substring(0, 240) + "..."
-            }
-
-            return "${exceptionType}: $exceptionMessage"
+          $mkcertCaRoot = (& mkcert -CAROOT).Trim()
+          if ([string]::IsNullOrWhiteSpace($mkcertCaRoot)) {
+            throw "mkcert did not return its CA root directory."
           }
 
-          function Invoke-TrustedHttpsWithRetry {
-            param(
-              [Parameter(Mandatory = $true)]
-              [string]$Name,
-              [Parameter(Mandatory = $true)]
-              [scriptblock]$Request,
-              [Parameter(Mandatory = $true)]
-              [scriptblock]$IsReady,
-              [int]$MaxAttempts = 6,
-              [int]$DelaySeconds = 2
-            )
-
-            $lastFailure = "request was not completed."
-            for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
-              try {
-                $response = & $Request
-                if (& $IsReady $response) {
-                  return $response
-                }
-                $lastFailure = "request returned a response that failed readiness validation."
-              } catch {
-                $lastFailure = ConvertTo-SafeHttpsFailure -ErrorRecord $_
-              }
-
-              if ($attempt -lt $MaxAttempts) {
-                Start-Sleep -Seconds $DelaySeconds
-              }
-            }
-
-            throw "HTTPS check '$Name' did not become ready after $MaxAttempts attempts. Last failure: $lastFailure"
+          $mkcertRootCaPath = Join-Path $mkcertCaRoot "rootCA.pem"
+          if (-not (Test-Path -LiteralPath $mkcertRootCaPath -PathType Leaf)) {
+            throw "mkcert root CA file was not found."
           }
 
-          $webHealthUrl = "https://${env:LAN_HOST_IP}:${env:HTTPS_PORT}/web-healthz"
-          $apiHealthUrl = "https://${env:LAN_HOST_IP}:${env:API_HTTPS_PORT}/healthz"
-          $apiDocsUrl = "https://${env:LAN_HOST_IP}:${env:API_HTTPS_PORT}/docs"
-
-          $webHealth = Invoke-TrustedHttpsWithRetry -Name "web health" `
-            -Request { Invoke-RestMethod -Uri $webHealthUrl -TimeoutSec 10 } `
-            -IsReady { param($response) $response.ok -eq $true -and $response.service -eq "web" }
-          if ($webHealth.ok -ne $true -or $webHealth.service -ne "web") {
-            throw "HTTPS web health check failed."
-          }
-
-          $apiHealth = Invoke-TrustedHttpsWithRetry -Name "API health" `
-            -Request { Invoke-RestMethod -Uri $apiHealthUrl -TimeoutSec 10 } `
-            -IsReady { param($response) $response.ok -eq $true }
-          if ($apiHealth.ok -ne $true) {
-            throw "HTTPS API health check failed."
-          }
-
-          $apiDocs = Invoke-TrustedHttpsWithRetry -Name "API documentation" `
-            -Request { Invoke-WebRequest -Uri $apiDocsUrl -UseBasicParsing -TimeoutSec 10 } `
-            -IsReady { param($response) $response.StatusCode -eq 200 -and $response.Content -match "SwaggerUIBundle" }
-          if ($apiDocs.StatusCode -ne 200 -or $apiDocs.Content -notmatch "SwaggerUIBundle") {
-            throw "HTTPS API documentation check failed."
-          }
+          $env:NODE_EXTRA_CA_CERTS = (Resolve-Path -LiteralPath $mkcertRootCaPath).Path
+          $env:WEB_BASE_URL = "https://${env:LAN_HOST_IP}:${env:HTTPS_PORT}"
+          $env:API_BASE_URL = "https://${env:LAN_HOST_IP}:${env:API_HTTPS_PORT}"
+          node scripts/smoke-stack.mjs
 
       - name: Verify Docker Whisper runtime
         run: |
