@@ -96,6 +96,7 @@ jobs:
       - name: Smoke separate HTTP services
         run: |
           $env:WEB_BASE_URL = "http://${env:LAN_HOST_IP}:${env:APP_PORT}"
+          $env:EXPECTED_WEB_REDIRECT_BASE_URL = "https://${env:LAN_HOST_IP}:${env:HTTPS_PORT}"
           $env:API_BASE_URL = "http://${env:LAN_HOST_IP}:${env:API_PORT}"
           node scripts/smoke-stack.mjs
 

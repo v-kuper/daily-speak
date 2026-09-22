@@ -118,6 +118,18 @@ test("trusted HTTPS verification starts Node with the explicit mkcert root CA an
   assert.ok(apiUrlExport < nodeStart, "the API HTTPS origin must be exported before Node starts");
 });
 
+test("HTTP smoke verifies the canonical web redirect without following untrusted HTTPS", () => {
+  const run = deployStep("Smoke separate HTTP services")?.run;
+  assert.equal(typeof run, "string");
+
+  assert.match(
+    run,
+    /\$env:EXPECTED_WEB_REDIRECT_BASE_URL\s*=\s*"https:\/\/\$\{env:LAN_HOST_IP\}:\$\{env:HTTPS_PORT\}"/,
+  );
+  assert.match(run, /\$env:WEB_BASE_URL\s*=\s*"http:\/\/\$\{env:LAN_HOST_IP\}:\$\{env:APP_PORT\}"/);
+  assert.doesNotMatch(run, /NODE_EXTRA_CA_CERTS/);
+});
+
 test("trusted HTTPS verification does not bypass trust or use the legacy PowerShell HTTP client", () => {
   const run = deployStep("Verify trusted HTTPS endpoints")?.run;
   assert.equal(typeof run, "string");

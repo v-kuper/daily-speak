@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createServer } from "node:http";
 import test from "node:test";
 
 import * as stackSmoke from "./smoke-stack.mjs";
@@ -8,20 +9,75 @@ import {
   selectStackURLs,
 } from "./smoke-stack.mjs";
 
+const listen = (server) => new Promise((resolve, reject) => {
+  server.once("error", reject);
+  server.listen(0, "127.0.0.1", () => resolve(server.address()));
+});
+
+const close = (server) => new Promise((resolve, reject) => {
+  server.close((error) => (error ? reject(error) : resolve()));
+});
+
+test("web route verification inspects an expected HTTPS redirect without following it", async (t) => {
+  const expectedRedirectBaseURL = "https://redirect.invalid:3443";
+  const server = createServer((request, response) => {
+    assert.equal(request.url, "/speak");
+    response.writeHead(308, { Location: `${expectedRedirectBaseURL}/speak` });
+    response.end();
+  });
+  const address = await listen(server);
+  t.after(() => close(server));
+
+  assert.equal(
+    await stackSmoke.verifyWebRoute(
+      {
+        webBaseURL: `http://127.0.0.1:${address.port}`,
+        expectedWebRedirectBaseURL: expectedRedirectBaseURL,
+      },
+      fetch,
+    ),
+    "web speak redirect",
+  );
+});
+
+test("web route verification rejects a redirect to the wrong origin", async (t) => {
+  const server = createServer((request, response) => {
+    assert.equal(request.url, "/speak");
+    response.writeHead(308, { Location: "https://wrong.example.test/speak" });
+    response.end();
+  });
+  const address = await listen(server);
+  t.after(() => close(server));
+
+  await assert.rejects(
+    stackSmoke.verifyWebRoute(
+      {
+        webBaseURL: `http://127.0.0.1:${address.port}`,
+        expectedWebRedirectBaseURL: "https://expected.example.test:3443",
+      },
+      fetch,
+    ),
+    /expected redirect to https:\/\/expected\.example\.test:3443\/speak, got https:\/\/wrong\.example\.test\/speak/,
+  );
+});
+
 test("stack smoke selects independent default and configured service URLs", () => {
   assert.deepEqual(selectStackURLs({}), {
     webBaseURL: "http://localhost:3218",
     apiBaseURL: "http://localhost:3219",
     webOrigin: "http://localhost:3218",
+    expectedWebRedirectBaseURL: null,
   });
 
   assert.deepEqual(selectStackURLs({
     WEB_BASE_URL: " https://web.example.test/app/ ",
     API_BASE_URL: " https://api.example.test/v1/ ",
+    EXPECTED_WEB_REDIRECT_BASE_URL: " https://web.example.test:3443/ ",
   }), {
     webBaseURL: "https://web.example.test/app",
     apiBaseURL: "https://api.example.test/v1",
     webOrigin: "https://web.example.test",
+    expectedWebRedirectBaseURL: "https://web.example.test:3443",
   });
 });
 

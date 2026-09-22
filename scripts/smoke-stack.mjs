@@ -34,10 +34,14 @@ export function selectStackURLs(env = process.env) {
     env.API_BASE_URL?.trim() || DEFAULT_API_BASE_URL,
     "API_BASE_URL",
   );
+  const configuredWebRedirectBaseURL = env.EXPECTED_WEB_REDIRECT_BASE_URL?.trim();
   return {
     webBaseURL,
     apiBaseURL,
     webOrigin: new URL(webBaseURL).origin,
+    expectedWebRedirectBaseURL: configuredWebRedirectBaseURL
+      ? normalizeBaseURL(configuredWebRedirectBaseURL, "EXPECTED_WEB_REDIRECT_BASE_URL")
+      : null,
   };
 }
 
@@ -123,13 +127,18 @@ async function fetchWithTimeout(fetchImpl, url, options = {}) {
   });
 }
 
-async function expectStatus(name, response, expectedStatus) {
+async function assertStatus(name, response, expectedStatus) {
   if (response.status !== expectedStatus) {
     const body = safeExcerpt(await response.text());
     throw new Error(
       `${name} failed: expected ${expectedStatus}, got ${response.status}. Body: ${body}`,
     );
   }
+  return response;
+}
+
+async function expectStatus(name, response, expectedStatus) {
+  await assertStatus(name, response, expectedStatus);
   process.stdout.write(`✓ ${name}\n`);
   return response;
 }
@@ -141,6 +150,38 @@ async function expectJSON(name, response, expectedStatus) {
   } catch {
     throw new Error(`${name} failed: response was not valid JSON.`);
   }
+}
+
+export async function verifyWebRoute(
+  { webBaseURL, expectedWebRedirectBaseURL },
+  fetchImpl,
+) {
+  const expectedRedirect = expectedWebRedirectBaseURL?.trim();
+  if (expectedRedirect) {
+    const response = await assertStatus(
+      "web speak redirect",
+      await request(fetchImpl, endpoint(webBaseURL, "/speak"), { redirect: "manual" }),
+      308,
+    );
+    const expectedLocation = endpoint(
+      normalizeBaseURL(expectedRedirect, "EXPECTED_WEB_REDIRECT_BASE_URL"),
+      "/speak",
+    );
+    const actualLocation = response.headers.get("location");
+    if (actualLocation !== expectedLocation) {
+      throw new Error(
+        `web speak redirect failed: expected redirect to ${expectedLocation}, got ${actualLocation ?? "no Location header"}.`,
+      );
+    }
+    return "web speak redirect";
+  }
+
+  await assertStatus(
+    "web speak route",
+    await request(fetchImpl, endpoint(webBaseURL, "/speak")),
+    200,
+  );
+  return "web speak route";
 }
 
 export async function waitForServices(
@@ -237,7 +278,12 @@ async function cleanupSession({ fetchImpl, apiBaseURL, webOrigin, cookie, record
 
 export async function runStackSmoke({ env = process.env, fetchImpl = fetch } = {}) {
   const urls = selectStackURLs(env);
-  const { webBaseURL, apiBaseURL, webOrigin } = urls;
+  const {
+    webBaseURL,
+    apiBaseURL,
+    webOrigin,
+    expectedWebRedirectBaseURL,
+  } = urls;
   await waitForServices(urls, fetchImpl);
 
   let cookie = "";
@@ -254,11 +300,14 @@ export async function runStackSmoke({ env = process.env, fetchImpl = fetch } = {
       throw new Error(`web health failed: expected service=web, got ${JSON.stringify(webHealth).slice(0, 300)}.`);
     }
 
-    await expectStatus(
-      "web speak route",
-      await request(fetchImpl, endpoint(webBaseURL, "/speak")),
-      200,
+    const webRouteCheck = await verifyWebRoute(
+      {
+        webBaseURL,
+        expectedWebRedirectBaseURL,
+      },
+      fetchImpl,
     );
+    process.stdout.write(`✓ ${webRouteCheck}\n`);
 
     await expectStatus(
       "API health",
