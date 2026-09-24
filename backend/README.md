@@ -33,7 +33,7 @@ CORS_ALLOWED_ORIGINS=http://localhost:3000,http://localhost:3219 \
 APP_ADDR=:3219 go run ./cmd/api
 ```
 
-The API applies `migrations/0001_init.sql` at startup. Open the independent API
+The API applies pending, versioned SQL migrations at startup. Open the independent API
 documentation at [http://localhost:3219/docs](http://localhost:3219/docs), or:
 
 ```bash
@@ -59,8 +59,10 @@ Required for a useful local API:
 Runtime and storage:
 
 - `APP_ADDR`: listen address, default `:3000`;
-- `DATABASE_SSL`: set to `require`, `true`, `1`, `yes`, or `on` when PostgreSQL
-  requires TLS;
+- `DATABASE_SSL`: set to `true` when PostgreSQL requires TLS. The
+  `DATABASE_URL` must then use `sslmode=verify-full` and a certificate trusted
+  by the API host (or a configured `sslrootcert`). Unverified TLS and plaintext
+  fallback connections are rejected. The local Docker default remains `false`;
 - `UPLOADS_DIR`: persistent media directory, default `public/uploads` outside
   Docker and `/app/uploads` in the image;
 - `SERVER_LOG_LEVEL`: log threshold such as `info` or `debug`.
