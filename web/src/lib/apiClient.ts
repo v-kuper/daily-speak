@@ -1,6 +1,7 @@
 export type ApiClient = {
   fetch: (path: string, init?: RequestInit) => Promise<Response>;
   assetURL: (value: string | null) => string | null;
+  url: (path: string) => string;
 };
 
 export class ApiUnavailableError extends Error {
@@ -12,11 +13,18 @@ export class ApiUnavailableError extends Error {
 
 export const createApiClient = (baseURL: string, fetchImpl: typeof fetch = fetch): ApiClient => {
   const normalizedBaseURL = baseURL.replace(/\/+$/, "");
+  const resolveURL = (path: string): string => {
+    if (/^https?:\/\//i.test(path)) return path;
+    const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+    return `${normalizedBaseURL}${normalizedPath}`;
+  };
   return {
     async fetch(path, init = {}) {
-      const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+      if (/^https?:\/\//i.test(path)) {
+        throw new Error("API requests must use a relative path.");
+      }
       try {
-        return await fetchImpl(`${normalizedBaseURL}${normalizedPath}`, {
+        return await fetchImpl(resolveURL(path), {
           ...init,
           credentials: "include",
         });
@@ -30,6 +38,7 @@ export const createApiClient = (baseURL: string, fetchImpl: typeof fetch = fetch
     assetURL(value) {
       return value?.startsWith("/uploads/") ? `${normalizedBaseURL}${value}` : value;
     },
+    url: resolveURL,
   };
 };
 
@@ -59,3 +68,5 @@ const getApiClient = (): ApiClient => {
 export const apiFetch = (path: string, init?: RequestInit): Promise<Response> => getApiClient().fetch(path, init);
 
 export const resolveApiAssetURL = (value: string | null): string | null => getApiClient().assetURL(value);
+
+export const resolveApiURL = (path: string): string => getApiClient().url(path);

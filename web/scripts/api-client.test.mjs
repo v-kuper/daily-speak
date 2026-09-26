@@ -156,6 +156,13 @@ test("network failures hide host details while abort errors keep their identity"
   await assert.rejects(() => cancelled.fetch("/api/topic-guidance"), (error) => error === abort);
 });
 
+test("cookie API requests reject absolute URLs while opaque storage URLs can be resolved separately", async () => {
+  const client = apiClient.createApiClient("https://api.example.com", async () => new Response(null));
+  await assert.rejects(() => client.fetch("https://storage.example/upload"), /relative path/i);
+  assert.equal(client.url("/signed-part?token=one"), "https://api.example.com/signed-part?token=one");
+  assert.equal(client.url("https://storage.example/upload?token=two"), "https://storage.example/upload?token=two");
+});
+
 test("JSON parsing preserves valid payloads and empty bodies but rejects malformed bodies", async () => {
   assert.deepEqual(await apiClient.readApiJSON(new Response('{"error":"Validation failed"}', { status: 400 })), { error: "Validation failed" });
   assert.equal(await apiClient.readApiJSON(new Response(null, { status: 204 })), null);

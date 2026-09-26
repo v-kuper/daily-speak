@@ -3,6 +3,7 @@ import {
   cancelAuth,
   deleteRecording,
   fetchRecording,
+  finishGuestPreviewFlow,
   finishFailedRecordingSave,
   openAuthForSave,
   saveRecording,
@@ -15,6 +16,7 @@ import {
 } from "../store/slices/appSlice";
 import { parseHistoryDate, recordingPath, safeReturnTo } from "./routes";
 import { shouldPollRecording } from "./shadowing";
+import { guestPreviewIdFromPath } from "./guestPreview";
 
 type RouteNavigator = { push: (path: string) => void; replace: (path: string) => void };
 
@@ -24,10 +26,29 @@ export async function authenticateAndNavigate(
   const state = store.getState().app;
   if (state.authStatus === "loading" || state.recordingSaveStatus === "loading") return;
   try {
+    const guestPreviewId = guestPreviewIdFromPath(returnTo);
     // A failed post-auth save can be retried without submitting the cleared password.
-    if (!state.isAuthenticated) {
-      const user = await store.dispatch(mode === "signIn" ? signIn() : signUp()).unwrap();
+    if (!state.isAuthenticated || guestPreviewId) {
+      const options = guestPreviewId ? { promoteGuest: true } : undefined;
+      const user = await store.dispatch(mode === "signIn" ? signIn(options) : signUp(options)).unwrap();
       if (!user) return;
+      if (guestPreviewId) {
+        const promotion = user.guestPreviewPromotion;
+        const promotionMessage = promotion?.status === "not_promoted"
+          ? promotion.reason === "quota_exceeded"
+            ? "Your account is ready, but this preview was not saved because your weekly free quota is exhausted."
+            : "Your account is ready, but only one guest preview can be added to an account."
+          : promotion?.status === "no_preview"
+            ? "Your account is ready, but the guest preview had already expired and could not be saved."
+            : null;
+        store.dispatch(finishGuestPreviewFlow(promotionMessage));
+        router.replace(
+          promotion?.status === "promoted" && promotion.recordingId
+            ? recordingPath(promotion.recordingId)
+            : "/speak"
+        );
+        return;
+      }
     }
     if (store.getState().app.pendingSaveAfterAuth) {
       const result = await store.dispatch(saveRecording(store.getState().app.pendingAuthSaveDraft ?? undefined)).unwrap();
@@ -40,9 +61,9 @@ export async function authenticateAndNavigate(
   }
 }
 
-export function cancelAuthentication(store: AppStore, router: RouteNavigator) {
+export function cancelAuthentication(store: AppStore, router: RouteNavigator, returnTo = "/speak") {
   store.dispatch(cancelAuth());
-  router.replace("/speak");
+  router.replace(guestPreviewIdFromPath(returnTo) ? returnTo : "/speak");
 }
 
 export function startGuestSave(store: AppStore, router: RouteNavigator) {

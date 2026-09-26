@@ -63,7 +63,7 @@ export default function AuthScreen({ returnTo }: { returnTo: string }) {
         {recordingSaveError && <div className="auth-error" role="alert">{recordingSaveError}</div>}
 
         <div className="auth-buttons">
-          <button type="button" className="btn btn-secondary" onClick={() => cancelAuthentication(store, router)} disabled={isLoading}>
+          <button type="button" className="btn btn-secondary" onClick={() => cancelAuthentication(store, router, returnTo)} disabled={isLoading}>
             Back
           </button>
           <button type="submit" className="btn btn-primary" disabled={isLoading}>
