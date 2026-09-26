@@ -15,6 +15,7 @@ import (
 type Logger struct {
 	scope     string
 	requestID string
+	traceID   string
 	method    string
 	path      string
 }
@@ -27,7 +28,8 @@ func ForRequest(scope string, r *http.Request) Logger {
 	if len(requestID) > 64 {
 		requestID = requestID[:64]
 	}
-	return Logger{scope: scope, requestID: requestID, method: r.Method, path: r.URL.Path}
+	traceID := traceIDFromHeader(r.Header.Get("traceparent"))
+	return Logger{scope: scope, requestID: requestID, traceID: traceID, method: r.Method, path: r.URL.Path}
 }
 
 func ForBackground(scope string) Logger {
@@ -44,6 +46,9 @@ func (l Logger) write(level string, message string, meta map[string]any) {
 		return
 	}
 	fields := map[string]any{"requestId": l.requestID, "method": l.method, "path": l.path}
+	if l.traceID != "" {
+		fields["traceId"] = l.traceID
+	}
 	for key, value := range meta {
 		if value != nil {
 			fields[key] = value
@@ -84,4 +89,17 @@ func shouldLog(level string) bool {
 
 func clean(value string) string {
 	return strings.Join(strings.Fields(value), " ")
+}
+
+func traceIDFromHeader(value string) string {
+	parts := strings.Split(strings.ToLower(strings.TrimSpace(value)), "-")
+	if len(parts) != 4 || parts[0] != "00" || len(parts[1]) != 32 || parts[1] == strings.Repeat("0", 32) {
+		return ""
+	}
+	for _, character := range parts[1] {
+		if character < '0' || character > '9' && character < 'a' || character > 'f' {
+			return ""
+		}
+	}
+	return parts[1]
 }

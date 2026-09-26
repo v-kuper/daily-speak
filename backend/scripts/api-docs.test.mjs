@@ -37,7 +37,7 @@ const routeSource = [
 
 const httpMethods = new Set(["get", "post", "put", "delete", "patch"]);
 const documentedAPIRoutes = [
-  "/healthz", "/api/v1", "/api/v1/auth/anonymous", "/api/v1/auth/register", "/api/v1/auth/login",
+  "/healthz", "/readyz", "/api/v1", "/api/v1/auth/anonymous", "/api/v1/auth/register", "/api/v1/auth/login",
   "/api/v1/auth/refresh", "/api/v1/auth/session", "/api/v1/auth/logout", "/api/v1/auth/logout-all",
   "/api/v1/auth/sessions", "/api/v1/auth/sessions/{sessionId}",
   "/api/v1/guest/previews", "/api/v1/guest/previews/{previewId}",
@@ -162,6 +162,7 @@ test("OpenAPI inventories every API and upload route, including retained Feed en
   for (const path of documentedAPIRoutes) assert.ok(openapi.paths[path], `missing OpenAPI path ${path}`);
   const sourceChecks = [
     ["/healthz", /mux\.HandleFunc\("\/healthz"/],
+    ["/readyz", /mux\.HandleFunc\("\/readyz"/],
     ["/api/v1", /mux\.HandleFunc\("\/api\/v1"/],
     ["/api/v1/auth/anonymous", /path == "\/api\/v1\/auth\/anonymous"/],
     ["/api/v1/auth/sessions/{sessionId}", /strings\.HasPrefix\(path, "\/api\/v1\/auth\/sessions\/"\)/],

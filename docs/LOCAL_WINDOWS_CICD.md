@@ -4,7 +4,7 @@ The Windows deployment runs two independent application containers plus shared
 infrastructure on one test host:
 
 - `web`: Next.js pages and `/web-healthz`;
-- `backend`: Go API, uploads, `/healthz`, `/openapi.json`, and `/docs`;
+- `backend`: Go API, uploads, `/healthz`, `/readyz`, `/openapi.json`, and `/docs`;
 - `postgres`: persistent application database;
 - `lan-https`: two independent Caddy HTTPS sites.
 
@@ -149,6 +149,7 @@ For Windows address `<windows-ipv4>`:
 | Web | `http://<windows-ipv4>:3218` | `https://<windows-ipv4>:3443` |
 | Web health | `http://<windows-ipv4>:3218/web-healthz` | `https://<windows-ipv4>:3443/web-healthz` |
 | API health | `http://<windows-ipv4>:3219/healthz` | `https://<windows-ipv4>:3444/healthz` |
+| API readiness | `http://<windows-ipv4>:3219/readyz` | `https://<windows-ipv4>:3444/readyz` |
 | Swagger | `http://<windows-ipv4>:3219/docs` | `https://<windows-ipv4>:3444/docs` |
 | OpenAPI | `http://<windows-ipv4>:3219/openapi.json` | `https://<windows-ipv4>:3444/openapi.json` |
 

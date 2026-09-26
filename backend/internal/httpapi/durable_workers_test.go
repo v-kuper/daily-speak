@@ -23,3 +23,10 @@ func startTestWorkers(t *testing.T, server *Server) {
 		})
 	}()
 }
+
+func TestWorkerConfigRejectsUnsafeJobRetention(t *testing.T) {
+	t.Setenv("WORKER_JOB_RETENTION", "1h")
+	if _, err := WorkerConfigFromEnv(); err == nil {
+		t.Fatal("expected short terminal job retention to be rejected")
+	}
+}

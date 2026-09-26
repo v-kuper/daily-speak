@@ -15,6 +15,7 @@ import (
 	"daily-speaking-practice/backend/internal/db"
 	"daily-speaking-practice/backend/internal/logging"
 	"daily-speaking-practice/backend/internal/media"
+	"daily-speaking-practice/backend/internal/operations"
 	"daily-speaking-practice/backend/internal/storage"
 	"daily-speaking-practice/backend/internal/transcription"
 	"daily-speaking-practice/backend/internal/tts"
@@ -35,6 +36,7 @@ type Config struct {
 	MediaPresignTTL    time.Duration
 	TranscribeAudio    func(context.Context, string) (string, error)
 	ProbeAudioDuration func(context.Context, string) (time.Duration, error)
+	Operations         operations.Config
 }
 
 type Server struct {
@@ -51,6 +53,14 @@ type Server struct {
 	mediaStore          storage.Store
 	transcribeAudio     func(context.Context, string) (string, error)
 	probeAudioDuration  func(context.Context, string) (time.Duration, error)
+	operations          operations.Config
+	limiter             requestLimiter
+	network             operations.Network
+	metrics             *operations.Metrics
+}
+
+type requestLimiter interface {
+	Allow(context.Context, string, string, operations.Limit) (operations.Decision, error)
 }
 
 func NewServer(config Config) *Server {
@@ -110,6 +120,10 @@ func NewServer(config Config) *Server {
 		mediaStore:          mediaStore,
 		transcribeAudio:     transcribeAudio,
 		probeAudioDuration:  probeAudioDuration,
+		operations:          config.Operations,
+		limiter:             operations.NewLimiter(config.DB),
+		network:             operations.NewNetwork(config.Operations.TrustedProxies),
+		metrics:             operations.NewMetrics(),
 	}
 }
 
@@ -132,6 +146,8 @@ func (s *Server) Handler() http.Handler {
 		_, _ = w.Write(apidocs.SwaggerHTML)
 	})
 	mux.HandleFunc("/healthz", s.healthz)
+	mux.HandleFunc("/readyz", s.readyz)
+	mux.HandleFunc("/metrics", s.handleMetrics)
 	mux.HandleFunc("/api/v1", s.routeV1)
 	mux.HandleFunc("/api/v1/media/uploads", s.routeV1)
 	mux.HandleFunc("/api/v1/media/uploads/", s.routeMediaUploadEntry)
@@ -144,7 +160,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Not found"})
 	})
-	corsHandler := s.cors.Wrap(mux)
+	corsHandler := s.cors.Wrap(s.withRateLimit(mux))
 	root := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if (r.URL.Path == "/openapi.json" || r.URL.Path == "/docs") && r.Method != http.MethodGet {
 			mux.ServeHTTP(w, r)
@@ -152,7 +168,7 @@ func (s *Server) Handler() http.Handler {
 		}
 		corsHandler.ServeHTTP(w, r)
 	})
-	return withRequestID(root)
+	return withRequestID(withTraceContext(s.withSecurityHeaders(s.withRequestMetrics(root))))
 }
 
 func (s *Server) healthz(w http.ResponseWriter, r *http.Request) {

@@ -1,6 +1,6 @@
 # Technical Debt and Follow-up Epics
 
-Last updated: 2026-09-22
+Last updated: 2026-09-27
 
 ## Current baseline
 
@@ -74,6 +74,15 @@ Acceptance boundary:
 
 Desired outcome: establish production abuse controls and observability for the
 independent API and web services.
+
+Implemented backend foundation: PostgreSQL-owned auth/write/expensive-work
+limits, trusted-proxy parsing, stable `429` responses, API security headers,
+separate liveness/readiness, protected low-cardinality Prometheus metrics, and
+W3C trace correlation. `docs/BACKEND_OPERATIONS.md` owns the initial thresholds,
+scaling policy, backup/restore procedure, and repeatable load/fault checklist.
+The remaining work is environment-specific: deploy the scraper/dashboards and
+alerts, export provider-specific AI/TTS metrics, and record production-like
+load plus restore-rehearsal evidence before claiming the whole epic complete.
 
 Acceptance boundary:
 

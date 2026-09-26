@@ -80,6 +80,38 @@
         }
       }
     },
+    "/readyz": {
+      "get": {
+        "tags": [
+          "Health"
+        ],
+        "summary": "Readiness check",
+        "description": "Reports whether PostgreSQL is reachable and durable work remains within the configured admission thresholds. Use this endpoint for load-balancer admission, not process restarts.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "The API is ready to accept traffic.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadinessResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "A required dependency is unavailable or durable work is above an admission threshold.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadinessResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1": {
       "get": {
         "tags": [
@@ -4309,6 +4341,43 @@
         "properties": {
           "ok": {
             "type": "boolean"
+          }
+        }
+      },
+      "ReadinessResponse": {
+        "type": "object",
+        "required": [
+          "ok",
+          "checks"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "checks": {
+            "type": "object",
+            "required": [
+              "database",
+              "queue"
+            ],
+            "properties": {
+              "database": {
+                "type": "string",
+                "enum": [
+                  "ok",
+                  "unavailable"
+                ]
+              },
+              "queue": {
+                "type": "string",
+                "enum": [
+                  "ok",
+                  "unavailable",
+                  "depth_exceeded",
+                  "oldest_job_exceeded"
+                ]
+              }
+            }
           }
         }
       },

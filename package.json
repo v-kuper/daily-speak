@@ -13,6 +13,7 @@
     "test:ci": "npm run test:infra",
     "test:smoke": "node scripts/smoke-api.mjs",
     "test:stack-smoke": "node scripts/smoke-stack.mjs",
+    "test:load-api": "node backend/scripts/load-api.mjs",
     "quality": "npm run web:quality && npm run backend:test && npm run test:api-docs && npm run test:infra",
     "docker:app": "docker compose up --build -d --remove-orphans web backend worker postgres",
     "docker:lan": "node scripts/docker-lan.mjs",

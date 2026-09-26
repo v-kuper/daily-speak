@@ -14,6 +14,7 @@ import (
 	"daily-speaking-practice/backend/internal/auth"
 	"daily-speaking-practice/backend/internal/db"
 	"daily-speaking-practice/backend/internal/httpapi"
+	"daily-speaking-practice/backend/internal/operations"
 	"daily-speaking-practice/backend/internal/storage"
 )
 
@@ -29,6 +30,10 @@ func main() {
 	identityTokens, err := auth.TokenConfigFromEnv()
 	if err != nil {
 		log.Fatalf("mobile identity configuration failed: %v", err)
+	}
+	operationsConfig, err := operations.ConfigFromEnv()
+	if err != nil {
+		log.Fatalf("operations configuration failed: %v", err)
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -62,6 +67,7 @@ func main() {
 		DB: database, CORS: cors, SessionCookie: sessionCookie, IdentityTokens: identityTokens,
 		MediaStore: mediaStore, MediaBucket: mediaConfig.S3Bucket,
 		MediaPartSize: mediaConfig.MultipartPartSize, MediaPresignTTL: mediaConfig.PresignTTL,
+		Operations: operationsConfig,
 	})
 	server := &http.Server{
 		Addr:              addr,
