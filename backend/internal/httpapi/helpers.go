@@ -147,10 +147,6 @@ func validSuggestionSeverity(severity suggestionSeverity) bool {
 	return recording.ValidSuggestionSeverity(severity)
 }
 
-func withoutLearningReference(item suggestion) suggestion {
-	return recording.WithoutLearningReference(item)
-}
-
 func normalizeURLInterests(values url.Values) []string {
 	return domain.NormalizeInterests(domain.URLQueryAll(values, "interest"), 10)
 }

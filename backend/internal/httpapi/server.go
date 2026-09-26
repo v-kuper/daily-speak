@@ -24,6 +24,7 @@ import (
 	"daily-speaking-practice/backend/internal/transcription"
 	"daily-speaking-practice/backend/internal/tts"
 	"daily-speaking-practice/backend/internal/workqueue"
+	"github.com/google/uuid"
 )
 
 type Config struct {
@@ -55,6 +56,8 @@ type Server struct {
 	practiceGenerator   practice.Generator
 	recordingAnalyzer   recording.Analyzer
 	recordingRewriter   recording.Rewriter
+	recordingRepository *recording.SQLProcessingRepository
+	recordingProcessor  *recording.Processor
 	sessionCookie       auth.CookieConfig
 	identityTokens      auth.TokenConfig
 	cors                CORSConfig
@@ -133,7 +136,8 @@ func NewServer(config Config) *Server {
 	if probeAudioDuration == nil {
 		probeAudioDuration = probeAudioDurationWithFFprobe
 	}
-	return &Server{
+	recordingRepository := recording.NewSQLProcessingRepository(config.DB)
+	server := &Server{
 		db:                  config.DB,
 		jobStore:            workqueue.NewStore(config.DB),
 		removeStoredUploads: removeStoredUploadFiles,
@@ -142,6 +146,7 @@ func NewServer(config Config) *Server {
 		practiceGenerator:   practiceGenerator,
 		recordingAnalyzer:   recordingAnalyzer,
 		recordingRewriter:   recordingRewriter,
+		recordingRepository: recordingRepository,
 		sessionCookie:       config.SessionCookie,
 		identityTokens:      config.IdentityTokens,
 		cors:                config.CORS,
@@ -156,6 +161,26 @@ func NewServer(config Config) *Server {
 		network:             operations.NewNetwork(config.Operations.TrustedProxies),
 		metrics:             operations.NewMetrics(),
 	}
+	server.recordingProcessor = recording.NewProcessor(recording.ProcessingDependencies{
+		Repository:         recordingRepository,
+		Materializer:       server.mediaMaterializer,
+		ResolveLegacyAudio: storedUploadPath,
+		ProbeAudioDuration: probeAudioDuration,
+		Transcribe: func(ctx context.Context, path string) (string, error) {
+			transcript, err := transcribeAudio(ctx, path)
+			if err != nil {
+				var typed transcription.Error
+				if errors.As(err, &typed) {
+					return "", errors.New(typed.Message)
+				}
+			}
+			return transcript, err
+		},
+		Analyzer: recordingAnalyzer,
+		Rewriter: recordingRewriter,
+		NewID:    uuid.NewString,
+	})
+	return server
 }
 
 func (s *Server) Handler() http.Handler {

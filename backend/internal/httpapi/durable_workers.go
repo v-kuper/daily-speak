@@ -95,12 +95,7 @@ func (s *Server) finalizeDurableFailure(ctx context.Context, tx pgx.Tx, job work
 			job.ResourceID, job.ID, truncateRunes(message, 500))
 		return err
 	case workqueue.KindRecordingProcess:
-		_, err := tx.Exec(ctx, `
-			UPDATE recordings
-			SET status = 'failed', processing_error = $3
-			WHERE id = $1 AND status = 'processing' AND processing_job_id = $2`,
-			job.ResourceID, job.ID, truncateRunes(message, 500))
-		return err
+		return s.recordingRepository.FinalizeFailure(ctx, tx, job.ID, job.ResourceID, message)
 	case workqueue.KindShadowingSynthesize:
 		_, err := tx.Exec(ctx, `
 			UPDATE recordings

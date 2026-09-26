@@ -3,7 +3,6 @@ package httpapi
 import (
 	"context"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -13,20 +12,6 @@ import (
 
 func stringPointer(value string) *string {
 	return &value
-}
-
-func TestMarshalSuggestionsDoesNotPersistDerivedReference(t *testing.T) {
-	value := marshalSuggestions([]suggestion{{
-		Wrong: "she go", Right: "she goes", Explanation: "The verb must agree with she.",
-		Category: categoryVerbGrammar, Severity: severityMedium, RuleID: "subject-verb-agreement",
-		LearningReference: learningReferenceFor("subject-verb-agreement", categoryVerbGrammar),
-	}})
-	if strings.Contains(value, "learningReference") {
-		t.Fatalf("derived reference was persisted: %s", value)
-	}
-	if !strings.Contains(value, `"ruleId":"subject-verb-agreement"`) {
-		t.Fatalf("ruleId missing: %s", value)
-	}
 }
 
 func TestRecordingProcessingTimeoutAllowsMultiPassRetries(t *testing.T) {

@@ -164,6 +164,7 @@ test("recording analysis owns its policy outside HTTP and provider adapters", ()
     "analysis_support.go",
     "analysis_service.go",
 	"rewrite.go",
+	"processing.go",
   ];
   for (const path of [
     ...coreFiles.map((name) => `backend/internal/recording/${name}`),
@@ -187,6 +188,11 @@ test("recording analysis owns its policy outside HTTP and provider adapters", ()
   assert.doesNotMatch(transport, /PostChat|error detector|adjudicator/);
 	assert.match(rewriteTransport, /recording\.RewriteInput/);
 	assert.doesNotMatch(rewriteTransport, /PostChat|natural conversational English/);
+	const processingTransport = readFileSync("backend/internal/httpapi/recording_processing.go", "utf8");
+	const processingRepository = readFileSync("backend/internal/recording/processing_repository.go", "utf8");
+	assert.match(processingTransport, /recording\.ProcessingJob/);
+	assert.doesNotMatch(processingTransport, /SELECT |UPDATE |INSERT INTO|processing_stage/);
+	assert.match(processingRepository, /LoadProcessingWork|SaveTranscript|CompleteRecording/);
   for (const name of [
     "recording_analysis_coordinator.go",
     "recording_analysis_prompts.go",

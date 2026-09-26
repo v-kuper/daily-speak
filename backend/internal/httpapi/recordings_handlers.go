@@ -200,15 +200,6 @@ func (s *Server) handleCreateRecording(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, map[string]any{"recording": recording, "quota": q})
 }
 
-func marshalSuggestions(suggestions []suggestion) string {
-	stored := make([]suggestion, len(suggestions))
-	for index, item := range suggestions {
-		stored[index] = withoutLearningReference(item)
-	}
-	suggestionJSON, _ := json.Marshal(stored)
-	return string(suggestionJSON)
-}
-
 type savedAudioFile struct {
 	publicURL    string
 	absolutePath string
