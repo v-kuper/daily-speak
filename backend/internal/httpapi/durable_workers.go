@@ -4,225 +4,48 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"daily-speaking-practice/backend/internal/logging"
 	"daily-speaking-practice/backend/internal/media"
 	"daily-speaking-practice/backend/internal/operations"
+	"daily-speaking-practice/backend/internal/worker"
 	"daily-speaking-practice/backend/internal/workqueue"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
 
-type WorkerConfig struct {
-	RecordingConcurrency    int
-	GuestPreviewConcurrency int
-	ShadowingConcurrency    int
-	CleanupConcurrency      int
-	PollInterval            time.Duration
-	LeaseDuration           time.Duration
-	HeartbeatInterval       time.Duration
-	RetryBaseDelay          time.Duration
-	RetryMaxDelay           time.Duration
-	MediaSweepInterval      time.Duration
-	JobRetention            time.Duration
-}
-
-func WorkerConfigFromEnv() (WorkerConfig, error) {
-	config := WorkerConfig{
-		RecordingConcurrency:    1,
-		GuestPreviewConcurrency: 1,
-		ShadowingConcurrency:    2,
-		CleanupConcurrency:      2,
-		PollInterval:            time.Second,
-		LeaseDuration:           2 * time.Minute,
-		HeartbeatInterval:       30 * time.Second,
-		RetryBaseDelay:          5 * time.Second,
-		RetryMaxDelay:           5 * time.Minute,
-		MediaSweepInterval:      15 * time.Minute,
-		JobRetention:            30 * 24 * time.Hour,
-	}
-	var err error
-	if config.RecordingConcurrency, err = positiveEnvInt("WORKER_RECORDING_CONCURRENCY", config.RecordingConcurrency); err != nil {
-		return WorkerConfig{}, err
-	}
-	if config.GuestPreviewConcurrency, err = positiveEnvInt("WORKER_GUEST_PREVIEW_CONCURRENCY", config.GuestPreviewConcurrency); err != nil {
-		return WorkerConfig{}, err
-	}
-	if config.ShadowingConcurrency, err = positiveEnvInt("WORKER_SHADOWING_CONCURRENCY", config.ShadowingConcurrency); err != nil {
-		return WorkerConfig{}, err
-	}
-	if config.CleanupConcurrency, err = positiveEnvInt("WORKER_CLEANUP_CONCURRENCY", config.CleanupConcurrency); err != nil {
-		return WorkerConfig{}, err
-	}
-	if config.PollInterval, err = positiveEnvDuration("WORKER_POLL_INTERVAL", config.PollInterval); err != nil {
-		return WorkerConfig{}, err
-	}
-	if config.LeaseDuration, err = positiveEnvDuration("WORKER_LEASE_DURATION", config.LeaseDuration); err != nil {
-		return WorkerConfig{}, err
-	}
-	if config.HeartbeatInterval, err = positiveEnvDuration("WORKER_HEARTBEAT_INTERVAL", config.HeartbeatInterval); err != nil {
-		return WorkerConfig{}, err
-	}
-	if config.RetryBaseDelay, err = positiveEnvDuration("WORKER_RETRY_BASE_DELAY", config.RetryBaseDelay); err != nil {
-		return WorkerConfig{}, err
-	}
-	if config.RetryMaxDelay, err = positiveEnvDuration("WORKER_RETRY_MAX_DELAY", config.RetryMaxDelay); err != nil {
-		return WorkerConfig{}, err
-	}
-	if config.MediaSweepInterval, err = positiveEnvDuration("MEDIA_SWEEP_INTERVAL", config.MediaSweepInterval); err != nil {
-		return WorkerConfig{}, err
-	}
-	if config.JobRetention, err = positiveEnvDuration("WORKER_JOB_RETENTION", config.JobRetention); err != nil {
-		return WorkerConfig{}, err
-	}
-	if config.JobRetention < 24*time.Hour {
-		return WorkerConfig{}, errors.New("WORKER_JOB_RETENTION must be at least 24h")
-	}
-	if config.HeartbeatInterval >= config.LeaseDuration {
-		return WorkerConfig{}, errors.New("WORKER_HEARTBEAT_INTERVAL must be shorter than WORKER_LEASE_DURATION")
-	}
-	return config, nil
-}
-
-func positiveEnvInt(name string, fallback int) (int, error) {
-	value := strings.TrimSpace(os.Getenv(name))
-	if value == "" {
-		return fallback, nil
-	}
-	parsed, err := strconv.Atoi(value)
-	if err != nil || parsed <= 0 || parsed > 64 {
-		return 0, fmt.Errorf("%s must be an integer between 1 and 64", name)
-	}
-	return parsed, nil
-}
-
-func positiveEnvDuration(name string, fallback time.Duration) (time.Duration, error) {
-	value := strings.TrimSpace(os.Getenv(name))
-	if value == "" {
-		return fallback, nil
-	}
-	parsed, err := time.ParseDuration(value)
-	if err != nil || parsed <= 0 {
-		return 0, fmt.Errorf("%s must be a positive duration", name)
-	}
-	return parsed, nil
-}
-
-func (s *Server) RunWorkers(ctx context.Context, config WorkerConfig) error {
+func (s *Server) RunWorkers(ctx context.Context, config worker.Config) error {
 	if s.db == nil || s.jobStore == nil {
 		return errors.New("worker database is not configured")
 	}
-	pools := []workqueue.RunnerConfig{
-		{
-			Kinds:             []string{workqueue.KindGuestPreview},
-			Concurrency:       config.GuestPreviewConcurrency,
-			PollInterval:      config.PollInterval,
-			LeaseDuration:     config.LeaseDuration,
-			HeartbeatInterval: config.HeartbeatInterval,
-			RetryBaseDelay:    config.RetryBaseDelay,
-			RetryMaxDelay:     config.RetryMaxDelay,
-			Handle:            s.handleDurableJob,
-			FinalizeFailure:   s.finalizeDurableFailure,
-		},
-		{
-			Kinds:             []string{workqueue.KindRecordingProcess},
-			Concurrency:       config.RecordingConcurrency,
-			PollInterval:      config.PollInterval,
-			LeaseDuration:     config.LeaseDuration,
-			HeartbeatInterval: config.HeartbeatInterval,
-			RetryBaseDelay:    config.RetryBaseDelay,
-			RetryMaxDelay:     config.RetryMaxDelay,
-			Handle:            s.handleDurableJob,
-			FinalizeFailure:   s.finalizeDurableFailure,
-		},
-		{
-			Kinds:             []string{workqueue.KindShadowingSynthesize},
-			Concurrency:       config.ShadowingConcurrency,
-			PollInterval:      config.PollInterval,
-			LeaseDuration:     config.LeaseDuration,
-			HeartbeatInterval: config.HeartbeatInterval,
-			RetryBaseDelay:    config.RetryBaseDelay,
-			RetryMaxDelay:     config.RetryMaxDelay,
-			Handle:            s.handleDurableJob,
-			FinalizeFailure:   s.finalizeDurableFailure,
-		},
-		{
-			Kinds:             []string{workqueue.KindMediaDelete},
-			Concurrency:       config.CleanupConcurrency,
-			PollInterval:      config.PollInterval,
-			LeaseDuration:     config.LeaseDuration,
-			HeartbeatInterval: config.HeartbeatInterval,
-			RetryBaseDelay:    config.RetryBaseDelay,
-			RetryMaxDelay:     config.RetryMaxDelay,
-			Handle:            s.handleDurableJob,
-			FinalizeFailure:   s.finalizeDurableFailure,
-		},
-	}
-	errCh := make(chan error, len(pools)+1)
-	var wait sync.WaitGroup
-	for _, pool := range pools {
-		pool := pool
-		wait.Add(1)
-		go func() {
-			defer wait.Done()
-			errCh <- workqueue.Run(ctx, s.jobStore, pool)
-		}()
-	}
-	wait.Add(1)
-	go func() {
-		defer wait.Done()
-		errCh <- s.runMaintenanceLoop(ctx, config.MediaSweepInterval, config.JobRetention)
-	}()
-	wait.Wait()
-	close(errCh)
-	for err := range errCh {
-		if err != nil && !errors.Is(err, context.Canceled) {
-			return err
-		}
-	}
-	return ctx.Err()
+	return worker.Run(ctx, s.jobStore, config, worker.Processor{
+		Handle:          s.handleDurableJob,
+		FinalizeFailure: s.finalizeDurableFailure,
+		Maintain:        s.performWorkerMaintenance,
+	})
 }
 
-func (s *Server) runMaintenanceLoop(ctx context.Context, interval time.Duration, jobRetention time.Duration) error {
-	if interval <= 0 {
-		interval = 15 * time.Minute
-	}
+func (s *Server) performWorkerMaintenance(ctx context.Context, jobRetention time.Duration) {
 	logger := logging.ForBackground("worker.media.maintenance")
-	run := func() {
-		if err := s.sweepExpiredMedia(ctx); err != nil && !errors.Is(err, context.Canceled) {
-			logger.Warn("media.sweep_failed", logging.ErrorMeta(err))
-		}
-		if s.jobStore != nil && jobRetention > 0 {
-			removed, err := s.jobStore.PruneTerminal(ctx, time.Now().UTC().Add(-jobRetention), 5000)
-			if err != nil && !errors.Is(err, context.Canceled) {
-				logger.Warn("jobs.prune_failed", logging.ErrorMeta(err))
-			} else if removed > 0 {
-				logger.Info("jobs.pruned", map[string]any{"count": removed})
-			}
-		}
-		if s.db != nil {
-			removed, err := operations.PruneExpiredRateLimits(ctx, s.db, time.Now().UTC(), 5000)
-			if err != nil && !errors.Is(err, context.Canceled) {
-				logger.Warn("rate_limits.prune_failed", logging.ErrorMeta(err))
-			} else if removed > 0 {
-				logger.Info("rate_limits.pruned", map[string]any{"count": removed})
-			}
+	if err := s.sweepExpiredMedia(ctx); err != nil && !errors.Is(err, context.Canceled) {
+		logger.Warn("media.sweep_failed", logging.ErrorMeta(err))
+	}
+	if s.jobStore != nil && jobRetention > 0 {
+		removed, err := s.jobStore.PruneTerminal(ctx, time.Now().UTC().Add(-jobRetention), 5000)
+		if err != nil && !errors.Is(err, context.Canceled) {
+			logger.Warn("jobs.prune_failed", logging.ErrorMeta(err))
+		} else if removed > 0 {
+			logger.Info("jobs.pruned", map[string]any{"count": removed})
 		}
 	}
-	run()
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-ticker.C:
-			run()
+	if s.db != nil {
+		removed, err := operations.PruneExpiredRateLimits(ctx, s.db, time.Now().UTC(), 5000)
+		if err != nil && !errors.Is(err, context.Canceled) {
+			logger.Warn("rate_limits.prune_failed", logging.ErrorMeta(err))
+		} else if removed > 0 {
+			logger.Info("rate_limits.pruned", map[string]any{"count": removed})
 		}
 	}
 }

@@ -129,6 +129,7 @@ backend/internal/media       authorized media lifecycle
 backend/internal/practice    speaking-practice generation application service
 backend/internal/practice/ollamaadapter  Ollama adapter for the practice port
 backend/internal/storage     local and S3 storage adapters
+backend/internal/worker      worker configuration and pool lifecycle
 backend/internal/workqueue   durable PostgreSQL queue
 backend/internal/operations  rate limits, proxy trust, and metrics
 backend/migrations           immutable ordered schema migrations

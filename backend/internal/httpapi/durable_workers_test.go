@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"daily-speaking-practice/backend/internal/worker"
 )
 
 func startTestWorkers(t *testing.T, server *Server) {
@@ -11,7 +13,7 @@ func startTestWorkers(t *testing.T, server *Server) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	go func() {
-		_ = server.RunWorkers(ctx, WorkerConfig{
+		_ = server.RunWorkers(ctx, worker.Config{
 			RecordingConcurrency: 1,
 			ShadowingConcurrency: 1,
 			CleanupConcurrency:   1,
@@ -22,11 +24,4 @@ func startTestWorkers(t *testing.T, server *Server) {
 			RetryMaxDelay:        20 * time.Millisecond,
 		})
 	}()
-}
-
-func TestWorkerConfigRejectsUnsafeJobRetention(t *testing.T) {
-	t.Setenv("WORKER_JOB_RETENTION", "1h")
-	if _, err := WorkerConfigFromEnv(); err == nil {
-		t.Fatal("expected short terminal job retention to be rejected")
-	}
 }
