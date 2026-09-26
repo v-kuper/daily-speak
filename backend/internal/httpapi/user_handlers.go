@@ -197,35 +197,12 @@ func (s *Server) handleUserData(w http.ResponseWriter, r *http.Request) {
 	defer recordingRows.Close()
 	recordings := []recordingResponse{}
 	for recordingRows.Next() {
-		var id, topic, transcript, correctedTranscript, practiceType, status, shadowingStatus string
-		var duration int
-		var timestamp, shadowingUpdatedAt time.Time
-		var suggestionsBytes []byte
-		var audioDataURL, photoDataURL, photoObject, processingStage, processingError, shadowingAudioURL, shadowingError *string
-		if err := recordingRows.Scan(&id, &topic, &duration, &timestamp, &transcript, &correctedTranscript, &suggestionsBytes, &practiceType, &audioDataURL, &photoDataURL, &photoObject, &status, &processingStage, &processingError, &shadowingStatus, &shadowingAudioURL, &shadowingError, &shadowingUpdatedAt); err != nil {
+		item, err := scanRecordingPageItem(recordingRows)
+		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to load user data."})
 			return
 		}
-		recordings = append(recordings, recordingResponse{
-			ID:                  id,
-			Topic:               topic,
-			Duration:            domain.ToNonNegativeInt(duration),
-			Timestamp:           timestamp.UTC().Format(time.RFC3339Nano),
-			Status:              normalizeRecordingStatus(status),
-			Transcript:          transcript,
-			CorrectedTranscript: correctedTranscript,
-			Suggestions:         normalizeSuggestions(suggestionsBytes, 0),
-			ProcessingStage:     normalizeRecordingProcessingStage(processingStage),
-			PracticeType:        domain.NormalizePracticeType(practiceType),
-			AudioDataURL:        normalizeOptionalAudio(audioDataURL, true),
-			PhotoDataURL:        normalizeOptionalPhoto(photoDataURL),
-			PhotoObject:         normalizeOptionalPhotoObject(photoObject),
-			ProcessingError:     normalizeOptionalProcessingError(processingError),
-			ShadowingStatus:     normalizeShadowingStatus(shadowingStatus),
-			ShadowingAudioURL:   normalizeOptionalShadowingAudio(shadowingAudioURL),
-			ShadowingError:      normalizeOptionalProcessingError(shadowingError),
-			ShadowingUpdatedAt:  shadowingUpdatedAt.UTC().Format(time.RFC3339Nano),
-		})
+		recordings = append(recordings, item.recording)
 	}
 
 	state, err := subscription.GetState(r.Context(), s.db, user.ID)

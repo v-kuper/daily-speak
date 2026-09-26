@@ -94,6 +94,8 @@ func (s *Server) Handler() http.Handler {
 		_, _ = w.Write(apidocs.SwaggerHTML)
 	})
 	mux.HandleFunc("/healthz", s.healthz)
+	mux.HandleFunc("/api/v1", s.routeV1)
+	mux.HandleFunc("/api/v1/", s.routeV1)
 	mux.HandleFunc("/api/", s.routeAPI)
 	mux.HandleFunc("/uploads/shadowing", s.handleShadowingUpload)
 	mux.HandleFunc("/uploads/shadowing/", s.handleShadowingUpload)
@@ -102,13 +104,14 @@ func (s *Server) Handler() http.Handler {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Not found"})
 	})
 	corsHandler := s.cors.Wrap(mux)
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	root := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if (r.URL.Path == "/openapi.json" || r.URL.Path == "/docs") && r.Method != http.MethodGet {
 			mux.ServeHTTP(w, r)
 			return
 		}
 		corsHandler.ServeHTTP(w, r)
 	})
+	return withRequestID(root)
 }
 
 func (s *Server) healthz(w http.ResponseWriter, r *http.Request) {

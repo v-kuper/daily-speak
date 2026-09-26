@@ -30,8 +30,11 @@ func TestCORSAllowsConfiguredCredentialedOrigin(t *testing.T) {
 			if response.Header().Get("Access-Control-Allow-Origin") != origin || response.Header().Get("Access-Control-Allow-Credentials") != "true" {
 				t.Fatalf("unexpected CORS headers: %v", response.Header())
 			}
-			if response.Header().Get("Access-Control-Allow-Methods") != "GET, POST, PUT, DELETE, OPTIONS" || response.Header().Get("Access-Control-Allow-Headers") != "Content-Type" {
+			if response.Header().Get("Access-Control-Allow-Methods") != "GET, POST, PUT, DELETE, OPTIONS" || response.Header().Get("Access-Control-Allow-Headers") != "Content-Type, X-Request-ID" {
 				t.Fatalf("preflight grants undocumented methods or headers: %v", response.Header())
+			}
+			if response.Header().Get("Access-Control-Expose-Headers") != requestIDHeader {
+				t.Fatalf("request id is not exposed to browser clients: %v", response.Header())
 			}
 			if !strings.Contains(strings.Join(response.Header().Values("Vary"), ","), "Origin") {
 				t.Fatal("missing Vary: Origin")

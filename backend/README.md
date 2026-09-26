@@ -7,7 +7,8 @@ Browser, mobile, and other HTTP clients can call the same API contract.
 
 ## Public surface
 
-- `/api/*`: application endpoints;
+- `/api/v1/*`: stable, versioned mobile API endpoints;
+- `/api/*`: legacy web application endpoints retained during migration;
 - `/uploads/*`: backend-owned persisted media;
 - `/healthz`: API health;
 - `/openapi.json`: canonical OpenAPI 3.1 document;
@@ -43,6 +44,11 @@ open http://localhost:3219/docs
 The OpenAPI document includes the retained Feed endpoints even though the
 current web client does not expose Feed UI.
 
+The first v1 resources are `GET /api/v1`, paginated
+`GET /api/v1/recordings`, and `GET /api/v1/recordings/{recordingId}`. Every
+response includes `X-Request-ID`; v1 errors include a stable machine-readable
+code. See `../docs/api-compatibility.md` for versioning and deprecation rules.
+
 ## Environment
 
 `backend/.env.example` lists backend-owned variables. The Go process does not
@@ -76,8 +82,8 @@ Current session authentication:
 `SameSite=None` is rejected unless `Secure=true`. Origins are compared exactly;
 wildcards, paths, credentials, queries, and fragments are invalid in
 `CORS_ALLOWED_ORIGINS`. The session cookie remains HttpOnly and its records are
-stored in PostgreSQL. Access/refresh tokens are not implemented by this
-refactor.
+stored in PostgreSQL. Protected v1 routes temporarily accept this cookie;
+access/refresh tokens are introduced in the next identity epic.
 
 AI and media variables are grouped in the example file:
 
