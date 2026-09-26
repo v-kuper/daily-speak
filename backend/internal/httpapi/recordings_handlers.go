@@ -1,28 +1,19 @@
 package httpapi
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"time"
 
-	"daily-speaking-practice/backend/internal/ai"
-	"daily-speaking-practice/backend/internal/aiparse"
 	"daily-speaking-practice/backend/internal/domain"
 	"daily-speaking-practice/backend/internal/logging"
 	"daily-speaking-practice/backend/internal/quota"
 	"daily-speaking-practice/backend/internal/workqueue"
 	"github.com/google/uuid"
-)
-
-var (
-	cyrillicPhrasePattern = regexp.MustCompile(`[\p{Cyrillic}]+(?:[- \t]+[\p{Cyrillic}]+)*`)
-	latinLetterPattern    = regexp.MustCompile(`[A-Za-z]`)
 )
 
 func (s *Server) handleCreateRecording(w http.ResponseWriter, r *http.Request) {
@@ -216,135 +207,6 @@ func marshalSuggestions(suggestions []suggestion) string {
 	}
 	suggestionJSON, _ := json.Marshal(stored)
 	return string(suggestionJSON)
-}
-
-func (s *Server) generateNaturalTranscript(ctx context.Context, transcript string, suggestions []suggestion, englishLevel string, logger logging.Logger) (string, error) {
-	if strings.TrimSpace(transcript) == "" {
-		return "", errors.New("The natural English version could not be generated. Please try again later.")
-	}
-	settings := ai.ResolveSettingsForUser()
-	useJSONFormat := !settings.IsThinkingModel
-	seed := absMod(domain.HashString(transcript)*193+domain.HashString(englishLevel)*29, 2147483647)
-	prompt := recordingNaturalVersionPrompt(transcript, suggestions, englishLevel)
-	for attempt := 0; attempt < 2; attempt++ {
-		strictJSON := attempt > 0
-		body := map[string]any{
-			"model":  settings.Model,
-			"stream": false,
-			"think":  ai.ThinkOption(settings.IsThinkingModel),
-			"messages": []map[string]string{
-				{"role": "system", "content": chooseString(strictJSON, "Return strict valid JSON only. No markdown. No prose.", "You rewrite learner speech as natural conversational English and output JSON only.")},
-				{"role": "user", "content": prompt},
-			},
-			"options": map[string]any{
-				"temperature": chooseFloat(strictJSON, 0.15, 0.35),
-				"seed":        seed + attempt*97,
-			},
-		}
-		if useJSONFormat {
-			body["format"] = "json"
-		}
-		payload, err := s.aiClient.PostChat(ctx, body)
-		if err != nil {
-			logger.Warn("ollama.natural_transcript_request_failed", logging.ErrorMeta(err))
-			return "", errors.New("The natural English version could not be generated. Please try again later.")
-		}
-		if correctedTranscript := parseNaturalTranscriptFromContent(ai.ExtractMessageContent(payload)); correctedTranscript != "" {
-			return correctedTranscript, nil
-		}
-	}
-	return "", errors.New("The natural English version could not be generated. Please try again later.")
-}
-
-func parseNaturalTranscriptFromContent(content string) string {
-	for _, candidate := range aiparse.ExtractJSONCandidates(content) {
-		var payload map[string]json.RawMessage
-		if json.Unmarshal([]byte(candidate), &payload) != nil {
-			continue
-		}
-		for _, key := range []string{"correctedTranscript", "naturalTranscript", "improvedTranscript"} {
-			raw, ok := payload[key]
-			if !ok {
-				continue
-			}
-			var value string
-			if json.Unmarshal(raw, &value) == nil {
-				if normalized := domain.NormalizeTranscript(value); normalized != "" && !containsCyrillic(normalized) {
-					return normalized
-				}
-			}
-		}
-	}
-	return ""
-}
-
-func extractRussianPhrases(transcript string) []string {
-	seen := map[string]struct{}{}
-	out := []string{}
-	for _, phrase := range cyrillicPhrasePattern.FindAllString(transcript, -1) {
-		if _, exists := seen[phrase]; exists {
-			continue
-		}
-		seen[phrase] = struct{}{}
-		out = append(out, phrase)
-	}
-	return out
-}
-
-func containsCyrillic(value string) bool {
-	return cyrillicPhrasePattern.MatchString(value)
-}
-
-func containsLatinLetter(value string) bool {
-	return latinLetterPattern.MatchString(value)
-}
-
-func recordingTranscriptForPrompt(transcript string) string {
-	return domain.NormalizeTranscript(transcript)
-}
-
-func recordingNaturalVersionPrompt(transcript string, suggestions []suggestion, englishLevel string) string {
-	transcriptForPrompt := recordingTranscriptForPrompt(transcript)
-	corrections := make([]rewriteCorrection, 0, len(suggestions))
-	for _, item := range suggestions {
-		corrections = append(corrections, rewriteCorrection{Wrong: item.Wrong, Right: item.Right})
-	}
-	suggestionsJSON, _ := json.Marshal(corrections)
-	parts := []string{
-		"Learner level: " + domain.FormatEnglishLevel(englishLevel) + ".",
-		recordingNaturalVersionLevelGuidance(englishLevel),
-		"Rewrite the transcript as natural conversational English while you preserve the speaker's meaning, intent, and factual details.",
-		"Replace every Russian word or phrase with its supplied English correction so the result is English-only.",
-		"Apply the supplied corrections, fix sentence structure and word order, and remove accidental repetitions or filler that make the thought unclear.",
-		"Do not invent new details, opinions, or events. Keep the result achievable and useful for a learner at the stated level.",
-		`Return only JSON with this exact shape: {"correctedTranscript":"..."}.`,
-		"No markdown and no extra keys.",
-		"Corrections: " + string(suggestionsJSON) + ".",
-		`Transcript: """` + transcriptForPrompt + `""".`,
-	}
-	return strings.Join(parts, " ")
-}
-
-type rewriteCorrection struct {
-	Wrong string `json:"wrong"`
-	Right string `json:"right"`
-}
-
-func recordingNaturalVersionLevelGuidance(englishLevel string) string {
-	switch domain.NormalizeEnglishLevel(englishLevel) {
-	case "a1":
-		return "Use very simple everyday vocabulary and short spoken sentences."
-	case "a2":
-		return "Use simple everyday vocabulary and clear spoken sentences."
-	case "b2":
-		return "Use natural upper-intermediate vocabulary, connectors, and varied spoken sentences."
-	case "c1":
-		return "Use fluent advanced vocabulary and idiomatic but precise conversational phrasing."
-	case "c2":
-		return "Use sophisticated near-native vocabulary, nuance, and idiomatic conversational phrasing."
-	default:
-		return "Use clear intermediate vocabulary and natural spoken sentence structures."
-	}
 }
 
 type savedAudioFile struct {

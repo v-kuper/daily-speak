@@ -32,6 +32,7 @@ type Config struct {
 	AIClient           ai.ChatClient
 	PracticeGenerator  practice.Generator
 	RecordingAnalyzer  recording.Analyzer
+	RecordingRewriter  recording.Rewriter
 	SessionCookie      auth.CookieConfig
 	IdentityTokens     auth.TokenConfig
 	CORS               CORSConfig
@@ -53,6 +54,7 @@ type Server struct {
 	aiClient            ai.ChatClient
 	practiceGenerator   practice.Generator
 	recordingAnalyzer   recording.Analyzer
+	recordingRewriter   recording.Rewriter
 	sessionCookie       auth.CookieConfig
 	identityTokens      auth.TokenConfig
 	cors                CORSConfig
@@ -87,12 +89,17 @@ func NewServer(config Config) *Server {
 	if practiceGenerator == nil {
 		practiceGenerator = practice.NewService(practiceollama.New(aiClient))
 	}
+	recordingService := recording.NewAnalysisService(
+		recordingollama.New(aiClient),
+		recording.AnalysisConfigFromEnv(),
+	)
 	recordingAnalyzer := config.RecordingAnalyzer
 	if recordingAnalyzer == nil {
-		recordingAnalyzer = recording.NewAnalysisService(
-			recordingollama.New(aiClient),
-			recording.AnalysisConfigFromEnv(),
-		)
+		recordingAnalyzer = recordingService
+	}
+	recordingRewriter := config.RecordingRewriter
+	if recordingRewriter == nil {
+		recordingRewriter = recordingService
 	}
 	mediaStore := config.MediaStore
 	if mediaStore == nil && config.DB != nil {
@@ -133,6 +140,7 @@ func NewServer(config Config) *Server {
 		aiClient:            aiClient,
 		practiceGenerator:   practiceGenerator,
 		recordingAnalyzer:   recordingAnalyzer,
+		recordingRewriter:   recordingRewriter,
 		sessionCookie:       config.SessionCookie,
 		identityTokens:      config.IdentityTokens,
 		cors:                config.CORS,

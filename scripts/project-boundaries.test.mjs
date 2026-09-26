@@ -160,11 +160,13 @@ test("recording analysis owns its policy outside HTTP and provider adapters", ()
     "analysis_review.go",
     "analysis_support.go",
     "analysis_service.go",
+	"rewrite.go",
   ];
   for (const path of [
     ...coreFiles.map((name) => `backend/internal/recording/${name}`),
     "backend/internal/recording/ollamaadapter/provider.go",
     "backend/internal/httpapi/recording_analysis.go",
+	"backend/internal/httpapi/recording_rewrite.go",
   ]) {
     assert.equal(existsSync(path), true, `missing ${path}`);
   }
@@ -174,11 +176,14 @@ test("recording analysis owns its policy outside HTTP and provider adapters", ()
     .join("\n");
   const provider = readFileSync("backend/internal/recording/ollamaadapter/provider.go", "utf8");
   const transport = readFileSync("backend/internal/httpapi/recording_analysis.go", "utf8");
+	const rewriteTransport = readFileSync("backend/internal/httpapi/recording_rewrite.go", "utf8");
   assert.doesNotMatch(core, /net\/http|internal\/httpapi|internal\/ai"/);
   assert.match(core, /AnalysisProvider/);
   assert.match(provider, /ai\.ChatClient/);
   assert.match(transport, /recording\.AnalysisInput/);
   assert.doesNotMatch(transport, /PostChat|error detector|adjudicator/);
+	assert.match(rewriteTransport, /recording\.RewriteInput/);
+	assert.doesNotMatch(rewriteTransport, /PostChat|natural conversational English/);
   for (const name of [
     "recording_analysis_coordinator.go",
     "recording_analysis_prompts.go",
