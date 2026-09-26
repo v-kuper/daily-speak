@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "DailySpeak API",
-    "version": "1.0.0",
-    "description": "HTTP API for DailySpeak. Authenticated endpoints use the `daily_speaking_session` HTTP-only cookie set by login/register."
+    "version": "1.1.0",
+    "description": "HTTP API for DailySpeak. New mobile integrations use the stable `/api/v1` contract. Authenticated endpoints temporarily accept the `daily_speaking_session` HTTP-only cookie until bearer tokens are added."
   },
   "servers": [
     {
@@ -26,6 +26,9 @@
   "tags": [
     {
       "name": "Health"
+    },
+    {
+      "name": "Mobile API v1"
     },
     {
       "name": "Auth"
@@ -70,6 +73,100 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/api/v1": {
+      "get": {
+        "tags": [
+          "Mobile API v1"
+        ],
+        "summary": "Read the current mobile API version",
+        "security": [],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RequestIdHeader"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/V1MetadataOK"
+          },
+          "405": {
+            "$ref": "#/components/responses/V1MethodNotAllowed"
+          }
+        }
+      }
+    },
+    "/api/v1/recordings": {
+      "get": {
+        "tags": [
+          "Mobile API v1",
+          "Recordings"
+        ],
+        "summary": "List owned recordings with cursor pagination",
+        "description": "Returns recordings ordered by timestamp and id descending. Cursors are opaque and must be sent back unchanged.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RequestIdHeader"
+          },
+          {
+            "$ref": "#/components/parameters/PageLimitQuery"
+          },
+          {
+            "$ref": "#/components/parameters/PageCursorQuery"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/V1RecordingPageOK"
+          },
+          "400": {
+            "$ref": "#/components/responses/V1BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/V1Unauthorized"
+          },
+          "405": {
+            "$ref": "#/components/responses/V1MethodNotAllowed"
+          },
+          "500": {
+            "$ref": "#/components/responses/V1InternalServerError"
+          }
+        }
+      }
+    },
+    "/api/v1/recordings/{recordingId}": {
+      "get": {
+        "tags": [
+          "Mobile API v1",
+          "Recordings"
+        ],
+        "summary": "Load one owned recording from the v1 API",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RequestIdHeader"
+          },
+          {
+            "$ref": "#/components/parameters/RecordingIdPath"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/V1RecordingOK"
+          },
+          "401": {
+            "$ref": "#/components/responses/V1Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/V1NotFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/V1MethodNotAllowed"
+          },
+          "500": {
+            "$ref": "#/components/responses/V1InternalServerError"
           }
         }
       }
@@ -1332,6 +1429,38 @@
       }
     },
     "parameters": {
+      "RequestIdHeader": {
+        "name": "X-Request-ID",
+        "in": "header",
+        "required": false,
+        "description": "Caller-generated diagnostic id. Unsafe values are replaced by the server.",
+        "schema": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$"
+        }
+      },
+      "PageLimitQuery": {
+        "name": "limit",
+        "in": "query",
+        "required": false,
+        "description": "Number of resources to return.",
+        "schema": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 20
+        }
+      },
+      "PageCursorQuery": {
+        "name": "cursor",
+        "in": "query",
+        "required": false,
+        "description": "Opaque cursor returned in the previous page.",
+        "schema": {
+          "type": "string",
+          "maxLength": 2048
+        }
+      },
       "DateQuery": {
         "name": "date",
         "in": "query",
@@ -1407,6 +1536,126 @@
       }
     },
     "responses": {
+      "V1MetadataOK": {
+        "description": "Current mobile API version.",
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestID"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/APIVersionResponse"
+            }
+          }
+        }
+      },
+      "V1RecordingPageOK": {
+        "description": "One stable page of owned recordings.",
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestID"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/RecordingPage"
+            }
+          }
+        }
+      },
+      "V1RecordingOK": {
+        "description": "Owned recording.",
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestID"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/RecordingResponse"
+            }
+          }
+        }
+      },
+      "V1BadRequest": {
+        "description": "Invalid request.",
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestID"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/V1ErrorResponse"
+            }
+          }
+        }
+      },
+      "V1Unauthorized": {
+        "description": "Authentication is missing or invalid.",
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestID"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/V1ErrorResponse"
+            }
+          }
+        }
+      },
+      "V1NotFound": {
+        "description": "Resource not found.",
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestID"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/V1ErrorResponse"
+            }
+          }
+        }
+      },
+      "V1MethodNotAllowed": {
+        "description": "Method not allowed for this resource.",
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestID"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/V1ErrorResponse"
+            }
+          }
+        }
+      },
+      "V1InternalServerError": {
+        "description": "Server error.",
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestID"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/V1ErrorResponse"
+            }
+          }
+        }
+      },
       "AuthUserOK": {
         "description": "Authenticated user. Response also sets `daily_speaking_session` on login/register.",
         "headers": {
@@ -1549,7 +1798,141 @@
         }
       }
     },
+    "headers": {
+      "RequestID": {
+        "description": "Diagnostic identifier for this request.",
+        "schema": {
+          "type": "string"
+        }
+      }
+    },
     "schemas": {
+      "APIVersionResponse": {
+        "type": "object",
+        "required": [
+          "version",
+          "status",
+          "documentation"
+        ],
+        "properties": {
+          "version": {
+            "type": "string",
+            "const": "v1"
+          },
+          "status": {
+            "type": "string",
+            "const": "stable"
+          },
+          "documentation": {
+            "type": "string",
+            "const": "/docs"
+          }
+        },
+        "example": {
+          "version": "v1",
+          "status": "stable",
+          "documentation": "/docs"
+        }
+      },
+      "V1ErrorResponse": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": [
+              "code",
+              "message",
+              "requestId"
+            ],
+            "properties": {
+              "code": {
+                "type": "string",
+                "description": "Stable machine-readable error code.",
+                "enum": [
+                  "invalid_request",
+                  "unauthorized",
+                  "payment_required",
+                  "forbidden",
+                  "not_found",
+                  "method_not_allowed",
+                  "conflict",
+                  "payload_too_large",
+                  "rate_limited",
+                  "internal_error",
+                  "upstream_unavailable",
+                  "service_unavailable",
+                  "request_failed"
+                ]
+              },
+              "message": {
+                "type": "string"
+              },
+              "requestId": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "example": {
+          "error": {
+            "code": "unauthorized",
+            "message": "Unauthorized",
+            "requestId": "01J8Z8RN5G3X2P1Y7Q9W4K6M8T"
+          }
+        }
+      },
+      "PageInfo": {
+        "type": "object",
+        "required": [
+          "limit",
+          "nextCursor"
+        ],
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "RecordingPage": {
+        "type": "object",
+        "required": [
+          "items",
+          "page"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Recording"
+            }
+          },
+          "page": {
+            "$ref": "#/components/schemas/PageInfo"
+          }
+        },
+        "example": {
+          "items": [],
+          "page": {
+            "limit": 20,
+            "nextCursor": null
+          }
+        }
+      },
       "HealthResponse": {
         "type": "object",
         "required": [

@@ -23,16 +23,19 @@ function runOpenAPICheck(t, source) {
 
 const openapi = JSON.parse(readFileSync("docs/openapi.json", "utf8"));
 const swaggerHTML = readFileSync("docs/swagger.html", "utf8");
+const compatibilityPolicy = readFileSync("../docs/api-compatibility.md", "utf8");
 const serverSource = readFileSync("internal/httpapi/server.go", "utf8");
 const routeSource = [
   serverSource,
+  readFileSync("internal/httpapi/v1.go", "utf8"),
   readFileSync("internal/httpapi/recording_sessions_handlers.go", "utf8"),
   readFileSync("internal/httpapi/feed_handlers.go", "utf8"),
 ].join("\n");
 
 const httpMethods = new Set(["get", "post", "put", "delete", "patch"]);
 const documentedAPIRoutes = [
-  "/healthz", "/api/auth/register", "/api/auth/login", "/api/auth/session", "/api/auth/logout",
+  "/healthz", "/api/v1", "/api/v1/recordings", "/api/v1/recordings/{recordingId}",
+  "/api/auth/register", "/api/auth/login", "/api/auth/session", "/api/auth/logout",
   "/api/daily-questions", "/api/topic-guidance", "/api/study-words", "/api/user/data",
   "/api/user/interests", "/api/user/ollama-model", "/api/user/subscription", "/api/user/english-level",
   "/api/user/recordings", "/api/recordings/{recordingId}", "/api/recordings/{recordingId}/retry",
@@ -44,6 +47,7 @@ const documentedAPIRoutes = [
 ];
 
 const protectedOperations = [
+  ["/api/v1/recordings", "get"], ["/api/v1/recordings/{recordingId}", "get"],
   ["/api/auth/session", "get"], ["/api/auth/logout", "post"], ["/api/user/data", "get"],
   ["/api/user/interests", "put"], ["/api/user/ollama-model", "get"], ["/api/user/subscription", "get"],
   ["/api/user/subscription", "post"], ["/api/user/subscription", "delete"],
@@ -71,6 +75,7 @@ const mutationBodies = [
 ];
 
 const expectedQueryParameters = new Map([
+  ["/api/v1/recordings", ["limit", "cursor"]],
   ["/api/daily-questions", ["date", "refresh", "interest", "level", "avoid"]],
   ["/api/topic-guidance", ["topic", "refresh", "interest", "level", "avoidQuestion", "avoidWord"]],
   ["/api/study-words", ["refresh", "interest", "level", "avoidWord"]],
@@ -131,6 +136,9 @@ test("OpenAPI inventories every API and upload route, including retained Feed en
   for (const path of documentedAPIRoutes) assert.ok(openapi.paths[path], `missing OpenAPI path ${path}`);
   const sourceChecks = [
     ["/healthz", /mux\.HandleFunc\("\/healthz"/],
+    ["/api/v1", /mux\.HandleFunc\("\/api\/v1"/],
+    ["/api/v1/recordings", /path == "\/api\/v1\/recordings"/],
+    ["/api/v1/recordings/{recordingId}", /strings\.HasPrefix\(path, "\/api\/v1\/recordings\/"\)/],
     ["/api/recording-sessions/{sessionId}/chunks", /action == "chunks"/],
     ["/api/recording-sessions/{sessionId}/audio", /action == "audio"/],
     ["/api/recording-sessions/{sessionId}/finish", /action == "finish"/],
@@ -206,4 +214,23 @@ test("shared externally visible schemas have representative examples", () => {
   const processingSchema = openapi.components.schemas.RecordingProcessingStage;
   assert.ok(processingSchema, "missing RecordingProcessingStage schema");
   assert.ok(processingSchema.example, "RecordingProcessingStage needs an example");
+});
+
+test("v1 operations expose request IDs and structured stable errors", () => {
+  const v1Operations = operations().filter(({ path }) => path.startsWith("/api/v1"));
+  assert.ok(v1Operations.length >= 3);
+  for (const { path, method, operation } of v1Operations) {
+    const parameters = operationParameters(path, operation);
+    assert.ok(parameters.some((parameter) => parameter.in === "header" && parameter.name === "X-Request-ID"), `${method.toUpperCase()} ${path} needs X-Request-ID request parameter`);
+    for (const [status, responseReference] of Object.entries(operation.responses)) {
+      assert.ok(responseReference.$ref?.startsWith("#/components/responses/V1"), `${method.toUpperCase()} ${path} ${status} must use a v1 shared response`);
+      const response = openapi.components.responses[responseReference.$ref.replace("#/components/responses/", "")];
+      assert.ok(response.headers?.["X-Request-ID"], `${method.toUpperCase()} ${path} ${status} needs X-Request-ID response header`);
+      if (/^[45]\d\d$/.test(status)) {
+        assert.equal(response.content?.["application/json"]?.schema?.$ref, "#/components/schemas/V1ErrorResponse", `${method.toUpperCase()} ${path} ${status} needs structured v1 error`);
+      }
+    }
+  }
+  assert.match(compatibilityPolicy, /at least 90 days/);
+  assert.match(compatibilityPolicy, /new major path/);
 });

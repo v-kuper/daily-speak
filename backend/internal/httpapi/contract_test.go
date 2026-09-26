@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -19,6 +20,100 @@ func TestHealthz(t *testing.T) {
 	}
 	if body := strings.TrimSpace(recorder.Body.String()); body != `{"ok":true}` {
 		t.Fatalf("unexpected body %q", body)
+	}
+}
+
+func TestEveryResponseHasRequestID(t *testing.T) {
+	handler := NewServer(Config{}).Handler()
+	cases := []struct {
+		name       string
+		requestID  string
+		wantSameID bool
+	}{
+		{name: "server generated"},
+		{name: "safe caller id", requestID: "ios-01J8Z.TEST:42", wantSameID: true},
+		{name: "unsafe caller id", requestID: "bad id\nvalue"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+			request.Header.Set("X-Request-ID", tc.requestID)
+			handler.ServeHTTP(recorder, request)
+			got := recorder.Header().Get("X-Request-ID")
+			if got == "" || strings.ContainsAny(got, " \r\n") {
+				t.Fatalf("invalid response request id %q", got)
+			}
+			if tc.wantSameID && got != tc.requestID {
+				t.Fatalf("request id = %q, want %q", got, tc.requestID)
+			}
+			if !tc.wantSameID && tc.requestID != "" && got == tc.requestID {
+				t.Fatalf("unsafe request id was retained: %q", got)
+			}
+		})
+	}
+}
+
+func TestV1MetadataAndStableErrors(t *testing.T) {
+	handler := NewServer(Config{}).Handler()
+
+	metadata := httptest.NewRecorder()
+	handler.ServeHTTP(metadata, httptest.NewRequest(http.MethodGet, "/api/v1", nil))
+	if metadata.Code != http.StatusOK || strings.TrimSpace(metadata.Body.String()) != `{"version":"v1","status":"stable","documentation":"/docs"}` {
+		t.Fatalf("unexpected metadata response %d: %s", metadata.Code, metadata.Body.String())
+	}
+
+	unauthorized := httptest.NewRecorder()
+	handler.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodGet, "/api/v1/recordings/demo", nil))
+	if unauthorized.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d: %s", unauthorized.Code, unauthorized.Body.String())
+	}
+	var payload struct {
+		Error struct {
+			Code      string `json:"code"`
+			Message   string `json:"message"`
+			RequestID string `json:"requestId"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(unauthorized.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode v1 error: %v", err)
+	}
+	if payload.Error.Code != "unauthorized" || payload.Error.Message != "Unauthorized" || payload.Error.RequestID == "" {
+		t.Fatalf("unexpected v1 error: %+v", payload.Error)
+	}
+	if payload.Error.RequestID != unauthorized.Header().Get("X-Request-ID") {
+		t.Fatalf("body and header request IDs differ")
+	}
+}
+
+func TestLegacyErrorsRemainCompatible(t *testing.T) {
+	handler := NewServer(Config{}).Handler()
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/recordings/demo", nil))
+	if strings.TrimSpace(recorder.Body.String()) != `{"error":"Unauthorized"}` {
+		t.Fatalf("legacy error contract changed: %s", recorder.Body.String())
+	}
+}
+
+func TestV1ErrorCodesAreStableByStatus(t *testing.T) {
+	cases := map[int]string{
+		http.StatusBadRequest:            "invalid_request",
+		http.StatusUnauthorized:          "unauthorized",
+		http.StatusPaymentRequired:       "payment_required",
+		http.StatusForbidden:             "forbidden",
+		http.StatusNotFound:              "not_found",
+		http.StatusMethodNotAllowed:      "method_not_allowed",
+		http.StatusConflict:              "conflict",
+		http.StatusRequestEntityTooLarge: "payload_too_large",
+		http.StatusTooManyRequests:       "rate_limited",
+		http.StatusInternalServerError:   "internal_error",
+		http.StatusBadGateway:            "upstream_unavailable",
+		http.StatusServiceUnavailable:    "service_unavailable",
+	}
+	for status, want := range cases {
+		if got := v1ErrorCode(status); got != want {
+			t.Fatalf("status %d: code %q, want %q", status, got, want)
+		}
 	}
 }
 
