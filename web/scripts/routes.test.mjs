@@ -6,10 +6,10 @@ import { createTypeScriptLoader } from "./helpers/load-typescript.mjs";
 const routes = createTypeScriptLoader()("src/lib/routes.ts");
 
 test("safeReturnTo accepts only known internal routes", () => {
-  for (const path of ["/speak", "/history", "/history?date=2026-09-21", "/history/recording-123", "/profile", "/profile/subscription", "/profile/english-level", "/profile/interests"]) {
+  for (const path of ["/speak", "/history", "/history?date=2026-09-21", "/history/recording-123", "/preview/preview-123", "/profile", "/profile/subscription", "/profile/english-level", "/profile/interests"]) {
     assert.equal(routes.safeReturnTo(path), path);
   }
-  for (const value of [undefined, null, 42, "", "/", "/auth", "https://evil.example", "//evil.example", "/feed", "/history/../profile", "/history/%", "/history/%2e%2e", "/history/%2F%2Fevil.example", "/history/recording/extra", "/history\\evil", "/history#fragment", "/history?date=2026-02-30", "/history?date=2026-09-21&next=https://evil.example", "/history?date=2026-09-21&date=2026-09-22", "/history?date=2026-09-21?", "/speak?date=2026-09-21", "javascript:alert(1)"]) {
+  for (const value of [undefined, null, 42, "", "/", "/auth", "https://evil.example", "//evil.example", "/feed", "/history/../profile", "/history/%", "/history/%2e%2e", "/history/%2F%2Fevil.example", "/history/recording/extra", "/history\\evil", "/preview/../profile", "/preview/%2F%2Fevil.example", "/preview/one/extra", "/history#fragment", "/history?date=2026-02-30", "/history?date=2026-09-21&next=https://evil.example", "/history?date=2026-09-21&date=2026-09-22", "/history?date=2026-09-21?", "/speak?date=2026-09-21", "javascript:alert(1)"]) {
     assert.equal(routes.safeReturnTo(value), "/speak", String(value));
   }
 });
@@ -44,7 +44,7 @@ test("protected routes wait for session restoration and preserve only safe desti
 });
 
 test("App Router owns every supported screen (boundary backstop)", () => {
-  for (const path of ["speak", "auth", "history", "history/[recordingId]", "profile", "profile/subscription", "profile/english-level", "profile/interests"]) {
+  for (const path of ["speak", "auth", "history", "history/[recordingId]", "preview/[previewId]", "profile", "profile/subscription", "profile/english-level", "profile/interests"]) {
     assert.equal(existsSync(`app/${path}/page.tsx`), true, `missing ${path}`);
   }
   const appSlice = readFileSync("src/store/slices/appSlice.ts", "utf8");

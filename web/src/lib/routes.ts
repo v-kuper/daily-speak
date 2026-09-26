@@ -35,6 +35,9 @@ export const safeReturnTo = (value: unknown): string => {
       return `/history?date=${date}`;
     }
   }
+  if (rawQuery === "" && /^\/preview\/[A-Za-z0-9-]+$/.test(path)) {
+    return path;
+  }
   return rawQuery === "" && /^\/history\/[A-Za-z0-9-]+$/.test(path) ? path : "/speak";
 };
 

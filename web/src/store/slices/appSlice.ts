@@ -16,6 +16,13 @@ import { DEFAULT_ENGLISH_LEVEL, normalizeEnglishLevel, parseEnglishLevel, type E
 import { isCurrentInterviewGuidanceRequest } from "../../lib/interviewGuidance";
 import { formatTime } from "../../lib/utils";
 import { parseSuggestions } from "../../lib/suggestions";
+import {
+  completeGuestPromotion,
+  GuestPreviewError,
+  MAX_GUEST_PREVIEW_SECONDS,
+  promoteGuestIdentity,
+  type GuestPreviewPromotion,
+} from "../../lib/guestPreview";
 
 export type SpeakMode = "idle" | "readyToRecord" | "recording" | "recorded";
 export type AuthStatus = "idle" | "loading";
@@ -314,6 +321,13 @@ type AuthUserPayload = {
 type AuthResponse = {
   user?: AuthUserPayload;
   error?: string;
+};
+
+type AuthResult = {
+  email: string;
+  isSubscriber: boolean;
+  englishLevel: EnglishLevel;
+  guestPreviewPromotion?: GuestPreviewPromotion;
 };
 
 type UserDataResponse = {
@@ -962,12 +976,12 @@ export const restoreSession = createAsyncThunk<
 });
 
 export const signIn = createAsyncThunk<
-  { email: string; isSubscriber: boolean; englishLevel: EnglishLevel },
-  void,
+  AuthResult,
+  void | { promoteGuest?: boolean },
   { state: { app: AppState }; rejectValue: string }
 >(
   "app/signIn",
-  async (_, { getState, rejectWithValue }) => {
+  async (options, { getState, rejectWithValue }) => {
     const { authEmailDraft, authPasswordDraft } = getState().app;
     const email = authEmailDraft.trim().toLowerCase();
     const password = authPasswordDraft.trim();
@@ -981,6 +995,9 @@ export const signIn = createAsyncThunk<
     }
 
     try {
+      const guestPreviewPromotion = options?.promoteGuest
+        ? await promoteGuestIdentity("signIn", email, password)
+        : undefined;
       const response = await apiFetch("/api/auth/login", {
         method: "POST",
         headers: {
@@ -995,20 +1012,22 @@ export const signIn = createAsyncThunk<
         return rejectWithValue(payload?.error ?? "Failed to sign in.");
       }
 
-      return user;
-    } catch {
+      if (guestPreviewPromotion) await completeGuestPromotion();
+      return { ...user, guestPreviewPromotion };
+    } catch (error) {
+      if (error instanceof GuestPreviewError) return rejectWithValue(error.message);
       return rejectWithValue("Cannot connect to authentication service.");
     }
   }
 );
 
 export const signUp = createAsyncThunk<
-  { email: string; isSubscriber: boolean; englishLevel: EnglishLevel },
-  void,
+  AuthResult,
+  void | { promoteGuest?: boolean },
   { state: { app: AppState }; rejectValue: string }
 >(
   "app/signUp",
-  async (_, { getState, rejectWithValue }) => {
+  async (options, { getState, rejectWithValue }) => {
     const { authEmailDraft, authPasswordDraft } = getState().app;
     const email = authEmailDraft.trim().toLowerCase();
     const password = authPasswordDraft.trim();
@@ -1022,7 +1041,10 @@ export const signUp = createAsyncThunk<
     }
 
     try {
-      const response = await apiFetch("/api/auth/register", {
+      const guestPreviewPromotion = options?.promoteGuest
+        ? await promoteGuestIdentity("signUp", email, password)
+        : undefined;
+      const response = await apiFetch(options?.promoteGuest ? "/api/auth/login" : "/api/auth/register", {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
@@ -1036,8 +1058,10 @@ export const signUp = createAsyncThunk<
         return rejectWithValue(payload?.error ?? "Failed to create account.");
       }
 
-      return user;
-    } catch {
+      if (guestPreviewPromotion) await completeGuestPromotion();
+      return { ...user, guestPreviewPromotion };
+    } catch (error) {
+      if (error instanceof GuestPreviewError) return rejectWithValue(error.message);
       return rejectWithValue("Cannot connect to authentication service.");
     }
   }
@@ -1728,6 +1752,9 @@ const applyRecordingQuotaState = (state: AppState, quota: RecordingQuota | null)
 };
 
 const resolveCurrentSessionLimit = (state: AppState): number => {
+  if (!state.isAuthenticated) {
+    return MAX_GUEST_PREVIEW_SECONDS;
+  }
   if (state.isSubscriber) {
     return Math.max(0, state.maxSessionSeconds);
   }
@@ -2142,6 +2169,25 @@ const appSlice = createSlice({
       state.recordingUploadSessionId = null;
       state.recordingInputError = null;
       state.pendingPhotoError = null;
+      state.recordingPracticeType = "topic";
+    },
+    finishGuestPreviewFlow: (state, action: PayloadAction<string | null>) => {
+      state.speakState = "idle";
+      state.selectedTopic = null;
+      state.recordingDuration = 0;
+      state.showQuestions = false;
+      state.showWords = false;
+      state.showAddTopicInput = false;
+      state.customTopicDraft = "";
+      state.pendingRecordingAudioDataUrl = null;
+      state.recordingUploadSessionId = null;
+      state.recordingInputError = action.payload;
+      state.recordingSaveError = null;
+      state.pendingPhotoDataUrl = null;
+      state.pendingPhotoObjectDraft = "";
+      state.pendingPhotoError = null;
+      state.pendingSaveAfterAuth = false;
+      state.pendingAuthSaveDraft = null;
       state.recordingPracticeType = "topic";
     },
     openAuthForSave: (state) => {
@@ -2702,6 +2748,7 @@ export const {
   stopRecording,
   reRecord,
   backToQuestionsList,
+  finishGuestPreviewFlow,
   openAuthForSave,
   toggleAddTopicInput,
   setCustomTopicDraft,

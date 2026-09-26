@@ -5,6 +5,12 @@ import { useRouter } from "next/navigation";
 import { saveAndNavigate, startGuestSave } from "../lib/routeFlows";
 import { apiFetch, readApiJSON } from "../lib/apiClient";
 import {
+  createGuestPreview,
+  guestPreviewPath,
+  MAX_GUEST_PREVIEW_SECONDS,
+  startNewGuestPreviewSession,
+} from "../lib/guestPreview";
+import {
   readBlobAsDataUrl,
   resolveAudioFileExtension,
   resolveBrowserRecordingSupportError,
@@ -172,6 +178,8 @@ export default function SpeakScreen() {
   const router = useRouter();
   const [finalAudioUploadState, setFinalAudioUploadState] = useState<FinalAudioUploadState>("idle");
   const [recordingStarting, setRecordingStarting] = useState(false);
+  const [guestSaveStatus, setGuestSaveStatus] = useState<FinalAudioUploadState>("idle");
+  const [guestSaveError, setGuestSaveError] = useState<string | null>(null);
   const {
     speakState,
     selectedTopic,
@@ -480,14 +488,34 @@ export default function SpeakScreen() {
   ]);
 
   const onSaveRecording = useCallback(() => {
-    if (!isAuthenticated) {
-      startGuestSave(store, router);
-      return;
-    }
-
     const draft = buildRecordingSaveDraft();
     if (!draft?.localRecordingId) {
       dispatch(setRecordingInputError("Preparing audio, please wait a moment before saving."));
+      return;
+    }
+
+    if (!isAuthenticated) {
+      if (draft.practiceType === "photo_description") {
+        startGuestSave(store, router);
+        return;
+      }
+      setGuestSaveError(null);
+      setGuestSaveStatus("uploading");
+      void createGuestPreview({
+        topic: draft.topic,
+        duration: draft.duration,
+        timestamp: draft.timestamp,
+        practiceType: draft.practiceType,
+        audioDataUrl: draft.audioDataUrl ?? "",
+      })
+        .then((preview) => {
+          setGuestSaveStatus("ready");
+          router.push(guestPreviewPath(preview.id));
+        })
+        .catch((error: unknown) => {
+          setGuestSaveStatus("failed");
+          setGuestSaveError(error instanceof Error ? error.message : "Cannot create the guest preview. Please try again.");
+        });
       return;
     }
 
@@ -497,6 +525,9 @@ export default function SpeakScreen() {
   const beginRecordingFromMicrophone = (onRecordingStarted: () => void) => {
     if (recordingStartingRef.current) {
       return;
+    }
+    if (!isAuthenticated) {
+      startNewGuestPreviewSession();
     }
     recordingStartingRef.current = true;
     setRecordingStarting(true);
@@ -977,9 +1008,11 @@ export default function SpeakScreen() {
           )}
 
           <div className="timer">{formatTime(recordingDuration)}</div>
-          {isAuthenticated && (
-            <div className="recorded-subtitle">Session limit: {formatTime(Math.max(0, sessionLimitSeconds))}</div>
-          )}
+          <div className="recorded-subtitle">
+            {isAuthenticated
+              ? `Session limit: ${formatTime(Math.max(0, sessionLimitSeconds))}`
+              : `Guest preview limit: ${formatTime(MAX_GUEST_PREVIEW_SECONDS)}`}
+          </div>
 
           {isTopicInterview && selectedTopic && (
             <InterviewQuestionCard topic={selectedTopic} followUps={topicGuidanceQuestions} />
@@ -1016,22 +1049,37 @@ export default function SpeakScreen() {
           </div>
         )}
 
-        {!isAuthenticated && <div className="notice">Saving is available only for authorized users. Sign in to continue.</div>}
+        {!isAuthenticated && !isPhotoPractice && (
+          <div className="notice">
+            Continue as a guest to see your transcript and a limited error preview. Sign in afterwards to unlock the full analysis.
+          </div>
+        )}
+        {!isAuthenticated && isPhotoPractice && (
+          <div className="notice">Photo analysis currently requires an account.</div>
+        )}
 
         <div className="btn-group speak-button-group">
-          <button className="btn btn-secondary" onClick={() => dispatch(reRecord())}>
+          <button className="btn btn-secondary" onClick={() => {
+            setGuestSaveError(null);
+            setGuestSaveStatus("idle");
+            dispatch(reRecord());
+          }} disabled={guestSaveStatus === "uploading"}>
             Re-record
           </button>
           <button
             className="btn btn-primary"
             onClick={onSaveRecording}
-            disabled={recordingSaveStatus === "loading" || (isAuthenticated && !pendingRecordingAudioDataUrl)}
+            disabled={recordingSaveStatus === "loading" || guestSaveStatus === "uploading" || !pendingRecordingAudioDataUrl}
           >
             {isAuthenticated
               ? recordingSaveStatus === "loading"
                 ? "Saving..."
                 : "Save and continue"
-              : "Sign in to save"}
+              : guestSaveStatus === "uploading"
+                ? "Preparing preview..."
+                : isPhotoPractice
+                  ? "Sign in to analyze"
+                  : "View guest preview"}
           </button>
         </div>
         {!pendingRecordingAudioDataUrl && !recordingInputError && (
@@ -1050,6 +1098,7 @@ export default function SpeakScreen() {
         )}
         {recordingInputError && <div className="auth-error top-spaced">{recordingInputError}</div>}
         {recordingSaveError && <div className="auth-error top-spaced">{recordingSaveError}</div>}
+        {guestSaveError && <div className="auth-error top-spaced">{guestSaveError}</div>}
       </div>
     </section>
   );
