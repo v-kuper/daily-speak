@@ -46,6 +46,9 @@ func TestDeleteRecordingCascadesDataAndRetriesQueuedFilesAfterRestart(t *testing
 	shadowingURL := fmt.Sprintf("/uploads/shadowing/%s/%s.mp3", user.ID, recordingID)
 	replyURL := fmt.Sprintf("/uploads/feed-replies/%s/%s.webm", user.ID, replyID)
 	t.Cleanup(func() {
+		_, _ = database.Exec(context.Background(), `
+			DELETE FROM processing_jobs
+			WHERE kind = 'media.delete' AND resource_id = ANY($1::text[])`, []string{recordingURL, shadowingURL, replyURL})
 		_, _ = database.Exec(context.Background(), `DELETE FROM pending_file_deletions WHERE public_url = ANY($1::text[])`, []string{recordingURL, shadowingURL, replyURL})
 		_, _ = database.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, user.ID)
 	})
@@ -116,6 +119,12 @@ func TestDeleteRecordingCascadesDataAndRetriesQueuedFilesAfterRestart(t *testing
 		VALUES ($1, $2, $3, 'Late publication', 30, 'Late transcript', $4)`,
 		uuid.NewString(), user.ID, recordingID, now); err == nil {
 		t.Fatal("expected the recording foreign key to reject a late Feed publication")
+	}
+	if _, err := database.Exec(ctx, `
+		UPDATE processing_jobs
+		SET priority = 100
+		WHERE kind = 'media.delete' AND resource_id = ANY($1::text[])`, []string{recordingURL, shadowingURL, replyURL}); err != nil {
+		t.Fatalf("prioritize deletion test jobs: %v", err)
 	}
 
 	restartedServer := NewServer(Config{DB: database})

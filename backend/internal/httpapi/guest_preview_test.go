@@ -3,12 +3,28 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
 	"daily-speaking-practice/backend/internal/ai"
 )
+
+func TestMediaUploadCollectionRouteDoesNotRedirect(t *testing.T) {
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/media/uploads", strings.NewReader(`{}`))
+
+	NewServer(Config{}).Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("media upload collection status = %d, body=%s", response.Code, response.Body.String())
+	}
+	if location := response.Header().Get("Location"); location != "" {
+		t.Fatalf("media upload collection redirected to %q", location)
+	}
+}
 
 func TestGuestPreviewRequestValidationAndIdempotencyDigest(t *testing.T) {
 	first, firstTime, err := normalizeGuestPreviewCreate(guestPreviewCreateRequest{

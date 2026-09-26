@@ -80,6 +80,11 @@ func TestGuestPreviewJourneyIsBoundedIdempotentAndExpiresDurably(t *testing.T) {
 		t.Fatalf("create preview: status=%d body=%s", first.Code, first.Body.String())
 	}
 	previewID := decodeGuestPreviewID(t, first)
+	t.Cleanup(func() {
+		_, _ = database.Exec(context.Background(), `
+			DELETE FROM processing_jobs
+			WHERE resource_id = ANY($1::text[])`, []string{previewID, assetID})
+	})
 	retry := postGuestPreview(t, server, guest.AccessToken, "preview-request-1", payload)
 	if retry.Code != http.StatusOK || decodeGuestPreviewID(t, retry) != previewID {
 		t.Fatalf("idempotent retry: status=%d body=%s", retry.Code, retry.Body.String())

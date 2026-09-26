@@ -133,6 +133,7 @@ func (s *Server) Handler() http.Handler {
 	})
 	mux.HandleFunc("/healthz", s.healthz)
 	mux.HandleFunc("/api/v1", s.routeV1)
+	mux.HandleFunc("/api/v1/media/uploads", s.routeV1)
 	mux.HandleFunc("/api/v1/media/uploads/", s.routeMediaUploadEntry)
 	mux.HandleFunc("/api/v1/media/local/", s.routeSignedLocalMedia)
 	mux.HandleFunc("/api/v1/", s.routeV1)
