@@ -52,7 +52,7 @@ func (s *Server) runRecordingJob(ctx context.Context, job workqueue.Job) error {
 	cleanupAudio := func() {}
 	if stage == "transcribing" {
 		if audioAssetID != nil {
-			work.AudioPath, cleanupAudio, err = s.materializeMediaAsset(ctx, *audioAssetID)
+			work.AudioPath, cleanupAudio, err = s.mediaMaterializer.Materialize(ctx, *audioAssetID)
 			if err != nil {
 				return errors.New("recording audio is unavailable")
 			}

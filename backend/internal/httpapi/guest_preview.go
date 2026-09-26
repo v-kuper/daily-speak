@@ -427,7 +427,7 @@ func (s *Server) runGuestPreviewJob(ctx context.Context, job workqueue.Job) erro
 			return nil
 		}
 	}
-	path, cleanup, err := s.materializeMediaAsset(ctx, assetID)
+	path, cleanup, err := s.mediaMaterializer.Materialize(ctx, assetID)
 	if err != nil {
 		return errors.New("guest preview audio is unavailable")
 	}

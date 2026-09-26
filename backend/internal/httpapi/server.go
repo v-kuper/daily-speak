@@ -61,6 +61,7 @@ type Server struct {
 	mediaService        *media.Service
 	mediaSigner         *media.URLSigner
 	mediaStore          storage.Store
+	mediaMaterializer   *media.Materializer
 	transcribeAudio     func(context.Context, string) (string, error)
 	probeAudioDuration  func(context.Context, string) (time.Duration, error)
 	operations          operations.Config
@@ -147,6 +148,7 @@ func NewServer(config Config) *Server {
 		mediaService:        mediaService,
 		mediaSigner:         mediaSigner,
 		mediaStore:          mediaStore,
+		mediaMaterializer:   media.NewMaterializer(config.DB, mediaStore),
 		transcribeAudio:     transcribeAudio,
 		probeAudioDuration:  probeAudioDuration,
 		operations:          config.Operations,

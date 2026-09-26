@@ -1,4 +1,4 @@
-package httpapi
+package media
 
 import (
 	"context"
@@ -10,20 +10,31 @@ import (
 	"os"
 	"strings"
 
+	"daily-speaking-practice/backend/internal/db"
 	"daily-speaking-practice/backend/internal/domain"
+	"daily-speaking-practice/backend/internal/storage"
 )
 
-// materializeMediaAsset gives path-based processors such as whisper.cpp a
+type Materializer struct {
+	db    *db.DB
+	store storage.Store
+}
+
+func NewMaterializer(database *db.DB, store storage.Store) *Materializer {
+	return &Materializer{db: database, store: store}
+}
+
+// Materialize gives path-based processors such as whisper.cpp a
 // bounded temporary file while keeping the durable source in the configured
 // store. Local and S3 objects therefore follow the same integrity path and a
 // worker never depends on an API container's filesystem.
-func (s *Server) materializeMediaAsset(ctx context.Context, assetID string) (string, func(), error) {
-	if s.mediaStore == nil {
+func (m *Materializer) Materialize(ctx context.Context, assetID string) (string, func(), error) {
+	if m == nil || m.db == nil || m.store == nil {
 		return "", func() {}, errors.New("media storage is not configured")
 	}
 	var driver, objectKey, contentType, expectedChecksum string
 	var expectedSize int64
-	err := s.db.QueryRow(ctx, `
+	err := m.db.QueryRow(ctx, `
 		SELECT storage_driver, object_key, content_type,
 		       COALESCE(verified_size_bytes, expected_size_bytes, 0),
 		       COALESCE(verified_checksum_sha256, expected_checksum_sha256, '')
@@ -35,10 +46,10 @@ func (s *Server) materializeMediaAsset(ctx context.Context, assetID string) (str
 	if err != nil {
 		return "", func() {}, err
 	}
-	if driver != s.mediaStore.Backend() {
-		return "", func() {}, fmt.Errorf("media asset requires %s storage, worker has %s", driver, s.mediaStore.Backend())
+	if driver != m.store.Backend() {
+		return "", func() {}, fmt.Errorf("media asset requires %s storage, worker has %s", driver, m.store.Backend())
 	}
-	body, info, err := s.mediaStore.Open(ctx, objectKey)
+	body, info, err := m.store.Open(ctx, objectKey)
 	if err != nil {
 		return "", func() {}, err
 	}

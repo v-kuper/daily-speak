@@ -108,6 +108,7 @@ test("API and durable worker have separate process entrypoints", () => {
   const runtime = readFileSync("backend/internal/worker/runtime.go", "utf8");
   const legacyWorkers = readFileSync("backend/internal/httpapi/durable_workers.go", "utf8");
   const mediaCleanup = readFileSync("backend/internal/media/cleanup.go", "utf8");
+	const mediaMaterializer = readFileSync("backend/internal/media/materializer.go", "utf8");
 
   assert.doesNotMatch(apiMain, /RunWorkers|StartBackgroundWorkers/);
   assert.match(workerMain, /RunWorkers/);
@@ -116,6 +117,8 @@ test("API and durable worker have separate process entrypoints", () => {
   assert.doesNotMatch(legacyWorkers, /WorkerConfigFromEnv|workqueue\.Run/);
   assert.match(mediaCleanup, /AbortExpiredUploads|EnqueueExpiredAssets|FinalizeFailure/);
   assert.doesNotMatch(legacyWorkers, /storage_driver|pending_file_deletions/);
+	assert.match(mediaMaterializer, /verified_checksum_sha256|io\.LimitReader/);
+	assert.equal(existsSync("backend/internal/httpapi/media_workers.go"), false);
 });
 
 test("practice generation is an application service outside HTTP transport", () => {
