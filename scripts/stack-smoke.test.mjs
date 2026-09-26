@@ -7,6 +7,7 @@ import {
   extractCookieHeader,
   resolveApiUploadURL,
   selectStackURLs,
+  verifyMobileIdentityConfiguration,
 } from "./smoke-stack.mjs";
 
 const listen = (server) => new Promise((resolve, reject) => {
@@ -109,6 +110,42 @@ test("stack smoke extracts request cookies without retaining Set-Cookie attribut
     "daily_speaking_session=secret; preference=compact",
   );
   assert.equal(extractCookieHeader({ get: () => null }), "");
+});
+
+test("mobile identity smoke proves token validation is configured without creating data", async () => {
+  let capturedURL;
+  let capturedOptions;
+  await verifyMobileIdentityConfiguration(
+    {
+      apiBaseURL: "https://api.example.test:3444",
+      webOrigin: "https://web.example.test:3443",
+    },
+    async (url, options) => {
+      capturedURL = url;
+      capturedOptions = options;
+      return Response.json({ error: { code: "invalid_access_token" } }, { status: 401 });
+    },
+  );
+
+  assert.equal(capturedURL, "https://api.example.test:3444/api/v1/auth/session");
+  assert.equal(capturedOptions.headers.get("Origin"), "https://web.example.test:3443");
+  assert.equal(capturedOptions.headers.get("Authorization"), "Bearer stack-smoke-invalid-token");
+});
+
+test("mobile identity smoke fails on the deployed identity_unavailable response", async () => {
+  await assert.rejects(
+    verifyMobileIdentityConfiguration(
+      {
+        apiBaseURL: "https://api.example.test:3444",
+        webOrigin: "https://web.example.test:3443",
+      },
+      async () => Response.json(
+        { error: { code: "identity_unavailable" } },
+        { status: 503 },
+      ),
+    ),
+    /expected 401, got 503.*identity_unavailable/,
+  );
 });
 
 test("readiness timeout reports the last sanitized endpoint failure without leaking request data", async () => {

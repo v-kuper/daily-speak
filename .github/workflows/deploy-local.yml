@@ -100,6 +100,18 @@ jobs:
             throw "Missing required Cartesia configuration: $($missing -join ', ')."
           }
 
+      - name: Validate mobile identity configuration
+        env:
+          AUTH_ACCESS_TOKEN_SECRET: ${{ secrets.AUTH_ACCESS_TOKEN_SECRET }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:AUTH_ACCESS_TOKEN_SECRET)) {
+            throw "Missing required GitHub Actions secret AUTH_ACCESS_TOKEN_SECRET. Add it under repository Settings > Secrets and variables > Actions > Secrets."
+          }
+          $signingSecret = $env:AUTH_ACCESS_TOKEN_SECRET.Trim()
+          if ($signingSecret.Length -lt 32) {
+            throw "GitHub Actions secret AUTH_ACCESS_TOKEN_SECRET must contain at least 32 characters."
+          }
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -132,6 +144,10 @@ jobs:
           MEDIA_S3_SECRET_ACCESS_KEY: ${{ secrets.MEDIA_S3_SECRET_ACCESS_KEY }}
           MEDIA_S3_SESSION_TOKEN: ${{ secrets.MEDIA_S3_SESSION_TOKEN }}
         run: .\scripts\setup-lan-https-proxy.ps1
+
+      - name: Verify Docker mobile identity configuration
+        run: |
+          docker compose exec -T backend sh -lc 'test "${#AUTH_ACCESS_TOKEN_SECRET}" -ge 32 && echo mobile-identity-config-ok'
 
       - name: Smoke separate HTTP services
         run: |

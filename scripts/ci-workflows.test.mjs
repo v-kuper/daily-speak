@@ -276,6 +276,40 @@ test("mobile signing secret stays server-side and reaches only the backend", () 
   assert.equal(parsedDeployWorkflow.jobs.deploy.env.AUTH_ACCESS_TOKEN_SECRET, undefined);
 });
 
+test("local deploy rejects a missing or weak mobile signing secret before Docker starts", () => {
+  const validation = deployStep("Validate mobile identity configuration");
+  assert.equal(
+    validation?.env?.AUTH_ACCESS_TOKEN_SECRET,
+    "${{ secrets.AUTH_ACCESS_TOKEN_SECRET }}",
+  );
+  assert.match(validation?.run ?? "", /IsNullOrWhiteSpace\(\$env:AUTH_ACCESS_TOKEN_SECRET\)/);
+  assert.match(validation?.run ?? "", /\$signingSecret = \$env:AUTH_ACCESS_TOKEN_SECRET\.Trim\(\)/);
+  assert.match(validation?.run ?? "", /\$signingSecret\.Length -lt 32/);
+  assert.match(validation?.run ?? "", /Settings > Secrets and variables > Actions > Secrets/);
+  assert.doesNotMatch(validation?.run ?? "", /Write-(?:Host|Output)[^\r\n]*AUTH_ACCESS_TOKEN_SECRET/);
+
+  const validationIndex = parsedDeployWorkflow.jobs.deploy.steps.indexOf(validation);
+  const dockerIndex = parsedDeployWorkflow.jobs.deploy.steps.indexOf(
+    deployStep("Build and start local Docker HTTPS stack"),
+  );
+  assert.ok(validationIndex >= 0 && validationIndex < dockerIndex);
+});
+
+test("local deploy verifies mobile identity inside Docker before API smoke checks", () => {
+  const verification = deployStep("Verify Docker mobile identity configuration");
+  const run = verification?.run ?? "";
+  assert.match(run, /docker compose exec -T backend sh -lc/);
+  assert.match(run, /test "\$\{#AUTH_ACCESS_TOKEN_SECRET\}" -ge 32/);
+  assert.match(run, /echo mobile-identity-config-ok/);
+  assert.doesNotMatch(run, /(?:echo|printf|env\s*\|)[^\r\n]*\$AUTH_ACCESS_TOKEN_SECRET/);
+
+  const verificationIndex = parsedDeployWorkflow.jobs.deploy.steps.indexOf(verification);
+  const smokeIndex = parsedDeployWorkflow.jobs.deploy.steps.indexOf(
+    deployStep("Smoke separate HTTP services"),
+  );
+  assert.ok(verificationIndex >= 0 && verificationIndex < smokeIndex);
+});
+
 test("backend operations controls reach Windows deploy without leaking to web or worker", () => {
   const deployEnv = parsedDeployWorkflow.jobs.deploy.env;
   const stepEnv = deployStep("Build and start local Docker HTTPS stack")?.env;

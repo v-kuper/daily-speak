@@ -184,6 +184,25 @@ export async function verifyWebRoute(
   return "web speak route";
 }
 
+export async function verifyMobileIdentityConfiguration(
+  { apiBaseURL, webOrigin },
+  fetchImpl,
+) {
+  const payload = await expectJSON(
+    "mobile identity configuration",
+    await request(fetchImpl, endpoint(apiBaseURL, "/api/v1/auth/session"), {
+      origin: webOrigin,
+      headers: { Authorization: "Bearer stack-smoke-invalid-token" },
+    }),
+    401,
+  );
+  if (payload?.error?.code !== "invalid_access_token") {
+    throw new Error(
+      `mobile identity configuration failed: expected invalid_access_token, got ${JSON.stringify(payload?.error?.code)}.`,
+    );
+  }
+}
+
 export async function waitForServices(
   { webBaseURL, apiBaseURL },
   fetchImpl,
@@ -354,6 +373,8 @@ export async function runStackSmoke({ env = process.env, fetchImpl = fetch } = {
     ) {
       throw new Error("credentialed CORS preflight failed: expected exact origin and allow-credentials=true.");
     }
+
+    await verifyMobileIdentityConfiguration({ apiBaseURL, webOrigin }, fetchImpl);
 
     const email = `stack-smoke-${Date.now()}-${randomUUID()}@example.com`;
     const registerResponse = await request(fetchImpl, endpoint(apiBaseURL, "/api/auth/register"), {
