@@ -92,13 +92,7 @@ func (s *Server) finalizeDurableFailure(ctx context.Context, tx pgx.Tx, job work
 	case workqueue.KindRecordingProcess:
 		return s.recordingRepository.FinalizeFailure(ctx, tx, job.ID, job.ResourceID, message)
 	case workqueue.KindShadowingSynthesize:
-		_, err := tx.Exec(ctx, `
-			UPDATE recordings
-			SET shadowing_status = 'failed', shadowing_audio_url = NULL,
-			    shadowing_error = $3, shadowing_updated_at = NOW(), shadowing_attempt_id = NULL
-			WHERE id = $1 AND shadowing_status = 'processing' AND shadowing_attempt_id = $2`,
-			job.ResourceID, job.ID, shadowingFailureMessage)
-		return err
+		return s.shadowingStore.FinalizeFailure(ctx, tx, job.ID, job.ResourceID)
 	case workqueue.KindMediaDelete:
 		return media.NewCleanup(s.db, s.mediaService, s.mediaStore, s.removeStoredUploads).
 			FinalizeFailure(ctx, tx, job.ResourceID, job.Attempts, message)

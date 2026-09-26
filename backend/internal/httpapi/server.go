@@ -21,6 +21,7 @@ import (
 	practiceollama "daily-speaking-practice/backend/internal/practice/ollamaadapter"
 	"daily-speaking-practice/backend/internal/recording"
 	recordingollama "daily-speaking-practice/backend/internal/recording/ollamaadapter"
+	"daily-speaking-practice/backend/internal/shadowing"
 	"daily-speaking-practice/backend/internal/storage"
 	"daily-speaking-practice/backend/internal/transcription"
 	"daily-speaking-practice/backend/internal/tts"
@@ -63,6 +64,8 @@ type Server struct {
 	recordingProcessor       *recording.Processor
 	guestPreviewStore        *guestpreview.Store
 	guestPreviewProcessor    *guestpreview.Processor
+	shadowingStore           *shadowing.Store
+	shadowingProcessor       *shadowing.Processor
 	sessionCookie            auth.CookieConfig
 	identityTokens           auth.TokenConfig
 	cors                     CORSConfig
@@ -118,14 +121,14 @@ func NewServer(config Config) *Server {
 	if mediaStore == nil && config.DB != nil {
 		mediaStore, _ = storage.NewLocal(resolveUploadsDir())
 	}
+	mediaBucket := strings.TrimSpace(config.MediaBucket)
+	if mediaBucket == "" && mediaStore != nil && mediaStore.Backend() == storage.BackendS3 {
+		mediaBucket = strings.TrimSpace(os.Getenv("MEDIA_S3_BUCKET"))
+	}
 	var mediaService *media.Service
 	if config.DB != nil && mediaStore != nil {
-		bucket := strings.TrimSpace(config.MediaBucket)
-		if bucket == "" && mediaStore.Backend() == storage.BackendS3 {
-			bucket = strings.TrimSpace(os.Getenv("MEDIA_S3_BUCKET"))
-		}
 		mediaService = media.NewService(media.NewSQLRepository(config.DB), mediaStore, media.Config{
-			Bucket: bucket, PartSizeBytes: config.MediaPartSize,
+			Bucket: mediaBucket, PartSizeBytes: config.MediaPartSize,
 			SignedRequestTTL: config.MediaPresignTTL,
 		})
 	}
@@ -157,6 +160,7 @@ func NewServer(config Config) *Server {
 	}
 	recordingRepository := recording.NewSQLProcessingRepository(config.DB)
 	guestPreviewStore := guestpreview.NewStore(config.DB, guestpreview.QueueCapacityFromEnv())
+	shadowingStore := shadowing.NewStore(config.DB)
 	server := &Server{
 		db:                       config.DB,
 		jobStore:                 workqueue.NewStore(config.DB),
@@ -169,6 +173,7 @@ func NewServer(config Config) *Server {
 		recordingPreviewAnalyzer: recordingPreviewAnalyzer,
 		recordingRepository:      recordingRepository,
 		guestPreviewStore:        guestPreviewStore,
+		shadowingStore:           shadowingStore,
 		sessionCookie:            config.SessionCookie,
 		identityTokens:           config.IdentityTokens,
 		cors:                     config.CORS,
@@ -197,6 +202,11 @@ func NewServer(config Config) *Server {
 		Store: guestPreviewStore, Materializer: server.mediaMaterializer,
 		ProbeAudioDuration: probeAudioDuration, Transcribe: transcribeForProcessing,
 		Analyzer: recordingPreviewAnalyzer,
+	})
+	server.shadowingProcessor = shadowing.NewProcessor(shadowing.ProcessorDependencies{
+		Store: shadowingStore, Synthesizer: synthesizer, MediaStore: mediaStore,
+		MediaBucket: mediaBucket, LocalSaver: shadowing.NewLocalSaver(resolveUploadsDir()),
+		NewID: uuid.NewString,
 	})
 	return server
 }

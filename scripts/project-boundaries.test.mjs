@@ -218,3 +218,17 @@ test("guest preview separates transport, processing policy, and SQL storage", ()
   assert.doesNotMatch(transport, /SELECT |UPDATE |INSERT INTO|PostChat|ExtractJSONCandidates/);
   assert.match(transport, /guestpreview\.NormalizeCreate|guestPreviewProcessor\.Process/);
 });
+
+test("shadowing separates transport, media processing, and persistence", () => {
+  const core = ["model.go", "local.go", "processor.go"]
+    .map((name) => readFileSync(`backend/internal/shadowing/${name}`, "utf8"))
+    .join("\n");
+  const store = readFileSync("backend/internal/shadowing/store.go", "utf8");
+  const transport = readFileSync("backend/internal/httpapi/shadowing.go", "utf8");
+
+  assert.doesNotMatch(core, /net\/http|internal\/httpapi|pgx|QueryRow|\.Exec\(/);
+  assert.match(core, /ProcessingStore|MediaStore|LocalSaver/);
+  assert.match(store, /shadowing_attempt_id|media_assets|processing_jobs/);
+  assert.doesNotMatch(transport, /SELECT |UPDATE |INSERT INTO|Synthesize\(|media_assets/);
+  assert.match(transport, /shadowingProcessor\.Process|shadowingStore\.Schedule/);
+});
