@@ -83,5 +83,6 @@ credentials. The web-only health endpoint is `/web-healthz` and returns
 
 The client currently sends `credentials: "include"` to the configured API
 origin. Authentication is a backend-owned, HttpOnly session cookie. Do not add
-token storage or server secrets to the web project. Access/refresh-token support
-is tracked as future work in `../docs/TECH_DEBT.md`.
+token storage or server secrets to the web project. Native clients use the
+backend's `/api/v1/auth/*` access/refresh-token contract independently; moving
+the web sandbox to that contract would be a separate reviewed migration.

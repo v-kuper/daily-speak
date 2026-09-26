@@ -1,10 +1,11 @@
 # Local Windows CI/CD
 
-The Windows deployment runs two independent application containers plus shared
+The Windows deployment runs three independent runtime containers plus shared
 infrastructure on one test host:
 
 - `web`: Next.js pages and `/web-healthz`;
 - `backend`: Go API, uploads, `/healthz`, `/readyz`, `/openapi.json`, and `/docs`;
+- `worker`: durable transcription, analysis, TTS, and cleanup jobs;
 - `postgres`: persistent application database;
 - `lan-https`: two independent Caddy HTTPS sites.
 
@@ -80,11 +81,18 @@ It uses the stable Compose project name `daily-speaking`.
 Required GitHub Actions values:
 
 - secret `CARTESIA_API_KEY`;
-- variable `CARTESIA_VOICE_ID`.
+- variable `CARTESIA_VOICE_ID`;
+- secret `AUTH_ACCESS_TOKEN_SECRET`, containing at least 32 characters generated
+  from a cryptographically secure random source (48 random bytes or more are
+  recommended).
 
-The API key must remain in `Secrets`, never `Variables`, repository files,
-runner system variables, issue text, or logs. The workflow validates only that
-both Cartesia values are non-empty and does not print them.
+Secret values must remain in `Secrets`, never `Variables`, repository files,
+runner system variables, issue text, or logs. The workflow validates Cartesia
+presence and the mobile signing-secret length without printing their values.
+
+Optional secrets are `METRICS_BEARER_TOKEN` for protected metrics and the
+`MEDIA_S3_ACCESS_KEY_ID`, `MEDIA_S3_SECRET_ACCESS_KEY`, and
+`MEDIA_S3_SESSION_TOKEN` credentials used only after switching storage to S3.
 
 Optional repository variables and defaults:
 
@@ -115,18 +123,18 @@ The workflow:
 
 1. checks out the same revision for both projects;
 2. installs from `web/package-lock.json` and runs the repository quality gates;
-3. validates Docker and Cartesia configuration;
-4. runs `.\scripts\setup-lan-https-proxy.ps1`;
+3. validates required Cartesia and mobile-identity configuration before Docker;
+4. verifies Docker and runs `.\scripts\setup-lan-https-proxy.ps1`;
 5. builds and starts `web`, `backend`, `worker`, `postgres`, and `lan-https` together with
    `--remove-orphans` under the stable `daily-speaking` Compose project;
-6. runs `scripts/smoke-stack.mjs` against the separate HTTP origins;
-7. verifies the independent HTTPS health/docs endpoints;
-8. verifies Whisper and Cartesia inside `backend` only.
+6. verifies the signing secret reached the backend container;
+7. runs `scripts/smoke-stack.mjs` against the separate HTTP and trusted HTTPS origins;
+8. verifies Whisper and Cartesia inside the worker container.
 
 The smoke uses a unique temporary account and verifies web health, `/speak`, API
-health, OpenAPI, Swagger, exact credentialed CORS, registration/session, a
-protected call, upload creation/serving/deletion, and logout. It never prints
-the session cookie.
+health/readiness, OpenAPI, Swagger, exact credentialed CORS, mobile identity
+availability, registration/session, a protected call, upload
+creation/serving/deletion, and logout. It never prints cookies or tokens.
 
 `--remove-orphans` is the one-time-safe migration from the former `app` service
 as well as the normal update behavior. Compose removes the old
@@ -170,7 +178,8 @@ both origins. The deployment sets:
 These LAN origins share a site (the same host), so the current HttpOnly session
 cookie can cross the two origins through `credentials: include`. If future web
 and API domains are genuinely cross-site, review the cookie threat model and use
-`SameSite=None` only with HTTPS, or complete the access/refresh-token epic.
+`SameSite=None` only with HTTPS, or migrate the web sandbox to the existing
+Bearer access/refresh-token contract after reviewing browser token storage.
 
 ## Certificate and firewall setup
 
@@ -315,9 +324,9 @@ must not be inferred from static/local tests:
 - API Swagger still lists the retained Feed endpoints and targets port `3444`;
 - a second LAN device loads web HTTPS `3443` and calls API HTTPS `3444`.
 
-For this refactor, those checks are explicitly deferred to the first remote
-CI/CD deployment because the local development environment is not configured to
-run the stack.
+These user-journey checks remain remote deployment acceptance. Static tests do
+not replace them, and the repository does not start local Docker as part of the
+quality suite.
 
 Official GitHub references:
 

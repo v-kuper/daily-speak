@@ -18,7 +18,7 @@ project.
 web/                     Next.js application
 backend/                 Go API/worker, migrations, OpenAPI, Whisper tooling
 scripts/                 repository and deployment utilities
-docs/                    operations and architecture documentation
+docs/                    canonical architecture, operations, and roadmap
 docker-compose.yml       local single-host orchestration
 ```
 
@@ -188,6 +188,8 @@ single `app` service safe. See the Windows runbook before rollback; the
 transition has downtime and requires a current database/uploads backup.
 
 Backend-specific Ollama, Whisper, and Cartesia instructions live in
-[`backend/README.md`](backend/README.md). Follow-up architecture work is tracked
-in [`docs/TECH_DEBT.md`](docs/TECH_DEBT.md), and the scaling/backup/observability
+[`backend/README.md`](backend/README.md). The canonical documentation index is
+[`docs/README.md`](docs/README.md), the current system boundary is documented in
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), follow-up work is tracked in
+[`docs/TECH_DEBT.md`](docs/TECH_DEBT.md), and the scaling/backup/observability
 runbook lives in [`docs/BACKEND_OPERATIONS.md`](docs/BACKEND_OPERATIONS.md).

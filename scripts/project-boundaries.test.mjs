@@ -25,6 +25,36 @@ test("root package only orchestrates independent projects", () => {
   assert.match(rootPackage.scripts.quality, /backend:test/);
 });
 
+test("repository keeps one canonical documentation set and ignores local tooling state", () => {
+  for (const path of [
+    "docs/README.md",
+    "docs/ARCHITECTURE.md",
+    "docs/api-compatibility.md",
+    "docs/BACKEND_OPERATIONS.md",
+    "docs/LOCAL_WINDOWS_CICD.md",
+    "docs/TECH_DEBT.md",
+  ]) {
+    assert.equal(existsSync(path), true, `missing canonical document ${path}`);
+  }
+  for (const path of [
+    "docs/EA_AGENT_DESIGN_BRIEF.md",
+    "docs/FUNCTIONAL_REQUIREMENTS_DESIGN.md",
+    "docs/superpowers/plans/2026-09-21-web-backend-separation.md",
+    "web/Daily Speaking Practice.html",
+    "web/design-qa.md",
+  ]) {
+    assert.equal(existsSync(path), false, `obsolete artifact returned: ${path}`);
+  }
+
+  const documentationIndex = readFileSync("docs/README.md", "utf8");
+  assert.match(documentationIndex, /ARCHITECTURE\.md/);
+  assert.match(documentationIndex, /Temporary implementation[\s\S]*do not belong/);
+  for (const path of [".idea/workspace.xml", ".ai/mcp/mcp.json"]) {
+    const result = spawnSync("git", ["check-ignore", "--quiet", "--no-index", path]);
+    assert.equal(result.status, 0, `${path} must remain local-only`);
+  }
+});
+
 test("frontend source is not left at repository root", () => {
   assert.equal(existsSync("app"), false);
   assert.equal(existsSync("src"), false);
