@@ -9,42 +9,30 @@ import (
 
 	"daily-speaking-practice/backend/internal/auth"
 	"daily-speaking-practice/backend/internal/domain"
+	"daily-speaking-practice/backend/internal/recording"
 )
 
-type suggestionCategory string
+type suggestionCategory = recording.SuggestionCategory
 
-type suggestionSeverity string
+type suggestionSeverity = recording.SuggestionSeverity
 
 const (
-	categoryLanguageSwitch    suggestionCategory = "language_switch"
-	categoryVerbGrammar       suggestionCategory = "verb_grammar"
-	categoryNounsDeterminers  suggestionCategory = "nouns_determiners"
-	categoryPrepositions      suggestionCategory = "prepositions"
-	categoryVocabulary        suggestionCategory = "vocabulary"
-	categorySentenceStructure suggestionCategory = "sentence_structure"
-	categoryNaturalness       suggestionCategory = "naturalness"
+	categoryLanguageSwitch    = recording.CategoryLanguageSwitch
+	categoryVerbGrammar       = recording.CategoryVerbGrammar
+	categoryNounsDeterminers  = recording.CategoryNounsDeterminers
+	categoryPrepositions      = recording.CategoryPrepositions
+	categoryVocabulary        = recording.CategoryVocabulary
+	categorySentenceStructure = recording.CategorySentenceStructure
+	categoryNaturalness       = recording.CategoryNaturalness
 
-	severityMajor  suggestionSeverity = "major"
-	severityMedium suggestionSeverity = "medium"
-	severityMinor  suggestionSeverity = "minor"
+	severityMajor  = recording.SeverityMajor
+	severityMedium = recording.SeverityMedium
+	severityMinor  = recording.SeverityMinor
 )
 
-type learningReference struct {
-	ID      string `json:"id"`
-	Title   string `json:"title"`
-	Summary string `json:"summary"`
-	URL     string `json:"url,omitempty"`
-}
+type learningReference = recording.LearningReference
 
-type suggestion struct {
-	Wrong             string             `json:"wrong"`
-	Right             string             `json:"right"`
-	Explanation       string             `json:"explanation"`
-	Category          suggestionCategory `json:"category,omitempty"`
-	Severity          suggestionSeverity `json:"severity,omitempty"`
-	RuleID            string             `json:"ruleId,omitempty"`
-	LearningReference *learningReference `json:"learningReference,omitempty"`
-}
+type suggestion = recording.Suggestion
 
 type recordingResponse struct {
 	ID                  string                  `json:"id"`
@@ -140,90 +128,27 @@ func stringAny(value any) string {
 }
 
 func normalizeSuggestions(input []byte, limit int) []suggestion {
-	if len(input) == 0 {
-		return []suggestion{}
-	}
-	var raw []map[string]any
-	if err := json.Unmarshal(input, &raw); err != nil {
-		return []suggestion{}
-	}
-	out := []suggestion{}
-	for _, item := range raw {
-		wrong := strings.TrimSpace(stringAny(firstValue(item, "wrong", "original", "mistake", "incorrect")))
-		right := strings.TrimSpace(stringAny(firstValue(item, "right", "correct", "correction", "fixed")))
-		explanation := strings.TrimSpace(stringAny(firstValue(item, "explanation", "reason", "note", "comment")))
-		if wrong == "" || right == "" || explanation == "" {
-			continue
-		}
-		category, _ := parseSuggestionCategory(stringAny(item["category"]))
-		severity, _ := parseSuggestionSeverity(stringAny(item["severity"]))
-		ruleID := strings.TrimSpace(stringAny(item["ruleId"]))
-		reference := learningReferenceFor(ruleID, category)
-		if reference == nil {
-			ruleID = ""
-		}
-		out = append(out, suggestion{
-			Wrong:             wrong,
-			Right:             right,
-			Explanation:       explanation,
-			Category:          category,
-			Severity:          severity,
-			RuleID:            ruleID,
-			LearningReference: reference,
-		})
-		if limit > 0 && len(out) >= limit {
-			break
-		}
-	}
-	return out
+	return recording.NormalizeSuggestions(input, limit)
 }
 
 func parseSuggestionCategory(value string) (suggestionCategory, bool) {
-	category := suggestionCategory(strings.TrimSpace(value))
-	return category, validSuggestionCategory(category)
+	return recording.ParseSuggestionCategory(value)
 }
 
 func validSuggestionCategory(category suggestionCategory) bool {
-	switch category {
-	case categoryLanguageSwitch,
-		categoryVerbGrammar,
-		categoryNounsDeterminers,
-		categoryPrepositions,
-		categoryVocabulary,
-		categorySentenceStructure,
-		categoryNaturalness:
-		return true
-	default:
-		return false
-	}
+	return recording.ValidSuggestionCategory(category)
 }
 
 func parseSuggestionSeverity(value string) (suggestionSeverity, bool) {
-	severity := suggestionSeverity(strings.TrimSpace(value))
-	return severity, validSuggestionSeverity(severity)
+	return recording.ParseSuggestionSeverity(value)
 }
 
 func validSuggestionSeverity(severity suggestionSeverity) bool {
-	switch severity {
-	case severityMajor, severityMedium, severityMinor:
-		return true
-	default:
-		return false
-	}
+	return recording.ValidSuggestionSeverity(severity)
 }
 
 func withoutLearningReference(item suggestion) suggestion {
-	item.LearningReference = nil
-	return item
-}
-
-func firstValue(item map[string]any, keys ...string) any {
-	for _, key := range keys {
-		if value, ok := item[key]; ok {
-			return value
-		}
-	}
-	return nil
+	return recording.WithoutLearningReference(item)
 }
 
 func normalizeURLInterests(values url.Values) []string {
