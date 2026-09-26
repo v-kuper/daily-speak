@@ -203,3 +203,18 @@ test("recording analysis owns its policy outside HTTP and provider adapters", ()
     assert.equal(existsSync(`backend/internal/httpapi/${name}`), false, `${name} returned to transport`);
   }
 });
+
+test("guest preview separates transport, processing policy, and SQL storage", () => {
+  const model = readFileSync("backend/internal/guestpreview/model.go", "utf8");
+  const processor = readFileSync("backend/internal/guestpreview/processor.go", "utf8");
+  const store = ["store.go", "processing_store.go"]
+    .map((name) => readFileSync(`backend/internal/guestpreview/${name}`, "utf8"))
+    .join("\n");
+  const transport = readFileSync("backend/internal/httpapi/guest_preview.go", "utf8");
+
+  assert.doesNotMatch(model + processor, /net\/http|internal\/httpapi|pgx|QueryRow|\.Exec\(/);
+  assert.match(processor, /ProcessingStore|PreviewAnalyzer/);
+  assert.match(store, /guest_previews|processing_jobs|media_assets/);
+  assert.doesNotMatch(transport, /SELECT |UPDATE |INSERT INTO|PostChat|ExtractJSONCandidates/);
+  assert.match(transport, /guestpreview\.NormalizeCreate|guestPreviewProcessor\.Process/);
+});

@@ -88,12 +88,7 @@ func (s *Server) handleDurableJob(ctx context.Context, job workqueue.Job) error 
 func (s *Server) finalizeDurableFailure(ctx context.Context, tx pgx.Tx, job workqueue.Job, message string) error {
 	switch job.Kind {
 	case workqueue.KindGuestPreview:
-		_, err := tx.Exec(ctx, `
-			UPDATE guest_previews
-			SET state = 'failed', processing_error = $3, updated_at = NOW()
-			WHERE id = $1 AND preview_job_id = $2 AND state IN ('queued', 'processing')`,
-			job.ResourceID, job.ID, truncateRunes(message, 500))
-		return err
+		return s.guestPreviewStore.FinalizeFailure(ctx, tx, job.ID, job.ResourceID, message)
 	case workqueue.KindRecordingProcess:
 		return s.recordingRepository.FinalizeFailure(ctx, tx, job.ID, job.ResourceID, message)
 	case workqueue.KindShadowingSynthesize:

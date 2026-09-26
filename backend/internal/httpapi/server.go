@@ -13,6 +13,7 @@ import (
 	"daily-speaking-practice/backend/internal/ai"
 	"daily-speaking-practice/backend/internal/auth"
 	"daily-speaking-practice/backend/internal/db"
+	"daily-speaking-practice/backend/internal/guestpreview"
 	"daily-speaking-practice/backend/internal/logging"
 	"daily-speaking-practice/backend/internal/media"
 	"daily-speaking-practice/backend/internal/operations"
@@ -60,6 +61,8 @@ type Server struct {
 	recordingPreviewAnalyzer recording.PreviewAnalyzer
 	recordingRepository      *recording.SQLProcessingRepository
 	recordingProcessor       *recording.Processor
+	guestPreviewStore        *guestpreview.Store
+	guestPreviewProcessor    *guestpreview.Processor
 	sessionCookie            auth.CookieConfig
 	identityTokens           auth.TokenConfig
 	cors                     CORSConfig
@@ -142,7 +145,18 @@ func NewServer(config Config) *Server {
 	if probeAudioDuration == nil {
 		probeAudioDuration = probeAudioDurationWithFFprobe
 	}
+	transcribeForProcessing := func(ctx context.Context, path string) (string, error) {
+		transcript, err := transcribeAudio(ctx, path)
+		if err != nil {
+			var typed transcription.Error
+			if errors.As(err, &typed) {
+				return "", errors.New(typed.Message)
+			}
+		}
+		return transcript, err
+	}
 	recordingRepository := recording.NewSQLProcessingRepository(config.DB)
+	guestPreviewStore := guestpreview.NewStore(config.DB, guestpreview.QueueCapacityFromEnv())
 	server := &Server{
 		db:                       config.DB,
 		jobStore:                 workqueue.NewStore(config.DB),
@@ -154,6 +168,7 @@ func NewServer(config Config) *Server {
 		recordingRewriter:        recordingRewriter,
 		recordingPreviewAnalyzer: recordingPreviewAnalyzer,
 		recordingRepository:      recordingRepository,
+		guestPreviewStore:        guestPreviewStore,
 		sessionCookie:            config.SessionCookie,
 		identityTokens:           config.IdentityTokens,
 		cors:                     config.CORS,
@@ -173,19 +188,15 @@ func NewServer(config Config) *Server {
 		Materializer:       server.mediaMaterializer,
 		ResolveLegacyAudio: storedUploadPath,
 		ProbeAudioDuration: probeAudioDuration,
-		Transcribe: func(ctx context.Context, path string) (string, error) {
-			transcript, err := transcribeAudio(ctx, path)
-			if err != nil {
-				var typed transcription.Error
-				if errors.As(err, &typed) {
-					return "", errors.New(typed.Message)
-				}
-			}
-			return transcript, err
-		},
-		Analyzer: recordingAnalyzer,
-		Rewriter: recordingRewriter,
-		NewID:    uuid.NewString,
+		Transcribe:         transcribeForProcessing,
+		Analyzer:           recordingAnalyzer,
+		Rewriter:           recordingRewriter,
+		NewID:              uuid.NewString,
+	})
+	server.guestPreviewProcessor = guestpreview.NewProcessor(guestpreview.ProcessorDependencies{
+		Store: guestPreviewStore, Materializer: server.mediaMaterializer,
+		ProbeAudioDuration: probeAudioDuration, Transcribe: transcribeForProcessing,
+		Analyzer: recordingPreviewAnalyzer,
 	})
 	return server
 }
