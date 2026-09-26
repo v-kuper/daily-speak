@@ -66,6 +66,16 @@ func TestRecordingRetryWorkResumesTheStoredFailedStage(t *testing.T) {
 			wantAudio: filepath.Join(uploadsDir, "recordings", "user-1", "recording-1.webm"),
 		},
 		{
+			name: "transcription accepts private media asset",
+			recording: recordingResponse{
+				Status: "failed", ProcessingStage: stringPointer("transcribing"),
+				Media: &recordingMediaResponse{Audio: &recordingMediaAssetResponse{
+					AssetID: "audio-asset", DownloadPath: "/api/v1/media/audio-asset/download",
+				}},
+			},
+			wantStage: "transcribing",
+		},
+		{
 			name: "analysis reuses transcript",
 			recording: recordingResponse{
 				Status: "failed", ProcessingStage: stringPointer("suggestions"), Transcript: "I go yesterday.",

@@ -14,6 +14,7 @@ import (
 	"daily-speaking-practice/backend/internal/auth"
 	"daily-speaking-practice/backend/internal/db"
 	"daily-speaking-practice/backend/internal/httpapi"
+	"daily-speaking-practice/backend/internal/storage"
 )
 
 func main() {
@@ -47,9 +48,21 @@ func main() {
 	if err := database.Migrate(ctx); err != nil {
 		log.Fatalf("database migration failed: %v", err)
 	}
+	mediaConfig, err := storage.ConfigFromEnv()
+	if err != nil {
+		log.Fatalf("media storage configuration failed: %v", err)
+	}
+	mediaStore, err := storage.New(ctx, mediaConfig)
+	if err != nil {
+		log.Fatalf("media storage initialization failed: %v", err)
+	}
 
 	addr := envDefault("APP_ADDR", ":3000")
-	apiServer := httpapi.NewServer(httpapi.Config{DB: database, CORS: cors, SessionCookie: sessionCookie, IdentityTokens: identityTokens})
+	apiServer := httpapi.NewServer(httpapi.Config{
+		DB: database, CORS: cors, SessionCookie: sessionCookie, IdentityTokens: identityTokens,
+		MediaStore: mediaStore, MediaBucket: mediaConfig.S3Bucket,
+		MediaPartSize: mediaConfig.MultipartPartSize, MediaPresignTTL: mediaConfig.PresignTTL,
+	})
 	server := &http.Server{
 		Addr:              addr,
 		Handler:           apiServer.Handler(),

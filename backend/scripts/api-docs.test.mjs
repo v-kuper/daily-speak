@@ -28,6 +28,8 @@ const serverSource = readFileSync("internal/httpapi/server.go", "utf8");
 const routeSource = [
   serverSource,
   readFileSync("internal/httpapi/v1.go", "utf8"),
+  readFileSync("internal/httpapi/media_v1.go", "utf8"),
+  readFileSync("internal/httpapi/recordings_create_v1.go", "utf8"),
   readFileSync("internal/httpapi/recording_sessions_handlers.go", "utf8"),
   readFileSync("internal/httpapi/feed_handlers.go", "utf8"),
 ].join("\n");
@@ -38,6 +40,10 @@ const documentedAPIRoutes = [
   "/api/v1/auth/refresh", "/api/v1/auth/session", "/api/v1/auth/logout", "/api/v1/auth/logout-all",
   "/api/v1/auth/sessions", "/api/v1/auth/sessions/{sessionId}",
   "/api/v1/recordings", "/api/v1/recordings/{recordingId}",
+  "/api/v1/media/uploads", "/api/v1/media/uploads/{uploadId}",
+  "/api/v1/media/uploads/{uploadId}/parts", "/api/v1/media/uploads/{uploadId}/complete",
+  "/api/v1/media/{assetId}/download", "/api/v1/media/uploads/{uploadId}/parts/{partNumber}",
+  "/api/v1/media/local/assets/{assetId}/content",
   "/api/auth/register", "/api/auth/login", "/api/auth/session", "/api/auth/logout",
   "/api/daily-questions", "/api/topic-guidance", "/api/study-words", "/api/user/data",
   "/api/user/interests", "/api/user/ollama-model", "/api/user/subscription", "/api/user/english-level",
@@ -68,6 +74,11 @@ const protectedOperations = [
 const mutationBodies = [
   ["/api/v1/auth/register", "post", "application/json"], ["/api/v1/auth/login", "post", "application/json"],
   ["/api/v1/auth/refresh", "post", "application/json"],
+  ["/api/v1/recordings", "post", "application/json"],
+  ["/api/v1/media/uploads", "post", "application/json"],
+  ["/api/v1/media/uploads/{uploadId}/parts", "post", "application/json"],
+  ["/api/v1/media/uploads/{uploadId}/complete", "post", "application/json"],
+  ["/api/v1/media/uploads/{uploadId}/parts/{partNumber}", "put", "application/octet-stream"],
   ["/api/auth/register", "post", "application/json"], ["/api/auth/login", "post", "application/json"],
   ["/api/user/interests", "put", "application/json"], ["/api/user/english-level", "put", "application/json"],
   ["/api/user/recordings", "post", "application/json"], ["/api/recording-sessions", "post", "application/json"],
@@ -80,10 +91,12 @@ const mutationBodies = [
 ];
 
 const expectedQueryParameters = new Map([
-  ["/api/v1/recordings", ["limit", "cursor"]],
-  ["/api/daily-questions", ["date", "refresh", "interest", "level", "avoid"]],
-  ["/api/topic-guidance", ["topic", "refresh", "interest", "level", "avoidQuestion", "avoidWord"]],
-  ["/api/study-words", ["refresh", "interest", "level", "avoidWord"]],
+  ["get /api/v1/recordings", ["limit", "cursor"]],
+  ["put /api/v1/media/uploads/{uploadId}/parts/{partNumber}", ["sizeBytes", "checksumSha256", "expires", "signature"]],
+  ["get /api/v1/media/local/assets/{assetId}/content", ["expires", "signature"]],
+  ["get /api/daily-questions", ["date", "refresh", "interest", "level", "avoid"]],
+  ["get /api/topic-guidance", ["topic", "refresh", "interest", "level", "avoidQuestion", "avoidWord"]],
+  ["get /api/study-words", ["refresh", "interest", "level", "avoidWord"]],
 ]);
 
 test("OpenAPI check accepts canonical JSON checked out with Windows line endings", (t) => {
@@ -151,6 +164,13 @@ test("OpenAPI inventories every API and upload route, including retained Feed en
     ["/api/v1/auth/sessions/{sessionId}", /strings\.HasPrefix\(path, "\/api\/v1\/auth\/sessions\/"\)/],
     ["/api/v1/recordings", /path == "\/api\/v1\/recordings"/],
     ["/api/v1/recordings/{recordingId}", /strings\.HasPrefix\(path, "\/api\/v1\/recordings\/"\)/],
+    ["/api/v1/media/uploads", /path == "\/api\/v1\/media\/uploads"/],
+    ["/api/v1/media/uploads/{uploadId}", /strings\.HasPrefix\(path, "\/api\/v1\/media\/uploads\/"\)/],
+    ["/api/v1/media/uploads/{uploadId}/parts", /parts\[1\] == "parts"/],
+    ["/api/v1/media/uploads/{uploadId}/complete", /parts\[1\] == "complete"/],
+    ["/api/v1/media/{assetId}/download", /strings\.HasSuffix\(path, "\/download"\)/],
+    ["/api/v1/media/uploads/{uploadId}/parts/{partNumber}", /mux\.HandleFunc\("\/api\/v1\/media\/uploads\/"/],
+    ["/api/v1/media/local/assets/{assetId}/content", /mux\.HandleFunc\("\/api\/v1\/media\/local\/"/],
     ["/api/recording-sessions/{sessionId}/chunks", /action == "chunks"/],
     ["/api/recording-sessions/{sessionId}/audio", /action == "audio"/],
     ["/api/recording-sessions/{sessionId}/finish", /action == "finish"/],
@@ -186,7 +206,10 @@ test("mobile identity and v1 resources declare bearer authentication", () => {
     ["/api/v1/auth/session", "get"], ["/api/v1/auth/logout", "post"],
     ["/api/v1/auth/logout-all", "post"], ["/api/v1/auth/sessions", "get"],
     ["/api/v1/auth/sessions/{sessionId}", "delete"], ["/api/v1/recordings", "get"],
-    ["/api/v1/recordings/{recordingId}", "get"],
+    ["/api/v1/recordings", "post"], ["/api/v1/recordings/{recordingId}", "get"],
+    ["/api/v1/media/uploads", "post"], ["/api/v1/media/uploads/{uploadId}", "get"],
+    ["/api/v1/media/uploads/{uploadId}", "delete"], ["/api/v1/media/uploads/{uploadId}/parts", "post"],
+    ["/api/v1/media/uploads/{uploadId}/complete", "post"], ["/api/v1/media/{assetId}/download", "get"],
   ];
   for (const [path, method] of bearerOperations) {
     assert.ok(usesBearerAuth(openapi.paths[path][method]), `${method.toUpperCase()} ${path} needs bearerAuth`);
@@ -203,7 +226,7 @@ test("path and query parameters are declared for every operation that uses them"
       assert.ok(parameter, `${method.toUpperCase()} ${path} needs path parameter ${name[1]}`);
       assert.equal(parameter.required, true, `${method.toUpperCase()} ${path} path parameter ${name[1]} must be required`);
     }
-    for (const name of expectedQueryParameters.get(path) ?? []) {
+    for (const name of expectedQueryParameters.get(`${method} ${path}`) ?? []) {
       assert.ok(parameters.some((parameter) => parameter.in === "query" && parameter.name === name), `${method.toUpperCase()} ${path} needs query parameter ${name}`);
     }
   }
@@ -221,6 +244,8 @@ test("shared externally visible schemas have representative examples", () => {
     ["Recording", ["id", "topic", "duration", "timestamp", "status", "transcript", "correctedTranscript", "suggestions", "practiceType", "shadowingStatus", "shadowingAudioUrl", "shadowingError", "shadowingUpdatedAt"]],
     ["Suggestion", ["wrong", "right", "explanation"]],
     ["SubscriptionState", ["isSubscriber", "subscriptionExpiresAt", "subscriptionCancelled"]],
+    ["MediaAsset", ["id", "state", "purpose", "contentType", "sizeBytes", "checksum"]],
+    ["MediaUpload", ["id", "state", "partSizeBytes", "partCount", "expiresAt", "uploadedParts"]],
     ["FeedPost", ["id", "sourceRecordingId", "topic", "duration", "transcript", "practiceType", "sourceTimestamp", "createdAt", "authorMaskedEmail", "replyCount", "reactions"]],
     ["FeedReply", ["id", "postId", "duration", "timestamp", "createdAt", "authorMaskedEmail", "reactions"]],
     ["ErrorResponse", ["error"]],
@@ -259,4 +284,28 @@ test("v1 operations expose request IDs and structured stable errors", () => {
   }
   assert.match(compatibilityPolicy, /at least 90 days/);
   assert.match(compatibilityPolicy, /new major path/);
+});
+
+test("mobile media contract keeps mutations idempotent and storage requests opaque", () => {
+  for (const [path, method] of [
+    ["/api/v1/media/uploads", "post"],
+    ["/api/v1/recordings", "post"],
+  ]) {
+    const parameters = operationParameters(path, openapi.paths[path][method]);
+    const key = parameters.find((parameter) => parameter.in === "header" && parameter.name === "Idempotency-Key");
+    assert.ok(key?.required, `${method.toUpperCase()} ${path} needs required Idempotency-Key`);
+  }
+
+  const createUpload = openapi.paths["/api/v1/media/uploads"].post;
+  assert.equal(createUpload.responses["403"].$ref, "#/components/responses/V1Forbidden");
+  assert.equal(createUpload.responses["415"].$ref, "#/components/responses/V1UnsupportedMediaType");
+  assert.equal(createUpload.responses["422"].$ref, "#/components/responses/V1UnprocessableEntity");
+
+  const signedPart = openapi.paths["/api/v1/media/uploads/{uploadId}/parts/{partNumber}"].put;
+  const signedContent = openapi.paths["/api/v1/media/local/assets/{assetId}/content"].get;
+  assert.deepEqual(signedPart.security, []);
+  assert.deepEqual(signedContent.security, []);
+  assert.equal(signedPart.requestBody.content["application/octet-stream"].schema.format, "binary");
+  assert.match(openapi.components.schemas.SignedMediaRequest.properties.url.description, /opaque/i);
+  assert.match(openapi.components.schemas.SignedMediaRequest.properties.url.description, /Do not persist/i);
 });

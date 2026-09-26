@@ -23,7 +23,28 @@ func resolveUploadsDir() string {
 }
 
 func uploadsHandler() http.Handler {
-	return http.StripPrefix(uploadsURLPrefix, http.FileServer(http.Dir(resolveUploadsDir())))
+	legacyFiles := http.StripPrefix(uploadsURLPrefix, http.FileServer(http.Dir(resolveUploadsDir())))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
+			return
+		}
+		// Only the two historical public URL shapes remain available here.
+		// New v1 objects, multipart state and metadata share the mounted local
+		// root but must only be reachable through owner-checked signed routes.
+		segments := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.Path, uploadsURLPrefix), "/"), "/")
+		if len(segments) != 3 || (segments[0] != "recordings" && segments[0] != "feed-replies") {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Not found"})
+			return
+		}
+		for _, segment := range segments {
+			if !isSafeStoredUploadSegment(segment) {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": "Not found"})
+				return
+			}
+		}
+		legacyFiles.ServeHTTP(w, r)
+	})
 }
 
 func (s *Server) handleShadowingUpload(w http.ResponseWriter, r *http.Request) {

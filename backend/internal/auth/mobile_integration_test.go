@@ -39,6 +39,15 @@ func TestMobileIdentityLifecycle(t *testing.T) {
 	if err != nil || guestIdentity.Kind != "guest" || guestIdentity.User != nil {
 		t.Fatalf("authenticate guest: identity=%+v err=%v", guestIdentity, err)
 	}
+	guestAssetID := uuid.NewString()
+	if _, err := database.Exec(ctx, `
+		INSERT INTO media_assets
+		  (id, owner_principal_id, purpose, state, storage_driver, object_key, content_type,
+		   expected_size_bytes, expected_checksum_sha256)
+		VALUES ($1, $2, 'recording_audio', 'pending', 'local', $3, 'audio/webm', 4, $4)`,
+		guestAssetID, guest.Identity.PrincipalID, "v1/guest/recording/"+guestAssetID+".webm", strings.Repeat("a", 64)); err != nil {
+		t.Fatalf("insert guest media asset: %v", err)
+	}
 
 	email := fmt.Sprintf("mobile-%s@example.com", uuid.NewString())
 	credentials, err := ValidateCredentials(email, "password123")
@@ -64,6 +73,10 @@ func TestMobileIdentityLifecycle(t *testing.T) {
 	var mergeTarget string
 	if err := database.QueryRow(ctx, `SELECT user_principal_id FROM principal_merges WHERE guest_principal_id = $1`, guest.Identity.PrincipalID).Scan(&mergeTarget); err != nil || mergeTarget != registered.Identity.PrincipalID {
 		t.Fatalf("guest merge was not persisted atomically: target=%q err=%v", mergeTarget, err)
+	}
+	var assetOwner string
+	if err := database.QueryRow(ctx, `SELECT owner_principal_id FROM media_assets WHERE id = $1`, guestAssetID).Scan(&assetOwner); err != nil || assetOwner != registered.Identity.PrincipalID {
+		t.Fatalf("guest media ownership was not transferred: owner=%q err=%v", assetOwner, err)
 	}
 	var storedRefreshHash string
 	if err := database.QueryRow(ctx, `SELECT token_hash FROM refresh_tokens WHERE session_id = $1 AND consumed_at IS NULL`, registered.Session.ID).Scan(&storedRefreshHash); err != nil {

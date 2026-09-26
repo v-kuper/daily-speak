@@ -62,6 +62,11 @@ func recordingRetryWorkFor(recording recordingResponse, englishLevel string) (re
 	}
 	switch work.Stage {
 	case "transcribing":
+		if recording.Media != nil && recording.Media.Audio != nil {
+			// Asset-backed recordings are materialized by runRecordingJob after
+			// the durable retry is claimed, so no legacy filesystem path is needed.
+			break
+		}
 		if recording.AudioDataURL == nil {
 			return recordingRetryWork{}, errRecordingRetryUnavailable
 		}

@@ -234,6 +234,16 @@ func mergeGuestPrincipal(ctx context.Context, tx pgx.Tx, guest *Identity, userPr
 		ON CONFLICT (guest_principal_id) DO NOTHING`, guestPrincipalID, userPrincipalID, now); err != nil {
 		return err
 	}
+	// Media ownership follows the principal in the same transaction as the
+	// identity merge. Guest uploads are enabled by a later epic, but keeping the
+	// transfer here prevents a future registration retry from orphaning an
+	// already uploaded object or exposing it through the old principal.
+	if _, err := tx.Exec(ctx, `
+		UPDATE media_assets
+		SET owner_principal_id = $2, updated_at = $3
+		WHERE owner_principal_id = $1`, guestPrincipalID, userPrincipalID, now); err != nil {
+		return err
+	}
 	return revokePrincipalSessionsTx(ctx, tx, guestPrincipalID, "principal_merged", now)
 }
 

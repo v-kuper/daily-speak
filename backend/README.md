@@ -59,6 +59,50 @@ open http://localhost:3219/docs
 The OpenAPI document includes the retained Feed endpoints even though the
 current web client does not expose Feed UI.
 
+## Migrate legacy local media to S3
+
+Legacy `/uploads/...` assets are moved only by the explicit
+`cmd/media-migrate` command. It is never started by the API, worker, Docker
+Compose, migrations, or CI deployment. The command always reads from
+`MEDIA_LOCAL_DIR` (falling back to the existing `UPLOADS_DIR`) and never deletes
+or modifies source media files.
+
+Configure the S3-compatible target and run the default dry-run first:
+
+```bash
+cd backend
+DATABASE_URL=postgres://postgres:postgres@localhost:5432/daily_speaking \
+MEDIA_STORAGE_DRIVER=s3 \
+MEDIA_LOCAL_DIR=/path/to/current/uploads \
+MEDIA_S3_REGION=us-east-1 \
+MEDIA_S3_BUCKET=daily-speaking-private \
+go run ./cmd/media-migrate
+```
+
+Dry-run hashes and audits at most 100 legacy assets by default. It does not
+write S3 objects or update PostgreSQL. After reviewing its summary, copy and
+publish one bounded batch with:
+
+```bash
+go run ./cmd/media-migrate --apply --limit=100
+```
+
+Use `--asset-id=<media-asset-id>` for a targeted retry. S3 credentials and an
+optional `MEDIA_S3_ENDPOINT`/`MEDIA_S3_FORCE_PATH_STYLE` are supplied through
+the same server-only variables as the API and worker. Each apply run:
+
+1. reads and hashes the local source;
+2. writes to a deterministic private S3 key and verifies size and SHA-256;
+3. atomically switches `media_assets.storage_driver`, bucket, key, and verified
+   metadata only after verification succeeds.
+
+The operation is resumable: an S3 object left by an interrupted run is reused
+only when its size and checksum match. Concurrent runs use a conditional
+database update. Failures leave the database pointed at the local source, and
+the source file is always retained. Repeat bounded apply runs until a dry-run
+reports both `planned=0` and `failed=0`. Back up PostgreSQL and the uploads directory before a
+production migration.
+
 The v1 surface includes mobile identity under `/api/v1/auth/*`, paginated
 `GET /api/v1/recordings`, and `GET /api/v1/recordings/{recordingId}`. Every
 response includes `X-Request-ID`; v1 errors include a stable machine-readable
@@ -84,8 +128,26 @@ Runtime and storage:
   `DATABASE_URL` must then use `sslmode=verify-full` and a certificate trusted
   by the API host (or a configured `sslrootcert`). Unverified TLS and plaintext
   fallback connections are rejected. The local Docker default remains `false`;
-- `UPLOADS_DIR`: persistent media directory, default `public/uploads` outside
-  Docker and `/app/uploads` in the image;
+- `MEDIA_STORAGE_DRIVER`: media backend, default `local`. The current Windows
+  deployment pins this value to `local`, so API and worker keep using the same
+  uploads bind mount without requiring S3 credentials;
+- `UPLOADS_DIR`: persistent media directory used by the `local` driver, default
+  `public/uploads` outside Docker and `/app/uploads` in the image;
+- `MEDIA_S3_REGION`, `MEDIA_S3_BUCKET`, and optional `MEDIA_S3_ENDPOINT`:
+  server-only S3-compatible target used only when the driver is explicitly
+  switched to `s3`;
+- `MEDIA_S3_FORCE_PATH_STYLE`: enable path-style addressing for providers that
+  require it, default `false`;
+- `MEDIA_S3_ACCESS_KEY_ID`, `MEDIA_S3_SECRET_ACCESS_KEY`, and optional
+  `MEDIA_S3_SESSION_TOKEN`: server-only credentials. Keep them out of repository
+  files and web configuration. Access key and secret key must be supplied
+  together when explicit credentials are used;
+- `MEDIA_UPLOAD_URL_TTL`: lifetime of a signed media upload request, default
+  `15m`;
+- `MEDIA_MULTIPART_PART_SIZE_BYTES`: multipart upload part size, default
+  `8388608` (8 MiB);
+- `MEDIA_SWEEP_INTERVAL`: worker interval for aborting expired multipart uploads
+  and deleting unattached expired media, default `15m`;
 - `SERVER_LOG_LEVEL`: log threshold such as `info` or `debug`.
 
 Durable worker controls:
@@ -135,9 +197,11 @@ AI and media variables are grouped in the example file:
 - `WHISPER_*` configures the Python or `whisper.cpp` transcription backend;
 - `CARTESIA_*` configures pronunciation audio synthesis.
 
-`CARTESIA_API_KEY` is a secret. Never commit it or expose it through web
-configuration. Uploaded media and Whisper models/cache must use persistent
-storage in production.
+`CARTESIA_API_KEY` and the `MEDIA_S3_*` credential values are secrets. Never
+commit them or expose them through web configuration. S3 settings are optional
+in local mode; an unset S3 secret must not block the current Windows deployment.
+Uploaded media and Whisper models/cache must use persistent storage in
+production.
 
 ## Tests and contract checks
 

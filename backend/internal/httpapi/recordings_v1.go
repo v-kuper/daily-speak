@@ -33,7 +33,8 @@ func (s *Server) handleListRecordingsV1(w http.ResponseWriter, r *http.Request) 
 		  id, topic, duration, timestamp, transcript, corrected_transcript, suggestions,
 		  practice_type, audio_data_url, photo_data_url, photo_object,
 		  status, processing_stage, processing_error,
-		  shadowing_status, shadowing_audio_url, shadowing_error, shadowing_updated_at
+		  shadowing_status, shadowing_audio_url, shadowing_error, shadowing_updated_at,
+		  audio_asset_id, photo_asset_id, shadowing_asset_id
 		FROM recordings
 		WHERE user_id = $1
 		  AND ($2::timestamptz IS NULL OR (timestamp, id) < ($2::timestamptz, $3::text))
@@ -82,6 +83,7 @@ func scanRecordingPageItem(row scanner) (recordingPageItem, error) {
 	var response recordingResponse
 	var timestamp, shadowingUpdatedAt time.Time
 	var suggestionsBytes []byte
+	var audioAssetID, photoAssetID, shadowingAssetID *string
 	err := row.Scan(
 		&response.ID, &response.Topic, &response.Duration, &timestamp,
 		&response.Transcript, &response.CorrectedTranscript, &suggestionsBytes,
@@ -89,6 +91,7 @@ func scanRecordingPageItem(row scanner) (recordingPageItem, error) {
 		&response.PhotoObject, &response.Status, &response.ProcessingStage,
 		&response.ProcessingError, &response.ShadowingStatus,
 		&response.ShadowingAudioURL, &response.ShadowingError, &shadowingUpdatedAt,
+		&audioAssetID, &photoAssetID, &shadowingAssetID,
 	)
 	if err != nil {
 		return recordingPageItem{}, err
@@ -107,5 +110,6 @@ func scanRecordingPageItem(row scanner) (recordingPageItem, error) {
 	response.ShadowingAudioURL = normalizeOptionalShadowingAudio(response.ShadowingAudioURL)
 	response.ShadowingError = normalizeOptionalProcessingError(response.ShadowingError)
 	response.ShadowingUpdatedAt = shadowingUpdatedAt.UTC().Format(time.RFC3339Nano)
+	response.Media = recordingMedia(audioAssetID, photoAssetID, shadowingAssetID)
 	return recordingPageItem{recording: response, timestamp: timestamp.UTC()}, nil
 }

@@ -36,6 +36,42 @@ func TestMigrationCatalog(t *testing.T) {
 	}
 }
 
+func TestMediaStorageMigrationIsAdditive(t *testing.T) {
+	catalog, err := migrations.All()
+	if err != nil {
+		t.Fatalf("load migrations: %v", err)
+	}
+	var sql string
+	for _, migration := range catalog {
+		if migration.Name == "0004_media_storage.sql" {
+			sql = migration.SQL
+			break
+		}
+	}
+	if sql == "" {
+		t.Fatal("0004_media_storage.sql is missing from the migration catalog")
+	}
+	required := []string{
+		"CREATE TABLE media_assets",
+		"CREATE TABLE media_uploads",
+		"CREATE TABLE media_upload_parts",
+		"owner_principal_id TEXT NOT NULL REFERENCES principals(id)",
+		"ADD COLUMN audio_asset_id TEXT REFERENCES media_assets(id)",
+		"ADD COLUMN photo_asset_id TEXT REFERENCES media_assets(id)",
+		"ADD COLUMN shadowing_asset_id TEXT REFERENCES media_assets(id)",
+		"legacy_public_url LIKE '/uploads/%'",
+		"ON CONFLICT DO NOTHING",
+	}
+	for _, fragment := range required {
+		if !strings.Contains(sql, fragment) {
+			t.Fatalf("media migration missing %q", fragment)
+		}
+	}
+	if strings.Contains(sql, "LIKE 'data:%'") || strings.Contains(sql, "LIKE 'data\\:%'") {
+		t.Fatal("media migration must not backfill data URLs")
+	}
+}
+
 func TestMigrateConcurrentAndAdoptsLegacySchema(t *testing.T) {
 	databaseURL := strings.TrimSpace(os.Getenv("TEST_DATABASE_URL"))
 	if databaseURL == "" {
@@ -50,12 +86,28 @@ func TestMigrateConcurrentAndAdoptsLegacySchema(t *testing.T) {
 			ctx := context.Background()
 			database := isolatedMigrationDatabase(t, databaseURL)
 			userID := uuid.NewString()
+			legacyRecordingID := uuid.NewString()
+			dataURLRecordingID := uuid.NewString()
+			legacyFeedPostID := uuid.NewString()
 			if legacy {
 				if _, err := database.Exec(ctx, InitialSchemaSQL()); err != nil {
 					t.Fatalf("install legacy schema: %v", err)
 				}
 				if _, err := database.Exec(ctx, `INSERT INTO users (id, email, password_hash) VALUES ($1, $2, 'test-hash')`, userID, userID+"@example.com"); err != nil {
 					t.Fatalf("insert legacy user: %v", err)
+				}
+				if _, err := database.Exec(ctx, `
+					INSERT INTO recordings (id, user_id, topic, duration, timestamp, transcript, audio_data_url)
+					VALUES
+					  ($1, $3, 'Legacy file', 10, NOW(), '', '/uploads/recordings/owner/legacy.webm'),
+					  ($2, $3, 'Inline data', 5, NOW(), '', 'data:audio/webm;base64,AAAA')`, legacyRecordingID, dataURLRecordingID, userID); err != nil {
+					t.Fatalf("insert legacy recordings: %v", err)
+				}
+				if _, err := database.Exec(ctx, `
+					INSERT INTO feed_posts
+					  (id, user_id, source_recording_id, topic, duration, audio_data_url, transcript, source_timestamp)
+					VALUES ($1, $2, $3, 'Legacy file', 10, '/uploads/recordings/owner/legacy.webm', '', NOW())`, legacyFeedPostID, userID, legacyRecordingID); err != nil {
+					t.Fatalf("insert legacy feed post: %v", err)
 				}
 			}
 			var wg sync.WaitGroup
@@ -90,6 +142,25 @@ func TestMigrateConcurrentAndAdoptsLegacySchema(t *testing.T) {
 				var principalKind string
 				if err := database.QueryRow(ctx, `SELECT kind FROM principals WHERE id = $1 AND user_id = $1`, userID).Scan(&principalKind); err != nil || principalKind != "user" {
 					t.Fatalf("legacy user principal was not backfilled: kind=%q err=%v", principalKind, err)
+				}
+				var recordingAssetID, feedAssetID, ownerID, purpose, driver, objectKey, legacyURL string
+				if err := database.QueryRow(ctx, `
+					SELECT r.audio_asset_id, p.audio_asset_id, a.owner_principal_id,
+					       a.purpose, a.storage_driver, a.object_key, a.legacy_public_url
+					FROM recordings r
+					JOIN feed_posts p ON p.id = $2
+					JOIN media_assets a ON a.id = r.audio_asset_id
+					WHERE r.id = $1`, legacyRecordingID, legacyFeedPostID).Scan(
+					&recordingAssetID, &feedAssetID, &ownerID, &purpose, &driver, &objectKey, &legacyURL,
+				); err != nil {
+					t.Fatalf("load migrated media asset: %v", err)
+				}
+				if recordingAssetID == "" || feedAssetID != recordingAssetID || ownerID != userID || purpose != "recording_audio" || driver != "local" || objectKey != "recordings/owner/legacy.webm" || legacyURL != "/uploads/recordings/owner/legacy.webm" {
+					t.Fatalf("unexpected migrated media: recording=%q feed=%q owner=%q purpose=%q driver=%q key=%q url=%q", recordingAssetID, feedAssetID, ownerID, purpose, driver, objectKey, legacyURL)
+				}
+				var dataURLAssetID *string
+				if err := database.QueryRow(ctx, `SELECT audio_asset_id FROM recordings WHERE id = $1`, dataURLRecordingID).Scan(&dataURLAssetID); err != nil || dataURLAssetID != nil {
+					t.Fatalf("data URL should not be migrated: asset=%v err=%v", dataURLAssetID, err)
 				}
 				if _, err := database.Exec(ctx, `UPDATE schema_migrations SET checksum = 'tampered' WHERE name = '0001_init.sql'`); err != nil {
 					t.Fatalf("tamper test migration ledger: %v", err)

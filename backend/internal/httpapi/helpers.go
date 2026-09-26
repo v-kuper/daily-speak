@@ -47,24 +47,59 @@ type suggestion struct {
 }
 
 type recordingResponse struct {
-	ID                  string       `json:"id"`
-	Topic               string       `json:"topic"`
-	Duration            int          `json:"duration"`
-	Timestamp           string       `json:"timestamp"`
-	Status              string       `json:"status"`
-	Transcript          string       `json:"transcript"`
-	CorrectedTranscript string       `json:"correctedTranscript"`
-	Suggestions         []suggestion `json:"suggestions"`
-	ProcessingStage     *string      `json:"processingStage"`
-	PracticeType        string       `json:"practiceType"`
-	AudioDataURL        *string      `json:"audioDataUrl"`
-	PhotoDataURL        *string      `json:"photoDataUrl"`
-	PhotoObject         *string      `json:"photoObject"`
-	ProcessingError     *string      `json:"processingError"`
-	ShadowingStatus     string       `json:"shadowingStatus"`
-	ShadowingAudioURL   *string      `json:"shadowingAudioUrl"`
-	ShadowingError      *string      `json:"shadowingError"`
-	ShadowingUpdatedAt  string       `json:"shadowingUpdatedAt"`
+	ID                  string                  `json:"id"`
+	Topic               string                  `json:"topic"`
+	Duration            int                     `json:"duration"`
+	Timestamp           string                  `json:"timestamp"`
+	Status              string                  `json:"status"`
+	Transcript          string                  `json:"transcript"`
+	CorrectedTranscript string                  `json:"correctedTranscript"`
+	Suggestions         []suggestion            `json:"suggestions"`
+	ProcessingStage     *string                 `json:"processingStage"`
+	PracticeType        string                  `json:"practiceType"`
+	AudioDataURL        *string                 `json:"audioDataUrl"`
+	PhotoDataURL        *string                 `json:"photoDataUrl"`
+	PhotoObject         *string                 `json:"photoObject"`
+	ProcessingError     *string                 `json:"processingError"`
+	ShadowingStatus     string                  `json:"shadowingStatus"`
+	ShadowingAudioURL   *string                 `json:"shadowingAudioUrl"`
+	ShadowingError      *string                 `json:"shadowingError"`
+	ShadowingUpdatedAt  string                  `json:"shadowingUpdatedAt"`
+	Media               *recordingMediaResponse `json:"media,omitempty"`
+}
+
+type recordingMediaResponse struct {
+	Audio     *recordingMediaAssetResponse `json:"audio,omitempty"`
+	Photo     *recordingMediaAssetResponse `json:"photo,omitempty"`
+	Shadowing *recordingMediaAssetResponse `json:"shadowing,omitempty"`
+}
+
+type recordingMediaAssetResponse struct {
+	AssetID      string `json:"assetId"`
+	DownloadPath string `json:"downloadPath"`
+}
+
+func recordingMedia(audioAssetID, photoAssetID, shadowingAssetID *string) *recordingMediaResponse {
+	response := &recordingMediaResponse{
+		Audio:     recordingMediaAsset(audioAssetID),
+		Photo:     recordingMediaAsset(photoAssetID),
+		Shadowing: recordingMediaAsset(shadowingAssetID),
+	}
+	if response.Audio == nil && response.Photo == nil && response.Shadowing == nil {
+		return nil
+	}
+	return response
+}
+
+func recordingMediaAsset(assetID *string) *recordingMediaAssetResponse {
+	if assetID == nil || strings.TrimSpace(*assetID) == "" {
+		return nil
+	}
+	id := strings.TrimSpace(*assetID)
+	return &recordingMediaAssetResponse{
+		AssetID:      id,
+		DownloadPath: "/api/v1/media/" + url.PathEscape(id) + "/download",
+	}
 }
 
 func (s *Server) optionalUser(r *http.Request) (*auth.User, error) {
