@@ -30,7 +30,10 @@ func main() {
 	defer stop()
 
 	databaseURL := strings.TrimSpace(os.Getenv("DATABASE_URL"))
-	requireSSL := normalizeBool(os.Getenv("DATABASE_SSL"))
+	requireSSL, err := parseDatabaseSSL(os.Getenv("DATABASE_SSL"))
+	if err != nil {
+		log.Fatalf("database SSL configuration failed: %v", err)
+	}
 	database, err := db.Connect(ctx, databaseURL, requireSSL)
 	if err != nil {
 		log.Fatalf("database connect failed: %v", err)
@@ -65,9 +68,15 @@ func main() {
 	}
 }
 
-func normalizeBool(value string) bool {
-	normalized := strings.ToLower(strings.TrimSpace(value))
-	return normalized == "1" || normalized == "true" || normalized == "yes" || normalized == "on" || normalized == "require"
+func parseDatabaseSSL(value string) (bool, error) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "0", "false", "no", "off":
+		return false, nil
+	case "1", "true", "yes", "on", "require":
+		return true, nil
+	default:
+		return false, errors.New("DATABASE_SSL must be a boolean value")
+	}
 }
 
 func envDefault(name string, fallback string) string {
