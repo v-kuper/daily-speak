@@ -42,6 +42,10 @@ type v1Error struct {
 	RequestID string `json:"requestId"`
 }
 
+func writeV1Error(w http.ResponseWriter, r *http.Request, status int, code string, message string) {
+	writeJSON(w, status, v1ErrorEnvelope{Error: v1Error{Code: code, Message: message, RequestID: requestIDFrom(r)}})
+}
+
 func (s *Server) routeV1(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "private, no-store")
 	buffered := newBufferedResponse()
@@ -52,6 +56,26 @@ func (s *Server) routeV1(w http.ResponseWriter, r *http.Request) {
 func (s *Server) dispatchV1(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimSuffix(r.URL.Path, "/")
 	switch {
+	case path == "/api/v1/auth/anonymous" && r.Method == http.MethodPost:
+		s.handleAnonymousIdentityV1(w, r)
+	case path == "/api/v1/auth/register" && r.Method == http.MethodPost:
+		s.handleRegisterIdentityV1(w, r)
+	case path == "/api/v1/auth/login" && r.Method == http.MethodPost:
+		s.handleLoginIdentityV1(w, r)
+	case path == "/api/v1/auth/refresh" && r.Method == http.MethodPost:
+		s.handleRefreshIdentityV1(w, r)
+	case path == "/api/v1/auth/session" && r.Method == http.MethodGet:
+		s.handleIdentitySessionV1(w, r)
+	case path == "/api/v1/auth/logout" && r.Method == http.MethodPost:
+		s.handleLogoutIdentityV1(w, r)
+	case path == "/api/v1/auth/logout-all" && r.Method == http.MethodPost:
+		s.handleLogoutAllIdentityV1(w, r)
+	case path == "/api/v1/auth/sessions" && r.Method == http.MethodGet:
+		s.handleListIdentitySessionsV1(w, r)
+	case strings.HasPrefix(path, "/api/v1/auth/sessions/") && !strings.Contains(strings.TrimPrefix(path, "/api/v1/auth/sessions/"), "/") && r.Method == http.MethodDelete:
+		s.handleRevokeIdentitySessionV1(w, r, strings.TrimPrefix(path, "/api/v1/auth/sessions/"))
+	case isIdentityV1Resource(path):
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
 	case path == "/api/v1" && r.Method == http.MethodGet:
 		writeJSON(w, http.StatusOK, struct {
 			Version       string `json:"version"`
@@ -73,6 +97,14 @@ func (s *Server) dispatchV1(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func isIdentityV1Resource(path string) bool {
+	switch path {
+	case "/api/v1/auth/anonymous", "/api/v1/auth/register", "/api/v1/auth/login", "/api/v1/auth/refresh", "/api/v1/auth/session", "/api/v1/auth/logout", "/api/v1/auth/logout-all", "/api/v1/auth/sessions":
+		return true
+	}
+	return strings.HasPrefix(path, "/api/v1/auth/sessions/") && !strings.Contains(strings.TrimPrefix(path, "/api/v1/auth/sessions/"), "/")
+}
+
 func commitV1Response(w http.ResponseWriter, r *http.Request, buffered *bufferedResponse) {
 	for name, values := range buffered.header {
 		if strings.EqualFold(name, "Content-Length") {
@@ -92,6 +124,12 @@ func commitV1Response(w http.ResponseWriter, r *http.Request, buffered *buffered
 		return
 	}
 	message := http.StatusText(status)
+	var structured v1ErrorEnvelope
+	if json.Unmarshal(buffered.body.Bytes(), &structured) == nil && strings.TrimSpace(structured.Error.Code) != "" {
+		structured.Error.RequestID = requestIDFrom(r)
+		writeJSON(w, status, structured)
+		return
+	}
 	var legacy struct {
 		Error string `json:"error"`
 	}

@@ -82,6 +82,20 @@ func TestV1RecordingsCursorPagination(t *testing.T) {
 	if second.Page.NextCursor != nil {
 		t.Fatalf("last page has next cursor %q", *second.Page.NextCursor)
 	}
+
+	tokenConfig := auth.TokenConfig{SigningKey: []byte(strings.Repeat("recording-integration-secret-", 2))}
+	mobileGrant, err := auth.LoginMobileUser(ctx, database, tokenConfig, auth.Credentials{Email: email, Password: "password123"}, nil, auth.DeviceInfo{Name: "Integration device", Platform: "ios"})
+	if err != nil {
+		t.Fatalf("create mobile session: %v", err)
+	}
+	bearerHandler := NewServer(Config{DB: database, IdentityTokens: tokenConfig}).Handler()
+	bearerRequest := httptest.NewRequest(http.MethodGet, "/api/v1/recordings?limit=1", nil)
+	bearerRequest.Header.Set("Authorization", "Bearer "+mobileGrant.AccessToken)
+	bearerResponse := httptest.NewRecorder()
+	bearerHandler.ServeHTTP(bearerResponse, bearerRequest)
+	if bearerResponse.Code != http.StatusOK {
+		t.Fatalf("bearer recordings request: status %d: %s", bearerResponse.Code, bearerResponse.Body.String())
+	}
 }
 
 func requestRecordingPage(t *testing.T, handler http.Handler, session auth.Session, target string) struct {

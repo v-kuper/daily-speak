@@ -34,7 +34,10 @@ const routeSource = [
 
 const httpMethods = new Set(["get", "post", "put", "delete", "patch"]);
 const documentedAPIRoutes = [
-  "/healthz", "/api/v1", "/api/v1/recordings", "/api/v1/recordings/{recordingId}",
+  "/healthz", "/api/v1", "/api/v1/auth/anonymous", "/api/v1/auth/register", "/api/v1/auth/login",
+  "/api/v1/auth/refresh", "/api/v1/auth/session", "/api/v1/auth/logout", "/api/v1/auth/logout-all",
+  "/api/v1/auth/sessions", "/api/v1/auth/sessions/{sessionId}",
+  "/api/v1/recordings", "/api/v1/recordings/{recordingId}",
   "/api/auth/register", "/api/auth/login", "/api/auth/session", "/api/auth/logout",
   "/api/daily-questions", "/api/topic-guidance", "/api/study-words", "/api/user/data",
   "/api/user/interests", "/api/user/ollama-model", "/api/user/subscription", "/api/user/english-level",
@@ -63,6 +66,8 @@ const protectedOperations = [
 ];
 
 const mutationBodies = [
+  ["/api/v1/auth/register", "post", "application/json"], ["/api/v1/auth/login", "post", "application/json"],
+  ["/api/v1/auth/refresh", "post", "application/json"],
   ["/api/auth/register", "post", "application/json"], ["/api/auth/login", "post", "application/json"],
   ["/api/user/interests", "put", "application/json"], ["/api/user/english-level", "put", "application/json"],
   ["/api/user/recordings", "post", "application/json"], ["/api/recording-sessions", "post", "application/json"],
@@ -113,11 +118,16 @@ function usesCookieAuth(operation) {
   return (operation.security ?? openapi.security ?? []).some((requirement) => Object.hasOwn(requirement, "cookieAuth"));
 }
 
+function usesBearerAuth(operation) {
+  return (operation.security ?? openapi.security ?? []).some((requirement) => Object.hasOwn(requirement, "bearerAuth"));
+}
+
 test("OpenAPI identifies the API origin and Swagger fetches its served artifact", () => {
   assert.equal(openapi.openapi, "3.1.0");
   assert.equal(openapi.info.title, "DailySpeak API");
   assert.deepEqual(openapi.servers[0], { url: "/", description: "Current API origin" });
   assert.ok(openapi.components.securitySchemes.cookieAuth);
+  assert.ok(openapi.components.securitySchemes.bearerAuth);
   assert.match(swaggerHTML, /url:\s*"\/openapi\.json"/);
   assert.match(swaggerHTML, /swagger-ui-bundle\.js/);
   assert.match(swaggerHTML, /SwaggerUIBundle/);
@@ -137,6 +147,8 @@ test("OpenAPI inventories every API and upload route, including retained Feed en
   const sourceChecks = [
     ["/healthz", /mux\.HandleFunc\("\/healthz"/],
     ["/api/v1", /mux\.HandleFunc\("\/api\/v1"/],
+    ["/api/v1/auth/anonymous", /path == "\/api\/v1\/auth\/anonymous"/],
+    ["/api/v1/auth/sessions/{sessionId}", /strings\.HasPrefix\(path, "\/api\/v1\/auth\/sessions\/"\)/],
     ["/api/v1/recordings", /path == "\/api\/v1\/recordings"/],
     ["/api/v1/recordings/{recordingId}", /strings\.HasPrefix\(path, "\/api\/v1\/recordings\/"\)/],
     ["/api/recording-sessions/{sessionId}/chunks", /action == "chunks"/],
@@ -167,6 +179,20 @@ test("protected operations declare cookie authentication", () => {
   for (const [path, method] of protectedOperations) {
     assert.ok(usesCookieAuth(openapi.paths[path][method]), `${method.toUpperCase()} ${path} needs cookieAuth`);
   }
+});
+
+test("mobile identity and v1 resources declare bearer authentication", () => {
+  const bearerOperations = [
+    ["/api/v1/auth/session", "get"], ["/api/v1/auth/logout", "post"],
+    ["/api/v1/auth/logout-all", "post"], ["/api/v1/auth/sessions", "get"],
+    ["/api/v1/auth/sessions/{sessionId}", "delete"], ["/api/v1/recordings", "get"],
+    ["/api/v1/recordings/{recordingId}", "get"],
+  ];
+  for (const [path, method] of bearerOperations) {
+    assert.ok(usesBearerAuth(openapi.paths[path][method]), `${method.toUpperCase()} ${path} needs bearerAuth`);
+  }
+  assert.deepEqual(openapi.paths["/api/v1/auth/anonymous"].post.security, []);
+  assert.deepEqual(openapi.paths["/api/v1/auth/refresh"].post.security, []);
 });
 
 test("path and query parameters are declared for every operation that uses them", () => {

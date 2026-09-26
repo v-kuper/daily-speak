@@ -25,6 +25,10 @@ func main() {
 	if err != nil {
 		log.Fatalf("session cookie configuration failed: %v", err)
 	}
+	identityTokens, err := auth.TokenConfigFromEnv()
+	if err != nil {
+		log.Fatalf("mobile identity configuration failed: %v", err)
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -45,7 +49,7 @@ func main() {
 	}
 
 	addr := envDefault("APP_ADDR", ":3000")
-	apiServer := httpapi.NewServer(httpapi.Config{DB: database, CORS: cors, SessionCookie: sessionCookie})
+	apiServer := httpapi.NewServer(httpapi.Config{DB: database, CORS: cors, SessionCookie: sessionCookie, IdentityTokens: identityTokens})
 	apiServer.StartBackgroundWorkers(ctx)
 	server := &http.Server{
 		Addr:              addr,

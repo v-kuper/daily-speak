@@ -138,11 +138,14 @@ func LoginUser(ctx context.Context, database *db.DB, email string, password stri
 		FROM users
 		WHERE email = $1
 		LIMIT 1`, email).Scan(&row.ID, &row.Email, &row.PasswordHash, &row.IsSubscriber, &row.EnglishLevel)
-	if errors.Is(err, pgx.ErrNoRows) || !VerifyPassword(password, row.PasswordHash) {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return User{}, HTTPError{Message: "Invalid email or password.", Status: 401}
 	}
 	if err != nil {
 		return User{}, err
+	}
+	if !VerifyPassword(password, row.PasswordHash) {
+		return User{}, HTTPError{Message: "Invalid email or password.", Status: 401}
 	}
 	level := domain.DefaultEnglishLevel
 	if row.EnglishLevel != nil {

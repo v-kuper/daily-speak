@@ -44,7 +44,7 @@ open http://localhost:3219/docs
 The OpenAPI document includes the retained Feed endpoints even though the
 current web client does not expose Feed UI.
 
-The first v1 resources are `GET /api/v1`, paginated
+The v1 surface includes mobile identity under `/api/v1/auth/*`, paginated
 `GET /api/v1/recordings`, and `GET /api/v1/recordings/{recordingId}`. Every
 response includes `X-Request-ID`; v1 errors include a stable machine-readable
 code. See `../docs/api-compatibility.md` for versioning and deprecation rules.
@@ -73,7 +73,25 @@ Runtime and storage:
   Docker and `/app/uploads` in the image;
 - `SERVER_LOG_LEVEL`: log threshold such as `info` or `debug`.
 
-Current session authentication:
+Mobile identity:
+
+- `AUTH_ACCESS_TOKEN_SECRET`: server-only signing secret with at least 32
+  characters. Generate at least 48 random bytes and keep it in the deployment
+  secret store. When it is absent, existing web authentication continues to
+  work while `/api/v1/auth/*` safely returns `identity_unavailable`;
+- `AUTH_ACCESS_TOKEN_ISSUER` and `AUTH_ACCESS_TOKEN_AUDIENCE`: stable token
+  scope, defaulting to `daily-speaking-api` and `daily-speaking-mobile`;
+- `AUTH_ACCESS_TOKEN_TTL`: short access lifetime, default `15m`;
+- `AUTH_REFRESH_TOKEN_TTL`: device-session lifetime, default `720h`;
+- `AUTH_GUEST_TOKEN_TTL`: anonymous identity lifetime, default `24h`.
+
+Access tokens are signed JWTs. Refresh tokens are opaque, single-use, and only
+their SHA-256 hashes are stored. Refresh replay revokes the complete device
+session. Registration or login with a guest Bearer token merges the guest
+principal into the user in one database transaction. Mobile clients should
+store refresh tokens in the OS secure storage and serialize refresh attempts.
+
+Legacy web session authentication:
 
 - `SESSION_COOKIE_SECURE`: boolean; use `true` on HTTPS;
 - `SESSION_COOKIE_SAME_SITE`: `lax`, `strict`, or `none`;
@@ -82,8 +100,8 @@ Current session authentication:
 `SameSite=None` is rejected unless `Secure=true`. Origins are compared exactly;
 wildcards, paths, credentials, queries, and fragments are invalid in
 `CORS_ALLOWED_ORIGINS`. The session cookie remains HttpOnly and its records are
-stored in PostgreSQL. Protected v1 routes temporarily accept this cookie;
-access/refresh tokens are introduced in the next identity epic.
+stored in PostgreSQL. Protected recording routes accept either the mobile
+Bearer token or the cookie during the web migration.
 
 AI and media variables are grouped in the example file:
 

@@ -87,6 +87,10 @@ func TestMigrateConcurrentAndAdoptsLegacySchema(t *testing.T) {
 				if err := database.QueryRow(ctx, `SELECT count(*) FROM users WHERE id = $1`, userID).Scan(&retained); err != nil || retained != 1 {
 					t.Fatalf("legacy user was not retained: count=%d err=%v", retained, err)
 				}
+				var principalKind string
+				if err := database.QueryRow(ctx, `SELECT kind FROM principals WHERE id = $1 AND user_id = $1`, userID).Scan(&principalKind); err != nil || principalKind != "user" {
+					t.Fatalf("legacy user principal was not backfilled: kind=%q err=%v", principalKind, err)
+				}
 				if _, err := database.Exec(ctx, `UPDATE schema_migrations SET checksum = 'tampered' WHERE name = '0001_init.sql'`); err != nil {
 					t.Fatalf("tamper test migration ledger: %v", err)
 				}

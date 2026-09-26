@@ -202,6 +202,21 @@ test("local deploy passes Cartesia credentials from the correct GitHub stores", 
   );
 });
 
+test("mobile signing secret stays server-side and reaches only the backend", () => {
+  assert.match(
+    deployWorkflow,
+    /AUTH_ACCESS_TOKEN_SECRET:\s+\$\{\{\s*secrets\.AUTH_ACCESS_TOKEN_SECRET\s*\}\}/,
+  );
+  assert.match(
+    dockerCompose,
+    /AUTH_ACCESS_TOKEN_SECRET:\s+\$\{AUTH_ACCESS_TOKEN_SECRET:-\}/,
+  );
+  assert.equal(compose.services.web.environment.AUTH_ACCESS_TOKEN_SECRET, undefined);
+  assert.equal(compose.services.backend.environment.AUTH_ACCESS_TOKEN_SECRET, "${AUTH_ACCESS_TOKEN_SECRET:-}");
+  assert.equal(deployStep("Build and start local Docker HTTPS stack")?.env.AUTH_ACCESS_TOKEN_SECRET, "${{ secrets.AUTH_ACCESS_TOKEN_SECRET }}");
+  assert.equal(parsedDeployWorkflow.jobs.deploy.env.AUTH_ACCESS_TOKEN_SECRET, undefined);
+});
+
 test("local deploy stops before Docker when Cartesia configuration is missing", () => {
   assert.match(deployWorkflow, /name:\s+Validate Cartesia configuration/);
   assert.match(
