@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"errors"
+	"math"
 	"strings"
 	"time"
 
@@ -19,17 +20,23 @@ const recordingProcessingTimeout = 30 * time.Minute
 func (s *Server) runRecordingJob(ctx context.Context, job workqueue.Job) error {
 	var work recordingRetryWork
 	var userID, status, stage string
+	var promotedGuestPreview bool
 	var audioURL, audioAssetID, currentJobID *string
 	var suggestionJSON []byte
 	err := s.db.QueryRow(ctx, `
 		SELECT r.user_id, r.status, COALESCE(r.processing_stage, ''), r.processing_job_id,
 		       r.audio_data_url, r.audio_asset_id, r.transcript, r.suggestions, r.topic, r.practice_type,
-		       r.photo_object, u.english_level
+		       r.photo_object, u.english_level,
+		       EXISTS (
+		         SELECT 1 FROM guest_previews p
+		         WHERE p.promoted_recording_id = r.id AND p.state = 'promoted'
+		       )
 		FROM recordings r
 		JOIN users u ON u.id = r.user_id
 		WHERE r.id = $1`, job.ResourceID).Scan(
 		&userID, &status, &stage, &currentJobID, &audioURL, &audioAssetID, &work.Transcript,
 		&suggestionJSON, &work.Topic, &work.PracticeType, &work.PhotoObject, &work.EnglishLevel,
+		&promotedGuestPreview,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil
@@ -59,6 +66,26 @@ func (s *Server) runRecordingJob(ctx context.Context, job workqueue.Job) error {
 		}
 	}
 	defer cleanupAudio()
+	// Authentication may win the race with the guest preview worker. In that
+	// case the promoted full job must still verify the real media duration and
+	// may not trust the client-declared value.
+	if stage == "transcribing" && promotedGuestPreview {
+		actualDuration, probeErr := s.probeAudioDuration(ctx, work.AudioPath)
+		if probeErr != nil {
+			return errors.New("recording audio duration could not be verified")
+		}
+		if actualDuration <= 0 || actualDuration > guestPreviewMaxDuration {
+			return errors.New("guest preview audio exceeds the 60 second limit")
+		}
+		verifiedSeconds := int(math.Ceil(actualDuration.Seconds()))
+		if _, updateErr := s.db.Exec(ctx, `
+			UPDATE recordings
+			SET duration = $2
+			WHERE id = $1 AND status = 'processing' AND processing_job_id = $3`,
+			job.ResourceID, verifiedSeconds, job.ID); updateErr != nil {
+			return updateErr
+		}
+	}
 	logger := logging.ForBackground("worker.recordings.process")
 	return s.processRecordingRetry(ctx, job.ResourceID, userID, job.ID, job.LeaseToken, work, logger)
 }
@@ -69,7 +96,7 @@ func (s *Server) processSavedRecording(ctx context.Context, recordingID string, 
 		return err
 	}
 
-	transcript, err := transcription.TranscribeAudioWithLocalWhisper(ctx, audioPath)
+	transcript, err := s.transcribeAudio(ctx, audioPath)
 	if err != nil {
 		var typed transcription.Error
 		if errors.As(err, &typed) {

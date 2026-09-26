@@ -68,6 +68,19 @@ func (service *Service) CreateUpload(ctx context.Context, input CreateUploadInpu
 	} else if !errors.Is(findErr, ErrNotFound) {
 		return UploadResource{}, findErr
 	}
+	if input.Purpose == PurposeGuestPreviewAudio {
+		if repository, ok := service.repository.(interface {
+			GuestUploadExists(context.Context, string) (bool, error)
+		}); ok {
+			exists, findErr := repository.GuestUploadExists(ctx, input.OwnerPrincipalID)
+			if findErr != nil {
+				return UploadResource{}, findErr
+			}
+			if exists {
+				return UploadResource{}, ErrConflict
+			}
+		}
+	}
 	objectKey, err := storage.NewObjectKey(input.OwnerPrincipalID, input.Purpose, extension)
 	if err != nil {
 		return UploadResource{}, ErrInvalidRequest
@@ -355,7 +368,7 @@ func validateCreateInput(input CreateUploadInput) (string, error) {
 		return "", ErrChecksumMismatch
 	}
 	switch input.Purpose {
-	case PurposeRecordingAudio:
+	case PurposeRecordingAudio, PurposeGuestPreviewAudio:
 		allowed := map[string]bool{
 			"audio/webm": true, "video/webm": true, "audio/mp4": true,
 			"audio/x-m4a": true, "video/mp4": true, "audio/ogg": true,
@@ -366,7 +379,11 @@ func validateCreateInput(input CreateUploadInput) (string, error) {
 			return "", ErrUnsupportedType
 		}
 		extension := domain.ResolveAudioExtension(input.ContentType)
-		if input.SizeBytes > domain.MaxAudioUploadBytes {
+		maxBytes := int64(domain.MaxAudioUploadBytes)
+		if input.Purpose == PurposeGuestPreviewAudio {
+			maxBytes = 10 * 1024 * 1024
+		}
+		if input.SizeBytes > maxBytes {
 			return "", ErrPayloadTooLarge
 		}
 		return extension, nil

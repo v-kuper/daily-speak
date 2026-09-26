@@ -55,6 +55,9 @@ func (s *Server) routeV1(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) dispatchV1(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimSuffix(r.URL.Path, "/")
+	if s.routeGuestPreviewV1(w, r, path) {
+		return
+	}
 	if s.routeMediaV1(w, r, path) {
 		return
 	}

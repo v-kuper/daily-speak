@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"daily-speaking-practice/backend/internal/logging"
 	"daily-speaking-practice/backend/internal/media"
 	"daily-speaking-practice/backend/internal/storage"
+	"daily-speaking-practice/backend/internal/transcription"
 	"daily-speaking-practice/backend/internal/tts"
 	"daily-speaking-practice/backend/internal/workqueue"
 )
@@ -31,6 +33,8 @@ type Config struct {
 	MediaSigningSecret []byte
 	MediaPartSize      int64
 	MediaPresignTTL    time.Duration
+	TranscribeAudio    func(context.Context, string) (string, error)
+	ProbeAudioDuration func(context.Context, string) (time.Duration, error)
 }
 
 type Server struct {
@@ -45,6 +49,8 @@ type Server struct {
 	mediaService        *media.Service
 	mediaSigner         *media.URLSigner
 	mediaStore          storage.Store
+	transcribeAudio     func(context.Context, string) (string, error)
+	probeAudioDuration  func(context.Context, string) (time.Duration, error)
 }
 
 func NewServer(config Config) *Server {
@@ -82,6 +88,14 @@ func NewServer(config Config) *Server {
 		signingSecret = []byte(strings.TrimSpace(os.Getenv("AUTH_ACCESS_TOKEN_SECRET")))
 	}
 	mediaSigner, _ := media.NewURLSigner(signingSecret)
+	transcribeAudio := config.TranscribeAudio
+	if transcribeAudio == nil {
+		transcribeAudio = transcription.TranscribeAudioWithLocalWhisper
+	}
+	probeAudioDuration := config.ProbeAudioDuration
+	if probeAudioDuration == nil {
+		probeAudioDuration = probeAudioDurationWithFFprobe
+	}
 	return &Server{
 		db:                  config.DB,
 		jobStore:            workqueue.NewStore(config.DB),
@@ -94,6 +108,8 @@ func NewServer(config Config) *Server {
 		mediaService:        mediaService,
 		mediaSigner:         mediaSigner,
 		mediaStore:          mediaStore,
+		transcribeAudio:     transcribeAudio,
+		probeAudioDuration:  probeAudioDuration,
 	}
 }
 

@@ -222,38 +222,7 @@ func deterministicRecordingCreateV1Identity(principalID string, idempotencyKey s
 }
 
 func lockRecordingQuotaV1(ctx context.Context, tx pgx.Tx, userID string) (quota.RecordingQuota, error) {
-	var isSubscriber bool
-	if err := tx.QueryRow(ctx, `
-		SELECT is_subscriber AND (subscription_expires_at IS NULL OR subscription_expires_at > NOW())
-		FROM users
-		WHERE id = $1
-		FOR UPDATE`, userID).Scan(&isSubscriber); err != nil {
-		return quota.RecordingQuota{}, err
-	}
-	var usedSeconds int
-	if err := tx.QueryRow(ctx, `
-		SELECT COALESCE(SUM(duration), 0)::int
-		FROM recordings
-		WHERE user_id = $1
-		  AND created_at >= date_trunc('week', NOW())
-		  AND created_at < date_trunc('week', NOW()) + INTERVAL '1 week'`, userID).Scan(&usedSeconds); err != nil {
-		return quota.RecordingQuota{}, err
-	}
-	usedSeconds = domain.ToNonNegativeInt(usedSeconds)
-	if isSubscriber {
-		return quota.RecordingQuota{IsSubscriber: true, WeeklyUsedSeconds: usedSeconds, MaxSessionSeconds: domain.SubscriberMaxSessionSeconds}, nil
-	}
-	limit := domain.FreeWeeklyLimitSeconds
-	remaining := limit - usedSeconds
-	if remaining < 0 {
-		remaining = 0
-	}
-	return quota.RecordingQuota{
-		WeeklyLimitSeconds:     &limit,
-		WeeklyUsedSeconds:      usedSeconds,
-		WeeklyRemainingSeconds: &remaining,
-		MaxSessionSeconds:      domain.SubscriberMaxSessionSeconds,
-	}, nil
+	return quota.LockRecordingQuota(ctx, tx, userID, time.Now().UTC())
 }
 
 func lockReadyMediaAssetV1(ctx context.Context, tx pgx.Tx, principalID string, assetID string, purpose string) error {

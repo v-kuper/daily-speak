@@ -108,6 +108,15 @@ The v1 surface includes mobile identity under `/api/v1/auth/*`, paginated
 response includes `X-Request-ID`; v1 errors include a stable machine-readable
 code. See `../docs/api-compatibility.md` for versioning and deprecation rules.
 
+The guest onboarding path uses the same Bearer identity and private media
+contract. A guest may upload one audio asset (10 MiB maximum) and call
+`POST /api/v1/guest/previews` once. The backend verifies that the audio is no
+longer than 60 seconds, then returns only a transcript and up to two
+high-confidence corrections. Registration or login atomically promotes the
+same preview id to a normal recording, reuses a completed transcript, and
+queues the full analysis. Multipass analysis, rewrite, and shadowing never run
+for an unauthenticated guest.
+
 ## Environment
 
 `backend/.env.example` lists backend-owned variables. The Go process does not
@@ -152,9 +161,11 @@ Runtime and storage:
 
 Durable worker controls:
 
-- `WORKER_RECORDING_CONCURRENCY`, `WORKER_SHADOWING_CONCURRENCY`, and
-  `WORKER_CLEANUP_CONCURRENCY`: independent bounded pools (defaults `1`, `2`,
-  and `2`);
+- `GUEST_PREVIEW_QUEUE_CAPACITY`: global database-backed admission bound for
+  queued/running guest previews, default `100`;
+- `WORKER_RECORDING_CONCURRENCY`, `WORKER_GUEST_PREVIEW_CONCURRENCY`,
+  `WORKER_SHADOWING_CONCURRENCY`, and `WORKER_CLEANUP_CONCURRENCY`: independent
+  bounded pools (defaults `1`, `1`, `2`, and `2`);
 - `WORKER_POLL_INTERVAL`: idle queue polling interval, default `1s`;
 - `WORKER_LEASE_DURATION` and `WORKER_HEARTBEAT_INTERVAL`: crash-recovery
   lease, defaults `2m` and `30s`; heartbeat must be shorter than the lease;
@@ -172,6 +183,11 @@ Mobile identity:
 - `AUTH_ACCESS_TOKEN_TTL`: short access lifetime, default `15m`;
 - `AUTH_REFRESH_TOKEN_TTL`: device-session lifetime, default `720h`;
 - `AUTH_GUEST_TOKEN_TTL`: anonymous identity lifetime, default `24h`.
+
+`ffprobe` is required by the worker to verify guest audio duration. It is
+included with `ffmpeg` in the backend image. Outside Docker the worker resolves
+it next to `WHISPER_FFMPEG_BIN` or from `PATH`; `FFPROBE_BINARY_PATH` can supply
+an explicit executable path.
 
 Access tokens are signed JWTs. Refresh tokens are opaque, single-use, and only
 their SHA-256 hashes are stored. Refresh replay revokes the complete device

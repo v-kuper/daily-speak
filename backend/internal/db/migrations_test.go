@@ -72,6 +72,44 @@ func TestMediaStorageMigrationIsAdditive(t *testing.T) {
 	}
 }
 
+func TestGuestPreviewMigrationAddsBoundedDurableState(t *testing.T) {
+	catalog, err := migrations.All()
+	if err != nil {
+		t.Fatalf("load migrations: %v", err)
+	}
+	var sql string
+	for _, migration := range catalog {
+		if migration.Name == "0005_guest_preview.sql" {
+			sql = migration.SQL
+			break
+		}
+	}
+	if sql == "" {
+		t.Fatal("0005_guest_preview.sql is missing from the migration catalog")
+	}
+	required := []string{
+		"CREATE TABLE guest_previews",
+		"CREATE TABLE guest_preview_entitlements",
+		"user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE",
+		"guest_principal_id TEXT NOT NULL UNIQUE REFERENCES principals(id) ON DELETE CASCADE",
+		"audio_asset_id TEXT NOT NULL UNIQUE REFERENCES media_assets(id) ON DELETE RESTRICT",
+		"state IN ('queued', 'processing', 'ready', 'failed', 'promoted')",
+		"jsonb_array_length(preview_corrections) <= 2",
+		"preview_job_id TEXT NOT NULL UNIQUE",
+		"idempotency_key TEXT NOT NULL",
+		"request_digest TEXT NOT NULL",
+		"promoted_recording_id TEXT UNIQUE REFERENCES recordings(id) ON DELETE CASCADE",
+		"expires_at TIMESTAMPTZ NOT NULL",
+		"purpose = 'guest_preview_audio' AND deleted_at IS NULL",
+		"'guest.preview'",
+	}
+	for _, fragment := range required {
+		if !strings.Contains(sql, fragment) {
+			t.Fatalf("guest preview migration missing %q", fragment)
+		}
+	}
+}
+
 func TestMigrateConcurrentAndAdoptsLegacySchema(t *testing.T) {
 	databaseURL := strings.TrimSpace(os.Getenv("TEST_DATABASE_URL"))
 	if databaseURL == "" {

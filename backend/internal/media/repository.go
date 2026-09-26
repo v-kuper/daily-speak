@@ -28,12 +28,40 @@ func (repository *SQLRepository) FindByIdempotency(ctx context.Context, sessionI
 		LIMIT 1`, sessionID, key)
 }
 
+func (repository *SQLRepository) GuestUploadExists(ctx context.Context, ownerPrincipalID string) (bool, error) {
+	var exists bool
+	err := repository.database.QueryRow(ctx, `
+		SELECT EXISTS (
+		  SELECT 1 FROM media_assets
+		  WHERE owner_principal_id = $1 AND purpose = $2 AND deleted_at IS NULL
+		)`, ownerPrincipalID, PurposeGuestPreviewAudio).Scan(&exists)
+	return exists, err
+}
+
 func (repository *SQLRepository) InsertUpload(ctx context.Context, asset Asset, upload Upload) error {
 	tx, err := repository.database.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
+	if asset.Purpose == PurposeGuestPreviewAudio {
+		var principalID string
+		err := tx.QueryRow(ctx, `
+			SELECT p.id
+			FROM principals p
+			JOIN device_sessions s ON s.principal_id = p.id
+			WHERE p.id = $1 AND s.id = $2
+			  AND p.kind = 'guest' AND p.merged_into_principal_id IS NULL
+			  AND p.expires_at > NOW()
+			  AND s.revoked_at IS NULL AND s.expires_at > NOW()
+			FOR UPDATE OF p, s`, asset.OwnerPrincipalID, upload.CreatedBySessionID).Scan(&principalID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrConflict
+		}
+		if err != nil {
+			return err
+		}
+	}
 	var bucket any
 	if asset.Bucket != "" {
 		bucket = asset.Bucket

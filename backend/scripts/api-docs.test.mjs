@@ -29,6 +29,7 @@ const routeSource = [
   serverSource,
   readFileSync("internal/httpapi/v1.go", "utf8"),
   readFileSync("internal/httpapi/media_v1.go", "utf8"),
+  readFileSync("internal/httpapi/guest_preview.go", "utf8"),
   readFileSync("internal/httpapi/recordings_create_v1.go", "utf8"),
   readFileSync("internal/httpapi/recording_sessions_handlers.go", "utf8"),
   readFileSync("internal/httpapi/feed_handlers.go", "utf8"),
@@ -39,6 +40,7 @@ const documentedAPIRoutes = [
   "/healthz", "/api/v1", "/api/v1/auth/anonymous", "/api/v1/auth/register", "/api/v1/auth/login",
   "/api/v1/auth/refresh", "/api/v1/auth/session", "/api/v1/auth/logout", "/api/v1/auth/logout-all",
   "/api/v1/auth/sessions", "/api/v1/auth/sessions/{sessionId}",
+  "/api/v1/guest/previews", "/api/v1/guest/previews/{previewId}",
   "/api/v1/recordings", "/api/v1/recordings/{recordingId}",
   "/api/v1/media/uploads", "/api/v1/media/uploads/{uploadId}",
   "/api/v1/media/uploads/{uploadId}/parts", "/api/v1/media/uploads/{uploadId}/complete",
@@ -74,6 +76,7 @@ const protectedOperations = [
 const mutationBodies = [
   ["/api/v1/auth/register", "post", "application/json"], ["/api/v1/auth/login", "post", "application/json"],
   ["/api/v1/auth/refresh", "post", "application/json"],
+  ["/api/v1/guest/previews", "post", "application/json"],
   ["/api/v1/recordings", "post", "application/json"],
   ["/api/v1/media/uploads", "post", "application/json"],
   ["/api/v1/media/uploads/{uploadId}/parts", "post", "application/json"],
@@ -162,6 +165,8 @@ test("OpenAPI inventories every API and upload route, including retained Feed en
     ["/api/v1", /mux\.HandleFunc\("\/api\/v1"/],
     ["/api/v1/auth/anonymous", /path == "\/api\/v1\/auth\/anonymous"/],
     ["/api/v1/auth/sessions/{sessionId}", /strings\.HasPrefix\(path, "\/api\/v1\/auth\/sessions\/"\)/],
+    ["/api/v1/guest/previews", /path == "\/api\/v1\/guest\/previews"/],
+    ["/api/v1/guest/previews/{previewId}", /strings\.HasPrefix\(path, "\/api\/v1\/guest\/previews\/"\)/],
     ["/api/v1/recordings", /path == "\/api\/v1\/recordings"/],
     ["/api/v1/recordings/{recordingId}", /strings\.HasPrefix\(path, "\/api\/v1\/recordings\/"\)/],
     ["/api/v1/media/uploads", /path == "\/api\/v1\/media\/uploads"/],
@@ -206,6 +211,7 @@ test("mobile identity and v1 resources declare bearer authentication", () => {
     ["/api/v1/auth/session", "get"], ["/api/v1/auth/logout", "post"],
     ["/api/v1/auth/logout-all", "post"], ["/api/v1/auth/sessions", "get"],
     ["/api/v1/auth/sessions/{sessionId}", "delete"], ["/api/v1/recordings", "get"],
+    ["/api/v1/guest/previews", "post"], ["/api/v1/guest/previews/{previewId}", "get"],
     ["/api/v1/recordings", "post"], ["/api/v1/recordings/{recordingId}", "get"],
     ["/api/v1/media/uploads", "post"], ["/api/v1/media/uploads/{uploadId}", "get"],
     ["/api/v1/media/uploads/{uploadId}", "delete"], ["/api/v1/media/uploads/{uploadId}/parts", "post"],
@@ -249,6 +255,7 @@ test("shared externally visible schemas have representative examples", () => {
     ["FeedPost", ["id", "sourceRecordingId", "topic", "duration", "transcript", "practiceType", "sourceTimestamp", "createdAt", "authorMaskedEmail", "replyCount", "reactions"]],
     ["FeedReply", ["id", "postId", "duration", "timestamp", "createdAt", "authorMaskedEmail", "reactions"]],
     ["ErrorResponse", ["error"]],
+    ["GuestPreview", ["id", "state", "topic", "duration", "timestamp", "practiceType", "transcript", "corrections", "expiresAt", "createdAt", "updatedAt"]],
   ]);
   for (const [name, fields] of expectedObjectSchemas) {
     const schema = openapi.components.schemas[name];
@@ -290,6 +297,7 @@ test("mobile media contract keeps mutations idempotent and storage requests opaq
   for (const [path, method] of [
     ["/api/v1/media/uploads", "post"],
     ["/api/v1/recordings", "post"],
+    ["/api/v1/guest/previews", "post"],
   ]) {
     const parameters = operationParameters(path, openapi.paths[path][method]);
     const key = parameters.find((parameter) => parameter.in === "header" && parameter.name === "Idempotency-Key");
@@ -308,4 +316,12 @@ test("mobile media contract keeps mutations idempotent and storage requests opaq
   assert.equal(signedPart.requestBody.content["application/octet-stream"].schema.format, "binary");
   assert.match(openapi.components.schemas.SignedMediaRequest.properties.url.description, /opaque/i);
   assert.match(openapi.components.schemas.SignedMediaRequest.properties.url.description, /Do not persist/i);
+
+  const guestPreview = openapi.components.schemas.GuestPreview;
+  assert.equal(guestPreview.properties.corrections.maxItems, 2);
+  assert.deepEqual(guestPreview.properties.state.$ref, "#/components/schemas/GuestPreviewState");
+  assert.equal(openapi.paths["/api/v1/guest/previews"].post.responses["503"].$ref, "#/components/responses/V1CapacityUnavailable");
+  assert.deepEqual(openapi.components.schemas.IdentityGrantResponse.properties.guestPreviewPromotion.$ref, "#/components/schemas/GuestPreviewPromotion");
+  assert.deepEqual(openapi.components.schemas.GuestPreviewPromotion.properties.status.enum, ["promoted", "not_promoted", "no_preview"]);
+  assert.deepEqual(openapi.components.schemas.GuestPreviewPromotion.properties.reason.enum, ["promotion_already_used", "quota_exceeded"]);
 });
