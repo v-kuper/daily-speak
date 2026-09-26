@@ -15,9 +15,16 @@ server creates one.
 
 The unversioned `/api/*` routes are the legacy web contract. They remain in
 place while the web sandbox migrates, but new mobile clients must use
-`/api/v1/*`. Protected v1 routes temporarily accept the existing session cookie.
-Bearer access and refresh tokens will be added as an additional authentication
-method in the identity epic.
+`/api/v1/*`. Mobile authentication uses short-lived Bearer access tokens and
+single-use opaque refresh tokens. A successful refresh replaces the submitted
+refresh token; submitting an already used token revokes that device session.
+Protected recording routes also accept the existing cookie during the web
+migration. Cookies are not part of the mobile contract.
+
+Clients must keep the access token in memory and the refresh token in secure
+device storage. They must serialize refresh attempts per device and replace the
+stored refresh token atomically after every successful refresh. Tokens, bearer
+headers, and passwords must never be logged.
 
 If a v1 operation must be retired, it will first return standards-based
 `Deprecation` and `Sunset` headers for at least 90 days. An incompatible change

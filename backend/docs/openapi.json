@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "DailySpeak API",
-    "version": "1.1.0",
-    "description": "HTTP API for DailySpeak. New mobile integrations use the stable `/api/v1` contract. Authenticated endpoints temporarily accept the `daily_speaking_session` HTTP-only cookie until bearer tokens are added."
+    "version": "1.2.0",
+    "description": "HTTP API for DailySpeak. Mobile clients use the stable `/api/v1` contract with short-lived bearer access tokens and rotating opaque refresh tokens. The legacy web cookie contract remains available during migration."
   },
   "servers": [
     {
@@ -99,6 +99,361 @@
         }
       }
     },
+    "/api/v1/auth/anonymous": {
+      "post": {
+        "tags": [
+          "Mobile API v1",
+          "Auth"
+        ],
+        "summary": "Create a short-lived guest identity",
+        "security": [],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RequestIdHeader"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IdentityDeviceInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "$ref": "#/components/responses/V1IdentityCreated"
+          },
+          "400": {
+            "$ref": "#/components/responses/V1BadRequest"
+          },
+          "405": {
+            "$ref": "#/components/responses/V1MethodNotAllowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/V1PayloadTooLarge"
+          },
+          "500": {
+            "$ref": "#/components/responses/V1InternalServerError"
+          },
+          "503": {
+            "$ref": "#/components/responses/V1ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/api/v1/auth/register": {
+      "post": {
+        "tags": [
+          "Mobile API v1",
+          "Auth"
+        ],
+        "summary": "Register an account and optionally upgrade a guest",
+        "description": "When a guest Bearer token is supplied, its identity is merged into the new account in the same transaction.",
+        "security": [
+          {},
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RequestIdHeader"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IdentityCredentialsInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "$ref": "#/components/responses/V1IdentityCreated"
+          },
+          "400": {
+            "$ref": "#/components/responses/V1BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/V1Unauthorized"
+          },
+          "409": {
+            "$ref": "#/components/responses/V1Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/V1PayloadTooLarge"
+          },
+          "500": {
+            "$ref": "#/components/responses/V1InternalServerError"
+          },
+          "503": {
+            "$ref": "#/components/responses/V1ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/api/v1/auth/login": {
+      "post": {
+        "tags": [
+          "Mobile API v1",
+          "Auth"
+        ],
+        "summary": "Sign in and optionally merge a guest identity",
+        "description": "When a guest Bearer token is supplied, its identity is merged into the account atomically.",
+        "security": [
+          {},
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RequestIdHeader"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IdentityCredentialsInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/V1IdentityOK"
+          },
+          "400": {
+            "$ref": "#/components/responses/V1BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/V1Unauthorized"
+          },
+          "409": {
+            "$ref": "#/components/responses/V1Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/V1PayloadTooLarge"
+          },
+          "500": {
+            "$ref": "#/components/responses/V1InternalServerError"
+          },
+          "503": {
+            "$ref": "#/components/responses/V1ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/api/v1/auth/refresh": {
+      "post": {
+        "tags": [
+          "Mobile API v1",
+          "Auth"
+        ],
+        "summary": "Rotate a refresh token and issue a new access token",
+        "description": "Each refresh token is single-use. Reuse revokes the entire device session.",
+        "security": [],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RequestIdHeader"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefreshTokenInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/V1IdentityOK"
+          },
+          "400": {
+            "$ref": "#/components/responses/V1BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/V1Unauthorized"
+          },
+          "413": {
+            "$ref": "#/components/responses/V1PayloadTooLarge"
+          },
+          "500": {
+            "$ref": "#/components/responses/V1InternalServerError"
+          },
+          "503": {
+            "$ref": "#/components/responses/V1ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/api/v1/auth/session": {
+      "get": {
+        "tags": [
+          "Mobile API v1",
+          "Auth"
+        ],
+        "summary": "Read the current mobile identity and device session",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RequestIdHeader"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/V1IdentitySessionOK"
+          },
+          "401": {
+            "$ref": "#/components/responses/V1Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/V1InternalServerError"
+          }
+        }
+      }
+    },
+    "/api/v1/auth/logout": {
+      "post": {
+        "tags": [
+          "Mobile API v1",
+          "Auth"
+        ],
+        "summary": "Revoke the current device session",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RequestIdHeader"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/V1SuccessOK"
+          },
+          "401": {
+            "$ref": "#/components/responses/V1Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/V1InternalServerError"
+          }
+        }
+      }
+    },
+    "/api/v1/auth/logout-all": {
+      "post": {
+        "tags": [
+          "Mobile API v1",
+          "Auth"
+        ],
+        "summary": "Revoke every device session for the current identity",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RequestIdHeader"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/V1SuccessOK"
+          },
+          "401": {
+            "$ref": "#/components/responses/V1Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/V1InternalServerError"
+          }
+        }
+      }
+    },
+    "/api/v1/auth/sessions": {
+      "get": {
+        "tags": [
+          "Mobile API v1",
+          "Auth"
+        ],
+        "summary": "List active device sessions",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RequestIdHeader"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/V1DeviceSessionsOK"
+          },
+          "401": {
+            "$ref": "#/components/responses/V1Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/V1InternalServerError"
+          }
+        }
+      }
+    },
+    "/api/v1/auth/sessions/{sessionId}": {
+      "delete": {
+        "tags": [
+          "Mobile API v1",
+          "Auth"
+        ],
+        "summary": "Revoke one owned device session",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RequestIdHeader"
+          },
+          {
+            "$ref": "#/components/parameters/SessionIdPath"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/V1SuccessOK"
+          },
+          "401": {
+            "$ref": "#/components/responses/V1Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/V1NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/V1InternalServerError"
+          }
+        }
+      }
+    },
     "/api/v1/recordings": {
       "get": {
         "tags": [
@@ -107,6 +462,14 @@
         ],
         "summary": "List owned recordings with cursor pagination",
         "description": "Returns recordings ordered by timestamp and id descending. Cursors are opaque and must be sent back unchanged.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
         "parameters": [
           {
             "$ref": "#/components/parameters/RequestIdHeader"
@@ -144,6 +507,14 @@
           "Recordings"
         ],
         "summary": "Load one owned recording from the v1 API",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
         "parameters": [
           {
             "$ref": "#/components/parameters/RequestIdHeader"
@@ -1426,6 +1797,12 @@
         "in": "cookie",
         "name": "daily_speaking_session",
         "description": "HTTP-only session cookie set by `/api/auth/register` and `/api/auth/login`."
+      },
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "Short-lived access token returned by `/api/v1/auth/*`. Refresh tokens are sent only to the refresh endpoint."
       }
     },
     "parameters": {
@@ -1581,6 +1958,81 @@
           }
         }
       },
+      "V1IdentityCreated": {
+        "description": "Identity and device token grant created.",
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestID"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/IdentityGrantResponse"
+            }
+          }
+        }
+      },
+      "V1IdentityOK": {
+        "description": "Identity and rotated device token grant.",
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestID"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/IdentityGrantResponse"
+            }
+          }
+        }
+      },
+      "V1IdentitySessionOK": {
+        "description": "Current identity and device session.",
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestID"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/IdentitySessionResponse"
+            }
+          }
+        }
+      },
+      "V1DeviceSessionsOK": {
+        "description": "Active device sessions.",
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestID"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/DeviceSessionListResponse"
+            }
+          }
+        }
+      },
+      "V1SuccessOK": {
+        "description": "Operation completed.",
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestID"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/SuccessResponse"
+            }
+          }
+        }
+      },
       "V1BadRequest": {
         "description": "Invalid request.",
         "headers": {
@@ -1596,8 +2048,38 @@
           }
         }
       },
+      "V1PayloadTooLarge": {
+        "description": "Request body is too large.",
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestID"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/V1ErrorResponse"
+            }
+          }
+        }
+      },
       "V1Unauthorized": {
         "description": "Authentication is missing or invalid.",
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestID"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/V1ErrorResponse"
+            }
+          }
+        }
+      },
+      "V1Conflict": {
+        "description": "Identity conflict or guest identity already merged.",
         "headers": {
           "X-Request-ID": {
             "$ref": "#/components/headers/RequestID"
@@ -1643,6 +2125,21 @@
       },
       "V1InternalServerError": {
         "description": "Server error.",
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestID"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/V1ErrorResponse"
+            }
+          }
+        }
+      },
+      "V1ServiceUnavailable": {
+        "description": "Mobile identity signing is not configured.",
         "headers": {
           "X-Request-ID": {
             "$ref": "#/components/headers/RequestID"
@@ -1834,6 +2331,267 @@
           "documentation": "/docs"
         }
       },
+      "IdentityDeviceInput": {
+        "type": "object",
+        "properties": {
+          "deviceName": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "platform": {
+            "type": "string",
+            "maxLength": 40
+          }
+        },
+        "example": {
+          "deviceName": "Personal iPhone",
+          "platform": "ios"
+        }
+      },
+      "IdentityCredentialsInput": {
+        "type": "object",
+        "required": [
+          "email",
+          "password"
+        ],
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "password": {
+            "type": "string",
+            "format": "password",
+            "minLength": 8
+          },
+          "deviceName": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "platform": {
+            "type": "string",
+            "maxLength": 40
+          }
+        },
+        "example": {
+          "email": "student@example.com",
+          "password": "password123",
+          "deviceName": "Personal iPhone",
+          "platform": "ios"
+        }
+      },
+      "RefreshTokenInput": {
+        "type": "object",
+        "required": [
+          "refreshToken"
+        ],
+        "properties": {
+          "refreshToken": {
+            "type": "string",
+            "description": "Single-use opaque refresh token returned by the previous grant."
+          }
+        },
+        "example": {
+          "refreshToken": "dsr_v1_example"
+        }
+      },
+      "IdentityPrincipal": {
+        "type": "object",
+        "required": [
+          "id",
+          "type"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "guest",
+              "user"
+            ]
+          }
+        },
+        "example": {
+          "id": "550e8400-e29b-41d4-a716-446655440000",
+          "type": "user"
+        }
+      },
+      "DeviceSession": {
+        "type": "object",
+        "required": [
+          "id",
+          "deviceName",
+          "platform",
+          "current",
+          "expiresAt",
+          "lastSeenAt",
+          "createdAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "deviceName": {
+            "type": "string"
+          },
+          "platform": {
+            "type": "string"
+          },
+          "current": {
+            "type": "boolean"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lastSeenAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "example": {
+          "id": "4d36e968-e325-11ce-bfc1-08002be10318",
+          "deviceName": "Personal iPhone",
+          "platform": "ios",
+          "current": true,
+          "expiresAt": "2026-10-26T12:00:00Z",
+          "lastSeenAt": "2026-09-26T12:00:00Z",
+          "createdAt": "2026-09-26T12:00:00Z"
+        }
+      },
+      "IdentityTokens": {
+        "type": "object",
+        "required": [
+          "tokenType",
+          "accessToken",
+          "accessTokenExpiresAt",
+          "refreshToken",
+          "refreshTokenExpiresAt"
+        ],
+        "properties": {
+          "tokenType": {
+            "type": "string",
+            "const": "Bearer"
+          },
+          "accessToken": {
+            "type": "string",
+            "description": "Short-lived signed JWT. Send it as Authorization: Bearer <token>."
+          },
+          "accessTokenExpiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "refreshToken": {
+            "type": "string",
+            "description": "Single-use opaque token. Store it only in secure device storage."
+          },
+          "refreshTokenExpiresAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "IdentityGrantResponse": {
+        "type": "object",
+        "required": [
+          "principal",
+          "session",
+          "tokens"
+        ],
+        "properties": {
+          "principal": {
+            "$ref": "#/components/schemas/IdentityPrincipal"
+          },
+          "user": {
+            "$ref": "#/components/schemas/User"
+          },
+          "session": {
+            "$ref": "#/components/schemas/DeviceSession"
+          },
+          "tokens": {
+            "$ref": "#/components/schemas/IdentityTokens"
+          }
+        },
+        "example": {
+          "principal": {
+            "id": "550e8400-e29b-41d4-a716-446655440000",
+            "type": "guest"
+          },
+          "session": {
+            "id": "4d36e968-e325-11ce-bfc1-08002be10318",
+            "deviceName": "Personal iPhone",
+            "platform": "ios",
+            "current": true,
+            "expiresAt": "2026-09-27T12:00:00Z",
+            "lastSeenAt": "2026-09-26T12:00:00Z",
+            "createdAt": "2026-09-26T12:00:00Z"
+          },
+          "tokens": {
+            "tokenType": "Bearer",
+            "accessToken": "header.payload.signature",
+            "accessTokenExpiresAt": "2026-09-26T12:15:00Z",
+            "refreshToken": "dsr_v1_example",
+            "refreshTokenExpiresAt": "2026-09-27T12:00:00Z"
+          }
+        }
+      },
+      "IdentitySessionResponse": {
+        "type": "object",
+        "required": [
+          "principal",
+          "session"
+        ],
+        "properties": {
+          "principal": {
+            "$ref": "#/components/schemas/IdentityPrincipal"
+          },
+          "user": {
+            "$ref": "#/components/schemas/User"
+          },
+          "session": {
+            "$ref": "#/components/schemas/DeviceSession"
+          }
+        }
+      },
+      "DeviceSessionListResponse": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeviceSession"
+            }
+          }
+        },
+        "example": {
+          "items": []
+        }
+      },
+      "SuccessResponse": {
+        "type": "object",
+        "required": [
+          "ok"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          }
+        },
+        "example": {
+          "ok": true
+        }
+      },
       "V1ErrorResponse": {
         "type": "object",
         "required": [
@@ -1853,6 +2611,15 @@
                 "description": "Stable machine-readable error code.",
                 "enum": [
                   "invalid_request",
+                  "identity_unavailable",
+                  "invalid_credentials",
+                  "email_in_use",
+                  "invalid_guest",
+                  "invalid_access_token",
+                  "access_token_expired",
+                  "invalid_refresh_token",
+                  "refresh_token_expired",
+                  "refresh_token_reused",
                   "unauthorized",
                   "payment_required",
                   "forbidden",

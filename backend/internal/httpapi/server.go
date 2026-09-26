@@ -18,11 +18,12 @@ import (
 )
 
 type Config struct {
-	DB            *db.DB
-	Synthesizer   tts.Synthesizer
-	AIClient      ai.ChatClient
-	SessionCookie auth.CookieConfig
-	CORS          CORSConfig
+	DB             *db.DB
+	Synthesizer    tts.Synthesizer
+	AIClient       ai.ChatClient
+	SessionCookie  auth.CookieConfig
+	IdentityTokens auth.TokenConfig
+	CORS           CORSConfig
 }
 
 type shadowingJob struct {
@@ -47,6 +48,7 @@ type Server struct {
 	shadowingProcessingJobs map[string]shadowingJob
 	aiClient                ai.ChatClient
 	sessionCookie           auth.CookieConfig
+	identityTokens          auth.TokenConfig
 	cors                    CORSConfig
 }
 
@@ -71,6 +73,7 @@ func NewServer(config Config) *Server {
 		shadowingProcessingJobs: map[string]shadowingJob{},
 		aiClient:                aiClient,
 		sessionCookie:           config.SessionCookie,
+		identityTokens:          config.IdentityTokens,
 		cors:                    config.CORS,
 	}
 }
@@ -268,6 +271,20 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request, scope string,
 		}
 		writeJSON(w, status, map[string]string{"error": message})
 	}
+	if bearer, present := bearerToken(r); present && strings.HasPrefix(r.URL.Path, "/api/v1/") {
+		identity, err := auth.AuthenticateAccessToken(r.Context(), s.db, s.identityTokens, bearer)
+		if err != nil {
+			logger.Info("request.unauthorized", map[string]any{"status": 401, "durationMs": logging.ElapsedMs(started)})
+			writeError(http.StatusUnauthorized, "Unauthorized")
+			return nil, false
+		}
+		if identity.User == nil {
+			logger.Info("request.unauthorized", map[string]any{"status": 401, "durationMs": logging.ElapsedMs(started)})
+			writeError(http.StatusUnauthorized, "Unauthorized")
+			return nil, false
+		}
+		return identity.User, true
+	}
 	token := sessionToken(r)
 	if token == "" {
 		logger.Info("request.unauthorized", map[string]any{"status": 401, "durationMs": logging.ElapsedMs(started)})
@@ -286,6 +303,18 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request, scope string,
 		return nil, false
 	}
 	return user, true
+}
+
+func bearerToken(r *http.Request) (string, bool) {
+	header := strings.TrimSpace(r.Header.Get("Authorization"))
+	if header == "" {
+		return "", false
+	}
+	parts := strings.Fields(header)
+	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") || strings.TrimSpace(parts[1]) == "" {
+		return "", true
+	}
+	return parts[1], true
 }
 
 func sessionToken(r *http.Request) string {

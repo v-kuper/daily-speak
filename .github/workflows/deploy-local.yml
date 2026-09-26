@@ -33,6 +33,11 @@ jobs:
       OLLAMA_MODEL: ${{ vars.OLLAMA_MODEL || 'gemma4:31b-cloud' }}
       OLLAMA_THINKING_MODEL: ${{ vars.OLLAMA_THINKING_MODEL || 'true' }}
       AI_ANALYSIS_CONCURRENCY: 3
+      AUTH_ACCESS_TOKEN_ISSUER: ${{ vars.AUTH_ACCESS_TOKEN_ISSUER || 'daily-speaking-api' }}
+      AUTH_ACCESS_TOKEN_AUDIENCE: ${{ vars.AUTH_ACCESS_TOKEN_AUDIENCE || 'daily-speaking-mobile' }}
+      AUTH_ACCESS_TOKEN_TTL: ${{ vars.AUTH_ACCESS_TOKEN_TTL || '15m' }}
+      AUTH_REFRESH_TOKEN_TTL: ${{ vars.AUTH_REFRESH_TOKEN_TTL || '720h' }}
+      AUTH_GUEST_TOKEN_TTL: ${{ vars.AUTH_GUEST_TOKEN_TTL || '24h' }}
       WHISPER_BACKEND: openai
       WHISPER_BINARY_PATH: ${{ vars.WHISPER_BINARY_PATH || '' }}
       WHISPER_MODEL_PATH: ${{ vars.WHISPER_MODEL_PATH || '' }}
@@ -91,6 +96,7 @@ jobs:
         env:
           CARTESIA_API_KEY: ${{ secrets.CARTESIA_API_KEY }}
           CARTESIA_VOICE_ID: ${{ vars.CARTESIA_VOICE_ID }}
+          AUTH_ACCESS_TOKEN_SECRET: ${{ secrets.AUTH_ACCESS_TOKEN_SECRET }}
         run: .\scripts\setup-lan-https-proxy.ps1
 
       - name: Smoke separate HTTP services
