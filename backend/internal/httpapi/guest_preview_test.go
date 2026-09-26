@@ -87,17 +87,6 @@ func TestGenerateGuestPreviewCorrectionsUsesOneAIRequest(t *testing.T) {
 	}
 }
 
-func TestWorkerConfigReadsGuestPreviewConcurrency(t *testing.T) {
-	t.Setenv("WORKER_GUEST_PREVIEW_CONCURRENCY", "3")
-	config, err := WorkerConfigFromEnv()
-	if err != nil {
-		t.Fatalf("worker config: %v", err)
-	}
-	if config.GuestPreviewConcurrency != 3 {
-		t.Fatalf("guest preview concurrency = %d", config.GuestPreviewConcurrency)
-	}
-}
-
 func TestGuestPreviewQueueCapacityUsesSafeBounds(t *testing.T) {
 	t.Setenv("GUEST_PREVIEW_QUEUE_CAPACITY", "37")
 	if got := guestPreviewQueueCapacity(); got != 37 {

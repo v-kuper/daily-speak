@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"daily-speaking-practice/backend/internal/ai"
+	"daily-speaking-practice/backend/internal/aiparse"
 	"daily-speaking-practice/backend/internal/auth"
 	"daily-speaking-practice/backend/internal/domain"
 	"daily-speaking-practice/backend/internal/logging"
@@ -527,7 +528,7 @@ func (s *Server) generateGuestPreviewCorrections(ctx context.Context, transcript
 }
 
 func parseGuestPreviewCorrections(content, transcript string) []suggestion {
-	for _, candidate := range ai.ExtractJSONCandidates(content) {
+	for _, candidate := range aiparse.ExtractJSONCandidates(content) {
 		var envelope struct {
 			Corrections []guestPreviewWireCorrection `json:"corrections"`
 		}

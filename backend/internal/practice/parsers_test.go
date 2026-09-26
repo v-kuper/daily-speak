@@ -1,4 +1,4 @@
-package httpapi
+package practice
 
 import "testing"
 

@@ -105,8 +105,48 @@ test("backend source has no Next.js upstream", () => {
 test("API and durable worker have separate process entrypoints", () => {
   const apiMain = readFileSync("backend/cmd/api/main.go", "utf8");
   const workerMain = readFileSync("backend/cmd/worker/main.go", "utf8");
+  const runtime = readFileSync("backend/internal/worker/runtime.go", "utf8");
+  const legacyWorkers = readFileSync("backend/internal/httpapi/durable_workers.go", "utf8");
+  const mediaCleanup = readFileSync("backend/internal/media/cleanup.go", "utf8");
 
   assert.doesNotMatch(apiMain, /RunWorkers|StartBackgroundWorkers/);
   assert.match(workerMain, /RunWorkers/);
-  assert.match(workerMain, /WorkerConfigFromEnv/);
+  assert.match(workerMain, /worker\.ConfigFromEnv/);
+  assert.match(runtime, /workqueue\.Run/);
+  assert.doesNotMatch(legacyWorkers, /WorkerConfigFromEnv|workqueue\.Run/);
+  assert.match(mediaCleanup, /AbortExpiredUploads|EnqueueExpiredAssets|FinalizeFailure/);
+  assert.doesNotMatch(legacyWorkers, /storage_driver|pending_file_deletions/);
+});
+
+test("practice generation is an application service outside HTTP transport", () => {
+  for (const path of [
+    "backend/internal/practice/service.go",
+    "backend/internal/practice/daily_questions.go",
+    "backend/internal/practice/prompts.go",
+    "backend/internal/practice/parsers.go",
+    "backend/internal/practice/ollamaadapter/provider.go",
+    "backend/internal/httpapi/practice_handlers.go",
+  ]) {
+    assert.equal(existsSync(path), true, `missing ${path}`);
+  }
+
+  const core = [
+    "service.go",
+    "daily_questions.go",
+    "topic_guidance.go",
+    "study_pack.go",
+    "prompts.go",
+    "parsers.go",
+    "normalization.go",
+  ].map((name) => readFileSync(`backend/internal/practice/${name}`, "utf8")).join("\n");
+  const service = readFileSync("backend/internal/practice/service.go", "utf8");
+  const provider = readFileSync("backend/internal/practice/ollamaadapter/provider.go", "utf8");
+  const handler = readFileSync("backend/internal/httpapi/practice_handlers.go", "utf8");
+  assert.doesNotMatch(core, /net\/http|internal\/httpapi|internal\/ai"/);
+  assert.match(service, /CompletionProvider/);
+  assert.match(provider, /ai\.ChatClient/);
+  assert.doesNotMatch(provider, /ai\.PostChat/);
+  assert.match(handler, /internal\/practice/);
+  assert.doesNotMatch(handler, /PostChat|You generate|output format exactly/);
+  assert.equal(existsSync("backend/internal/httpapi/ai_handlers.go"), false);
 });

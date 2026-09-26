@@ -236,3 +236,21 @@ func errorMessage(err error, fallback string) string {
 	}
 	return err.Error()
 }
+
+func chooseFloat(condition bool, ifTrue float64, ifFalse float64) float64 {
+	if condition {
+		return ifTrue
+	}
+	return ifFalse
+}
+
+func absMod(value int, mod int) int {
+	if mod <= 0 {
+		return value
+	}
+	out := value % mod
+	if out < 0 {
+		return -out
+	}
+	return out
+}

@@ -16,6 +16,8 @@ import (
 	"daily-speaking-practice/backend/internal/logging"
 	"daily-speaking-practice/backend/internal/media"
 	"daily-speaking-practice/backend/internal/operations"
+	"daily-speaking-practice/backend/internal/practice"
+	"daily-speaking-practice/backend/internal/practice/ollamaadapter"
 	"daily-speaking-practice/backend/internal/storage"
 	"daily-speaking-practice/backend/internal/transcription"
 	"daily-speaking-practice/backend/internal/tts"
@@ -26,6 +28,7 @@ type Config struct {
 	DB                 *db.DB
 	Synthesizer        tts.Synthesizer
 	AIClient           ai.ChatClient
+	PracticeGenerator  practice.Generator
 	SessionCookie      auth.CookieConfig
 	IdentityTokens     auth.TokenConfig
 	CORS               CORSConfig
@@ -45,6 +48,7 @@ type Server struct {
 	removeStoredUploads func([]string) error
 	synthesizer         tts.Synthesizer
 	aiClient            ai.ChatClient
+	practiceGenerator   practice.Generator
 	sessionCookie       auth.CookieConfig
 	identityTokens      auth.TokenConfig
 	cors                CORSConfig
@@ -74,6 +78,10 @@ func NewServer(config Config) *Server {
 	aiClient := config.AIClient
 	if aiClient == nil {
 		aiClient = ai.OllamaClient{}
+	}
+	practiceGenerator := config.PracticeGenerator
+	if practiceGenerator == nil {
+		practiceGenerator = practice.NewService(ollamaadapter.New(aiClient))
 	}
 	mediaStore := config.MediaStore
 	if mediaStore == nil && config.DB != nil {
@@ -112,6 +120,7 @@ func NewServer(config Config) *Server {
 		removeStoredUploads: removeStoredUploadFiles,
 		synthesizer:         synthesizer,
 		aiClient:            aiClient,
+		practiceGenerator:   practiceGenerator,
 		sessionCookie:       config.SessionCookie,
 		identityTokens:      config.IdentityTokens,
 		cors:                config.CORS,

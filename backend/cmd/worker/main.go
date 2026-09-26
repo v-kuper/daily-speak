@@ -12,6 +12,7 @@ import (
 	"daily-speaking-practice/backend/internal/db"
 	"daily-speaking-practice/backend/internal/httpapi"
 	"daily-speaking-practice/backend/internal/storage"
+	"daily-speaking-practice/backend/internal/worker"
 )
 
 func main() {
@@ -39,16 +40,16 @@ func main() {
 		log.Fatalf("media storage initialization failed: %v", err)
 	}
 
-	config, err := httpapi.WorkerConfigFromEnv()
+	config, err := worker.ConfigFromEnv()
 	if err != nil {
 		log.Fatalf("worker configuration failed: %v", err)
 	}
-	worker := httpapi.NewServer(httpapi.Config{
+	processor := httpapi.NewServer(httpapi.Config{
 		DB: database, MediaStore: mediaStore, MediaBucket: mediaConfig.S3Bucket,
 		MediaPartSize: mediaConfig.MultipartPartSize, MediaPresignTTL: mediaConfig.PresignTTL,
 	})
 	log.Printf("daily-speaking worker started")
-	if err := worker.RunWorkers(ctx, config); err != nil && !errors.Is(err, context.Canceled) {
+	if err := processor.RunWorkers(ctx, config); err != nil && !errors.Is(err, context.Canceled) {
 		log.Fatalf("worker failed: %v", err)
 	}
 }

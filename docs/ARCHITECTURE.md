@@ -121,11 +121,15 @@ procedures live in [`BACKEND_OPERATIONS.md`](BACKEND_OPERATIONS.md).
 web/                         standalone Next.js application
 backend/cmd/api              API process composition
 backend/cmd/worker           durable worker process composition
+backend/internal/aiparse     provider-neutral model-output normalization
 backend/internal/auth        cookie and mobile identity
 backend/internal/db          PostgreSQL connection and migrations
 backend/internal/httpapi     current HTTP transport and orchestration
 backend/internal/media       authorized media lifecycle
+backend/internal/practice    speaking-practice generation application service
+backend/internal/practice/ollamaadapter  Ollama adapter for the practice port
 backend/internal/storage     local and S3 storage adapters
+backend/internal/worker      worker configuration and pool lifecycle
 backend/internal/workqueue   durable PostgreSQL queue
 backend/internal/operations  rate limits, proxy trust, and metrics
 backend/migrations           immutable ordered schema migrations
