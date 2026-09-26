@@ -118,7 +118,10 @@ test("API and durable worker have separate process entrypoints", () => {
   assert.match(mediaCleanup, /AbortExpiredUploads|EnqueueExpiredAssets|FinalizeFailure/);
   assert.doesNotMatch(legacyWorkers, /storage_driver|pending_file_deletions/);
 	assert.match(mediaMaterializer, /verified_checksum_sha256|io\.LimitReader/);
-	assert.equal(existsSync("backend/internal/httpapi/media_workers.go"), false);
+  assert.equal(existsSync("backend/internal/httpapi/media_workers.go"), false);
+	assert.equal(existsSync("backend/internal/httpapi/guest_preview_probe.go"), false);
+	assert.match(readFileSync("backend/internal/media/probe.go", "utf8"), /func ProbeAudioDuration/);
+	assert.match(readFileSync("backend/internal/storage/legacy.go", "utf8"), /type LegacyUploads/);
 });
 
 test("practice generation is an application service outside HTTP transport", () => {

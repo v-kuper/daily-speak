@@ -146,7 +146,7 @@ func NewServer(config Config) *Server {
 	}
 	probeAudioDuration := config.ProbeAudioDuration
 	if probeAudioDuration == nil {
-		probeAudioDuration = probeAudioDurationWithFFprobe
+		probeAudioDuration = media.ProbeAudioDuration
 	}
 	transcribeForProcessing := func(ctx context.Context, path string) (string, error) {
 		transcript, err := transcribeAudio(ctx, path)

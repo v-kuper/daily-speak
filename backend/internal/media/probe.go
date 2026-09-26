@@ -1,4 +1,4 @@
-package httpapi
+package media
 
 import (
 	"context"
@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-func probeAudioDurationWithFFprobe(ctx context.Context, audioPath string) (time.Duration, error) {
+func ProbeAudioDuration(ctx context.Context, audioPath string) (time.Duration, error) {
 	binary, err := resolveFFprobeBinary()
 	if err != nil {
 		return 0, err
@@ -32,13 +32,21 @@ func probeAudioDurationWithFFprobe(ctx context.Context, audioPath string) (time.
 		if message == "" {
 			message = err.Error()
 		}
-		return 0, fmt.Errorf("ffprobe failed: %s", truncateRunes(message, 300))
+		return 0, fmt.Errorf("ffprobe failed: %s", truncateProbeMessage(message, 300))
 	}
 	seconds, err := strconv.ParseFloat(strings.TrimSpace(string(output)), 64)
 	if err != nil || seconds <= 0 || seconds > 24*60*60 {
 		return 0, errors.New("ffprobe returned an invalid duration")
 	}
 	return time.Duration(seconds * float64(time.Second)), nil
+}
+
+func truncateProbeMessage(value string, limit int) string {
+	runes := []rune(value)
+	if len(runes) <= limit {
+		return value
+	}
+	return string(runes[:limit])
 }
 
 func resolveFFprobeBinary() (string, error) {
