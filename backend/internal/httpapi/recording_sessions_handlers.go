@@ -309,6 +309,18 @@ func (s *Server) handleFinishRecordingSession(w http.ResponseWriter, r *http.Req
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Recording upload session is already finalized."})
 		return
 	}
+	// The session lock preserves finalize idempotency; the user-row lock below
+	// serializes its quota reservation with direct web/mobile recordings and
+	// guest-preview promotion.
+	qBefore, err = lockRecordingQuotaV1(r.Context(), tx, user.ID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to save recording."})
+		return
+	}
+	if quotaError := recordingQuotaError(qBefore, duration); quotaError != nil {
+		writeJSON(w, quotaError.status, map[string]string{"error": quotaError.message})
+		return
+	}
 	err = tx.QueryRow(r.Context(), `
 		INSERT INTO recordings
 		  (id, user_id, topic, duration, timestamp, transcript, corrected_transcript, suggestions, practice_type, audio_data_url, photo_data_url, photo_object, status, processing_stage, processing_job_id)

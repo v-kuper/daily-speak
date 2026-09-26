@@ -154,7 +154,7 @@
           "Auth"
         ],
         "summary": "Register an account and optionally upgrade a guest",
-        "description": "When a guest Bearer token is supplied, its identity is merged into the new account in the same transaction.",
+        "description": "When a guest Bearer token is supplied, its identity is merged into the new account in the same transaction. guestPreviewPromotion reports whether the bounded preview became the stable account recording.",
         "security": [
           {},
           {
@@ -208,7 +208,7 @@
           "Auth"
         ],
         "summary": "Sign in and optionally merge a guest identity",
-        "description": "When a guest Bearer token is supplied, its identity is merged into the account atomically.",
+        "description": "When a guest Bearer token is supplied, its identity is merged into the account atomically. An account may consume the guest-preview promotion only once and free accounts must have recording quota available; authentication still succeeds when promotion is declined, with the result in guestPreviewPromotion.",
         "security": [
           {},
           {
@@ -457,6 +457,114 @@
         }
       }
     },
+    "/api/v1/guest/previews": {
+      "post": {
+        "tags": [
+          "Mobile API v1",
+          "Recordings"
+        ],
+        "summary": "Create the single bounded guest preview",
+        "description": "Attaches one owned ready guest audio asset and queues transcription plus at most two high-confidence corrections. It never starts full multipass analysis, rewrite, or shadowing. The actual audio duration is verified server-side and must not exceed 60 seconds.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RequestIdHeader"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKeyHeader"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateGuestPreviewRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/V1GuestPreviewOK"
+          },
+          "201": {
+            "$ref": "#/components/responses/V1GuestPreviewCreated"
+          },
+          "400": {
+            "$ref": "#/components/responses/V1BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/V1Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/V1Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/V1NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/V1Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/V1PayloadTooLarge"
+          },
+          "500": {
+            "$ref": "#/components/responses/V1InternalServerError"
+          },
+          "503": {
+            "$ref": "#/components/responses/V1CapacityUnavailable"
+          }
+        }
+      }
+    },
+    "/api/v1/guest/previews/{previewId}": {
+      "get": {
+        "tags": [
+          "Mobile API v1",
+          "Recordings"
+        ],
+        "summary": "Load the owned guest preview",
+        "description": "Returns only the bounded preview result. After account upgrade, continue polling the same id through `/api/v1/recordings/{recordingId}`.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RequestIdHeader"
+          },
+          {
+            "$ref": "#/components/parameters/GuestPreviewIdPath"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/V1GuestPreviewOK"
+          },
+          "401": {
+            "$ref": "#/components/responses/V1Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/V1Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/V1NotFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/V1MethodNotAllowed"
+          },
+          "500": {
+            "$ref": "#/components/responses/V1InternalServerError"
+          }
+        }
+      }
+    },
     "/api/v1/recordings": {
       "get": {
         "tags": [
@@ -606,7 +714,7 @@
           "Media"
         ],
         "summary": "Create an owned resumable media upload",
-        "description": "Creates an upload plan for recording audio or a recording photo. The client computes the complete-object SHA-256 before starting. A user access token and Idempotency-Key are required; guest identities receive account_required.",
+        "description": "Creates an upload plan for recording audio or a recording photo. The client computes the complete-object SHA-256 before starting. User identities use the normal media limits. A guest identity may create one recording_audio upload up to 10 MiB for its bounded preview; guest photos and additional live assets are rejected.",
         "security": [
           {
             "bearerAuth": []
@@ -642,6 +750,9 @@
           },
           "403": {
             "$ref": "#/components/responses/V1Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/V1Conflict"
           },
           "413": {
             "$ref": "#/components/responses/V1PayloadTooLarge"
@@ -2305,6 +2416,15 @@
           "format": "uuid"
         }
       },
+      "GuestPreviewIdPath": {
+        "name": "previewId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
       "MediaPartNumberPath": {
         "name": "partNumber",
         "in": "path",
@@ -2509,6 +2629,42 @@
           "application/json": {
             "schema": {
               "$ref": "#/components/schemas/RecordingWithQuotaResponse"
+            }
+          }
+        }
+      },
+      "V1GuestPreviewCreated": {
+        "description": "Guest preview created and durable processing queued.",
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestID"
+          },
+          "Location": {
+            "description": "Relative URL of the guest preview resource.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/GuestPreviewResponse"
+            }
+          }
+        }
+      },
+      "V1GuestPreviewOK": {
+        "description": "Current bounded guest preview state.",
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestID"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/GuestPreviewResponse"
             }
           }
         }
@@ -2891,6 +3047,28 @@
           }
         }
       },
+      "V1CapacityUnavailable": {
+        "description": "Guest preview admission capacity is temporarily exhausted. Retry later without changing the idempotency key.",
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestID"
+          },
+          "Retry-After": {
+            "description": "Minimum delay in seconds before retrying.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/V1ErrorResponse"
+            }
+          }
+        }
+      },
       "AuthUserOK": {
         "description": "Authenticated user. Response also sets `daily_speaking_session` on login/register.",
         "headers": {
@@ -3237,6 +3415,39 @@
           }
         }
       },
+      "GuestPreviewPromotion": {
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "promoted",
+              "not_promoted",
+              "no_preview"
+            ]
+          },
+          "previewId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "recordingId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Stable recording ID, present only when status is promoted."
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "promotion_already_used",
+              "quota_exceeded"
+            ],
+            "description": "Machine-readable reason, present only when status is not_promoted."
+          }
+        }
+      },
       "IdentityGrantResponse": {
         "type": "object",
         "required": [
@@ -3256,6 +3467,9 @@
           },
           "tokens": {
             "$ref": "#/components/schemas/IdentityTokens"
+          },
+          "guestPreviewPromotion": {
+            "$ref": "#/components/schemas/GuestPreviewPromotion"
           }
         },
         "example": {
@@ -3365,11 +3579,16 @@
                   "payment_required",
                   "forbidden",
                   "account_required",
+                  "guest_required",
+                  "guest_media_restricted",
                   "not_found",
                   "media_not_found",
                   "method_not_allowed",
                   "conflict",
                   "idempotency_conflict",
+                  "guest_preview_conflict",
+                  "idempotency_key_required",
+                  "invalid_checksum",
                   "upload_expired",
                   "unsupported_media_type",
                   "checksum_mismatch",
@@ -3381,6 +3600,7 @@
                   "upstream_unavailable",
                   "service_unavailable",
                   "storage_unavailable",
+                  "capacity_exhausted",
                   "request_failed"
                 ]
               },
@@ -3447,6 +3667,183 @@
           "page": {
             "limit": 20,
             "nextCursor": null
+          }
+        }
+      },
+      "CreateGuestPreviewRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "audioAssetId",
+          "topic",
+          "duration",
+          "practiceType"
+        ],
+        "properties": {
+          "audioAssetId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "topic": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "duration": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 60,
+            "description": "Client estimate in seconds. The backend replaces it with the measured audio duration before publishing the preview."
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Optional client recording time. The server time is used when omitted."
+          },
+          "practiceType": {
+            "type": "string",
+            "enum": [
+              "free_talk",
+              "topic"
+            ]
+          }
+        },
+        "example": {
+          "audioAssetId": "cb29ab9b-04de-45fb-a77a-d49743da5f94",
+          "topic": "My day",
+          "duration": 31,
+          "practiceType": "free_talk"
+        }
+      },
+      "GuestPreviewState": {
+        "type": "string",
+        "enum": [
+          "queued",
+          "processing",
+          "ready",
+          "failed"
+        ],
+        "example": "ready"
+      },
+      "GuestPreview": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "state",
+          "topic",
+          "duration",
+          "timestamp",
+          "practiceType",
+          "transcript",
+          "corrections",
+          "expiresAt",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Stable id reused as recordingId after account upgrade."
+          },
+          "state": {
+            "$ref": "#/components/schemas/GuestPreviewState"
+          },
+          "topic": {
+            "type": "string"
+          },
+          "duration": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 60
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "practiceType": {
+            "type": "string",
+            "enum": [
+              "free_talk",
+              "topic"
+            ]
+          },
+          "transcript": {
+            "type": "string"
+          },
+          "corrections": {
+            "type": "array",
+            "maxItems": 2,
+            "items": {
+              "$ref": "#/components/schemas/Suggestion"
+            },
+            "description": "Zero to two high-confidence corrections. This is never the hidden full analysis result."
+          },
+          "processingError": {
+            "type": "string",
+            "description": "Safe generic message returned only when state is failed."
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "example": {
+          "id": "2f43ef36-14d8-49c6-8218-a36a87720d77",
+          "state": "ready",
+          "topic": "My day",
+          "duration": 31,
+          "timestamp": "2026-09-27T08:30:00Z",
+          "practiceType": "free_talk",
+          "transcript": "Yesterday I go to work.",
+          "corrections": [
+            {
+              "wrong": "Yesterday I go",
+              "right": "Yesterday I went",
+              "explanation": "Use the past tense for a completed action.",
+              "category": "verb_grammar",
+              "severity": "major",
+              "learningReference": null
+            }
+          ],
+          "expiresAt": "2026-09-28T08:30:00Z",
+          "createdAt": "2026-09-27T08:30:00Z",
+          "updatedAt": "2026-09-27T08:31:00Z"
+        }
+      },
+      "GuestPreviewResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "preview"
+        ],
+        "properties": {
+          "preview": {
+            "$ref": "#/components/schemas/GuestPreview"
+          }
+        },
+        "example": {
+          "preview": {
+            "id": "2f43ef36-14d8-49c6-8218-a36a87720d77",
+            "state": "queued",
+            "topic": "My day",
+            "duration": 31,
+            "timestamp": "2026-09-27T08:30:00Z",
+            "practiceType": "free_talk",
+            "transcript": "",
+            "corrections": [],
+            "expiresAt": "2026-09-28T08:30:00Z",
+            "createdAt": "2026-09-27T08:30:00Z",
+            "updatedAt": "2026-09-27T08:30:00Z"
           }
         }
       },

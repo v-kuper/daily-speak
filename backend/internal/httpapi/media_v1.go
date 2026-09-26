@@ -72,7 +72,7 @@ func (s *Server) routeMediaUploadV1(w http.ResponseWriter, r *http.Request, rest
 }
 
 func (s *Server) handleCreateMediaUploadV1(w http.ResponseWriter, r *http.Request) {
-	identity, ok := s.requiredMediaUserV1(w, r)
+	identity, ok := s.requiredMediaPrincipalV1(w, r)
 	if !ok || !s.mediaAvailable(w, r) {
 		return
 	}
@@ -96,9 +96,20 @@ func (s *Server) handleCreateMediaUploadV1(w http.ResponseWriter, r *http.Reques
 		writeV1Error(w, r, http.StatusBadRequest, "invalid_checksum", "checksum.algorithm must be sha256")
 		return
 	}
+	purpose := strings.ToLower(strings.TrimSpace(payload.Purpose))
+	if identity.Kind == "guest" {
+		if purpose != media.PurposeRecordingAudio {
+			writeV1Error(w, r, http.StatusForbidden, "guest_media_restricted", "Guests may upload one preview recording only")
+			return
+		}
+		purpose = media.PurposeGuestPreviewAudio
+	} else if purpose == media.PurposeGuestPreviewAudio {
+		writeV1Error(w, r, http.StatusBadRequest, "invalid_request", "Media purpose is invalid")
+		return
+	}
 	resource, err := s.mediaService.CreateUpload(r.Context(), media.CreateUploadInput{
 		OwnerPrincipalID: identity.PrincipalID, SessionID: identity.SessionID,
-		IdempotencyKey: r.Header.Get("Idempotency-Key"), Purpose: payload.Purpose,
+		IdempotencyKey: r.Header.Get("Idempotency-Key"), Purpose: purpose,
 		ContentType: payload.ContentType, SizeBytes: payload.SizeBytes,
 		ChecksumSHA256: payload.Checksum.Value,
 	})
@@ -111,7 +122,7 @@ func (s *Server) handleCreateMediaUploadV1(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *Server) handleGetMediaUploadV1(w http.ResponseWriter, r *http.Request, uploadID string) {
-	identity, ok := s.requiredMediaUserV1(w, r)
+	identity, ok := s.requiredMediaPrincipalV1(w, r)
 	if !ok || !s.mediaAvailable(w, r) {
 		return
 	}
@@ -124,7 +135,7 @@ func (s *Server) handleGetMediaUploadV1(w http.ResponseWriter, r *http.Request, 
 }
 
 func (s *Server) handleSignMediaUploadPartsV1(w http.ResponseWriter, r *http.Request, uploadID string) {
-	identity, ok := s.requiredMediaUserV1(w, r)
+	identity, ok := s.requiredMediaPrincipalV1(w, r)
 	if !ok || !s.mediaAvailable(w, r) {
 		return
 	}
@@ -164,7 +175,7 @@ func (s *Server) handleSignMediaUploadPartsV1(w http.ResponseWriter, r *http.Req
 }
 
 func (s *Server) handleCompleteMediaUploadV1(w http.ResponseWriter, r *http.Request, uploadID string) {
-	identity, ok := s.requiredMediaUserV1(w, r)
+	identity, ok := s.requiredMediaPrincipalV1(w, r)
 	if !ok || !s.mediaAvailable(w, r) {
 		return
 	}
@@ -183,7 +194,7 @@ func (s *Server) handleCompleteMediaUploadV1(w http.ResponseWriter, r *http.Requ
 }
 
 func (s *Server) handleAbortMediaUploadV1(w http.ResponseWriter, r *http.Request, uploadID string) {
-	identity, ok := s.requiredMediaUserV1(w, r)
+	identity, ok := s.requiredMediaPrincipalV1(w, r)
 	if !ok || !s.mediaAvailable(w, r) {
 		return
 	}
@@ -277,7 +288,7 @@ func (s *Server) routeMediaUploadEntry(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) requiredMediaUserV1(w http.ResponseWriter, r *http.Request) (*auth.Identity, bool) {
-	identity, ok := s.requiredIdentityV1(w, r)
+	identity, ok := s.requiredMediaPrincipalV1(w, r)
 	if !ok {
 		return nil, false
 	}
@@ -286,6 +297,10 @@ func (s *Server) requiredMediaUserV1(w http.ResponseWriter, r *http.Request) (*a
 		return nil, false
 	}
 	return identity, true
+}
+
+func (s *Server) requiredMediaPrincipalV1(w http.ResponseWriter, r *http.Request) (*auth.Identity, bool) {
+	return s.requiredIdentityV1(w, r)
 }
 
 func (s *Server) mediaAvailable(w http.ResponseWriter, r *http.Request) bool {
@@ -364,8 +379,12 @@ func mediaUploadResponse(resource media.UploadResource, parts []storage.PartInfo
 }
 
 func mediaAssetResponse(asset media.Asset) map[string]any {
+	purpose := asset.Purpose
+	if purpose == media.PurposeGuestPreviewAudio {
+		purpose = media.PurposeRecordingAudio
+	}
 	return map[string]any{
-		"id": asset.ID, "state": asset.State, "purpose": asset.Purpose,
+		"id": asset.ID, "state": asset.State, "purpose": purpose,
 		"contentType": asset.ContentType, "sizeBytes": asset.ExpectedSizeBytes,
 		"checksum": map[string]string{"algorithm": "sha256", "value": asset.ExpectedChecksumSHA256},
 	}

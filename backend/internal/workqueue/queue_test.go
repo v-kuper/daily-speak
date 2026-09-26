@@ -5,6 +5,12 @@ import (
 	"time"
 )
 
+func TestGuestPreviewKindIsStable(t *testing.T) {
+	if KindGuestPreview != "guest.preview" {
+		t.Fatalf("guest preview job kind = %q", KindGuestPreview)
+	}
+}
+
 func TestRetryDelayUsesCappedExponentialBackoff(t *testing.T) {
 	base := 2 * time.Second
 	maximum := 10 * time.Second

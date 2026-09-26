@@ -27,10 +27,18 @@ type identityCredentialsPayload struct {
 }
 
 type identityResponse struct {
-	Principal identityPrincipalResponse `json:"principal"`
-	User      *auth.User                `json:"user,omitempty"`
-	Session   identitySessionResponse   `json:"session"`
-	Tokens    *identityTokensResponse   `json:"tokens,omitempty"`
+	Principal             identityPrincipalResponse              `json:"principal"`
+	User                  *auth.User                             `json:"user,omitempty"`
+	Session               identitySessionResponse                `json:"session"`
+	Tokens                *identityTokensResponse                `json:"tokens,omitempty"`
+	GuestPreviewPromotion *identityGuestPreviewPromotionResponse `json:"guestPreviewPromotion,omitempty"`
+}
+
+type identityGuestPreviewPromotionResponse struct {
+	Status      string `json:"status"`
+	PreviewID   string `json:"previewId,omitempty"`
+	RecordingID string `json:"recordingId,omitempty"`
+	Reason      string `json:"reason,omitempty"`
 }
 
 type identityPrincipalResponse struct {
@@ -311,6 +319,12 @@ func identityGrantResponse(grant auth.TokenGrant) identityResponse {
 	response.Tokens = &identityTokensResponse{
 		TokenType: "Bearer", AccessToken: grant.AccessToken, AccessTokenExpiresAt: formatIdentityTime(grant.AccessTokenExpiresAt),
 		RefreshToken: grant.RefreshToken, RefreshTokenExpiresAt: formatIdentityTime(grant.RefreshTokenExpiresAt),
+	}
+	if grant.GuestPreviewPromotion != nil {
+		response.GuestPreviewPromotion = &identityGuestPreviewPromotionResponse{
+			Status: grant.GuestPreviewPromotion.Status, PreviewID: grant.GuestPreviewPromotion.PreviewID,
+			RecordingID: grant.GuestPreviewPromotion.RecordingID, Reason: grant.GuestPreviewPromotion.Reason,
+		}
 	}
 	return response
 }

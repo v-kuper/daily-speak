@@ -2,9 +2,11 @@ package quota
 
 import (
 	"context"
+	"time"
 
 	"daily-speaking-practice/backend/internal/db"
 	"daily-speaking-practice/backend/internal/domain"
+	"github.com/jackc/pgx/v5"
 )
 
 type RecordingQuota struct {
@@ -13,6 +15,44 @@ type RecordingQuota struct {
 	WeeklyUsedSeconds      int  `json:"weeklyUsedSeconds"`
 	WeeklyRemainingSeconds *int `json:"weeklyRemainingSeconds"`
 	MaxSessionSeconds      int  `json:"maxSessionSeconds"`
+}
+
+// LockRecordingQuota is the shared admission boundary for every code path
+// that creates a recording. Holding the user row lock until the caller commits
+// makes the read-and-insert decision atomic across API replicas and clients.
+func LockRecordingQuota(ctx context.Context, tx pgx.Tx, userID string, now time.Time) (RecordingQuota, error) {
+	var isSubscriber bool
+	if err := tx.QueryRow(ctx, `
+		SELECT is_subscriber AND (subscription_expires_at IS NULL OR subscription_expires_at > $2)
+		FROM users
+		WHERE id = $1
+		FOR UPDATE`, userID, now).Scan(&isSubscriber); err != nil {
+		return RecordingQuota{}, err
+	}
+	var usedSeconds int
+	if err := tx.QueryRow(ctx, `
+		SELECT COALESCE(SUM(duration), 0)::int
+		FROM recordings
+		WHERE user_id = $1
+		  AND created_at >= date_trunc('week', $2::timestamptz)
+		  AND created_at < date_trunc('week', $2::timestamptz) + INTERVAL '1 week'`, userID, now).Scan(&usedSeconds); err != nil {
+		return RecordingQuota{}, err
+	}
+	usedSeconds = domain.ToNonNegativeInt(usedSeconds)
+	if isSubscriber {
+		return RecordingQuota{IsSubscriber: true, WeeklyUsedSeconds: usedSeconds, MaxSessionSeconds: domain.SubscriberMaxSessionSeconds}, nil
+	}
+	limit := domain.FreeWeeklyLimitSeconds
+	remaining := limit - usedSeconds
+	if remaining < 0 {
+		remaining = 0
+	}
+	return RecordingQuota{
+		WeeklyLimitSeconds:     &limit,
+		WeeklyUsedSeconds:      usedSeconds,
+		WeeklyRemainingSeconds: &remaining,
+		MaxSessionSeconds:      domain.SubscriberMaxSessionSeconds,
+	}, nil
 }
 
 func GetRecordingQuota(ctx context.Context, database *db.DB, userID string, knownSubscriber *bool) (RecordingQuota, error) {

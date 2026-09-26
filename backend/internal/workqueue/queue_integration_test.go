@@ -54,6 +54,22 @@ func TestQueueClaimsOnceRecoversExpiredLeaseAndFencesOldOwner(t *testing.T) {
 		_, _ = database.Exec(context.Background(), `DELETE FROM processing_jobs WHERE idempotency_key = $1`, idempotencyKey)
 	})
 	store := NewStore(database)
+	guestJobID := uuid.NewString()
+	guestIdempotencyKey := "guest-preview-kind-test:" + uuid.NewString()
+	t.Cleanup(func() {
+		_, _ = database.Exec(context.Background(), `DELETE FROM processing_jobs WHERE idempotency_key = $1`, guestIdempotencyKey)
+	})
+	if err := Enqueue(ctx, database, NewJob{
+		ID: guestJobID, Kind: KindGuestPreview, ResourceID: uuid.NewString(),
+		IdempotencyKey: guestIdempotencyKey, MaxAttempts: 2,
+	}); err != nil {
+		t.Fatalf("enqueue guest preview kind: %v", err)
+	}
+	var guestKind string
+	if err := database.QueryRow(ctx, `SELECT kind FROM processing_jobs WHERE id = $1`, guestJobID).Scan(&guestKind); err != nil || guestKind != KindGuestPreview {
+		t.Fatalf("stored guest preview kind=%q err=%v", guestKind, err)
+	}
+
 	job := NewJob{
 		ID:             jobID,
 		Kind:           KindMediaDelete,

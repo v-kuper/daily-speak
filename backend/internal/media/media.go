@@ -24,7 +24,11 @@ var (
 
 const (
 	PurposeRecordingAudio = "recording_audio"
-	PurposeRecordingPhoto = "recording_photo"
+	// PurposeGuestPreviewAudio is an internal storage purpose. Clients still
+	// request recording_audio; the HTTP authorization layer maps guest uploads
+	// to this value so PostgreSQL can enforce one live guest object atomically.
+	PurposeGuestPreviewAudio = "guest_preview_audio"
+	PurposeRecordingPhoto    = "recording_photo"
 )
 
 type Asset struct {

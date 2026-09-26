@@ -19,6 +19,7 @@ const (
 	KindRecordingProcess    = "recording.process"
 	KindShadowingSynthesize = "shadowing.synthesize"
 	KindMediaDelete         = "media.delete"
+	KindGuestPreview        = "guest.preview"
 )
 
 var ErrLeaseLost = errors.New("processing job lease was lost")

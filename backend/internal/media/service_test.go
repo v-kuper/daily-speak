@@ -64,6 +64,22 @@ func TestCreateInputValidationRejectsUnsupportedOrOversizedMedia(t *testing.T) {
 	}
 }
 
+func TestGuestPreviewUploadUsesTighterAudioLimit(t *testing.T) {
+	input := CreateUploadInput{
+		OwnerPrincipalID: "guest-1", SessionID: "session-1",
+		IdempotencyKey: "request-1234", Purpose: PurposeGuestPreviewAudio,
+		ContentType: "audio/webm", SizeBytes: 10 * 1024 * 1024,
+		ChecksumSHA256: strings.Repeat("a", 64),
+	}
+	if _, err := validateCreateInput(input); err != nil {
+		t.Fatalf("guest upload at limit: %v", err)
+	}
+	input.SizeBytes++
+	if _, err := validateCreateInput(input); !errors.Is(err, ErrPayloadTooLarge) {
+		t.Fatalf("guest upload above limit error = %v", err)
+	}
+}
+
 func TestCompletingUploadFencesConcurrentAbort(t *testing.T) {
 	now := time.Date(2026, 9, 26, 20, 0, 0, 0, time.UTC)
 	resource := testUploadResource(now)

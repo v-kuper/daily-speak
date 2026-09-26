@@ -244,6 +244,8 @@ test("environment examples document the local default and optional S3 contract",
     assert.match(example, /^MEDIA_UPLOAD_URL_TTL=15m$/m);
     assert.match(example, /^MEDIA_MULTIPART_PART_SIZE_BYTES=8388608$/m);
     assert.match(example, /^MEDIA_SWEEP_INTERVAL=15m$/m);
+    assert.match(example, /^GUEST_PREVIEW_QUEUE_CAPACITY=100$/m);
+    assert.match(example, /^WORKER_GUEST_PREVIEW_CONCURRENCY=1$/m);
   }
 });
 
@@ -343,7 +345,9 @@ test("Compose gives independent contexts and bounded worker execution", () => {
   assert.deepEqual(worker.depends_on, { postgres: { condition: "service_healthy" } });
   assert.equal(worker.ports, undefined);
   assert.equal(worker.environment.WORKER_RECORDING_CONCURRENCY, "${WORKER_RECORDING_CONCURRENCY:-1}");
+  assert.equal(worker.environment.WORKER_GUEST_PREVIEW_CONCURRENCY, "${WORKER_GUEST_PREVIEW_CONCURRENCY:-1}");
   assert.equal(worker.environment.WORKER_SHADOWING_CONCURRENCY, "${WORKER_SHADOWING_CONCURRENCY:-2}");
+  assert.equal(backend.environment.GUEST_PREVIEW_QUEUE_CAPACITY, "${GUEST_PREVIEW_QUEUE_CAPACITY:-100}");
   assert.deepEqual(web.environment, {
     PUBLIC_WEB_BASE_URL: "${PUBLIC_WEB_BASE_URL:-}",
     PUBLIC_API_BASE_URL: "${PUBLIC_API_BASE_URL:-http://localhost:3219}",

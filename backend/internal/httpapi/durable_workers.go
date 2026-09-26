@@ -18,31 +18,36 @@ import (
 )
 
 type WorkerConfig struct {
-	RecordingConcurrency int
-	ShadowingConcurrency int
-	CleanupConcurrency   int
-	PollInterval         time.Duration
-	LeaseDuration        time.Duration
-	HeartbeatInterval    time.Duration
-	RetryBaseDelay       time.Duration
-	RetryMaxDelay        time.Duration
-	MediaSweepInterval   time.Duration
+	RecordingConcurrency    int
+	GuestPreviewConcurrency int
+	ShadowingConcurrency    int
+	CleanupConcurrency      int
+	PollInterval            time.Duration
+	LeaseDuration           time.Duration
+	HeartbeatInterval       time.Duration
+	RetryBaseDelay          time.Duration
+	RetryMaxDelay           time.Duration
+	MediaSweepInterval      time.Duration
 }
 
 func WorkerConfigFromEnv() (WorkerConfig, error) {
 	config := WorkerConfig{
-		RecordingConcurrency: 1,
-		ShadowingConcurrency: 2,
-		CleanupConcurrency:   2,
-		PollInterval:         time.Second,
-		LeaseDuration:        2 * time.Minute,
-		HeartbeatInterval:    30 * time.Second,
-		RetryBaseDelay:       5 * time.Second,
-		RetryMaxDelay:        5 * time.Minute,
-		MediaSweepInterval:   15 * time.Minute,
+		RecordingConcurrency:    1,
+		GuestPreviewConcurrency: 1,
+		ShadowingConcurrency:    2,
+		CleanupConcurrency:      2,
+		PollInterval:            time.Second,
+		LeaseDuration:           2 * time.Minute,
+		HeartbeatInterval:       30 * time.Second,
+		RetryBaseDelay:          5 * time.Second,
+		RetryMaxDelay:           5 * time.Minute,
+		MediaSweepInterval:      15 * time.Minute,
 	}
 	var err error
 	if config.RecordingConcurrency, err = positiveEnvInt("WORKER_RECORDING_CONCURRENCY", config.RecordingConcurrency); err != nil {
+		return WorkerConfig{}, err
+	}
+	if config.GuestPreviewConcurrency, err = positiveEnvInt("WORKER_GUEST_PREVIEW_CONCURRENCY", config.GuestPreviewConcurrency); err != nil {
 		return WorkerConfig{}, err
 	}
 	if config.ShadowingConcurrency, err = positiveEnvInt("WORKER_SHADOWING_CONCURRENCY", config.ShadowingConcurrency); err != nil {
@@ -104,6 +109,17 @@ func (s *Server) RunWorkers(ctx context.Context, config WorkerConfig) error {
 		return errors.New("worker database is not configured")
 	}
 	pools := []workqueue.RunnerConfig{
+		{
+			Kinds:             []string{workqueue.KindGuestPreview},
+			Concurrency:       config.GuestPreviewConcurrency,
+			PollInterval:      config.PollInterval,
+			LeaseDuration:     config.LeaseDuration,
+			HeartbeatInterval: config.HeartbeatInterval,
+			RetryBaseDelay:    config.RetryBaseDelay,
+			RetryMaxDelay:     config.RetryMaxDelay,
+			Handle:            s.handleDurableJob,
+			FinalizeFailure:   s.finalizeDurableFailure,
+		},
 		{
 			Kinds:             []string{workqueue.KindRecordingProcess},
 			Concurrency:       config.RecordingConcurrency,
@@ -228,6 +244,9 @@ func (s *Server) sweepExpiredMedia(ctx context.Context) error {
 			return abortErr
 		}
 	}
+	if err := s.expireGuestPreviews(ctx); err != nil {
+		return err
+	}
 
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
@@ -284,6 +303,10 @@ func (s *Server) sweepExpiredMedia(ctx context.Context) error {
 
 func (s *Server) handleDurableJob(ctx context.Context, job workqueue.Job) error {
 	switch job.Kind {
+	case workqueue.KindGuestPreview:
+		jobCtx, cancel := context.WithTimeout(ctx, guestPreviewProcessingTimeout)
+		defer cancel()
+		return s.runGuestPreviewJob(jobCtx, job)
 	case workqueue.KindRecordingProcess:
 		jobCtx, cancel := context.WithTimeout(ctx, recordingProcessingTimeout)
 		defer cancel()
@@ -334,6 +357,13 @@ func (s *Server) handleDurableJob(ctx context.Context, job workqueue.Job) error 
 
 func (s *Server) finalizeDurableFailure(ctx context.Context, tx pgx.Tx, job workqueue.Job, message string) error {
 	switch job.Kind {
+	case workqueue.KindGuestPreview:
+		_, err := tx.Exec(ctx, `
+			UPDATE guest_previews
+			SET state = 'failed', processing_error = $3, updated_at = NOW()
+			WHERE id = $1 AND preview_job_id = $2 AND state IN ('queued', 'processing')`,
+			job.ResourceID, job.ID, truncateRunes(message, 500))
+		return err
 	case workqueue.KindRecordingProcess:
 		_, err := tx.Exec(ctx, `
 			UPDATE recordings

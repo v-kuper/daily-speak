@@ -96,6 +96,7 @@ Optional repository variables and defaults:
 | `API_HTTPS_PORT` | `3444` | API HTTPS host port |
 | `POSTGRES_PORT` | `5433` | loopback-only database port |
 | `UPLOADS_HOST_DIR` | `D:\DailySpeaking\data\uploads` | backend media storage |
+| `GUEST_PREVIEW_QUEUE_CAPACITY` | `100` | maximum admitted guest preview jobs |
 | `OLLAMA_BASE_URL` | `http://host.docker.internal:11434` | backend AI service |
 | `OLLAMA_MODEL` | `gemma4:31b-cloud` | backend AI model |
 | `OLLAMA_THINKING_MODEL` | `true` | backend model behavior |
@@ -103,6 +104,7 @@ Optional repository variables and defaults:
 | `WHISPER_MODEL_PATH` | empty | optional `whisper.cpp` model |
 
 The workflow deliberately fixes `AI_ANALYSIS_CONCURRENCY=3`,
+`WORKER_GUEST_PREVIEW_CONCURRENCY=1`,
 `WHISPER_BACKEND=openai`, `WHISPER_OPENAI_MODEL=base`, and
 `WHISPER_LANGUAGE=auto` in source so old runner variables cannot silently alter
 the deployed transcription mode.
