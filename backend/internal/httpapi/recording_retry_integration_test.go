@@ -119,7 +119,7 @@ func newRecordingRetryFixture(t *testing.T, stage string, client *retryAIClient)
 	}
 
 	t.Setenv("UPLOADS_DIR", t.TempDir())
-	return recordingRetryFixture{
+	fixture := recordingRetryFixture{
 		database:    database,
 		owner:       owner,
 		ownerCookie: auth.NewSessionCookie(session.Token, session.ExpiresAt),
@@ -127,6 +127,8 @@ func newRecordingRetryFixture(t *testing.T, stage string, client *retryAIClient)
 		client:      client,
 		server:      NewServer(Config{DB: database, AIClient: client, Synthesizer: &fakeSynthesizer{audio: []byte("ID3")}}),
 	}
+	startTestWorkers(t, fixture.server)
+	return fixture
 }
 
 func (fixture recordingRetryFixture) post(t *testing.T, cookie *http.Cookie) *httptest.ResponseRecorder {

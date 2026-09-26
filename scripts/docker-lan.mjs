@@ -120,7 +120,7 @@ export function buildComposeCommand({ env = process.env, interfaces = os.network
   const hostAddress = listLanAddresses(interfaces)[0] ?? "localhost";
   return {
     command: "docker",
-    args: ["compose", "up", "--build", "-d", "--remove-orphans", "web", "backend", "postgres"],
+    args: ["compose", "up", "--build", "-d", "--remove-orphans", "web", "backend", "worker", "postgres"],
     env: {
       ...env,
       APP_PORT: webPort,

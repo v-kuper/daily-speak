@@ -33,6 +33,14 @@ jobs:
       OLLAMA_MODEL: ${{ vars.OLLAMA_MODEL || 'gemma4:31b-cloud' }}
       OLLAMA_THINKING_MODEL: ${{ vars.OLLAMA_THINKING_MODEL || 'true' }}
       AI_ANALYSIS_CONCURRENCY: 3
+      WORKER_RECORDING_CONCURRENCY: 1
+      WORKER_SHADOWING_CONCURRENCY: 2
+      WORKER_CLEANUP_CONCURRENCY: 2
+      WORKER_POLL_INTERVAL: 1s
+      WORKER_LEASE_DURATION: 2m
+      WORKER_HEARTBEAT_INTERVAL: 30s
+      WORKER_RETRY_BASE_DELAY: 5s
+      WORKER_RETRY_MAX_DELAY: 5m
       AUTH_ACCESS_TOKEN_ISSUER: ${{ vars.AUTH_ACCESS_TOKEN_ISSUER || 'daily-speaking-api' }}
       AUTH_ACCESS_TOKEN_AUDIENCE: ${{ vars.AUTH_ACCESS_TOKEN_AUDIENCE || 'daily-speaking-mobile' }}
       AUTH_ACCESS_TOKEN_TTL: ${{ vars.AUTH_ACCESS_TOKEN_TTL || '15m' }}
@@ -125,11 +133,11 @@ jobs:
 
       - name: Verify Docker Whisper runtime
         run: |
-          docker compose exec -T backend sh -lc 'env | grep WHISPER && test -x "$WHISPER_PYTHON_BIN" && $WHISPER_PYTHON_BIN -m whisper --help >/dev/null && echo whisper-ok'
+          docker compose exec -T worker sh -lc 'env | grep WHISPER && test -x "$WHISPER_PYTHON_BIN" && $WHISPER_PYTHON_BIN -m whisper --help >/dev/null && echo whisper-ok'
 
       - name: Verify Docker Cartesia configuration
         run: |
-          docker compose exec -T backend sh -lc 'test -n "$CARTESIA_API_KEY" && test -n "$CARTESIA_VOICE_ID" && echo cartesia-config-ok'
+          docker compose exec -T worker sh -lc 'test -n "$CARTESIA_API_KEY" && test -n "$CARTESIA_VOICE_ID" && echo cartesia-config-ok'
 
       - name: Deployment diagnostics
         if: failure()
@@ -137,4 +145,5 @@ jobs:
           docker compose ps
           docker compose logs --tail 120 web
           docker compose logs --tail 120 backend
+          docker compose logs --tail 120 worker
           docker compose logs --tail 120 lan-https

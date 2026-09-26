@@ -166,9 +166,9 @@ https://${HostIp}:${ApiHttpsPort} {
   }
 
   if (-not $SkipDockerComposeUp) {
-    docker compose up --build -d --remove-orphans web backend postgres
+    docker compose up --build -d --remove-orphans web backend worker postgres
     if ($LASTEXITCODE -ne 0) {
-      throw "Failed to build or start web, backend, and postgres services."
+      throw "Failed to build or start web, backend, worker, and postgres services."
     }
 
     docker compose up -d --force-recreate --no-deps lan-https

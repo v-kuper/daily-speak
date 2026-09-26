@@ -11,6 +11,7 @@ import (
 
 	"daily-speaking-practice/backend/internal/domain"
 	"daily-speaking-practice/backend/internal/logging"
+	"daily-speaking-practice/backend/internal/workqueue"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
@@ -72,8 +73,13 @@ func (s *Server) scheduleShadowing(ctx context.Context, userID string, recording
 	userID = strings.TrimSpace(userID)
 	recordingID = strings.TrimSpace(recordingID)
 	attemptID := uuid.NewString()
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return recordingResponse{}, false, err
+	}
+	defer tx.Rollback(ctx)
 	var correctedTranscript string
-	err := s.db.QueryRow(ctx, `
+	err = tx.QueryRow(ctx, `
 		UPDATE recordings
 		SET shadowing_status = 'processing',
 		    shadowing_error = NULL,
@@ -84,7 +90,7 @@ func (s *Server) scheduleShadowing(ctx context.Context, userID string, recording
 		  AND BTRIM(corrected_transcript) <> ''
 		  AND (
 		    shadowing_status IN ('pending', 'failed')
-		    OR (shadowing_status = 'processing' AND shadowing_updated_at < NOW() - INTERVAL '5 minutes')
+		    OR (shadowing_status = 'processing' AND shadowing_attempt_id IS NULL AND shadowing_updated_at < NOW() - INTERVAL '5 minutes')
 		  )
 		RETURNING corrected_transcript`, recordingID, userID, attemptID).Scan(&correctedTranscript)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -100,48 +106,58 @@ func (s *Server) scheduleShadowing(ctx context.Context, userID string, recording
 	if err != nil {
 		return recordingResponse{}, false, err
 	}
+	if err := workqueue.Enqueue(ctx, tx, workqueue.NewJob{
+		ID:             attemptID,
+		Kind:           workqueue.KindShadowingSynthesize,
+		ResourceID:     recordingID,
+		IdempotencyKey: "shadowing:" + attemptID,
+		MaxAttempts:    4,
+	}); err != nil {
+		return recordingResponse{}, false, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return recordingResponse{}, false, err
+	}
 
 	recording, err := s.recordingForUser(ctx, userID, recordingID)
 	if err != nil {
-		_, _ = s.db.Exec(context.Background(), `
-			UPDATE recordings
-			SET shadowing_status = 'failed', shadowing_error = $3, shadowing_updated_at = NOW(), shadowing_attempt_id = NULL
-			WHERE id = $1 AND user_id = $2 AND shadowing_attempt_id = $4`, recordingID, userID, shadowingFailureMessage, attemptID)
 		return recordingResponse{}, false, err
 	}
-	s.startShadowingJob(recordingID, userID, correctedTranscript, attemptID)
 	return recording, true, nil
 }
 
-func (s *Server) startShadowingJob(recordingID string, userID string, correctedTranscript string, attemptID string) {
-	ctx, cancel := context.WithTimeout(context.Background(), shadowingJobTimeout)
-	s.registerShadowingProcessing(recordingID, shadowingJob{id: attemptID, cancel: cancel})
-	go func() {
-		defer cancel()
-		defer s.unregisterShadowingProcessing(recordingID, attemptID)
-		s.runShadowing(ctx, recordingID, userID, correctedTranscript, attemptID)
-	}()
+func (s *Server) runShadowingJob(ctx context.Context, job workqueue.Job) error {
+	var userID, correctedTranscript, status string
+	var attemptID *string
+	err := s.db.QueryRow(ctx, `
+		SELECT user_id, corrected_transcript, shadowing_status, shadowing_attempt_id
+		FROM recordings
+		WHERE id = $1`, job.ResourceID).Scan(&userID, &correctedTranscript, &status, &attemptID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if status != "processing" || attemptID == nil || *attemptID != job.ID {
+		return nil
+	}
+	return s.runShadowing(ctx, job.ResourceID, userID, correctedTranscript, job.ID, job.LeaseToken)
 }
 
-func (s *Server) runShadowing(ctx context.Context, recordingID string, userID string, correctedTranscript string, attemptID string) {
+func (s *Server) runShadowing(ctx context.Context, recordingID string, userID string, correctedTranscript string, attemptID string, leaseToken string) error {
 	started := time.Now()
-	logger := logging.ForBackground("api.recordings.shadowing")
+	logger := logging.ForBackground("worker.recordings.shadowing")
 	audio, err := s.synthesizer.Synthesize(ctx, correctedTranscript)
 	if err != nil {
-		if errors.Is(ctx.Err(), context.Canceled) {
-			logger.Info("shadowing.cancelled", map[string]any{"recordingId": recordingID})
-			return
-		}
-		s.failShadowing(recordingID, userID, attemptID, logger)
-		return
+		return err
 	}
-	saved, err := saveShadowingAudio(userID, recordingID, attemptID, audio)
+	// Include the fenced lease token in the object name. A worker that finishes
+	// after losing its lease can therefore never overwrite the active worker's
+	// published audio before its conditional database update is rejected.
+	saved, err := saveShadowingAudio(userID, recordingID, attemptID+"-"+leaseToken, audio)
 	if err != nil {
-		if errors.Is(ctx.Err(), context.Canceled) {
-			return
-		}
-		s.failShadowing(recordingID, userID, attemptID, logger)
-		return
+		return err
 	}
 
 	result, err := s.db.Exec(ctx, `
@@ -151,65 +167,24 @@ func (s *Server) runShadowing(ctx context.Context, recordingID string, userID st
 		    shadowing_error = NULL,
 		    shadowing_updated_at = NOW(),
 		    shadowing_attempt_id = NULL
-		WHERE id = $1 AND user_id = $3 AND shadowing_status = 'processing' AND shadowing_attempt_id = $4`, recordingID, saved.publicURL, userID, attemptID)
+		WHERE id = $1 AND user_id = $3 AND shadowing_status = 'processing' AND shadowing_attempt_id = $4
+		  AND EXISTS (
+		    SELECT 1 FROM processing_jobs
+		    WHERE id = $4 AND state = 'running' AND lease_token = $5
+		  )`, recordingID, saved.publicURL, userID, attemptID, leaseToken)
 	if err != nil || result.RowsAffected() == 0 {
 		_ = os.Remove(saved.absolutePath)
-		if !errors.Is(ctx.Err(), context.Canceled) {
-			s.failShadowing(recordingID, userID, attemptID, logger)
+		if err != nil {
+			return err
 		}
-		return
+		return nil
 	}
 	logger.Info("shadowing.ready", map[string]any{
 		"recordingId": recordingID,
 		"durationMs":  logging.ElapsedMs(started),
 		"bytes":       len(audio),
 	})
-}
-
-func (s *Server) failShadowing(recordingID string, userID string, attemptID string, logger logging.Logger) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	_, err := s.db.Exec(ctx, `
-		UPDATE recordings
-		SET shadowing_status = 'failed',
-		    shadowing_audio_url = NULL,
-		    shadowing_error = $3,
-		    shadowing_updated_at = NOW(),
-		    shadowing_attempt_id = NULL
-		WHERE id = $1 AND user_id = $2 AND shadowing_status = 'processing' AND shadowing_attempt_id = $4`, recordingID, userID, shadowingFailureMessage, attemptID)
-	meta := map[string]any{"recordingId": recordingID}
-	if err != nil {
-		meta["statusUpdate"] = "failed"
-	}
-	logger.Error("shadowing.failed", meta)
-}
-
-func (s *Server) registerShadowingProcessing(recordingID string, job shadowingJob) {
-	s.shadowingProcessingMu.Lock()
-	previous := s.shadowingProcessingJobs[recordingID]
-	s.shadowingProcessingJobs[recordingID] = job
-	s.shadowingProcessingMu.Unlock()
-	if previous.cancel != nil {
-		previous.cancel()
-	}
-}
-
-func (s *Server) unregisterShadowingProcessing(recordingID string, jobID string) {
-	s.shadowingProcessingMu.Lock()
-	if current := s.shadowingProcessingJobs[recordingID]; current.id == jobID {
-		delete(s.shadowingProcessingJobs, recordingID)
-	}
-	s.shadowingProcessingMu.Unlock()
-}
-
-func (s *Server) cancelShadowingProcessing(recordingID string) {
-	s.shadowingProcessingMu.Lock()
-	job := s.shadowingProcessingJobs[recordingID]
-	delete(s.shadowingProcessingJobs, recordingID)
-	s.shadowingProcessingMu.Unlock()
-	if job.cancel != nil {
-		job.cancel()
-	}
+	return nil
 }
 
 func saveShadowingAudio(userID string, recordingID string, attemptID string, audio []byte) (savedAudioFile, error) {

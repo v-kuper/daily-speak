@@ -5,6 +5,12 @@ migrations, recordings and uploads, AI/transcription integrations, Feed data,
 and the OpenAPI contract. It does not contain or proxy the Next.js application.
 Browser, mobile, and other HTTP clients can call the same API contract.
 
+Paid recording work is executed by the independent `cmd/worker` process. API
+requests atomically persist recording state and a PostgreSQL job; workers use
+leased claims, heartbeats, bounded concurrency, and retry backoff. API replicas
+stay stateless and never start transcription, analysis, TTS, or media-cleanup
+goroutines.
+
 ## Public surface
 
 - `/api/v1/*`: stable, versioned mobile API endpoints;
@@ -32,6 +38,15 @@ cd backend
 DATABASE_URL=postgres://postgres:postgres@localhost:5432/daily_speaking \
 CORS_ALLOWED_ORIGINS=http://localhost:3000,http://localhost:3219 \
 APP_ADDR=:3219 go run ./cmd/api
+```
+
+In a second process, start the worker with the same `DATABASE_URL`, provider
+configuration, and `UPLOADS_DIR`:
+
+```bash
+cd backend
+DATABASE_URL=postgres://postgres:postgres@localhost:5432/daily_speaking \
+go run ./cmd/worker
 ```
 
 The API applies pending, versioned SQL migrations at startup. Open the independent API
@@ -72,6 +87,17 @@ Runtime and storage:
 - `UPLOADS_DIR`: persistent media directory, default `public/uploads` outside
   Docker and `/app/uploads` in the image;
 - `SERVER_LOG_LEVEL`: log threshold such as `info` or `debug`.
+
+Durable worker controls:
+
+- `WORKER_RECORDING_CONCURRENCY`, `WORKER_SHADOWING_CONCURRENCY`, and
+  `WORKER_CLEANUP_CONCURRENCY`: independent bounded pools (defaults `1`, `2`,
+  and `2`);
+- `WORKER_POLL_INTERVAL`: idle queue polling interval, default `1s`;
+- `WORKER_LEASE_DURATION` and `WORKER_HEARTBEAT_INTERVAL`: crash-recovery
+  lease, defaults `2m` and `30s`; heartbeat must be shorter than the lease;
+- `WORKER_RETRY_BASE_DELAY` and `WORKER_RETRY_MAX_DELAY`: exponential retry
+  bounds, defaults `5s` and `5m`.
 
 Mobile identity:
 

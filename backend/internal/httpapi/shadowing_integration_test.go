@@ -31,18 +31,21 @@ type controlledSynthesisResult struct {
 }
 
 type controlledSynthesizer struct {
-	started chan struct{}
-	release chan controlledSynthesisResult
+	started  chan struct{}
+	release  chan controlledSynthesisResult
+	finished chan struct{}
 }
 
 func newControlledSynthesizer() *controlledSynthesizer {
 	return &controlledSynthesizer{
-		started: make(chan struct{}),
-		release: make(chan controlledSynthesisResult, 1),
+		started:  make(chan struct{}),
+		release:  make(chan controlledSynthesisResult, 1),
+		finished: make(chan struct{}),
 	}
 }
 
 func (s *controlledSynthesizer) Synthesize(ctx context.Context, _ string) ([]byte, error) {
+	defer close(s.finished)
 	close(s.started)
 	select {
 	case result := <-s.release:
@@ -155,19 +158,13 @@ func waitForControlledSynthesizer(t *testing.T, synthesizer *controlledSynthesiz
 	}
 }
 
-func waitForShadowingJobToFinish(t *testing.T, server *Server, recordingID string) {
+func waitForControlledSynthesizerFinish(t *testing.T, synthesizer *controlledSynthesizer) {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		server.shadowingProcessingMu.Lock()
-		_, running := server.shadowingProcessingJobs[recordingID]
-		server.shadowingProcessingMu.Unlock()
-		if !running {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
+	select {
+	case <-synthesizer.finished:
+	case <-time.After(2 * time.Second):
+		t.Fatal("synthesizer did not finish")
 	}
-	t.Fatal("shadowing job did not finish")
 }
 
 func (f shadowingFixture) waitForShadowingStatus(t *testing.T, want string) recordingResponse {
@@ -260,6 +257,7 @@ func TestShadowingRetryRequiresCorrectedTranscript(t *testing.T) {
 func TestShadowingConcurrentRequestsClaimOnce(t *testing.T) {
 	synthesizer := &fakeSynthesizer{audio: []byte("ID3")}
 	fixture := newShadowingFixture(t, synthesizer, "I went yesterday.", "pending", time.Now().UTC())
+	startTestWorkers(t, fixture.server)
 	var wait sync.WaitGroup
 	wait.Add(2)
 	statuses := make(chan int, 2)
@@ -297,6 +295,7 @@ func TestShadowingRecentProcessingIsNotDuplicated(t *testing.T) {
 func TestShadowingStaleProcessingCanBeReclaimed(t *testing.T) {
 	synthesizer := &fakeSynthesizer{audio: []byte("ID3")}
 	fixture := newShadowingFixture(t, synthesizer, "I went yesterday.", "processing", time.Now().UTC().Add(-6*time.Minute))
+	startTestWorkers(t, fixture.server)
 	response := fixture.post(t, fixture.ownerCookie)
 	if response.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
@@ -311,24 +310,25 @@ func TestReclaimedShadowingIgnoresOlderWorkerFailure(t *testing.T) {
 	oldSynthesizer := newControlledSynthesizer()
 	fixture := newShadowingFixture(t, &fakeSynthesizer{}, "I went yesterday.", "pending", time.Now().UTC())
 	oldServer := NewServer(Config{DB: fixture.database, Synthesizer: oldSynthesizer})
+	startTestWorkers(t, oldServer)
 	if response := fixture.postToServer(t, oldServer, fixture.ownerCookie); response.Code != http.StatusOK {
 		t.Fatalf("old claim status=%d body=%q", response.Code, response.Body.String())
 	}
 	waitForControlledSynthesizer(t, oldSynthesizer)
 	if _, err := fixture.database.Exec(context.Background(), `
-		UPDATE recordings SET shadowing_updated_at = NOW() - INTERVAL '6 minutes' WHERE id = $1`, fixture.recordingID); err != nil {
+		UPDATE processing_jobs
+		SET lease_expires_at = NOW() - INTERVAL '1 second'
+		WHERE resource_id = $1 AND kind = 'shadowing.synthesize' AND state = 'running'`, fixture.recordingID); err != nil {
 		t.Fatal(err)
 	}
 
 	newSynthesizer := newControlledSynthesizer()
 	newServer := NewServer(Config{DB: fixture.database, Synthesizer: newSynthesizer})
-	if response := fixture.postToServer(t, newServer, fixture.ownerCookie); response.Code != http.StatusOK {
-		t.Fatalf("new claim status=%d body=%q", response.Code, response.Body.String())
-	}
+	startTestWorkers(t, newServer)
 	waitForControlledSynthesizer(t, newSynthesizer)
 
 	oldSynthesizer.release <- controlledSynthesisResult{err: errors.New("old worker failed")}
-	waitForShadowingJobToFinish(t, oldServer, fixture.recordingID)
+	waitForControlledSynthesizerFinish(t, oldSynthesizer)
 	newSynthesizer.release <- controlledSynthesisResult{audio: []byte("ID3-new-attempt")}
 	recording := fixture.waitForShadowingStatus(t, "ready")
 	if recording.ShadowingAudioURL == nil {
@@ -347,6 +347,7 @@ func TestReclaimedShadowingIgnoresOlderWorkerFailure(t *testing.T) {
 func TestShadowingFailurePreservesReadyRecording(t *testing.T) {
 	synthesizer := &fakeSynthesizer{err: errors.New("provider body includes secret-internal-detail")}
 	fixture := newShadowingFixture(t, synthesizer, "I went yesterday.", "pending", time.Now().UTC())
+	startTestWorkers(t, fixture.server)
 	response := fixture.post(t, fixture.ownerCookie)
 	if response.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())

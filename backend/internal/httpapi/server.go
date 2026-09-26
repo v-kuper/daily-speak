@@ -1,12 +1,10 @@
 package httpapi
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	apidocs "daily-speaking-practice/backend/docs"
@@ -15,6 +13,7 @@ import (
 	"daily-speaking-practice/backend/internal/db"
 	"daily-speaking-practice/backend/internal/logging"
 	"daily-speaking-practice/backend/internal/tts"
+	"daily-speaking-practice/backend/internal/workqueue"
 )
 
 type Config struct {
@@ -26,30 +25,15 @@ type Config struct {
 	CORS           CORSConfig
 }
 
-type shadowingJob struct {
-	id     string
-	cancel context.CancelFunc
-}
-
-type recordingProcessingJob struct {
-	id     string
-	cancel context.CancelFunc
-}
-
 type Server struct {
-	db                      *db.DB
-	recordingProcessingMu   sync.Mutex
-	recordingProcessingJobs map[string]recordingProcessingJob
-	fileDeletionWorkerOnce  sync.Once
-	fileDeletionWake        chan struct{}
-	removeStoredUploads     func([]string) error
-	synthesizer             tts.Synthesizer
-	shadowingProcessingMu   sync.Mutex
-	shadowingProcessingJobs map[string]shadowingJob
-	aiClient                ai.ChatClient
-	sessionCookie           auth.CookieConfig
-	identityTokens          auth.TokenConfig
-	cors                    CORSConfig
+	db                  *db.DB
+	jobStore            *workqueue.Store
+	removeStoredUploads func([]string) error
+	synthesizer         tts.Synthesizer
+	aiClient            ai.ChatClient
+	sessionCookie       auth.CookieConfig
+	identityTokens      auth.TokenConfig
+	cors                CORSConfig
 }
 
 func NewServer(config Config) *Server {
@@ -65,16 +49,14 @@ func NewServer(config Config) *Server {
 		aiClient = ai.OllamaClient{}
 	}
 	return &Server{
-		db:                      config.DB,
-		recordingProcessingJobs: map[string]recordingProcessingJob{},
-		fileDeletionWake:        make(chan struct{}, 1),
-		removeStoredUploads:     removeStoredUploadFiles,
-		synthesizer:             synthesizer,
-		shadowingProcessingJobs: map[string]shadowingJob{},
-		aiClient:                aiClient,
-		sessionCookie:           config.SessionCookie,
-		identityTokens:          config.IdentityTokens,
-		cors:                    config.CORS,
+		db:                  config.DB,
+		jobStore:            workqueue.NewStore(config.DB),
+		removeStoredUploads: removeStoredUploadFiles,
+		synthesizer:         synthesizer,
+		aiClient:            aiClient,
+		sessionCookie:       config.SessionCookie,
+		identityTokens:      config.IdentityTokens,
+		cors:                config.CORS,
 	}
 }
 

@@ -15,6 +15,7 @@ import (
 	"daily-speaking-practice/backend/internal/domain"
 	"daily-speaking-practice/backend/internal/logging"
 	"daily-speaking-practice/backend/internal/quota"
+	"daily-speaking-practice/backend/internal/workqueue"
 	"github.com/google/uuid"
 )
 
@@ -86,6 +87,7 @@ func (s *Server) handleCreateRecording(w http.ResponseWriter, r *http.Request) {
 	}
 
 	recordingID := uuid.NewString()
+	processingJobID := uuid.NewString()
 	savedAudio, err := saveAudioFile("recordings", user.ID, recordingID, parsedAudio)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to save recording."})
@@ -120,11 +122,17 @@ func (s *Server) handleCreateRecording(w http.ResponseWriter, r *http.Request) {
 		ShadowingError      *string
 		ShadowingUpdatedAt  time.Time
 	}
-	err = s.db.QueryRow(r.Context(), `
+	tx, err := s.db.Begin(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to save recording."})
+		return
+	}
+	defer tx.Rollback(r.Context())
+	err = tx.QueryRow(r.Context(), `
 		INSERT INTO recordings
-		  (id, user_id, topic, duration, timestamp, transcript, corrected_transcript, suggestions, practice_type, audio_data_url, photo_data_url, photo_object, status, processing_stage)
+		  (id, user_id, topic, duration, timestamp, transcript, corrected_transcript, suggestions, practice_type, audio_data_url, photo_data_url, photo_object, status, processing_stage, processing_job_id)
 		VALUES
-		  ($1, $2, $3, $4, $5, '', '', '[]'::jsonb, $6, $7, $8, $9, 'processing', 'transcribing')
+		  ($1, $2, $3, $4, $5, '', '', '[]'::jsonb, $6, $7, $8, $9, 'processing', 'transcribing', $10)
 		RETURNING id, topic, duration, timestamp, status, transcript, corrected_transcript, suggestions, processing_stage, practice_type, audio_data_url, photo_data_url, photo_object, processing_error,
 		          shadowing_status, shadowing_audio_url, shadowing_error, shadowing_updated_at`,
 		recordingID,
@@ -136,13 +144,27 @@ func (s *Server) handleCreateRecording(w http.ResponseWriter, r *http.Request) {
 		savedAudio.publicURL,
 		stringOrNil(practiceType == "photo_description", photoDataURL),
 		stringOrNil(practiceType == "photo_description", photoObject),
+		processingJobID,
 	).Scan(&inserted.ID, &inserted.Topic, &inserted.Duration, &inserted.Timestamp, &inserted.Status, &inserted.Transcript, &inserted.CorrectedTranscript, &inserted.Suggestions, &inserted.ProcessingStage, &inserted.PracticeType, &inserted.AudioDataURL, &inserted.PhotoDataURL, &inserted.PhotoObject, &inserted.ProcessingError, &inserted.ShadowingStatus, &inserted.ShadowingAudioURL, &inserted.ShadowingError, &inserted.ShadowingUpdatedAt)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to save recording."})
 		return
 	}
+	if err := workqueue.Enqueue(r.Context(), tx, workqueue.NewJob{
+		ID:             processingJobID,
+		Kind:           workqueue.KindRecordingProcess,
+		ResourceID:     recordingID,
+		IdempotencyKey: "recording:" + processingJobID,
+		MaxAttempts:    3,
+	}); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to save recording."})
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to save recording."})
+		return
+	}
 	cleanupAudio = ""
-	s.processRecordingInBackground(recordingID, user.ID, savedAudio.absolutePath, topic, practiceType, photoObject, user.EnglishLevel)
 
 	q := recordingQuotaAfterSave(qBefore, duration)
 	if refreshedQuota, quotaErr := quota.GetRecordingQuota(r.Context(), s.db, user.ID, &user.IsSubscriber); quotaErr == nil {
