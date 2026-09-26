@@ -75,7 +75,8 @@ Practice generation is the first extracted vertical slice: HTTP owns request
 validation and response mapping, the application service owns use cases and
 business rules, and its Ollama adapter owns the provider request format.
 Worker configuration and pool lifecycle now live in `backend/internal/worker`;
-concrete recording/media processors still need to leave `httpapi`.
+media expiry and deletion live in `backend/internal/media`. Concrete recording
+and guest-preview processors still need to leave `httpapi`.
 
 Incrementally reduce `backend/internal/httpapi` by extracting identity,
 recordings, analysis, guest preview, profile/subscription, and Feed services
