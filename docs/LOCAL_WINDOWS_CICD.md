@@ -115,7 +115,7 @@ The workflow:
 2. installs from `web/package-lock.json` and runs the repository quality gates;
 3. validates Docker and Cartesia configuration;
 4. runs `.\scripts\setup-lan-https-proxy.ps1`;
-5. builds and starts `web`, `backend`, `postgres`, and `lan-https` together with
+5. builds and starts `web`, `backend`, `worker`, `postgres`, and `lan-https` together with
    `--remove-orphans` under the stable `daily-speaking` Compose project;
 6. runs `scripts/smoke-stack.mjs` against the separate HTTP origins;
 7. verifies the independent HTTPS health/docs endpoints;
@@ -245,7 +245,7 @@ Inspect each failure boundary separately:
 
 ```powershell
 docker compose ps
-docker compose logs -f web backend
+docker compose logs -f web backend worker
 docker compose logs -f lan-https
 docker compose logs -f postgres
 ```
@@ -253,7 +253,7 @@ docker compose logs -f postgres
 Safe Cartesia presence check (does not print values):
 
 ```powershell
-docker compose exec -T backend sh -lc 'test -n "$CARTESIA_API_KEY" && test -n "$CARTESIA_VOICE_ID" && echo cartesia-config-ok'
+docker compose exec -T worker sh -lc 'test -n "$CARTESIA_API_KEY" && test -n "$CARTESIA_VOICE_ID" && echo cartesia-config-ok'
 ```
 
 Do not run `env | grep CARTESIA` or publish `docker compose config` output when a
@@ -270,7 +270,7 @@ older binary is compatible with the current schema. Expect downtime from the
 Select the previously known-good revision in a clean checkout/worktree and
 preserve the same project name, uploads path, ports, and secrets. After checking
 out that older revision, stop both its declared services and any newer orphaned
-`web`, `backend`, or `lan-https` containers, without deleting volumes:
+`web`, `backend`, `worker`, or `lan-https` containers, without deleting volumes:
 
 ```powershell
 git switch --detach <previous-good-revision>
@@ -288,13 +288,15 @@ is preserved, and Compose never deletes the external uploads directory.
 For HTTP-only recovery, with the required origins already set in the shell:
 
 ```powershell
-docker compose up --build -d --remove-orphans web backend postgres
+docker compose up --build -d --remove-orphans web backend worker postgres
 ```
 
 Do not delete or recreate the uploads directory or PostgreSQL volume during a
-rollback. The split itself does not change the schema or session-token format,
-so no backfill or intentional sign-out is required; this does not replace the
-backup and schema-compatibility check for later revisions.
+rollback. The durable-worker migration is additive, but an older release cannot
+execute jobs created by the new worker. Before rollback, stop new writes and
+confirm there are no `queued`, `running`, or `retry_wait` rows in
+`processing_jobs`. This does not replace the backup and schema-compatibility
+check.
 
 ## Post-deploy acceptance
 

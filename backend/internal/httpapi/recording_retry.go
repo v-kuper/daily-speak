@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"daily-speaking-practice/backend/internal/logging"
+	"daily-speaking-practice/backend/internal/workqueue"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -131,16 +133,23 @@ func (s *Server) scheduleRecordingRetry(ctx context.Context, userID string, reco
 	if recording.Status == "processing" {
 		return recording, false, nil
 	}
-	work, err := recordingRetryWorkFor(recording, englishLevel)
+	_, err = recordingRetryWorkFor(recording, englishLevel)
 	if err != nil {
 		return recordingResponse{}, false, err
 	}
 
 	startedAt := time.Now().UTC()
-	result, err := s.db.Exec(ctx, `
+	jobID := uuid.NewString()
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return recordingResponse{}, false, err
+	}
+	defer tx.Rollback(ctx)
+	result, err := tx.Exec(ctx, `
 		UPDATE recordings
 		SET status = 'processing',
 		    processing_error = NULL,
+		    processing_job_id = $3,
 		    transcript = CASE WHEN processing_stage = 'transcribing' THEN '' ELSE transcript END,
 		    suggestions = CASE WHEN processing_stage IN ('transcribing', 'suggestions') THEN '[]'::jsonb ELSE suggestions END,
 		    corrected_transcript = '',
@@ -149,7 +158,7 @@ func (s *Server) scheduleRecordingRetry(ctx context.Context, userID string, reco
 		    shadowing_error = NULL,
 		    shadowing_updated_at = NOW(),
 		    shadowing_attempt_id = NULL
-		WHERE id = $1 AND user_id = $2 AND status = 'failed'`, recordingID, userID)
+		WHERE id = $1 AND user_id = $2 AND status = 'failed'`, recordingID, userID, jobID)
 	if err != nil {
 		return recordingResponse{}, false, err
 	}
@@ -163,9 +172,17 @@ func (s *Server) scheduleRecordingRetry(ctx context.Context, userID string, reco
 		}
 		return recordingResponse{}, false, errRecordingRetryUnavailable
 	}
-
-	s.startRecordingProcessingJob(recordingID, func(jobContext context.Context, logger logging.Logger) error {
-		return s.processRecordingRetry(jobContext, recordingID, userID, work, logger)
-	})
+	if err := workqueue.Enqueue(ctx, tx, workqueue.NewJob{
+		ID:             jobID,
+		Kind:           workqueue.KindRecordingProcess,
+		ResourceID:     recordingID,
+		IdempotencyKey: "recording:" + jobID,
+		MaxAttempts:    3,
+	}); err != nil {
+		return recordingResponse{}, false, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return recordingResponse{}, false, err
+	}
 	return recordingAfterRetryClaim(recording, startedAt), true, nil
 }

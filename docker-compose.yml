@@ -72,6 +72,51 @@ services:
       retries: 12
       start_period: 20s
 
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: ["./daily-speaking-worker"]
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/daily_speaking
+      SERVER_LOG_LEVEL: info
+      UPLOADS_DIR: ${UPLOADS_DIR:-/app/uploads}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma4:31b-cloud}
+      OLLAMA_THINKING_MODEL: ${OLLAMA_THINKING_MODEL:-true}
+      AI_ANALYSIS_CONCURRENCY: ${AI_ANALYSIS_CONCURRENCY:-3}
+      WHISPER_BACKEND: ${WHISPER_BACKEND:-openai}
+      WHISPER_BINARY_PATH: ${WHISPER_BINARY_PATH:-}
+      WHISPER_MODEL_PATH: ${WHISPER_MODEL_PATH:-}
+      WHISPER_PYTHON_BIN: ${WHISPER_PYTHON_BIN:-/opt/whisper/bin/python}
+      WHISPER_OPENAI_MODEL: ${WHISPER_OPENAI_MODEL:-base}
+      WHISPER_OPENAI_MODEL_DIR: ${WHISPER_OPENAI_MODEL_DIR:-/app/tools/whisper/openai-models}
+      WHISPER_OPENAI_CACHE_DIR: ${WHISPER_OPENAI_CACHE_DIR:-/app/tools/whisper/cache}
+      WHISPER_FFMPEG_BIN: ${WHISPER_FFMPEG_BIN:-/usr/bin/ffmpeg}
+      WHISPER_OPENAI_DEVICE: ${WHISPER_OPENAI_DEVICE:-cpu}
+      WHISPER_OPENAI_FP16: ${WHISPER_OPENAI_FP16:-false}
+      WHISPER_LANGUAGE: ${WHISPER_LANGUAGE:-auto}
+      CARTESIA_API_KEY: ${CARTESIA_API_KEY:-}
+      CARTESIA_VOICE_ID: ${CARTESIA_VOICE_ID:-}
+      CARTESIA_MODEL: ${CARTESIA_MODEL:-sonic-3.6}
+      CARTESIA_API_URL: ${CARTESIA_API_URL:-https://api.cartesia.ai/tts/bytes}
+      CARTESIA_API_VERSION: ${CARTESIA_API_VERSION:-2026-08-14}
+      WORKER_RECORDING_CONCURRENCY: ${WORKER_RECORDING_CONCURRENCY:-1}
+      WORKER_SHADOWING_CONCURRENCY: ${WORKER_SHADOWING_CONCURRENCY:-2}
+      WORKER_CLEANUP_CONCURRENCY: ${WORKER_CLEANUP_CONCURRENCY:-2}
+      WORKER_POLL_INTERVAL: ${WORKER_POLL_INTERVAL:-1s}
+      WORKER_LEASE_DURATION: ${WORKER_LEASE_DURATION:-2m}
+      WORKER_HEARTBEAT_INTERVAL: ${WORKER_HEARTBEAT_INTERVAL:-30s}
+      WORKER_RETRY_BASE_DELAY: ${WORKER_RETRY_BASE_DELAY:-5s}
+      WORKER_RETRY_MAX_DELAY: ${WORKER_RETRY_MAX_DELAY:-5m}
+    volumes:
+      - ${WHISPER_TOOLS_HOST_DIR:-./backend/tools}:/app/tools
+      - ${UPLOADS_HOST_DIR:-./.data/uploads}:/app/uploads
+
   lan-https:
     image: caddy:2-alpine
     container_name: daily-speaking-lan-https

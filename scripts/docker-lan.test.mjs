@@ -69,7 +69,7 @@ test("HTTP deployment selects a physical LAN adapter and preserves provider/stor
     WiFi: [{ family: "IPv4", address: "10.1.2.3", internal: false }],
   } });
   assert.equal(command.command, "docker");
-  assert.deepEqual(command.args, ["compose", "up", "--build", "-d", "--remove-orphans", "web", "backend", "postgres"]);
+  assert.deepEqual(command.args, ["compose", "up", "--build", "-d", "--remove-orphans", "web", "backend", "worker", "postgres"]);
   assert.deepEqual(command.env, {
     ...env, APP_PORT: "8080", API_PORT: "8081",
     PUBLIC_API_BASE_URL: "http://10.1.2.3:8081",

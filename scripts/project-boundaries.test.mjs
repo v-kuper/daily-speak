@@ -71,3 +71,12 @@ test("backend source has no Next.js upstream", () => {
   assert.doesNotMatch(smoke, /NEXT_|next/i);
   assert.match(smoke, /cwd:\s*"backend"/);
 });
+
+test("API and durable worker have separate process entrypoints", () => {
+  const apiMain = readFileSync("backend/cmd/api/main.go", "utf8");
+  const workerMain = readFileSync("backend/cmd/worker/main.go", "utf8");
+
+  assert.doesNotMatch(apiMain, /RunWorkers|StartBackgroundWorkers/);
+  assert.match(workerMain, /RunWorkers/);
+  assert.match(workerMain, /WorkerConfigFromEnv/);
+});

@@ -8,6 +8,8 @@ import (
 
 	"daily-speaking-practice/backend/internal/logging"
 	"daily-speaking-practice/backend/internal/quota"
+	"daily-speaking-practice/backend/internal/workqueue"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -128,6 +130,27 @@ func (s *Server) handleDeleteRecording(w http.ResponseWriter, r *http.Request, r
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to delete recording."})
 			return
 		}
+		jobID := uuid.NewString()
+		if err := workqueue.Enqueue(r.Context(), tx, workqueue.NewJob{
+			ID:             jobID,
+			Kind:           workqueue.KindMediaDelete,
+			ResourceID:     fileURL,
+			IdempotencyKey: "media.delete:" + fileURL,
+			MaxAttempts:    20,
+		}); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to delete recording."})
+			return
+		}
+	}
+	if _, err := tx.Exec(r.Context(), `
+		UPDATE processing_jobs
+		SET state = 'cancelled', completed_at = NOW(), updated_at = NOW(),
+		    lease_token = NULL, lease_owner = NULL, lease_expires_at = NULL, heartbeat_at = NULL
+		WHERE resource_id = $1
+		  AND kind IN ('recording.process', 'shadowing.synthesize')
+		  AND state IN ('queued', 'running', 'retry_wait')`, recordingID); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to delete recording."})
+		return
 	}
 	if _, err := tx.Exec(r.Context(), `
 		DELETE FROM recording_upload_sessions
@@ -154,9 +177,6 @@ func (s *Server) handleDeleteRecording(w http.ResponseWriter, r *http.Request, r
 		return
 	}
 
-	s.cancelRecordingProcessing(recordingID)
-	s.cancelShadowingProcessing(recordingID)
-	s.wakeFileDeletionWorker()
 	var quotaResponse *quota.RecordingQuota
 	if currentQuota, quotaErr := quota.GetRecordingQuota(r.Context(), s.db, user.ID, &user.IsSubscriber); quotaErr == nil {
 		quotaResponse = &currentQuota

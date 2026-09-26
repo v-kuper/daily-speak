@@ -54,7 +54,7 @@ test("LAN HTTPS deployment recreates only Caddy after starting the application s
   const composeBlock = script.match(/if \(-not \$SkipDockerComposeUp\) \{([\s\S]*?)\r?\n  \}/)?.[1];
   assert.ok(composeBlock, "Compose commands must remain guarded by SkipDockerComposeUp");
 
-  const primaryUp = "docker compose up --build -d --remove-orphans web backend postgres";
+  const primaryUp = "docker compose up --build -d --remove-orphans web backend worker postgres";
   const caddyRecreate = "docker compose up -d --force-recreate --no-deps lan-https";
   const composeStatements = composeBlock.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   const primaryIndex = composeBlock.indexOf(primaryUp);
@@ -63,7 +63,7 @@ test("LAN HTTPS deployment recreates only Caddy after starting the application s
   assert.deepEqual(composeStatements, [
     primaryUp,
     "if ($LASTEXITCODE -ne 0) {",
-    'throw "Failed to build or start web, backend, and postgres services."',
+    'throw "Failed to build or start web, backend, worker, and postgres services."',
     "}",
     caddyRecreate,
     "if ($LASTEXITCODE -ne 0) {",

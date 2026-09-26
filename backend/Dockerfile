@@ -4,6 +4,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -o /out/daily-speaking-api ./cmd/api
+RUN CGO_ENABLED=0 GOOS=linux go build -o /out/daily-speaking-worker ./cmd/worker
 
 FROM debian:bookworm-slim AS runtime
 WORKDIR /app
@@ -23,6 +24,7 @@ RUN apt-get update \
   && /opt/whisper/bin/pip install --no-cache-dir -U pip openai-whisper \
   && rm -rf /var/lib/apt/lists/*
 COPY --from=build /out/daily-speaking-api ./daily-speaking-api
+COPY --from=build /out/daily-speaking-worker ./daily-speaking-worker
 RUN mkdir -p /app/uploads /app/tools/whisper/openai-models /app/tools/whisper/cache
 EXPOSE 3000
 CMD ["./daily-speaking-api"]

@@ -50,7 +50,6 @@ func main() {
 
 	addr := envDefault("APP_ADDR", ":3000")
 	apiServer := httpapi.NewServer(httpapi.Config{DB: database, CORS: cors, SessionCookie: sessionCookie, IdentityTokens: identityTokens})
-	apiServer.StartBackgroundWorkers(ctx)
 	server := &http.Server{
 		Addr:              addr,
 		Handler:           apiServer.Handler(),

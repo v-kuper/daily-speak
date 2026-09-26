@@ -4,8 +4,8 @@ Daily Speaking is a monorepo containing two independent applications:
 
 - `web/`: a Next.js 15 client with its own dependency graph, build, tests, and
   Docker image;
-- `backend/`: a Go HTTP API with its own module, tests, migrations, OpenAPI
-  contract, and Docker image.
+- `backend/`: a Go backend project with independent API and durable worker
+  entrypoints, tests, migrations, OpenAPI contract, and Docker image.
 
 The browser calls the configured API origin directly. The web application does
 not proxy API traffic, and the backend does not serve or proxy Next.js. A future
@@ -16,7 +16,7 @@ project.
 
 ```text
 web/                     Next.js application
-backend/                 Go API, migrations, OpenAPI, Whisper tooling
+backend/                 Go API/worker, migrations, OpenAPI, Whisper tooling
 scripts/                 repository and deployment utilities
 docs/                    operations and architecture documentation
 docker-compose.yml       local single-host orchestration
@@ -44,6 +44,11 @@ CORS_ALLOWED_ORIGINS=http://localhost:3000,http://localhost:3219 \
 APP_ADDR=:3219 go run ./cmd/api
 ```
 
+Run `go run ./cmd/worker` in a second backend process with the same database,
+uploads path, Whisper, Ollama, and Cartesia configuration. The API only accepts
+requests and transactionally queues work; the worker owns transcription,
+analysis, TTS, and media cleanup.
+
 The backend command above must be run from `backend/` so its relative tool paths
 resolve correctly. Use the project environment examples as references before
 adding optional AI, transcription, or TTS configuration:
@@ -60,7 +65,7 @@ own, so export/source backend values through the shell or process manager.
 
 ```bash
 cp .env.example .env
-docker compose up --build -d --remove-orphans web backend postgres
+docker compose up --build -d --remove-orphans web backend worker postgres
 ```
 
 Default HTTP endpoints:
@@ -78,10 +83,11 @@ Open Swagger directly on macOS with:
 open http://localhost:3219/docs
 ```
 
-Compose starts separate `web`, `backend`, and `postgres` services. The web
+Compose starts separate `web`, `backend`, `worker`, and `postgres` services. The web
 service has no dependency on backend startup and can serve pages while the API
-is unavailable. Uploaded audio belongs only to the backend and is stored outside
-the image through `UPLOADS_HOST_DIR`.
+is unavailable. The backend and worker use the same backend image but different
+entrypoints. Uploaded audio belongs only to the backend project and is shared
+between API and worker through `UPLOADS_HOST_DIR`.
 
 ## Environment ownership
 
@@ -97,11 +103,11 @@ the image through `UPLOADS_HOST_DIR`.
 For credentialed browser requests, every web origin must appear exactly in
 `CORS_ALLOWED_ORIGINS`. Add each API origin that serves Swagger too, because
 Swagger `Try it out` sends mutations from that API origin. The current
-authentication remains a PostgreSQL-backed, HttpOnly session cookie. On HTTPS set
-`SESSION_COOKIE_SECURE=true`. Use
+web authentication remains a PostgreSQL-backed, HttpOnly session cookie. Mobile
+clients use short-lived Bearer access tokens and rotating opaque refresh tokens
+under `/api/v1/auth/*`. On HTTPS set `SESSION_COOKIE_SECURE=true`. Use
 `SESSION_COOKIE_SAME_SITE=none` only for genuinely cross-site web/API origins;
-it requires a secure cookie. Access and refresh tokens are a deferred epic, not
-part of this refactor.
+it requires a secure cookie.
 
 ## Routes and API contract
 
@@ -169,7 +175,7 @@ diagnostics, and rollback are documented in
 ## Operations
 
 ```bash
-docker compose logs -f web backend
+docker compose logs -f web backend worker
 docker compose logs -f lan-https
 docker compose --project-name daily-speaking down --remove-orphans
 ```

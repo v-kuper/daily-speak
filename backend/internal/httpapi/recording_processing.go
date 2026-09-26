@@ -3,73 +3,59 @@ package httpapi
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"daily-speaking-practice/backend/internal/domain"
 	"daily-speaking-practice/backend/internal/logging"
 	"daily-speaking-practice/backend/internal/transcription"
+	"daily-speaking-practice/backend/internal/workqueue"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 )
 
 const recordingProcessingTimeout = 30 * time.Minute
 
-func (s *Server) processRecordingInBackground(recordingID string, userID string, audioPath string, topic string, practiceType string, photoObject *string, englishLevel string) {
-	s.startRecordingProcessingJob(recordingID, func(ctx context.Context, logger logging.Logger) error {
-		return s.processSavedRecording(ctx, recordingID, userID, audioPath, topic, practiceType, photoObject, englishLevel, logger)
-	})
-}
-
-func (s *Server) startRecordingProcessingJob(recordingID string, run func(context.Context, logging.Logger) error) {
-	ctx, cancel := context.WithTimeout(context.Background(), recordingProcessingTimeout)
-	jobID := uuid.NewString()
-	s.registerRecordingProcessing(recordingID, recordingProcessingJob{id: jobID, cancel: cancel})
-	go func() {
-		defer cancel()
-		defer s.unregisterRecordingProcessing(recordingID, jobID)
-		logger := logging.ForBackground("api.recordings.process")
-		if err := run(ctx, logger); err != nil {
-			if errors.Is(ctx.Err(), context.Canceled) {
-				logger.Info("recording.processing_cancelled", map[string]any{"recordingId": recordingID})
-				return
-			}
-			logger.Error("recording.processing_failed", logging.ErrorMeta(err))
-			_, _ = s.db.Exec(context.Background(), `
-				UPDATE recordings
-				SET status = 'failed', processing_error = $2
-				WHERE id = $1`, recordingID, truncateRunes(err.Error(), 500))
+func (s *Server) runRecordingJob(ctx context.Context, job workqueue.Job) error {
+	var work recordingRetryWork
+	var userID, status, stage string
+	var audioURL, currentJobID *string
+	var suggestionJSON []byte
+	err := s.db.QueryRow(ctx, `
+		SELECT r.user_id, r.status, COALESCE(r.processing_stage, ''), r.processing_job_id,
+		       r.audio_data_url, r.transcript, r.suggestions, r.topic, r.practice_type,
+		       r.photo_object, u.english_level
+		FROM recordings r
+		JOIN users u ON u.id = r.user_id
+		WHERE r.id = $1`, job.ResourceID).Scan(
+		&userID, &status, &stage, &currentJobID, &audioURL, &work.Transcript,
+		&suggestionJSON, &work.Topic, &work.PracticeType, &work.PhotoObject, &work.EnglishLevel,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if status != "processing" || currentJobID == nil || *currentJobID != job.ID {
+		return nil
+	}
+	work.Stage = stage
+	work.Suggestions = normalizeSuggestions(suggestionJSON, 0)
+	if stage == "transcribing" {
+		if audioURL == nil {
+			return errors.New("recording audio is unavailable")
 		}
-	}()
-}
-
-func (s *Server) registerRecordingProcessing(recordingID string, job recordingProcessingJob) {
-	s.recordingProcessingMu.Lock()
-	previous := s.recordingProcessingJobs[recordingID]
-	s.recordingProcessingJobs[recordingID] = job
-	s.recordingProcessingMu.Unlock()
-	if previous.cancel != nil {
-		previous.cancel()
+		work.AudioPath, err = storedUploadPath(*audioURL)
+		if err != nil {
+			return errors.New("recording audio is unavailable")
+		}
 	}
+	logger := logging.ForBackground("worker.recordings.process")
+	return s.processRecordingRetry(ctx, job.ResourceID, userID, job.ID, job.LeaseToken, work, logger)
 }
 
-func (s *Server) unregisterRecordingProcessing(recordingID string, jobID string) {
-	s.recordingProcessingMu.Lock()
-	if current := s.recordingProcessingJobs[recordingID]; current.id == jobID {
-		delete(s.recordingProcessingJobs, recordingID)
-	}
-	s.recordingProcessingMu.Unlock()
-}
-
-func (s *Server) cancelRecordingProcessing(recordingID string) {
-	s.recordingProcessingMu.Lock()
-	job := s.recordingProcessingJobs[recordingID]
-	delete(s.recordingProcessingJobs, recordingID)
-	s.recordingProcessingMu.Unlock()
-	if job.cancel != nil {
-		job.cancel()
-	}
-}
-
-func (s *Server) processSavedRecording(ctx context.Context, recordingID string, userID string, audioPath string, topic string, practiceType string, photoObject *string, englishLevel string, logger logging.Logger) error {
+func (s *Server) processSavedRecording(ctx context.Context, recordingID string, userID string, jobID string, leaseToken string, audioPath string, topic string, practiceType string, photoObject *string, englishLevel string, logger logging.Logger) error {
 	interests, err := s.recordingInterests(ctx, userID)
 	if err != nil {
 		return err
@@ -87,16 +73,24 @@ func (s *Server) processSavedRecording(ctx context.Context, recordingID string, 
 	if transcript == "" {
 		return errors.New("Whisper returned an empty transcript. Try speaking louder or recording again.")
 	}
-	if _, err := s.db.Exec(ctx, `
+	result, err := s.db.Exec(ctx, `
 		UPDATE recordings
 		SET transcript = $2,
 		    processing_stage = 'suggestions',
 		    processing_error = NULL
-		WHERE id = $1`, recordingID, transcript); err != nil {
+		WHERE id = $1 AND status = 'processing' AND processing_job_id = $3
+		  AND EXISTS (
+		    SELECT 1 FROM processing_jobs
+		    WHERE id = $3 AND state = 'running' AND lease_token = $4
+		  )`, recordingID, transcript, jobID, leaseToken)
+	if err != nil {
 		return err
 	}
+	if result.RowsAffected() == 0 {
+		return nil
+	}
 
-	return s.processRecordingSuggestions(ctx, recordingID, userID, transcript, topic, interests, practiceType, photoObject, englishLevel, logger)
+	return s.processRecordingSuggestions(ctx, recordingID, userID, jobID, leaseToken, transcript, topic, interests, practiceType, photoObject, englishLevel, logger)
 }
 
 func (s *Server) recordingInterests(ctx context.Context, userID string) ([]string, error) {
@@ -122,56 +116,88 @@ func (s *Server) recordingInterests(ctx context.Context, userID string) ([]strin
 	return interests, nil
 }
 
-func (s *Server) processRecordingSuggestions(ctx context.Context, recordingID string, userID string, transcript string, topic string, interests []string, practiceType string, photoObject *string, englishLevel string, logger logging.Logger) error {
+func (s *Server) processRecordingSuggestions(ctx context.Context, recordingID string, userID string, jobID string, leaseToken string, transcript string, topic string, interests []string, practiceType string, photoObject *string, englishLevel string, logger logging.Logger) error {
 	suggestions, err := s.generateRecordingSuggestions(ctx, recordingID, transcript, topic, interests, practiceType, photoObject, englishLevel, logger)
 	if err != nil {
 		return err
 	}
 	suggestionJSON := marshalSuggestions(suggestions)
-	if _, err := s.db.Exec(ctx, `
+	result, err := s.db.Exec(ctx, `
 		UPDATE recordings
 		SET suggestions = $2::jsonb,
 		    processing_stage = 'rewriting',
 		    processing_error = NULL
-		WHERE id = $1`, recordingID, suggestionJSON); err != nil {
+		WHERE id = $1 AND status = 'processing' AND processing_job_id = $3
+		  AND EXISTS (
+		    SELECT 1 FROM processing_jobs
+		    WHERE id = $3 AND state = 'running' AND lease_token = $4
+		  )`, recordingID, suggestionJSON, jobID, leaseToken)
+	if err != nil {
 		return err
 	}
-	return s.processRecordingRewrite(ctx, recordingID, userID, transcript, suggestions, englishLevel, logger)
+	if result.RowsAffected() == 0 {
+		return nil
+	}
+	return s.processRecordingRewrite(ctx, recordingID, jobID, leaseToken, transcript, suggestions, englishLevel, logger)
 }
 
-func (s *Server) processRecordingRewrite(ctx context.Context, recordingID string, userID string, transcript string, suggestions []suggestion, englishLevel string, logger logging.Logger) error {
+func (s *Server) processRecordingRewrite(ctx context.Context, recordingID string, jobID string, leaseToken string, transcript string, suggestions []suggestion, englishLevel string, logger logging.Logger) error {
 	correctedTranscript, err := s.generateNaturalTranscript(ctx, transcript, suggestions, englishLevel, logger)
 	if err != nil {
 		return err
 	}
-	if _, err = s.db.Exec(ctx, `
+	shadowingJobID := uuid.NewString()
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	result, err := tx.Exec(ctx, `
 		UPDATE recordings
 		SET status = 'ready',
 		    corrected_transcript = $2,
 		    processing_stage = NULL,
-		    processing_error = NULL
-		WHERE id = $1`, recordingID, correctedTranscript); err != nil {
+		    processing_error = NULL,
+		    shadowing_status = 'processing',
+		    shadowing_error = NULL,
+		    shadowing_updated_at = NOW(),
+		    shadowing_attempt_id = $4
+		WHERE id = $1 AND status = 'processing' AND processing_job_id = $3
+		  AND EXISTS (
+		    SELECT 1 FROM processing_jobs
+		    WHERE id = $3 AND state = 'running' AND lease_token = $5
+		  )`, recordingID, correctedTranscript, jobID, shadowingJobID, leaseToken)
+	if err != nil {
 		return err
 	}
-	if _, _, scheduleErr := s.scheduleShadowing(context.Background(), userID, recordingID); scheduleErr != nil {
-		logger.Warn("shadowing.schedule_failed", map[string]any{"recordingId": recordingID})
+	if result.RowsAffected() == 0 {
+		return nil
 	}
-	return nil
+	if err := workqueue.Enqueue(ctx, tx, workqueue.NewJob{
+		ID:             shadowingJobID,
+		Kind:           workqueue.KindShadowingSynthesize,
+		ResourceID:     recordingID,
+		IdempotencyKey: "shadowing:" + shadowingJobID,
+		MaxAttempts:    4,
+	}); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
-func (s *Server) processRecordingRetry(ctx context.Context, recordingID string, userID string, work recordingRetryWork, logger logging.Logger) error {
+func (s *Server) processRecordingRetry(ctx context.Context, recordingID string, userID string, jobID string, leaseToken string, work recordingRetryWork, logger logging.Logger) error {
 	switch work.Stage {
 	case "transcribing":
-		return s.processSavedRecording(ctx, recordingID, userID, work.AudioPath, work.Topic, work.PracticeType, work.PhotoObject, work.EnglishLevel, logger)
+		return s.processSavedRecording(ctx, recordingID, userID, jobID, leaseToken, work.AudioPath, work.Topic, work.PracticeType, work.PhotoObject, work.EnglishLevel, logger)
 	case "suggestions":
 		interests, err := s.recordingInterests(ctx, userID)
 		if err != nil {
 			return err
 		}
-		return s.processRecordingSuggestions(ctx, recordingID, userID, work.Transcript, work.Topic, interests, work.PracticeType, work.PhotoObject, work.EnglishLevel, logger)
+		return s.processRecordingSuggestions(ctx, recordingID, userID, jobID, leaseToken, work.Transcript, work.Topic, interests, work.PracticeType, work.PhotoObject, work.EnglishLevel, logger)
 	case "rewriting":
-		return s.processRecordingRewrite(ctx, recordingID, userID, work.Transcript, work.Suggestions, work.EnglishLevel, logger)
+		return s.processRecordingRewrite(ctx, recordingID, jobID, leaseToken, work.Transcript, work.Suggestions, work.EnglishLevel, logger)
 	default:
-		return errors.New("Recording processing cannot be retried from this stage.")
+		return errors.New("recording processing cannot resume from persisted stage " + strings.TrimSpace(work.Stage))
 	}
 }

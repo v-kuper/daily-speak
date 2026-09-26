@@ -14,7 +14,7 @@ import (
 
 	"daily-speaking-practice/backend/internal/auth"
 	"daily-speaking-practice/backend/internal/db"
-	"daily-speaking-practice/backend/internal/logging"
+	"daily-speaking-practice/backend/internal/workqueue"
 	"github.com/google/uuid"
 )
 
@@ -122,19 +122,50 @@ func TestDeleteRecordingCascadesDataAndRetriesQueuedFilesAfterRestart(t *testing
 	restartedServer.removeStoredUploads = func([]string) error {
 		return errors.New("simulated Windows sharing violation")
 	}
-	restartedServer.processPendingFileDeletions(ctx, logging.ForBackground("test.file_cleanup"))
-	assertPendingDeletionAttempts(t, database, recordingURL, 1)
-	assertPendingDeletionAttempts(t, database, shadowingURL, 1)
-	assertPendingDeletionAttempts(t, database, replyURL, 1)
+	processDeletionJobsOnce(t, restartedServer, 3, true)
+	assertDeletionJob(t, database, recordingURL, "retry_wait", 1)
+	assertDeletionJob(t, database, shadowingURL, "retry_wait", 1)
+	assertDeletionJob(t, database, replyURL, "retry_wait", 1)
+	if _, err := database.Exec(ctx, `
+		UPDATE processing_jobs SET available_at = NOW()
+		WHERE kind = 'media.delete' AND resource_id = ANY($1::text[])`, []string{recordingURL, shadowingURL, replyURL}); err != nil {
+		t.Fatal(err)
+	}
 
 	secondRestart := NewServer(Config{DB: database})
-	secondRestart.processPendingFileDeletions(ctx, logging.ForBackground("test.file_cleanup"))
+	processDeletionJobsOnce(t, secondRestart, 3, false)
 	assertTableRowCount(t, database, "pending_file_deletions", "public_url", recordingURL, 0)
 	assertTableRowCount(t, database, "pending_file_deletions", "public_url", shadowingURL, 0)
 	assertTableRowCount(t, database, "pending_file_deletions", "public_url", replyURL, 0)
 	assertUploadMissing(t, uploadsDir, recordingURL)
 	assertUploadMissing(t, uploadsDir, shadowingURL)
 	assertUploadMissing(t, uploadsDir, replyURL)
+}
+
+func processDeletionJobsOnce(t *testing.T, server *Server, count int, wantError bool) {
+	t.Helper()
+	for range count {
+		job, found, err := server.jobStore.Claim(context.Background(), "deletion-test", []string{workqueue.KindMediaDelete}, time.Minute)
+		if err != nil || !found {
+			t.Fatalf("claim deletion job: found=%t err=%v", found, err)
+		}
+		handleErr := server.handleDurableJob(context.Background(), job)
+		if wantError {
+			if handleErr == nil {
+				t.Fatal("expected simulated deletion failure")
+			}
+			if _, err := server.jobStore.Fail(context.Background(), job, handleErr, time.Hour, server.finalizeDurableFailure); err != nil {
+				t.Fatalf("schedule deletion retry: %v", err)
+			}
+			continue
+		}
+		if handleErr != nil {
+			t.Fatalf("delete stored upload: %v", handleErr)
+		}
+		if err := server.jobStore.Complete(context.Background(), job); err != nil {
+			t.Fatalf("complete deletion job: %v", err)
+		}
+	}
 }
 
 func writeTestUpload(t *testing.T, uploadsDir string, publicURL string) {
@@ -180,16 +211,17 @@ func assertTableRowCount(t *testing.T, database *db.DB, table string, column str
 	}
 }
 
-func assertPendingDeletionAttempts(t *testing.T, database *db.DB, publicURL string, expected int) {
+func assertDeletionJob(t *testing.T, database *db.DB, publicURL string, expectedState string, expectedAttempts int) {
 	t.Helper()
+	var state string
 	var attempts int
 	if err := database.QueryRow(context.Background(), `
-		SELECT attempts
-		FROM pending_file_deletions
-		WHERE public_url = $1`, publicURL).Scan(&attempts); err != nil {
-		t.Fatalf("load pending deletion attempts: %v", err)
+		SELECT state, attempts
+		FROM processing_jobs
+		WHERE kind = 'media.delete' AND resource_id = $1`, publicURL).Scan(&state, &attempts); err != nil {
+		t.Fatalf("load deletion job: %v", err)
 	}
-	if attempts != expected {
-		t.Fatalf("expected %d cleanup attempts for %q, got %d", expected, publicURL, attempts)
+	if state != expectedState || attempts != expectedAttempts {
+		t.Fatalf("deletion job for %q: state=%q attempts=%d", publicURL, state, attempts)
 	}
 }

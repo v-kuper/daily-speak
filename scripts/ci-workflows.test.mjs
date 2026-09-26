@@ -33,7 +33,7 @@ test("quality workflow installs and builds web independently", () => {
   assert.match(qualityWorkflow, /npm ci --prefix web/);
   assert.match(qualityWorkflow, /npm run quality --prefix web/);
   assert.match(qualityWorkflow, /cd backend && go test \.\/\.\.\./);
-  assert.match(qualityWorkflow, /docker compose build web backend/);
+  assert.match(qualityWorkflow, /docker compose build web backend worker/);
 });
 
 test("Windows deploy checks both services", () => {
@@ -41,7 +41,8 @@ test("Windows deploy checks both services", () => {
   assert.match(deployWorkflow, /API_HTTPS_PORT:/);
   assert.match(deployWorkflow, /docker compose logs --tail 120 web/);
   assert.match(deployWorkflow, /docker compose logs --tail 120 backend/);
-  assert.match(deployWorkflow, /docker compose exec -T backend/);
+  assert.match(deployWorkflow, /docker compose logs --tail 120 worker/);
+  assert.match(deployWorkflow, /docker compose exec -T worker/);
   assert.match(deployWorkflow, /node scripts\/smoke-stack\.mjs/);
 });
 
@@ -92,6 +93,7 @@ test("local deploy workflow verifies quality, deploys the LAN Docker app, and ch
   assert.doesNotMatch(deployWorkflow, /ServerCertificateValidationCallback/);
   assert.match(deployWorkflow, /docker compose logs --tail 120 web/);
   assert.match(deployWorkflow, /docker compose logs --tail 120 backend/);
+  assert.match(deployWorkflow, /docker compose logs --tail 120 worker/);
   assert.match(deployWorkflow, /docker compose logs --tail 120 lan-https/);
 });
 
@@ -143,10 +145,10 @@ test("local deploy uses a stable Docker Compose project name", () => {
   assert.match(dockerLanScript, /COMPOSE_PROJECT_NAME/);
   assert.match(dockerLanScript, /"--remove-orphans"/);
   const httpsSetup = readFileSync("scripts/setup-lan-https-proxy.ps1", "utf8");
-  assert.match(httpsSetup, /docker compose up --build -d --remove-orphans web backend postgres\r?\n\s*if \(\$LASTEXITCODE -ne 0\) \{\r?\n\s*throw "Failed to build or start web, backend, and postgres services\."/);
+  assert.match(httpsSetup, /docker compose up --build -d --remove-orphans web backend worker postgres\r?\n\s*if \(\$LASTEXITCODE -ne 0\) \{\r?\n\s*throw "Failed to build or start web, backend, worker, and postgres services\."/);
   assert.match(httpsSetup, /docker compose up -d --force-recreate --no-deps lan-https\r?\n\s*if \(\$LASTEXITCODE -ne 0\) \{\r?\n\s*throw "Failed to recreate lan-https service with current TLS configuration\."/);
   assert.doesNotMatch(httpsSetup, /docker compose down[^\r\n]*-v/);
-  assert.match(rootPackage.scripts["docker:app"], /up --build -d --remove-orphans web backend postgres/);
+  assert.match(rootPackage.scripts["docker:app"], /up --build -d --remove-orphans web backend worker postgres/);
 });
 
 test("local deploy workflow defaults to the Docker-local Python Whisper backend", () => {
@@ -176,9 +178,9 @@ test("multi-pass analysis concurrency is source-controlled for clean Windows dep
   assert.match(envExample, /AI_ANALYSIS_CONCURRENCY=3/);
 });
 
-test("local deploy workflow verifies Whisper inside the backend container", () => {
+test("local deploy workflow verifies Whisper inside the worker container", () => {
   assert.match(deployWorkflow, /name:\s+Verify Docker Whisper runtime/);
-  assert.match(deployWorkflow, /docker compose exec -T backend sh -lc/);
+  assert.match(deployWorkflow, /docker compose exec -T worker sh -lc/);
   assert.match(deployWorkflow, /test -x "\$WHISPER_PYTHON_BIN"/);
   assert.match(deployWorkflow, /\$WHISPER_PYTHON_BIN -m whisper --help/);
   assert.match(deployWorkflow, /echo whisper-ok/);
@@ -230,7 +232,7 @@ test("local deploy stops before Docker when Cartesia configuration is missing", 
   assert.doesNotMatch(deployWorkflow, /Write-Host[^\n]*CARTESIA_API_KEY/);
 });
 
-test("local deploy verifies Cartesia variables reached the backend container without printing them", () => {
+test("local deploy verifies Cartesia variables reached the worker container without printing them", () => {
   assert.match(deployWorkflow, /name:\s+Verify Docker Cartesia configuration/);
   assert.match(
     deployWorkflow,
@@ -272,15 +274,21 @@ test("Docker runtime includes the local Python Whisper backend", () => {
   assert.match(dockerfile, /WHISPER_FFMPEG_BIN=\/usr\/bin\/ffmpeg/);
 });
 
-test("Compose gives independent contexts, ports and health to web and backend", () => {
-  assert.deepEqual(Object.keys(compose.services).sort(), ["backend", "lan-https", "postgres", "web"]);
-  const { web, backend } = compose.services;
+test("Compose gives independent contexts and bounded worker execution", () => {
+  assert.deepEqual(Object.keys(compose.services).sort(), ["backend", "lan-https", "postgres", "web", "worker"]);
+  const { web, backend, worker } = compose.services;
   assert.equal(web.build.context, "./web");
   assert.equal(backend.build.context, "./backend");
   assert.deepEqual(web.ports, ["0.0.0.0:${APP_PORT:-3218}:3000"]);
   assert.deepEqual(backend.ports, ["0.0.0.0:${API_PORT:-3219}:3000"]);
   assert.equal(web.depends_on, undefined);
   assert.deepEqual(backend.depends_on, { postgres: { condition: "service_healthy" } });
+  assert.equal(worker.build.context, "./backend");
+  assert.deepEqual(worker.command, ["./daily-speaking-worker"]);
+  assert.deepEqual(worker.depends_on, { postgres: { condition: "service_healthy" } });
+  assert.equal(worker.ports, undefined);
+  assert.equal(worker.environment.WORKER_RECORDING_CONCURRENCY, "${WORKER_RECORDING_CONCURRENCY:-1}");
+  assert.equal(worker.environment.WORKER_SHADOWING_CONCURRENCY, "${WORKER_SHADOWING_CONCURRENCY:-2}");
   assert.deepEqual(web.environment, {
     PUBLIC_WEB_BASE_URL: "${PUBLIC_WEB_BASE_URL:-}",
     PUBLIC_API_BASE_URL: "${PUBLIC_API_BASE_URL:-http://localhost:3219}",
@@ -294,13 +302,14 @@ test("Compose gives independent contexts, ports and health to web and backend", 
 });
 
 test("Compose keeps backend credentials and persistent data with their owners", () => {
-  const { web, backend, postgres } = compose.services;
+  const { web, backend, worker, postgres } = compose.services;
   assert.ok(backend, "backend service is required");
   assert.equal(web.volumes, undefined);
   assert.deepEqual(backend.volumes, [
     "${WHISPER_TOOLS_HOST_DIR:-./backend/tools}:/app/tools",
     "${UPLOADS_HOST_DIR:-./.data/uploads}:/app/uploads",
   ]);
+  assert.deepEqual(worker.volumes, backend.volumes);
   assert.deepEqual(postgres.volumes, ["postgres_data:/var/lib/postgresql/data"]);
   assert.deepEqual(postgres.ports, ["127.0.0.1:${POSTGRES_PORT:-5432}:5432"]);
   assert.ok(Object.hasOwn(compose.volumes, "postgres_data"));
@@ -330,7 +339,9 @@ test("application images ship only their own production runtime and assets", () 
     "FROM golang:1.26.2-alpine AS build", "FROM debian:bookworm-slim AS runtime",
   ]);
   assert.ok(backend.includes("RUN CGO_ENABLED=0 GOOS=linux go build -o /out/daily-speaking-api ./cmd/api"));
+  assert.ok(backend.includes("RUN CGO_ENABLED=0 GOOS=linux go build -o /out/daily-speaking-worker ./cmd/worker"));
   assert.ok(backend.includes("COPY --from=build /out/daily-speaking-api ./daily-speaking-api"));
+  assert.ok(backend.includes("COPY --from=build /out/daily-speaking-worker ./daily-speaking-worker"));
   assert.ok(backend.includes("ENV APP_ADDR=:3000"));
   assert.ok(backend.includes("EXPOSE 3000"));
   assert.ok(backend.includes('CMD ["./daily-speaking-api"]'));
