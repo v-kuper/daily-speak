@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	"daily-speaking-practice/backend/internal/ai"
+	"daily-speaking-practice/backend/internal/aiparse"
 )
 
 type detectorWireCandidate struct {
@@ -33,7 +33,7 @@ func recordingDetectorPrompt(pass analysisPass, input recordingAnalysisInput) st
 }
 
 func parseDetectorCandidates(content string, category suggestionCategory, transcript string) ([]analysisCandidate, bool) {
-	for _, candidateJSON := range ai.ExtractJSONCandidates(content) {
+	for _, candidateJSON := range aiparse.ExtractJSONCandidates(content) {
 		var envelope map[string]json.RawMessage
 		if json.Unmarshal([]byte(candidateJSON), &envelope) != nil {
 			continue

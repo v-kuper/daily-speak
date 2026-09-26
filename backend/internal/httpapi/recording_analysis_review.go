@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"daily-speaking-practice/backend/internal/ai"
+	"daily-speaking-practice/backend/internal/aiparse"
 )
 
 type reviewerInput struct {
@@ -43,7 +43,7 @@ func parseReviewedSuggestions(content string, transcript string, candidates []an
 		}
 		byID[candidate.ID] = candidate
 	}
-	for _, candidateJSON := range ai.ExtractJSONCandidates(content) {
+	for _, candidateJSON := range aiparse.ExtractJSONCandidates(content) {
 		var envelope map[string]json.RawMessage
 		if json.Unmarshal([]byte(candidateJSON), &envelope) != nil {
 			continue

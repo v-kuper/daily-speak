@@ -110,3 +110,36 @@ test("API and durable worker have separate process entrypoints", () => {
   assert.match(workerMain, /RunWorkers/);
   assert.match(workerMain, /WorkerConfigFromEnv/);
 });
+
+test("practice generation is an application service outside HTTP transport", () => {
+  for (const path of [
+    "backend/internal/practice/service.go",
+    "backend/internal/practice/daily_questions.go",
+    "backend/internal/practice/prompts.go",
+    "backend/internal/practice/parsers.go",
+    "backend/internal/practice/ollamaadapter/provider.go",
+    "backend/internal/httpapi/practice_handlers.go",
+  ]) {
+    assert.equal(existsSync(path), true, `missing ${path}`);
+  }
+
+  const core = [
+    "service.go",
+    "daily_questions.go",
+    "topic_guidance.go",
+    "study_pack.go",
+    "prompts.go",
+    "parsers.go",
+    "normalization.go",
+  ].map((name) => readFileSync(`backend/internal/practice/${name}`, "utf8")).join("\n");
+  const service = readFileSync("backend/internal/practice/service.go", "utf8");
+  const provider = readFileSync("backend/internal/practice/ollamaadapter/provider.go", "utf8");
+  const handler = readFileSync("backend/internal/httpapi/practice_handlers.go", "utf8");
+  assert.doesNotMatch(core, /net\/http|internal\/httpapi|internal\/ai"/);
+  assert.match(service, /CompletionProvider/);
+  assert.match(provider, /ai\.ChatClient/);
+  assert.doesNotMatch(provider, /ai\.PostChat/);
+  assert.match(handler, /internal\/practice/);
+  assert.doesNotMatch(handler, /PostChat|You generate|output format exactly/);
+  assert.equal(existsSync("backend/internal/httpapi/ai_handlers.go"), false);
+});

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"daily-speaking-practice/backend/internal/ai"
+	"daily-speaking-practice/backend/internal/aiparse"
 	"daily-speaking-practice/backend/internal/domain"
 	"daily-speaking-practice/backend/internal/logging"
 	"daily-speaking-practice/backend/internal/quota"
@@ -256,7 +257,7 @@ func (s *Server) generateNaturalTranscript(ctx context.Context, transcript strin
 }
 
 func parseNaturalTranscriptFromContent(content string) string {
-	for _, candidate := range ai.ExtractJSONCandidates(content) {
+	for _, candidate := range aiparse.ExtractJSONCandidates(content) {
 		var payload map[string]json.RawMessage
 		if json.Unmarshal([]byte(candidate), &payload) != nil {
 			continue

@@ -71,10 +71,25 @@ queue remains the default until measured workload demonstrates a limitation.
 
 ## P1: feature-oriented backend split
 
+Practice generation is the first extracted vertical slice: HTTP owns request
+validation and response mapping, the application service owns use cases and
+business rules, and its Ollama adapter owns the provider request format.
+
 Incrementally reduce `backend/internal/httpapi` by extracting identity,
 recordings, analysis, guest preview, profile/subscription, and Feed services
 with explicit repositories and transport-neutral inputs/outputs. HTTP handlers
 should validate transport data, call one service boundary, and map its result.
+
+Use this order to keep every merge deployable:
+
+1. Move worker runtime composition out of `httpapi`; `cmd/worker` must not build
+   an HTTP server to process durable jobs.
+2. Extract recording ingestion, processing, retry, deletion, and shadowing
+   behind one recording application boundary and explicit repositories.
+3. Extract guest preview and its lifecycle using the same job/media ports.
+4. Extract identity plus profile/subscription orchestration while preserving
+   the existing access/refresh-token and anonymous-claim contracts.
+5. Keep Feed isolated until the retained-Feed product decision is made.
 
 Each extraction must preserve routes, OpenAPI, persisted data, authorization,
 idempotency, retry behavior, and integration coverage. Avoid a single large
