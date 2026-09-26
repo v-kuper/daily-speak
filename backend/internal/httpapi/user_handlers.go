@@ -186,7 +186,8 @@ func (s *Server) handleUserData(w http.ResponseWriter, r *http.Request) {
 		  id, topic, duration, timestamp, transcript, corrected_transcript, suggestions,
 		  practice_type, audio_data_url, photo_data_url, photo_object,
 		  status, processing_stage, processing_error,
-		  shadowing_status, shadowing_audio_url, shadowing_error, shadowing_updated_at
+		  shadowing_status, shadowing_audio_url, shadowing_error, shadowing_updated_at,
+		  audio_asset_id, photo_asset_id, shadowing_asset_id
 		FROM recordings
 		WHERE user_id = $1
 		ORDER BY timestamp DESC`, user.ID)

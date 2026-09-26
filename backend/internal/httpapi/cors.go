@@ -50,11 +50,11 @@ func (c CORSConfig) Wrap(next http.Handler) http.Handler {
 		if allowed {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Access-Control-Allow-Credentials", "true")
-			w.Header().Set("Access-Control-Expose-Headers", requestIDHeader)
+			w.Header().Set("Access-Control-Expose-Headers", requestIDHeader+", ETag, X-Checksum-SHA256")
 		}
 		if r.Method == http.MethodOptions {
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, "+requestIDHeader)
+			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, Idempotency-Key, "+requestIDHeader)
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}

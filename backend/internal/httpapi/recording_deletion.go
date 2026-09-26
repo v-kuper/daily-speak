@@ -33,12 +33,15 @@ func (s *Server) handleDeleteRecording(w http.ResponseWriter, r *http.Request, r
 	}
 	defer func() { _ = tx.Rollback(r.Context()) }()
 
-	var recordingAudioURL, shadowingAudioURL *string
+	var recordingAudioURL, shadowingAudioURL, recordingAudioAssetID, recordingPhotoAssetID, shadowingAssetID *string
 	err = tx.QueryRow(r.Context(), `
-		SELECT audio_data_url, shadowing_audio_url
+		SELECT audio_data_url, shadowing_audio_url, audio_asset_id, photo_asset_id, shadowing_asset_id
 		FROM recordings
 		WHERE id = $1 AND user_id = $2
-		FOR UPDATE`, recordingID, user.ID).Scan(&recordingAudioURL, &shadowingAudioURL)
+		FOR UPDATE`, recordingID, user.ID).Scan(
+		&recordingAudioURL, &shadowingAudioURL, &recordingAudioAssetID,
+		&recordingPhotoAssetID, &shadowingAssetID,
+	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Recording not found."})
 		return
@@ -66,10 +69,29 @@ func (s *Server) handleDeleteRecording(w http.ResponseWriter, r *http.Request, r
 	}
 	appendFileURL(recordingAudioURL)
 	appendFileURL(shadowingAudioURL)
+	assetIDs := make([]string, 0, 6)
+	assetIDSet := map[string]struct{}{}
+	appendAssetID := func(value *string) {
+		if value == nil {
+			return
+		}
+		normalized := strings.TrimSpace(*value)
+		if normalized == "" {
+			return
+		}
+		if _, exists := assetIDSet[normalized]; exists {
+			return
+		}
+		assetIDSet[normalized] = struct{}{}
+		assetIDs = append(assetIDs, normalized)
+	}
+	appendAssetID(recordingAudioAssetID)
+	appendAssetID(recordingPhotoAssetID)
+	appendAssetID(shadowingAssetID)
 
 	postIDs := []string{}
 	postRows, err := tx.Query(r.Context(), `
-		SELECT id, audio_data_url
+		SELECT id, audio_data_url, audio_asset_id, photo_asset_id
 		FROM feed_posts
 		WHERE source_recording_id = $1
 		FOR UPDATE`, recordingID)
@@ -79,14 +101,16 @@ func (s *Server) handleDeleteRecording(w http.ResponseWriter, r *http.Request, r
 	}
 	for postRows.Next() {
 		var postID string
-		var audioURL *string
-		if err := postRows.Scan(&postID, &audioURL); err != nil {
+		var audioURL, audioAssetID, photoAssetID *string
+		if err := postRows.Scan(&postID, &audioURL, &audioAssetID, &photoAssetID); err != nil {
 			postRows.Close()
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to delete recording."})
 			return
 		}
 		postIDs = append(postIDs, postID)
 		appendFileURL(audioURL)
+		appendAssetID(audioAssetID)
+		appendAssetID(photoAssetID)
 	}
 	postRowsErr := postRows.Err()
 	postRows.Close()
@@ -97,7 +121,7 @@ func (s *Server) handleDeleteRecording(w http.ResponseWriter, r *http.Request, r
 
 	if len(postIDs) > 0 {
 		replyRows, queryErr := tx.Query(r.Context(), `
-			SELECT audio_data_url
+			SELECT audio_data_url, audio_asset_id
 			FROM feed_replies
 			WHERE post_id = ANY($1::text[])
 			FOR UPDATE`, postIDs)
@@ -106,13 +130,14 @@ func (s *Server) handleDeleteRecording(w http.ResponseWriter, r *http.Request, r
 			return
 		}
 		for replyRows.Next() {
-			var audioURL *string
-			if err := replyRows.Scan(&audioURL); err != nil {
+			var audioURL, audioAssetID *string
+			if err := replyRows.Scan(&audioURL, &audioAssetID); err != nil {
 				replyRows.Close()
 				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to delete recording."})
 				return
 			}
 			appendFileURL(audioURL)
+			appendAssetID(audioAssetID)
 		}
 		replyRowsErr := replyRows.Err()
 		replyRows.Close()
@@ -137,6 +162,23 @@ func (s *Server) handleDeleteRecording(w http.ResponseWriter, r *http.Request, r
 			ResourceID:     fileURL,
 			IdempotencyKey: "media.delete:" + fileURL,
 			MaxAttempts:    20,
+		}); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to delete recording."})
+			return
+		}
+	}
+	for _, assetID := range assetIDs {
+		if _, err := tx.Exec(r.Context(), `
+			UPDATE media_assets
+			SET state = 'deleting', retention_until = NOW(), updated_at = NOW()
+			WHERE id = $1 AND state <> 'deleted'`, assetID); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to delete recording."})
+			return
+		}
+		jobID := uuid.NewString()
+		if err := workqueue.Enqueue(r.Context(), tx, workqueue.NewJob{
+			ID: jobID, Kind: workqueue.KindMediaDelete, ResourceID: assetID,
+			IdempotencyKey: "media.delete:asset:" + assetID, MaxAttempts: 20,
 		}); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to delete recording."})
 			return

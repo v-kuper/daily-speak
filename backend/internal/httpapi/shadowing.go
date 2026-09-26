@@ -1,7 +1,10 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"net/http"
 	"os"
@@ -11,6 +14,7 @@ import (
 
 	"daily-speaking-practice/backend/internal/domain"
 	"daily-speaking-practice/backend/internal/logging"
+	"daily-speaking-practice/backend/internal/storage"
 	"daily-speaking-practice/backend/internal/workqueue"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -155,15 +159,72 @@ func (s *Server) runShadowing(ctx context.Context, recordingID string, userID st
 	// Include the fenced lease token in the object name. A worker that finishes
 	// after losing its lease can therefore never overwrite the active worker's
 	// published audio before its conditional database update is rejected.
-	saved, err := saveShadowingAudio(userID, recordingID, attemptID+"-"+leaseToken, audio)
+	assetID := uuid.NewString()
+	checksumBytes := sha256.Sum256(audio)
+	checksum := hex.EncodeToString(checksumBytes[:])
+	objectKey := ""
+	publicURL := ""
+	var objectInfo storage.ObjectInfo
+	if s.mediaStore != nil && s.mediaStore.Backend() == storage.BackendLocal {
+		saved, saveErr := saveShadowingAudio(userID, recordingID, attemptID+"-"+leaseToken, audio)
+		if saveErr != nil {
+			return saveErr
+		}
+		publicURL = saved.publicURL
+		objectKey = strings.TrimPrefix(publicURL, uploadsURLPrefix)
+		objectInfo, err = s.mediaStore.Stat(ctx, objectKey)
+		if err != nil {
+			_ = os.Remove(saved.absolutePath)
+			return err
+		}
+	} else if s.mediaStore != nil {
+		objectKey, err = storage.NewObjectKey(userID, "shadowing_audio", "mp3")
+		if err == nil {
+			objectInfo, err = s.mediaStore.Put(ctx, storage.PutRequest{
+				Key: objectKey, ContentType: "audio/mpeg", Size: int64(len(audio)), SHA256: checksum,
+				Metadata: map[string]string{"asset-id": assetID, "owner-principal-id": userID, "purpose": "shadowing_audio"},
+			}, bytes.NewReader(audio))
+		}
+	} else {
+		err = errors.New("media storage is not configured")
+	}
 	if err != nil {
 		return err
 	}
-
-	result, err := s.db.Exec(ctx, `
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		_ = s.mediaStore.Delete(context.Background(), objectKey)
+		return err
+	}
+	defer tx.Rollback(ctx)
+	var bucket any
+	if s.mediaStore.Backend() == storage.BackendS3 {
+		bucket = strings.TrimSpace(os.Getenv("MEDIA_S3_BUCKET"))
+	}
+	var legacyURL any
+	if publicURL != "" {
+		legacyURL = publicURL
+	}
+	_, err = tx.Exec(ctx, `
+		INSERT INTO media_assets
+		  (id, owner_principal_id, purpose, state, storage_driver, bucket, object_key,
+		   content_type, expected_size_bytes, verified_size_bytes,
+		   expected_checksum_sha256, verified_checksum_sha256, etag,
+		   legacy_public_url, verified_at, attached_at)
+		VALUES
+		  ($1, $2, 'shadowing_audio', 'ready', $3, $4, $5,
+		   'audio/mpeg', $6, $6, $7, $7, NULLIF($8, ''), $9, NOW(), NOW())`,
+		assetID, userID, s.mediaStore.Backend(), bucket, objectKey, objectInfo.Size,
+		objectInfo.SHA256, objectInfo.ETag, legacyURL)
+	if err != nil {
+		_ = s.mediaStore.Delete(context.Background(), objectKey)
+		return err
+	}
+	result, err := tx.Exec(ctx, `
 		UPDATE recordings
 		SET shadowing_status = 'ready',
 		    shadowing_audio_url = $2,
+		    shadowing_asset_id = $6,
 		    shadowing_error = NULL,
 		    shadowing_updated_at = NOW(),
 		    shadowing_attempt_id = NULL
@@ -171,13 +232,17 @@ func (s *Server) runShadowing(ctx context.Context, recordingID string, userID st
 		  AND EXISTS (
 		    SELECT 1 FROM processing_jobs
 		    WHERE id = $4 AND state = 'running' AND lease_token = $5
-		  )`, recordingID, saved.publicURL, userID, attemptID, leaseToken)
+		  )`, recordingID, stringOrNil(publicURL != "", &publicURL), userID, attemptID, leaseToken, assetID)
 	if err != nil || result.RowsAffected() == 0 {
-		_ = os.Remove(saved.absolutePath)
+		_ = s.mediaStore.Delete(context.Background(), objectKey)
 		if err != nil {
 			return err
 		}
 		return nil
+	}
+	if err := tx.Commit(ctx); err != nil {
+		_ = s.mediaStore.Delete(context.Background(), objectKey)
+		return err
 	}
 	logger.Info("shadowing.ready", map[string]any{
 		"recordingId": recordingID,

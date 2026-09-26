@@ -436,14 +436,18 @@ func (s *Server) recordingForUser(ctx context.Context, userID string, recordingI
 		ShadowingAudioURL   *string
 		ShadowingError      *string
 		ShadowingUpdatedAt  time.Time
+		AudioAssetID        *string
+		PhotoAssetID        *string
+		ShadowingAssetID    *string
 	}
 	err := s.db.QueryRow(ctx, `
 		SELECT id, topic, duration, timestamp, status, transcript, corrected_transcript, suggestions,
 		       processing_stage, practice_type, audio_data_url, photo_data_url, photo_object, processing_error,
-		       shadowing_status, shadowing_audio_url, shadowing_error, shadowing_updated_at
+		       shadowing_status, shadowing_audio_url, shadowing_error, shadowing_updated_at,
+		       audio_asset_id, photo_asset_id, shadowing_asset_id
 		FROM recordings
 		WHERE id = $1 AND user_id = $2
-		LIMIT 1`, strings.TrimSpace(recordingID), userID).Scan(&row.ID, &row.Topic, &row.Duration, &row.Timestamp, &row.Status, &row.Transcript, &row.CorrectedTranscript, &row.Suggestions, &row.ProcessingStage, &row.PracticeType, &row.AudioDataURL, &row.PhotoDataURL, &row.PhotoObject, &row.ProcessingError, &row.ShadowingStatus, &row.ShadowingAudioURL, &row.ShadowingError, &row.ShadowingUpdatedAt)
+		LIMIT 1`, strings.TrimSpace(recordingID), userID).Scan(&row.ID, &row.Topic, &row.Duration, &row.Timestamp, &row.Status, &row.Transcript, &row.CorrectedTranscript, &row.Suggestions, &row.ProcessingStage, &row.PracticeType, &row.AudioDataURL, &row.PhotoDataURL, &row.PhotoObject, &row.ProcessingError, &row.ShadowingStatus, &row.ShadowingAudioURL, &row.ShadowingError, &row.ShadowingUpdatedAt, &row.AudioAssetID, &row.PhotoAssetID, &row.ShadowingAssetID)
 	if err != nil {
 		return recordingResponse{}, err
 	}
@@ -466,6 +470,7 @@ func (s *Server) recordingForUser(ctx context.Context, userID string, recordingI
 		ShadowingAudioURL:   normalizeOptionalShadowingAudio(row.ShadowingAudioURL),
 		ShadowingError:      normalizeOptionalProcessingError(row.ShadowingError),
 		ShadowingUpdatedAt:  row.ShadowingUpdatedAt.UTC().Format(time.RFC3339Nano),
+		Media:               recordingMedia(row.AudioAssetID, row.PhotoAssetID, row.ShadowingAssetID),
 	}, nil
 }
 

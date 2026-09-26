@@ -12,6 +12,8 @@ const webDockerfile = readFileSync("web/Dockerfile", "utf8");
 const dockerfile = readFileSync("backend/Dockerfile", "utf8");
 const dockerCompose = readFileSync("docker-compose.yml", "utf8");
 const compose = parseYaml(dockerCompose);
+const rootEnvExample = readFileSync(".env.example", "utf8");
+const backendEnvExample = readFileSync("backend/.env.example", "utf8");
 const rootPackage = JSON.parse(readFileSync("package.json", "utf8"));
 const instructions = (source) => source.replace(/\\\r?\n\s*/g, " ").split(/\r?\n/)
   .map((line) => line.trim()).filter((line) => line && !line.startsWith("#"));
@@ -190,6 +192,59 @@ test("local deploy workflow configures persistent uploaded media storage", () =>
   assert.match(deployWorkflow, /UPLOADS_DIR:\s+\/app\/uploads/);
   assert.match(deployWorkflow, /UPLOADS_HOST_DIR:\s+\$\{\{\s*vars\.UPLOADS_HOST_DIR/);
   assert.match(deployWorkflow, /D:\\DailySpeaking\\data\\uploads/);
+  assert.equal(parsedDeployWorkflow.jobs.deploy.env.MEDIA_STORAGE_DRIVER, "local");
+  assert.equal(parsedDeployWorkflow.jobs.deploy.env.MEDIA_S3_FORCE_PATH_STYLE, "${{ vars.MEDIA_S3_FORCE_PATH_STYLE || 'false' }}");
+  assert.equal(parsedDeployWorkflow.jobs.deploy.env.MEDIA_UPLOAD_URL_TTL, "${{ vars.MEDIA_UPLOAD_URL_TTL || '15m' }}");
+  assert.equal(parsedDeployWorkflow.jobs.deploy.env.MEDIA_MULTIPART_PART_SIZE_BYTES, "${{ vars.MEDIA_MULTIPART_PART_SIZE_BYTES || '8388608' }}");
+});
+
+test("media storage configuration remains local-compatible and server-only", () => {
+  const { web, backend, worker } = compose.services;
+  const expectedServerMedia = {
+    MEDIA_STORAGE_DRIVER: "${MEDIA_STORAGE_DRIVER:-local}",
+    MEDIA_S3_REGION: "${MEDIA_S3_REGION:-}",
+    MEDIA_S3_BUCKET: "${MEDIA_S3_BUCKET:-}",
+    MEDIA_S3_ENDPOINT: "${MEDIA_S3_ENDPOINT:-}",
+    MEDIA_S3_FORCE_PATH_STYLE: "${MEDIA_S3_FORCE_PATH_STYLE:-false}",
+    MEDIA_S3_ACCESS_KEY_ID: "${MEDIA_S3_ACCESS_KEY_ID:-}",
+    MEDIA_S3_SECRET_ACCESS_KEY: "${MEDIA_S3_SECRET_ACCESS_KEY:-}",
+    MEDIA_S3_SESSION_TOKEN: "${MEDIA_S3_SESSION_TOKEN:-}",
+    MEDIA_UPLOAD_URL_TTL: "${MEDIA_UPLOAD_URL_TTL:-15m}",
+    MEDIA_MULTIPART_PART_SIZE_BYTES: "${MEDIA_MULTIPART_PART_SIZE_BYTES:-8388608}",
+  };
+  for (const [name, value] of Object.entries(expectedServerMedia)) {
+    assert.equal(backend.environment[name], value, `backend ${name}`);
+    assert.equal(worker.environment[name], value, `worker ${name}`);
+    assert.equal(web.environment[name], undefined, `web must not receive ${name}`);
+  }
+  assert.deepEqual(worker.volumes, backend.volumes);
+  assert.ok(backend.volumes.includes("${UPLOADS_HOST_DIR:-./.data/uploads}:/app/uploads"));
+});
+
+test("Windows deploy keeps optional S3 credentials scoped to the Compose start step", () => {
+  const deployEnv = parsedDeployWorkflow.jobs.deploy.env;
+  const stepEnv = deployStep("Build and start local Docker HTTPS stack")?.env;
+  for (const name of ["MEDIA_S3_ACCESS_KEY_ID", "MEDIA_S3_SECRET_ACCESS_KEY", "MEDIA_S3_SESSION_TOKEN"]) {
+    assert.equal(deployEnv[name], undefined, `${name} must not be job-wide`);
+    assert.equal(stepEnv[name], `\${{ secrets.${name} }}`);
+  }
+  assert.doesNotMatch(deployWorkflow, /IsNullOrWhiteSpace\(\$env:MEDIA_S3_/);
+});
+
+test("environment examples document the local default and optional S3 contract", () => {
+  for (const example of [rootEnvExample, backendEnvExample]) {
+    assert.match(example, /^MEDIA_STORAGE_DRIVER=local$/m);
+    assert.match(example, /^MEDIA_S3_REGION=$/m);
+    assert.match(example, /^MEDIA_S3_BUCKET=$/m);
+    assert.match(example, /^MEDIA_S3_ENDPOINT=$/m);
+    assert.match(example, /^MEDIA_S3_FORCE_PATH_STYLE=false$/m);
+    assert.match(example, /^MEDIA_S3_ACCESS_KEY_ID=$/m);
+    assert.match(example, /^MEDIA_S3_SECRET_ACCESS_KEY=$/m);
+    assert.match(example, /^MEDIA_S3_SESSION_TOKEN=$/m);
+    assert.match(example, /^MEDIA_UPLOAD_URL_TTL=15m$/m);
+    assert.match(example, /^MEDIA_MULTIPART_PART_SIZE_BYTES=8388608$/m);
+    assert.match(example, /^MEDIA_SWEEP_INTERVAL=15m$/m);
+  }
 });
 
 test("local deploy passes Cartesia credentials from the correct GitHub stores", () => {

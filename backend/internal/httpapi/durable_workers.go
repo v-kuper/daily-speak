@@ -10,7 +10,10 @@ import (
 	"sync"
 	"time"
 
+	"daily-speaking-practice/backend/internal/logging"
+	"daily-speaking-practice/backend/internal/media"
 	"daily-speaking-practice/backend/internal/workqueue"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -23,6 +26,7 @@ type WorkerConfig struct {
 	HeartbeatInterval    time.Duration
 	RetryBaseDelay       time.Duration
 	RetryMaxDelay        time.Duration
+	MediaSweepInterval   time.Duration
 }
 
 func WorkerConfigFromEnv() (WorkerConfig, error) {
@@ -35,6 +39,7 @@ func WorkerConfigFromEnv() (WorkerConfig, error) {
 		HeartbeatInterval:    30 * time.Second,
 		RetryBaseDelay:       5 * time.Second,
 		RetryMaxDelay:        5 * time.Minute,
+		MediaSweepInterval:   15 * time.Minute,
 	}
 	var err error
 	if config.RecordingConcurrency, err = positiveEnvInt("WORKER_RECORDING_CONCURRENCY", config.RecordingConcurrency); err != nil {
@@ -59,6 +64,9 @@ func WorkerConfigFromEnv() (WorkerConfig, error) {
 		return WorkerConfig{}, err
 	}
 	if config.RetryMaxDelay, err = positiveEnvDuration("WORKER_RETRY_MAX_DELAY", config.RetryMaxDelay); err != nil {
+		return WorkerConfig{}, err
+	}
+	if config.MediaSweepInterval, err = positiveEnvDuration("MEDIA_SWEEP_INTERVAL", config.MediaSweepInterval); err != nil {
 		return WorkerConfig{}, err
 	}
 	if config.HeartbeatInterval >= config.LeaseDuration {
@@ -130,7 +138,7 @@ func (s *Server) RunWorkers(ctx context.Context, config WorkerConfig) error {
 			FinalizeFailure:   s.finalizeDurableFailure,
 		},
 	}
-	errCh := make(chan error, len(pools))
+	errCh := make(chan error, len(pools)+1)
 	var wait sync.WaitGroup
 	for _, pool := range pools {
 		pool := pool
@@ -140,6 +148,11 @@ func (s *Server) RunWorkers(ctx context.Context, config WorkerConfig) error {
 			errCh <- workqueue.Run(ctx, s.jobStore, pool)
 		}()
 	}
+	wait.Add(1)
+	go func() {
+		defer wait.Done()
+		errCh <- s.runMediaMaintenanceLoop(ctx, config.MediaSweepInterval)
+	}()
 	wait.Wait()
 	close(errCh)
 	for err := range errCh {
@@ -148,6 +161,125 @@ func (s *Server) RunWorkers(ctx context.Context, config WorkerConfig) error {
 		}
 	}
 	return ctx.Err()
+}
+
+func (s *Server) runMediaMaintenanceLoop(ctx context.Context, interval time.Duration) error {
+	if interval <= 0 {
+		interval = 15 * time.Minute
+	}
+	logger := logging.ForBackground("worker.media.maintenance")
+	run := func() {
+		if err := s.sweepExpiredMedia(ctx); err != nil && !errors.Is(err, context.Canceled) {
+			logger.Warn("media.sweep_failed", logging.ErrorMeta(err))
+		}
+	}
+	run()
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			run()
+		}
+	}
+}
+
+func (s *Server) sweepExpiredMedia(ctx context.Context) error {
+	if s.db == nil || s.mediaService == nil {
+		return nil
+	}
+	type expiredUpload struct {
+		ID      string
+		OwnerID string
+	}
+	rows, err := s.db.Query(ctx, `
+		SELECT u.id, a.owner_principal_id
+		FROM media_uploads u
+		JOIN media_assets a ON a.id = u.asset_id
+		WHERE u.expires_at <= NOW()
+		  AND (
+		    u.state IN ('pending', 'uploading', 'failed', 'aborting')
+		    OR (u.state = 'completing' AND u.updated_at <= NOW() - INTERVAL '30 minutes')
+		  )
+		ORDER BY u.expires_at ASC
+		LIMIT 100`)
+	if err != nil {
+		return err
+	}
+	uploads := make([]expiredUpload, 0, 100)
+	for rows.Next() {
+		var upload expiredUpload
+		if err := rows.Scan(&upload.ID, &upload.OwnerID); err != nil {
+			rows.Close()
+			return err
+		}
+		uploads = append(uploads, upload)
+	}
+	rowsErr := rows.Err()
+	rows.Close()
+	if rowsErr != nil {
+		return rowsErr
+	}
+	for _, upload := range uploads {
+		_, abortErr := s.mediaService.AbortExpiredUpload(ctx, upload.OwnerID, upload.ID, 30*time.Minute)
+		if abortErr != nil && !errors.Is(abortErr, media.ErrNotFound) && !errors.Is(abortErr, media.ErrConflict) {
+			return abortErr
+		}
+	}
+
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	assetRows, err := tx.Query(ctx, `
+		SELECT id
+		FROM media_assets
+		WHERE attached_at IS NULL
+		  AND retention_until <= NOW()
+		  AND state IN ('ready', 'failed')
+		ORDER BY retention_until ASC
+		FOR UPDATE SKIP LOCKED
+		LIMIT 100`)
+	if err != nil {
+		return err
+	}
+	assetIDs := make([]string, 0, 100)
+	for assetRows.Next() {
+		var assetID string
+		if err := assetRows.Scan(&assetID); err != nil {
+			assetRows.Close()
+			return err
+		}
+		assetIDs = append(assetIDs, assetID)
+	}
+	assetRowsErr := assetRows.Err()
+	assetRows.Close()
+	if assetRowsErr != nil {
+		return assetRowsErr
+	}
+	for _, assetID := range assetIDs {
+		result, err := tx.Exec(ctx, `
+			UPDATE media_assets
+			SET state = 'deleting', updated_at = NOW()
+			WHERE id = $1 AND attached_at IS NULL AND state IN ('ready', 'failed')`, assetID)
+		if err != nil {
+			return err
+		}
+		if result.RowsAffected() == 0 {
+			continue
+		}
+		jobID := uuid.NewString()
+		if err := workqueue.Enqueue(ctx, tx, workqueue.NewJob{
+			ID: jobID, Kind: workqueue.KindMediaDelete, ResourceID: assetID,
+			IdempotencyKey: "media.expire:asset:" + assetID + ":" + jobID, MaxAttempts: 20,
+		}); err != nil {
+			return err
+		}
+	}
+	return tx.Commit(ctx)
 }
 
 func (s *Server) handleDurableJob(ctx context.Context, job workqueue.Job) error {
@@ -163,10 +295,37 @@ func (s *Server) handleDurableJob(ctx context.Context, job workqueue.Job) error 
 	case workqueue.KindMediaDelete:
 		jobCtx, cancel := context.WithTimeout(ctx, time.Minute)
 		defer cancel()
-		if err := s.removeStoredUploads([]string{job.ResourceID}); err != nil {
+		if strings.HasPrefix(job.ResourceID, uploadsURLPrefix) {
+			if err := s.removeStoredUploads([]string{job.ResourceID}); err != nil {
+				return err
+			}
+			_, err := s.db.Exec(jobCtx, `DELETE FROM pending_file_deletions WHERE public_url = $1`, job.ResourceID)
 			return err
 		}
-		_, err := s.db.Exec(jobCtx, `DELETE FROM pending_file_deletions WHERE public_url = $1`, job.ResourceID)
+		if s.mediaStore == nil {
+			return errors.New("media storage is not configured")
+		}
+		var driver, objectKey, state string
+		err := s.db.QueryRow(jobCtx, `
+			SELECT storage_driver, object_key, state
+			FROM media_assets
+			WHERE id = $1`, job.ResourceID).Scan(&driver, &objectKey, &state)
+		if errors.Is(err, pgx.ErrNoRows) || state == "deleted" {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if driver != s.mediaStore.Backend() {
+			return fmt.Errorf("media asset requires %s storage, worker has %s", driver, s.mediaStore.Backend())
+		}
+		if err := s.mediaStore.Delete(jobCtx, objectKey); err != nil {
+			return err
+		}
+		_, err = s.db.Exec(jobCtx, `
+			UPDATE media_assets
+			SET state = 'deleted', deleted_at = COALESCE(deleted_at, NOW()), updated_at = NOW()
+			WHERE id = $1`, job.ResourceID)
 		return err
 	default:
 		return fmt.Errorf("unsupported processing job kind %q", job.Kind)
@@ -191,6 +350,13 @@ func (s *Server) finalizeDurableFailure(ctx context.Context, tx pgx.Tx, job work
 			job.ResourceID, job.ID, shadowingFailureMessage)
 		return err
 	case workqueue.KindMediaDelete:
+		if !strings.HasPrefix(job.ResourceID, uploadsURLPrefix) {
+			_, err := tx.Exec(ctx, `
+				UPDATE media_assets
+				SET state = 'failed', updated_at = NOW()
+				WHERE id = $1 AND state = 'deleting'`, job.ResourceID)
+			return err
+		}
 		_, err := tx.Exec(ctx, `
 			INSERT INTO pending_file_deletions (public_url, attempts, last_error, updated_at)
 			VALUES ($1, $2, $3, NOW())

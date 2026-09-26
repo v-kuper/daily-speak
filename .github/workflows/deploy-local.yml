@@ -29,6 +29,14 @@ jobs:
       POSTGRES_PORT: ${{ vars.POSTGRES_PORT || '5433' }}
       UPLOADS_HOST_DIR: ${{ vars.UPLOADS_HOST_DIR || 'D:\DailySpeaking\data\uploads' }}
       UPLOADS_DIR: /app/uploads
+      MEDIA_STORAGE_DRIVER: local
+      MEDIA_S3_REGION: ${{ vars.MEDIA_S3_REGION || '' }}
+      MEDIA_S3_BUCKET: ${{ vars.MEDIA_S3_BUCKET || '' }}
+      MEDIA_S3_ENDPOINT: ${{ vars.MEDIA_S3_ENDPOINT || '' }}
+      MEDIA_S3_FORCE_PATH_STYLE: ${{ vars.MEDIA_S3_FORCE_PATH_STYLE || 'false' }}
+      MEDIA_UPLOAD_URL_TTL: ${{ vars.MEDIA_UPLOAD_URL_TTL || '15m' }}
+      MEDIA_MULTIPART_PART_SIZE_BYTES: ${{ vars.MEDIA_MULTIPART_PART_SIZE_BYTES || '8388608' }}
+      MEDIA_SWEEP_INTERVAL: ${{ vars.MEDIA_SWEEP_INTERVAL || '15m' }}
       OLLAMA_BASE_URL: ${{ vars.OLLAMA_BASE_URL || 'http://host.docker.internal:11434' }}
       OLLAMA_MODEL: ${{ vars.OLLAMA_MODEL || 'gemma4:31b-cloud' }}
       OLLAMA_THINKING_MODEL: ${{ vars.OLLAMA_THINKING_MODEL || 'true' }}
@@ -105,6 +113,9 @@ jobs:
           CARTESIA_API_KEY: ${{ secrets.CARTESIA_API_KEY }}
           CARTESIA_VOICE_ID: ${{ vars.CARTESIA_VOICE_ID }}
           AUTH_ACCESS_TOKEN_SECRET: ${{ secrets.AUTH_ACCESS_TOKEN_SECRET }}
+          MEDIA_S3_ACCESS_KEY_ID: ${{ secrets.MEDIA_S3_ACCESS_KEY_ID }}
+          MEDIA_S3_SECRET_ACCESS_KEY: ${{ secrets.MEDIA_S3_SECRET_ACCESS_KEY }}
+          MEDIA_S3_SESSION_TOKEN: ${{ secrets.MEDIA_S3_SESSION_TOKEN }}
         run: .\scripts\setup-lan-https-proxy.ps1
 
       - name: Smoke separate HTTP services

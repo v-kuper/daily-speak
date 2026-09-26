@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "DailySpeak API",
-    "version": "1.2.0",
+    "version": "1.3.0",
     "description": "HTTP API for DailySpeak. Mobile clients use the stable `/api/v1` contract with short-lived bearer access tokens and rotating opaque refresh tokens. The legacy web cookie contract remains available during migration."
   },
   "servers": [
@@ -41,6 +41,9 @@
     },
     {
       "name": "Recordings"
+    },
+    {
+      "name": "Media"
     },
     {
       "name": "Recording upload sessions"
@@ -498,6 +501,60 @@
             "$ref": "#/components/responses/V1InternalServerError"
           }
         }
+      },
+      "post": {
+        "tags": [
+          "Mobile API v1",
+          "Recordings"
+        ],
+        "summary": "Create a recording from ready media assets",
+        "description": "Atomically attaches owned ready audio and optional photo assets, reserves quota, and enqueues durable processing. A user access token and an Idempotency-Key are required; guest identities cannot start paid processing.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RequestIdHeader"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKeyHeader"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateRecordingFromAssetsRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "$ref": "#/components/responses/V1RecordingWithQuotaCreated"
+          },
+          "400": {
+            "$ref": "#/components/responses/V1BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/V1Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/V1Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/V1NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/V1Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/V1InternalServerError"
+          }
+        }
       }
     },
     "/api/v1/recordings/{recordingId}": {
@@ -538,6 +595,407 @@
           },
           "500": {
             "$ref": "#/components/responses/V1InternalServerError"
+          }
+        }
+      }
+    },
+    "/api/v1/media/uploads": {
+      "post": {
+        "tags": [
+          "Mobile API v1",
+          "Media"
+        ],
+        "summary": "Create an owned resumable media upload",
+        "description": "Creates an upload plan for recording audio or a recording photo. The client computes the complete-object SHA-256 before starting. A user access token and Idempotency-Key are required; guest identities receive account_required.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RequestIdHeader"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKeyHeader"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateMediaUploadRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "$ref": "#/components/responses/V1MediaUploadCreated"
+          },
+          "400": {
+            "$ref": "#/components/responses/V1BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/V1Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/V1Forbidden"
+          },
+          "413": {
+            "$ref": "#/components/responses/V1PayloadTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/V1UnsupportedMediaType"
+          },
+          "422": {
+            "$ref": "#/components/responses/V1UnprocessableEntity"
+          },
+          "500": {
+            "$ref": "#/components/responses/V1InternalServerError"
+          },
+          "503": {
+            "$ref": "#/components/responses/V1ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/api/v1/media/uploads/{uploadId}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/MediaUploadIdPath"
+        }
+      ],
+      "get": {
+        "tags": [
+          "Mobile API v1",
+          "Media"
+        ],
+        "summary": "Resume an owned media upload",
+        "description": "Returns upload state and the parts already accepted by storage. A foreign upload is reported as not found.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RequestIdHeader"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/V1MediaUploadOK"
+          },
+          "401": {
+            "$ref": "#/components/responses/V1Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/V1Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/V1NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/V1ServiceUnavailable"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Mobile API v1",
+          "Media"
+        ],
+        "summary": "Abort an owned media upload",
+        "description": "Idempotently aborts an incomplete upload. A completed upload cannot be aborted.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RequestIdHeader"
+          }
+        ],
+        "responses": {
+          "204": {
+            "$ref": "#/components/responses/V1NoContent"
+          },
+          "401": {
+            "$ref": "#/components/responses/V1Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/V1Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/V1NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/V1Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/V1ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/api/v1/media/uploads/{uploadId}/parts": {
+      "post": {
+        "tags": [
+          "Mobile API v1",
+          "Media"
+        ],
+        "summary": "Create short-lived upload requests for media parts",
+        "description": "Returns opaque bounded upload requests. Send exactly the returned method, URL, and headers; URLs are short-lived and must never be persisted.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RequestIdHeader"
+          },
+          {
+            "$ref": "#/components/parameters/MediaUploadIdPath"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SignMediaPartsRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/V1MediaPartsOK"
+          },
+          "400": {
+            "$ref": "#/components/responses/V1BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/V1Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/V1Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/V1NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/V1Conflict"
+          },
+          "410": {
+            "$ref": "#/components/responses/V1Gone"
+          },
+          "503": {
+            "$ref": "#/components/responses/V1ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/api/v1/media/uploads/{uploadId}/complete": {
+      "post": {
+        "tags": [
+          "Mobile API v1",
+          "Media"
+        ],
+        "summary": "Complete and verify an owned media upload",
+        "description": "Completes multipart storage and verifies the whole-object size and SHA-256. Repeating a successful completion is idempotent.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RequestIdHeader"
+          },
+          {
+            "$ref": "#/components/parameters/MediaUploadIdPath"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompleteMediaUploadRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/V1MediaUploadOK"
+          },
+          "400": {
+            "$ref": "#/components/responses/V1BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/V1Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/V1Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/V1NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/V1Conflict"
+          },
+          "410": {
+            "$ref": "#/components/responses/V1Gone"
+          },
+          "422": {
+            "$ref": "#/components/responses/V1UnprocessableEntity"
+          },
+          "503": {
+            "$ref": "#/components/responses/V1ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/api/v1/media/{assetId}/download": {
+      "get": {
+        "tags": [
+          "Mobile API v1",
+          "Media"
+        ],
+        "summary": "Create a short-lived authorized media download request",
+        "description": "Returns an opaque request for an owned ready asset. Foreign, deleted, and non-ready assets are all reported as not found. The returned URL must not be persisted.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RequestIdHeader"
+          },
+          {
+            "$ref": "#/components/parameters/MediaAssetIdPath"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/V1MediaDownloadOK"
+          },
+          "401": {
+            "$ref": "#/components/responses/V1Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/V1Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/V1NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/V1ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/api/v1/media/uploads/{uploadId}/parts/{partNumber}": {
+      "put": {
+        "tags": [
+          "Mobile API v1",
+          "Media"
+        ],
+        "summary": "Upload one part to local media storage",
+        "description": "Local-storage transport endpoint. Invoke only the opaque signed URL returned by the parts endpoint. Signature, expiry, size, and checksum are bound into the URL; no bearer token is sent.",
+        "security": [],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RequestIdHeader"
+          },
+          {
+            "$ref": "#/components/parameters/MediaUploadIdPath"
+          },
+          {
+            "$ref": "#/components/parameters/MediaPartNumberPath"
+          },
+          {
+            "$ref": "#/components/parameters/MediaSignedSizeQuery"
+          },
+          {
+            "$ref": "#/components/parameters/MediaSignedChecksumQuery"
+          },
+          {
+            "$ref": "#/components/parameters/MediaSignedExpiryQuery"
+          },
+          {
+            "$ref": "#/components/parameters/MediaSignatureQuery"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/V1MediaPartStored"
+          },
+          "400": {
+            "$ref": "#/components/responses/V1BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/V1NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/V1UnprocessableEntity"
+          },
+          "503": {
+            "$ref": "#/components/responses/V1ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/api/v1/media/local/assets/{assetId}/content": {
+      "get": {
+        "tags": [
+          "Mobile API v1",
+          "Media"
+        ],
+        "summary": "Download signed content from local media storage",
+        "description": "Local-storage transport endpoint. Invoke only the opaque signed URL returned by the authorized download endpoint; no bearer token is sent.",
+        "security": [],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RequestIdHeader"
+          },
+          {
+            "$ref": "#/components/parameters/MediaAssetIdPath"
+          },
+          {
+            "$ref": "#/components/parameters/MediaSignedExpiryQuery"
+          },
+          {
+            "$ref": "#/components/parameters/MediaSignatureQuery"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/V1MediaContentOK"
+          },
+          "404": {
+            "$ref": "#/components/responses/V1NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/V1ServiceUnavailable"
           }
         }
       }
@@ -1816,6 +2274,88 @@
           "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$"
         }
       },
+      "IdempotencyKeyHeader": {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "description": "Stable key for retrying this logical mutation. Reusing it with a different request returns a conflict.",
+        "schema": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$"
+        },
+        "example": "ios-01K6T7Q2Y3A8F4N5R6M7P8S9V0"
+      },
+      "MediaUploadIdPath": {
+        "name": "uploadId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "MediaAssetIdPath": {
+        "name": "assetId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "MediaPartNumberPath": {
+        "name": "partNumber",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000
+        }
+      },
+      "MediaSignedSizeQuery": {
+        "name": "sizeBytes",
+        "in": "query",
+        "required": true,
+        "description": "Signed exact Content-Length for this local upload part.",
+        "schema": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1
+        }
+      },
+      "MediaSignedChecksumQuery": {
+        "name": "checksumSha256",
+        "in": "query",
+        "required": true,
+        "description": "Signed lowercase SHA-256 for this local upload part.",
+        "schema": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "MediaSignedExpiryQuery": {
+        "name": "expires",
+        "in": "query",
+        "required": true,
+        "description": "Signed Unix expiry. Treat it as opaque client-side.",
+        "schema": {
+          "type": "integer",
+          "format": "int64"
+        }
+      },
+      "MediaSignatureQuery": {
+        "name": "signature",
+        "in": "query",
+        "required": true,
+        "description": "HMAC signature for the local transport request. Treat it as opaque.",
+        "schema": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
       "PageLimitQuery": {
         "name": "limit",
         "in": "query",
@@ -1958,6 +2498,144 @@
           }
         }
       },
+      "V1RecordingWithQuotaCreated": {
+        "description": "Recording created, media attached, and durable processing queued.",
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestID"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/RecordingWithQuotaResponse"
+            }
+          }
+        }
+      },
+      "V1MediaUploadCreated": {
+        "description": "Resumable media upload created.",
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestID"
+          },
+          "Location": {
+            "description": "Relative URL of the created upload resource.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/MediaUploadResource"
+            }
+          }
+        }
+      },
+      "V1MediaUploadOK": {
+        "description": "Current media upload state.",
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestID"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/MediaUploadResource"
+            }
+          }
+        }
+      },
+      "V1MediaPartsOK": {
+        "description": "Short-lived opaque requests for the requested upload parts.",
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestID"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/SignedMediaPartsResponse"
+            }
+          }
+        }
+      },
+      "V1MediaDownloadOK": {
+        "description": "Short-lived opaque request for owned media content.",
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestID"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/MediaDownloadResponse"
+            }
+          }
+        }
+      },
+      "V1NoContent": {
+        "description": "Operation completed without a response body.",
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestID"
+          }
+        }
+      },
+      "V1MediaPartStored": {
+        "description": "Local media part stored and verified.",
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestID"
+          },
+          "ETag": {
+            "description": "Opaque part entity tag to send to the completion endpoint.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          "X-Checksum-SHA256": {
+            "description": "Verified lowercase SHA-256 of the uploaded part.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        }
+      },
+      "V1MediaContentOK": {
+        "description": "Verified local media content. The content type and length match the stored asset metadata.",
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestID"
+          },
+          "ETag": {
+            "description": "Storage entity tag.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        },
+        "content": {
+          "audio/*": {
+            "schema": {
+              "type": "string",
+              "format": "binary"
+            }
+          },
+          "image/*": {
+            "schema": {
+              "type": "string",
+              "format": "binary"
+            }
+          }
+        }
+      },
       "V1IdentityCreated": {
         "description": "Identity and device token grant created.",
         "headers": {
@@ -2078,6 +2756,21 @@
           }
         }
       },
+      "V1Forbidden": {
+        "description": "The authenticated identity cannot perform this operation; media mutations require a user account.",
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestID"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/V1ErrorResponse"
+            }
+          }
+        }
+      },
       "V1Conflict": {
         "description": "Identity conflict or guest identity already merged.",
         "headers": {
@@ -2095,6 +2788,51 @@
       },
       "V1NotFound": {
         "description": "Resource not found.",
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestID"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/V1ErrorResponse"
+            }
+          }
+        }
+      },
+      "V1Gone": {
+        "description": "The upload plan has expired.",
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestID"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/V1ErrorResponse"
+            }
+          }
+        }
+      },
+      "V1UnsupportedMediaType": {
+        "description": "The media content type is not allowed for the requested purpose.",
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestID"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/V1ErrorResponse"
+            }
+          }
+        }
+      },
+      "V1UnprocessableEntity": {
+        "description": "The declared size or SHA-256 does not match the uploaded bytes.",
         "headers": {
           "X-Request-ID": {
             "$ref": "#/components/headers/RequestID"
@@ -2611,6 +3349,9 @@
                 "description": "Stable machine-readable error code.",
                 "enum": [
                   "invalid_request",
+                  "idempotency_key_required",
+                  "invalid_checksum",
+                  "invalid_part",
                   "identity_unavailable",
                   "invalid_credentials",
                   "email_in_use",
@@ -2623,14 +3364,23 @@
                   "unauthorized",
                   "payment_required",
                   "forbidden",
+                  "account_required",
                   "not_found",
+                  "media_not_found",
                   "method_not_allowed",
                   "conflict",
+                  "idempotency_conflict",
+                  "upload_expired",
+                  "unsupported_media_type",
+                  "checksum_mismatch",
+                  "size_mismatch",
+                  "quota_exceeded",
                   "payload_too_large",
                   "rate_limited",
                   "internal_error",
                   "upstream_unavailable",
                   "service_unavailable",
+                  "storage_unavailable",
                   "request_failed"
                 ]
               },
@@ -2697,6 +3447,460 @@
           "page": {
             "limit": 20,
             "nextCursor": null
+          }
+        }
+      },
+      "CreateRecordingFromAssetsRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "topic",
+          "duration",
+          "timestamp",
+          "practiceType",
+          "audioAssetId"
+        ],
+        "properties": {
+          "topic": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          },
+          "duration": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Recording duration in seconds. Quota is reserved atomically when the recording is created."
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "practiceType": {
+            "$ref": "#/components/schemas/PracticeType"
+          },
+          "audioAssetId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "photoAssetId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Required when practiceType is photo_description."
+          }
+        },
+        "example": {
+          "topic": "My weekend",
+          "duration": 42,
+          "timestamp": "2026-09-26T20:00:00Z",
+          "practiceType": "free_talk",
+          "audioAssetId": "e8ca3d43-6c11-4e62-9566-d9f408ec1b65",
+          "photoAssetId": null
+        }
+      },
+      "MediaPurpose": {
+        "type": "string",
+        "enum": [
+          "recording_audio",
+          "recording_photo"
+        ]
+      },
+      "MediaChecksum": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "algorithm",
+          "value"
+        ],
+        "properties": {
+          "algorithm": {
+            "type": "string",
+            "const": "sha256"
+          },
+          "value": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        },
+        "example": {
+          "algorithm": "sha256",
+          "value": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+        }
+      },
+      "CreateMediaUploadRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "purpose",
+          "contentType",
+          "sizeBytes",
+          "checksum"
+        ],
+        "properties": {
+          "purpose": {
+            "$ref": "#/components/schemas/MediaPurpose"
+          },
+          "contentType": {
+            "type": "string",
+            "description": "Allowed audio types include WebM, MP4/M4A, Ogg, WAV, and MPEG. Allowed photo types are JPEG, PNG, WebP, and GIF."
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "description": "Exact whole-object size. Audio is limited to 80 MiB and photos to 4 MiB."
+          },
+          "checksum": {
+            "$ref": "#/components/schemas/MediaChecksum"
+          }
+        },
+        "example": {
+          "purpose": "recording_audio",
+          "contentType": "audio/webm",
+          "sizeBytes": 5238421,
+          "checksum": {
+            "algorithm": "sha256",
+            "value": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+          }
+        }
+      },
+      "MediaAsset": {
+        "type": "object",
+        "required": [
+          "id",
+          "state",
+          "purpose",
+          "contentType",
+          "sizeBytes",
+          "checksum"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "uploading",
+              "uploaded",
+              "verifying",
+              "ready",
+              "failed",
+              "deleting",
+              "deleted"
+            ]
+          },
+          "purpose": {
+            "$ref": "#/components/schemas/MediaPurpose"
+          },
+          "contentType": {
+            "type": "string"
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1
+          },
+          "checksum": {
+            "$ref": "#/components/schemas/MediaChecksum"
+          }
+        },
+        "example": {
+          "id": "e8ca3d43-6c11-4e62-9566-d9f408ec1b65",
+          "state": "uploading",
+          "purpose": "recording_audio",
+          "contentType": "audio/webm",
+          "sizeBytes": 5238421,
+          "checksum": {
+            "algorithm": "sha256",
+            "value": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+          }
+        }
+      },
+      "MediaUploadedPart": {
+        "type": "object",
+        "required": [
+          "partNumber",
+          "sizeBytes",
+          "etag",
+          "checksumSha256"
+        ],
+        "properties": {
+          "partNumber": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1
+          },
+          "etag": {
+            "type": "string"
+          },
+          "checksumSha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        }
+      },
+      "MediaUpload": {
+        "type": "object",
+        "required": [
+          "id",
+          "state",
+          "partSizeBytes",
+          "partCount",
+          "expiresAt",
+          "uploadedParts"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "uploading",
+              "completing",
+              "completed",
+              "aborted",
+              "expired",
+              "failed"
+            ]
+          },
+          "partSizeBytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1
+          },
+          "partCount": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "uploadedParts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MediaUploadedPart"
+            }
+          }
+        },
+        "example": {
+          "id": "bc219e9d-069c-480c-a656-f9f2ae83f1c2",
+          "state": "uploading",
+          "partSizeBytes": 8388608,
+          "partCount": 1,
+          "expiresAt": "2026-09-27T20:00:00Z",
+          "uploadedParts": []
+        }
+      },
+      "MediaUploadResource": {
+        "type": "object",
+        "required": [
+          "asset",
+          "upload"
+        ],
+        "properties": {
+          "asset": {
+            "$ref": "#/components/schemas/MediaAsset"
+          },
+          "upload": {
+            "$ref": "#/components/schemas/MediaUpload"
+          }
+        }
+      },
+      "MediaPartDescriptor": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "partNumber",
+          "sizeBytes",
+          "checksumSha256"
+        ],
+        "properties": {
+          "partNumber": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1
+          },
+          "checksumSha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        }
+      },
+      "SignMediaPartsRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "parts"
+        ],
+        "properties": {
+          "parts": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/MediaPartDescriptor"
+            }
+          }
+        },
+        "example": {
+          "parts": [
+            {
+              "partNumber": 1,
+              "sizeBytes": 5238421,
+              "checksumSha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+            }
+          ]
+        }
+      },
+      "SignedMediaRequest": {
+        "type": "object",
+        "required": [
+          "method",
+          "url",
+          "headers",
+          "expiresAt"
+        ],
+        "properties": {
+          "method": {
+            "type": "string",
+            "enum": [
+              "GET",
+              "PUT"
+            ]
+          },
+          "url": {
+            "type": "string",
+            "description": "Opaque absolute or relative short-lived URL. Do not persist or modify it."
+          },
+          "headers": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Headers that must be copied exactly to the storage request."
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "SignedMediaPart": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/MediaPartDescriptor"
+          },
+          {
+            "type": "object",
+            "required": [
+              "request"
+            ],
+            "properties": {
+              "request": {
+                "$ref": "#/components/schemas/SignedMediaRequest"
+              }
+            }
+          }
+        ]
+      },
+      "SignedMediaPartsResponse": {
+        "type": "object",
+        "required": [
+          "parts"
+        ],
+        "properties": {
+          "parts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SignedMediaPart"
+            }
+          }
+        }
+      },
+      "CompletedMediaPart": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "partNumber",
+          "etag"
+        ],
+        "properties": {
+          "partNumber": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000
+          },
+          "etag": {
+            "type": "string",
+            "minLength": 1
+          },
+          "checksumSha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        }
+      },
+      "CompleteMediaUploadRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "parts"
+        ],
+        "properties": {
+          "parts": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 10000,
+            "items": {
+              "$ref": "#/components/schemas/CompletedMediaPart"
+            }
+          }
+        },
+        "example": {
+          "parts": [
+            {
+              "partNumber": 1,
+              "etag": "sha256:0123456789abcdef",
+              "checksumSha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+            }
+          ]
+        }
+      },
+      "MediaDownloadResponse": {
+        "type": "object",
+        "required": [
+          "asset",
+          "request"
+        ],
+        "properties": {
+          "asset": {
+            "$ref": "#/components/schemas/MediaAsset"
+          },
+          "request": {
+            "$ref": "#/components/schemas/SignedMediaRequest"
           }
         }
       },
@@ -2867,6 +4071,38 @@
           "explanation": "Use the irregular past-tense form `went`."
         }
       },
+      "RecordingMediaAsset": {
+        "type": "object",
+        "required": [
+          "assetId",
+          "downloadPath"
+        ],
+        "properties": {
+          "assetId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "downloadPath": {
+            "type": "string",
+            "description": "Stable backend path. Call it with Bearer authentication to receive a short-lived opaque download request.",
+            "pattern": "^/api/v1/media/[^/]+/download$"
+          }
+        }
+      },
+      "RecordingMedia": {
+        "type": "object",
+        "properties": {
+          "audio": {
+            "$ref": "#/components/schemas/RecordingMediaAsset"
+          },
+          "photo": {
+            "$ref": "#/components/schemas/RecordingMediaAsset"
+          },
+          "shadowing": {
+            "$ref": "#/components/schemas/RecordingMediaAsset"
+          }
+        }
+      },
       "Recording": {
         "type": "object",
         "required": [
@@ -2980,6 +4216,10 @@
           "shadowingUpdatedAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "media": {
+            "$ref": "#/components/schemas/RecordingMedia",
+            "description": "Private media references for mobile clients. Omitted for legacy records that have not been indexed as media assets."
           }
         },
         "example": {
@@ -3006,7 +4246,13 @@
           "shadowingStatus": "ready",
           "shadowingAudioUrl": "/uploads/shadowing/user-123/recording-123.mp3",
           "shadowingError": null,
-          "shadowingUpdatedAt": "2026-09-21T10:31:00Z"
+          "shadowingUpdatedAt": "2026-09-21T10:31:00Z",
+          "media": {
+            "audio": {
+              "assetId": "e8ca3d43-6c11-4e62-9566-d9f408ec1b65",
+              "downloadPath": "/api/v1/media/e8ca3d43-6c11-4e62-9566-d9f408ec1b65/download"
+            }
+          }
         }
       },
       "RecordingResponse": {

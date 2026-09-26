@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -12,17 +13,24 @@ import (
 	"daily-speaking-practice/backend/internal/auth"
 	"daily-speaking-practice/backend/internal/db"
 	"daily-speaking-practice/backend/internal/logging"
+	"daily-speaking-practice/backend/internal/media"
+	"daily-speaking-practice/backend/internal/storage"
 	"daily-speaking-practice/backend/internal/tts"
 	"daily-speaking-practice/backend/internal/workqueue"
 )
 
 type Config struct {
-	DB             *db.DB
-	Synthesizer    tts.Synthesizer
-	AIClient       ai.ChatClient
-	SessionCookie  auth.CookieConfig
-	IdentityTokens auth.TokenConfig
-	CORS           CORSConfig
+	DB                 *db.DB
+	Synthesizer        tts.Synthesizer
+	AIClient           ai.ChatClient
+	SessionCookie      auth.CookieConfig
+	IdentityTokens     auth.TokenConfig
+	CORS               CORSConfig
+	MediaStore         storage.Store
+	MediaBucket        string
+	MediaSigningSecret []byte
+	MediaPartSize      int64
+	MediaPresignTTL    time.Duration
 }
 
 type Server struct {
@@ -34,6 +42,9 @@ type Server struct {
 	sessionCookie       auth.CookieConfig
 	identityTokens      auth.TokenConfig
 	cors                CORSConfig
+	mediaService        *media.Service
+	mediaSigner         *media.URLSigner
+	mediaStore          storage.Store
 }
 
 func NewServer(config Config) *Server {
@@ -48,6 +59,29 @@ func NewServer(config Config) *Server {
 	if aiClient == nil {
 		aiClient = ai.OllamaClient{}
 	}
+	mediaStore := config.MediaStore
+	if mediaStore == nil && config.DB != nil {
+		mediaStore, _ = storage.NewLocal(resolveUploadsDir())
+	}
+	var mediaService *media.Service
+	if config.DB != nil && mediaStore != nil {
+		bucket := strings.TrimSpace(config.MediaBucket)
+		if bucket == "" && mediaStore.Backend() == storage.BackendS3 {
+			bucket = strings.TrimSpace(os.Getenv("MEDIA_S3_BUCKET"))
+		}
+		mediaService = media.NewService(media.NewSQLRepository(config.DB), mediaStore, media.Config{
+			Bucket: bucket, PartSizeBytes: config.MediaPartSize,
+			SignedRequestTTL: config.MediaPresignTTL,
+		})
+	}
+	signingSecret := config.MediaSigningSecret
+	if len(signingSecret) == 0 {
+		signingSecret = []byte(strings.TrimSpace(os.Getenv("MEDIA_URL_SIGNING_SECRET")))
+	}
+	if len(signingSecret) == 0 {
+		signingSecret = []byte(strings.TrimSpace(os.Getenv("AUTH_ACCESS_TOKEN_SECRET")))
+	}
+	mediaSigner, _ := media.NewURLSigner(signingSecret)
 	return &Server{
 		db:                  config.DB,
 		jobStore:            workqueue.NewStore(config.DB),
@@ -57,6 +91,9 @@ func NewServer(config Config) *Server {
 		sessionCookie:       config.SessionCookie,
 		identityTokens:      config.IdentityTokens,
 		cors:                config.CORS,
+		mediaService:        mediaService,
+		mediaSigner:         mediaSigner,
+		mediaStore:          mediaStore,
 	}
 }
 
@@ -80,6 +117,8 @@ func (s *Server) Handler() http.Handler {
 	})
 	mux.HandleFunc("/healthz", s.healthz)
 	mux.HandleFunc("/api/v1", s.routeV1)
+	mux.HandleFunc("/api/v1/media/uploads/", s.routeMediaUploadEntry)
+	mux.HandleFunc("/api/v1/media/local/", s.routeSignedLocalMedia)
 	mux.HandleFunc("/api/v1/", s.routeV1)
 	mux.HandleFunc("/api/", s.routeAPI)
 	mux.HandleFunc("/uploads/shadowing", s.handleShadowingUpload)

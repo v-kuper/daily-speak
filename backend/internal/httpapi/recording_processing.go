@@ -19,16 +19,16 @@ const recordingProcessingTimeout = 30 * time.Minute
 func (s *Server) runRecordingJob(ctx context.Context, job workqueue.Job) error {
 	var work recordingRetryWork
 	var userID, status, stage string
-	var audioURL, currentJobID *string
+	var audioURL, audioAssetID, currentJobID *string
 	var suggestionJSON []byte
 	err := s.db.QueryRow(ctx, `
 		SELECT r.user_id, r.status, COALESCE(r.processing_stage, ''), r.processing_job_id,
-		       r.audio_data_url, r.transcript, r.suggestions, r.topic, r.practice_type,
+		       r.audio_data_url, r.audio_asset_id, r.transcript, r.suggestions, r.topic, r.practice_type,
 		       r.photo_object, u.english_level
 		FROM recordings r
 		JOIN users u ON u.id = r.user_id
 		WHERE r.id = $1`, job.ResourceID).Scan(
-		&userID, &status, &stage, &currentJobID, &audioURL, &work.Transcript,
+		&userID, &status, &stage, &currentJobID, &audioURL, &audioAssetID, &work.Transcript,
 		&suggestionJSON, &work.Topic, &work.PracticeType, &work.PhotoObject, &work.EnglishLevel,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -42,15 +42,23 @@ func (s *Server) runRecordingJob(ctx context.Context, job workqueue.Job) error {
 	}
 	work.Stage = stage
 	work.Suggestions = normalizeSuggestions(suggestionJSON, 0)
+	cleanupAudio := func() {}
 	if stage == "transcribing" {
-		if audioURL == nil {
-			return errors.New("recording audio is unavailable")
-		}
-		work.AudioPath, err = storedUploadPath(*audioURL)
-		if err != nil {
+		if audioAssetID != nil {
+			work.AudioPath, cleanupAudio, err = s.materializeMediaAsset(ctx, *audioAssetID)
+			if err != nil {
+				return errors.New("recording audio is unavailable")
+			}
+		} else if audioURL != nil {
+			work.AudioPath, err = storedUploadPath(*audioURL)
+			if err != nil {
+				return errors.New("recording audio is unavailable")
+			}
+		} else {
 			return errors.New("recording audio is unavailable")
 		}
 	}
+	defer cleanupAudio()
 	logger := logging.ForBackground("worker.recordings.process")
 	return s.processRecordingRetry(ctx, job.ResourceID, userID, job.ID, job.LeaseToken, work, logger)
 }

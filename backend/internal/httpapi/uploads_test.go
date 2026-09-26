@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"daily-speaking-practice/backend/internal/domain"
@@ -59,6 +60,32 @@ func TestHandlerServesUploadsFromConfiguredDir(t *testing.T) {
 	}
 	if recorder.Body.String() != "audio-bytes" {
 		t.Fatalf("expected uploaded audio bytes, got %q", recorder.Body.String())
+	}
+}
+
+func TestHandlerDoesNotExposePrivateMediaStorageNamespaces(t *testing.T) {
+	uploadsDir := t.TempDir()
+	t.Setenv("UPLOADS_DIR", uploadsDir)
+	paths := []string{
+		"v1/user/recording_audio/private.webm",
+		".daily-speaking-multipart/upload/parts/1",
+		".daily-speaking-metadata/v1/private.json",
+	}
+	handler := NewServer(Config{}).Handler()
+	for _, relativePath := range paths {
+		absolutePath := filepath.Join(uploadsDir, filepath.FromSlash(relativePath))
+		if err := os.MkdirAll(filepath.Dir(absolutePath), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(absolutePath, []byte("private"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		response := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodGet, "/uploads/"+relativePath, nil)
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusNotFound || strings.Contains(response.Body.String(), "private") {
+			t.Fatalf("%s leaked through legacy uploads handler: status=%d body=%q", relativePath, response.Code, response.Body.String())
+		}
 	}
 }
 

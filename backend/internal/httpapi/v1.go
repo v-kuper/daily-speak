@@ -55,6 +55,9 @@ func (s *Server) routeV1(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) dispatchV1(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimSuffix(r.URL.Path, "/")
+	if s.routeMediaV1(w, r, path) {
+		return
+	}
 	switch {
 	case path == "/api/v1/auth/anonymous" && r.Method == http.MethodPost:
 		s.handleAnonymousIdentityV1(w, r)
@@ -86,6 +89,8 @@ func (s *Server) dispatchV1(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
 	case path == "/api/v1/recordings" && r.Method == http.MethodGet:
 		s.handleListRecordingsV1(w, r)
+	case path == "/api/v1/recordings" && r.Method == http.MethodPost:
+		s.handleCreateRecordingV1(w, r)
 	case path == "/api/v1/recordings":
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
 	case strings.HasPrefix(path, "/api/v1/recordings/") && !strings.Contains(strings.TrimPrefix(path, "/api/v1/recordings/"), "/") && r.Method == http.MethodGet:
