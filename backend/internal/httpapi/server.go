@@ -17,7 +17,9 @@ import (
 	"daily-speaking-practice/backend/internal/media"
 	"daily-speaking-practice/backend/internal/operations"
 	"daily-speaking-practice/backend/internal/practice"
-	"daily-speaking-practice/backend/internal/practice/ollamaadapter"
+	practiceollama "daily-speaking-practice/backend/internal/practice/ollamaadapter"
+	"daily-speaking-practice/backend/internal/recording"
+	recordingollama "daily-speaking-practice/backend/internal/recording/ollamaadapter"
 	"daily-speaking-practice/backend/internal/storage"
 	"daily-speaking-practice/backend/internal/transcription"
 	"daily-speaking-practice/backend/internal/tts"
@@ -29,6 +31,7 @@ type Config struct {
 	Synthesizer        tts.Synthesizer
 	AIClient           ai.ChatClient
 	PracticeGenerator  practice.Generator
+	RecordingAnalyzer  recording.Analyzer
 	SessionCookie      auth.CookieConfig
 	IdentityTokens     auth.TokenConfig
 	CORS               CORSConfig
@@ -49,6 +52,7 @@ type Server struct {
 	synthesizer         tts.Synthesizer
 	aiClient            ai.ChatClient
 	practiceGenerator   practice.Generator
+	recordingAnalyzer   recording.Analyzer
 	sessionCookie       auth.CookieConfig
 	identityTokens      auth.TokenConfig
 	cors                CORSConfig
@@ -81,7 +85,14 @@ func NewServer(config Config) *Server {
 	}
 	practiceGenerator := config.PracticeGenerator
 	if practiceGenerator == nil {
-		practiceGenerator = practice.NewService(ollamaadapter.New(aiClient))
+		practiceGenerator = practice.NewService(practiceollama.New(aiClient))
+	}
+	recordingAnalyzer := config.RecordingAnalyzer
+	if recordingAnalyzer == nil {
+		recordingAnalyzer = recording.NewAnalysisService(
+			recordingollama.New(aiClient),
+			recording.AnalysisConfigFromEnv(),
+		)
 	}
 	mediaStore := config.MediaStore
 	if mediaStore == nil && config.DB != nil {
@@ -121,6 +132,7 @@ func NewServer(config Config) *Server {
 		synthesizer:         synthesizer,
 		aiClient:            aiClient,
 		practiceGenerator:   practiceGenerator,
+		recordingAnalyzer:   recordingAnalyzer,
 		sessionCookie:       config.SessionCookie,
 		identityTokens:      config.IdentityTokens,
 		cors:                config.CORS,

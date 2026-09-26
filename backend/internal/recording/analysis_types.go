@@ -1,4 +1,4 @@
-package httpapi
+package recording
 
 type recordingAnalysisInput struct {
 	Transcript   string   `json:"transcript"`

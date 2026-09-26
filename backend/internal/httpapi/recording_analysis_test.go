@@ -216,24 +216,14 @@ func TestExtractRussianPhrasesKeepsExactUniqueTranscriptText(t *testing.T) {
 	}
 }
 
-func TestRecordingPromptsKeepRussianTextAfterSixThousandRunes(t *testing.T) {
+func TestRecordingNaturalPromptKeepsRussianTextAfterSixThousandRunes(t *testing.T) {
 	transcript := strings.Repeat("a", 6001) + " капуста"
-	suggestionsPrompt := recordingDetectorPrompt(findAnalysisPass(categoryLanguageSwitch), recordingAnalysisInput{
-		Transcript:   transcript,
-		Topic:        "Long talk",
-		PracticeType: "free_talk",
-		EnglishLevel: "b1",
-		Russian:      extractRussianPhrases(transcript),
-	})
 	naturalPrompt := recordingNaturalVersionPrompt(
 		transcript,
 		[]suggestion{{Wrong: "капуста", Right: "cabbage", Explanation: "Use English."}},
 		"b1",
 	)
 
-	if !strings.Contains(suggestionsPrompt, "капуста") {
-		t.Fatal("expected the full transcript in the suggestions prompt")
-	}
 	if !strings.Contains(naturalPrompt, "капуста") {
 		t.Fatal("expected the full transcript in the natural-version prompt")
 	}

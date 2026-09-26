@@ -150,3 +150,41 @@ test("practice generation is an application service outside HTTP transport", () 
   assert.doesNotMatch(handler, /PostChat|You generate|output format exactly/);
   assert.equal(existsSync("backend/internal/httpapi/ai_handlers.go"), false);
 });
+
+test("recording analysis owns its policy outside HTTP and provider adapters", () => {
+  const coreFiles = [
+    "model.go",
+    "references.go",
+    "analysis_types.go",
+    "analysis_prompts.go",
+    "analysis_review.go",
+    "analysis_support.go",
+    "analysis_service.go",
+  ];
+  for (const path of [
+    ...coreFiles.map((name) => `backend/internal/recording/${name}`),
+    "backend/internal/recording/ollamaadapter/provider.go",
+    "backend/internal/httpapi/recording_analysis.go",
+  ]) {
+    assert.equal(existsSync(path), true, `missing ${path}`);
+  }
+
+  const core = coreFiles
+    .map((name) => readFileSync(`backend/internal/recording/${name}`, "utf8"))
+    .join("\n");
+  const provider = readFileSync("backend/internal/recording/ollamaadapter/provider.go", "utf8");
+  const transport = readFileSync("backend/internal/httpapi/recording_analysis.go", "utf8");
+  assert.doesNotMatch(core, /net\/http|internal\/httpapi|internal\/ai"/);
+  assert.match(core, /AnalysisProvider/);
+  assert.match(provider, /ai\.ChatClient/);
+  assert.match(transport, /recording\.AnalysisInput/);
+  assert.doesNotMatch(transport, /PostChat|error detector|adjudicator/);
+  for (const name of [
+    "recording_analysis_coordinator.go",
+    "recording_analysis_prompts.go",
+    "recording_analysis_review.go",
+    "recording_analysis_types.go",
+  ]) {
+    assert.equal(existsSync(`backend/internal/httpapi/${name}`), false, `${name} returned to transport`);
+  }
+});
