@@ -28,49 +28,51 @@ import (
 )
 
 type Config struct {
-	DB                 *db.DB
-	Synthesizer        tts.Synthesizer
-	AIClient           ai.ChatClient
-	PracticeGenerator  practice.Generator
-	RecordingAnalyzer  recording.Analyzer
-	RecordingRewriter  recording.Rewriter
-	SessionCookie      auth.CookieConfig
-	IdentityTokens     auth.TokenConfig
-	CORS               CORSConfig
-	MediaStore         storage.Store
-	MediaBucket        string
-	MediaSigningSecret []byte
-	MediaPartSize      int64
-	MediaPresignTTL    time.Duration
-	TranscribeAudio    func(context.Context, string) (string, error)
-	ProbeAudioDuration func(context.Context, string) (time.Duration, error)
-	Operations         operations.Config
+	DB                       *db.DB
+	Synthesizer              tts.Synthesizer
+	AIClient                 ai.ChatClient
+	PracticeGenerator        practice.Generator
+	RecordingAnalyzer        recording.Analyzer
+	RecordingRewriter        recording.Rewriter
+	RecordingPreviewAnalyzer recording.PreviewAnalyzer
+	SessionCookie            auth.CookieConfig
+	IdentityTokens           auth.TokenConfig
+	CORS                     CORSConfig
+	MediaStore               storage.Store
+	MediaBucket              string
+	MediaSigningSecret       []byte
+	MediaPartSize            int64
+	MediaPresignTTL          time.Duration
+	TranscribeAudio          func(context.Context, string) (string, error)
+	ProbeAudioDuration       func(context.Context, string) (time.Duration, error)
+	Operations               operations.Config
 }
 
 type Server struct {
-	db                  *db.DB
-	jobStore            *workqueue.Store
-	removeStoredUploads func([]string) error
-	synthesizer         tts.Synthesizer
-	aiClient            ai.ChatClient
-	practiceGenerator   practice.Generator
-	recordingAnalyzer   recording.Analyzer
-	recordingRewriter   recording.Rewriter
-	recordingRepository *recording.SQLProcessingRepository
-	recordingProcessor  *recording.Processor
-	sessionCookie       auth.CookieConfig
-	identityTokens      auth.TokenConfig
-	cors                CORSConfig
-	mediaService        *media.Service
-	mediaSigner         *media.URLSigner
-	mediaStore          storage.Store
-	mediaMaterializer   *media.Materializer
-	transcribeAudio     func(context.Context, string) (string, error)
-	probeAudioDuration  func(context.Context, string) (time.Duration, error)
-	operations          operations.Config
-	limiter             requestLimiter
-	network             operations.Network
-	metrics             *operations.Metrics
+	db                       *db.DB
+	jobStore                 *workqueue.Store
+	removeStoredUploads      func([]string) error
+	synthesizer              tts.Synthesizer
+	aiClient                 ai.ChatClient
+	practiceGenerator        practice.Generator
+	recordingAnalyzer        recording.Analyzer
+	recordingRewriter        recording.Rewriter
+	recordingPreviewAnalyzer recording.PreviewAnalyzer
+	recordingRepository      *recording.SQLProcessingRepository
+	recordingProcessor       *recording.Processor
+	sessionCookie            auth.CookieConfig
+	identityTokens           auth.TokenConfig
+	cors                     CORSConfig
+	mediaService             *media.Service
+	mediaSigner              *media.URLSigner
+	mediaStore               storage.Store
+	mediaMaterializer        *media.Materializer
+	transcribeAudio          func(context.Context, string) (string, error)
+	probeAudioDuration       func(context.Context, string) (time.Duration, error)
+	operations               operations.Config
+	limiter                  requestLimiter
+	network                  operations.Network
+	metrics                  *operations.Metrics
 }
 
 type requestLimiter interface {
@@ -105,6 +107,10 @@ func NewServer(config Config) *Server {
 	if recordingRewriter == nil {
 		recordingRewriter = recordingService
 	}
+	recordingPreviewAnalyzer := config.RecordingPreviewAnalyzer
+	if recordingPreviewAnalyzer == nil {
+		recordingPreviewAnalyzer = recordingService
+	}
 	mediaStore := config.MediaStore
 	if mediaStore == nil && config.DB != nil {
 		mediaStore, _ = storage.NewLocal(resolveUploadsDir())
@@ -138,28 +144,29 @@ func NewServer(config Config) *Server {
 	}
 	recordingRepository := recording.NewSQLProcessingRepository(config.DB)
 	server := &Server{
-		db:                  config.DB,
-		jobStore:            workqueue.NewStore(config.DB),
-		removeStoredUploads: removeStoredUploadFiles,
-		synthesizer:         synthesizer,
-		aiClient:            aiClient,
-		practiceGenerator:   practiceGenerator,
-		recordingAnalyzer:   recordingAnalyzer,
-		recordingRewriter:   recordingRewriter,
-		recordingRepository: recordingRepository,
-		sessionCookie:       config.SessionCookie,
-		identityTokens:      config.IdentityTokens,
-		cors:                config.CORS,
-		mediaService:        mediaService,
-		mediaSigner:         mediaSigner,
-		mediaStore:          mediaStore,
-		mediaMaterializer:   media.NewMaterializer(config.DB, mediaStore),
-		transcribeAudio:     transcribeAudio,
-		probeAudioDuration:  probeAudioDuration,
-		operations:          config.Operations,
-		limiter:             operations.NewLimiter(config.DB),
-		network:             operations.NewNetwork(config.Operations.TrustedProxies),
-		metrics:             operations.NewMetrics(),
+		db:                       config.DB,
+		jobStore:                 workqueue.NewStore(config.DB),
+		removeStoredUploads:      removeStoredUploadFiles,
+		synthesizer:              synthesizer,
+		aiClient:                 aiClient,
+		practiceGenerator:        practiceGenerator,
+		recordingAnalyzer:        recordingAnalyzer,
+		recordingRewriter:        recordingRewriter,
+		recordingPreviewAnalyzer: recordingPreviewAnalyzer,
+		recordingRepository:      recordingRepository,
+		sessionCookie:            config.SessionCookie,
+		identityTokens:           config.IdentityTokens,
+		cors:                     config.CORS,
+		mediaService:             mediaService,
+		mediaSigner:              mediaSigner,
+		mediaStore:               mediaStore,
+		mediaMaterializer:        media.NewMaterializer(config.DB, mediaStore),
+		transcribeAudio:          transcribeAudio,
+		probeAudioDuration:       probeAudioDuration,
+		operations:               config.Operations,
+		limiter:                  operations.NewLimiter(config.DB),
+		network:                  operations.NewNetwork(config.Operations.TrustedProxies),
+		metrics:                  operations.NewMetrics(),
 	}
 	server.recordingProcessor = recording.NewProcessor(recording.ProcessingDependencies{
 		Repository:         recordingRepository,

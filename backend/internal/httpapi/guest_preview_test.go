@@ -58,20 +58,6 @@ func TestGuestPreviewRequestValidationAndIdempotencyDigest(t *testing.T) {
 	}
 }
 
-func TestParseGuestPreviewCorrectionsKeepsOnlyTwoHighConfidenceMaterialErrors(t *testing.T) {
-	transcript := "Yesterday I go to work and she have a meeting. It was nice."
-	input := `{"corrections":[
-		{"wrong":"Yesterday I go","right":"Yesterday I went","explanation":"Use past tense.","category":"verb_grammar","severity":"major","confidence":0.99},
-		{"wrong":"she have","right":"she has","explanation":"Match the subject.","category":"verb_grammar","severity":"medium","confidence":0.95},
-		{"wrong":"It was nice","right":"It was pleasant","explanation":"A style alternative.","category":"naturalness","severity":"minor","confidence":0.99},
-		{"wrong":"work","right":"the office","explanation":"Uncertain preference.","category":"vocabulary","severity":"major","confidence":0.70}
-	]}`
-	got := parseGuestPreviewCorrections(input, transcript)
-	if len(got) != 2 || got[0].Wrong != "Yesterday I go" || got[1].Wrong != "she have" {
-		t.Fatalf("unexpected preview corrections: %#v", got)
-	}
-}
-
 func TestGenerateGuestPreviewCorrectionsUsesOneAIRequest(t *testing.T) {
 	client := &countingGuestPreviewAI{response: `{"corrections":[]}`}
 	server := NewServer(Config{AIClient: client})

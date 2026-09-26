@@ -43,3 +43,21 @@ func TestProviderTranslatesAnalysisCompletionToOllamaChat(t *testing.T) {
 		t.Fatalf("messages=%#v", body["messages"])
 	}
 }
+
+func TestProviderCanForceCheapJSONModeForPreview(t *testing.T) {
+	client := &fakeChatClient{}
+	provider := New(client)
+	provider.resolveSettings = func() ai.Settings {
+		return ai.Settings{Model: "thinking-model", IsThinkingModel: true}
+	}
+	_, err := provider.Complete(context.Background(), recording.AnalysisCompletionRequest{
+		SystemPrompt: "system", UserPrompt: "user", ForceJSON: true, DisableThinking: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := client.body.(map[string]any)
+	if body["think"] != false || body["format"] != "json" {
+		t.Fatalf("body=%#v", body)
+	}
+}

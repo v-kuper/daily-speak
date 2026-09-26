@@ -40,11 +40,13 @@ type AnalysisProvider interface {
 }
 
 type AnalysisCompletionRequest struct {
-	SystemPrompt string
-	UserPrompt   string
-	Temperature  float64
-	Seed         int
-	StrictJSON   bool
+	SystemPrompt    string
+	UserPrompt      string
+	Temperature     float64
+	Seed            int
+	StrictJSON      bool
+	ForceJSON       bool
+	DisableThinking bool
 }
 
 type AnalysisConfig struct{ Concurrency int }

@@ -165,6 +165,7 @@ test("recording analysis owns its policy outside HTTP and provider adapters", ()
     "analysis_service.go",
 	"rewrite.go",
 	"processing.go",
+	"preview.go",
   ];
   for (const path of [
     ...coreFiles.map((name) => `backend/internal/recording/${name}`),
