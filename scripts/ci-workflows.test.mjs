@@ -276,6 +276,25 @@ test("mobile signing secret stays server-side and reaches only the backend", () 
   assert.equal(parsedDeployWorkflow.jobs.deploy.env.AUTH_ACCESS_TOKEN_SECRET, undefined);
 });
 
+test("backend operations controls reach Windows deploy without leaking to web or worker", () => {
+  const deployEnv = parsedDeployWorkflow.jobs.deploy.env;
+  const stepEnv = deployStep("Build and start local Docker HTTPS stack")?.env;
+  assert.equal(deployEnv.TRUSTED_PROXY_CIDRS, "${{ vars.TRUSTED_PROXY_CIDRS || '172.16.0.0/12' }}");
+  assert.equal(deployEnv.RATE_LIMIT_ENABLED, "${{ vars.RATE_LIMIT_ENABLED || 'true' }}");
+  assert.equal(deployEnv.READINESS_MAX_QUEUE_DEPTH, "${{ vars.READINESS_MAX_QUEUE_DEPTH || '1000' }}");
+  assert.equal(deployEnv.WORKER_JOB_RETENTION, "${{ vars.WORKER_JOB_RETENTION || '720h' }}");
+  assert.equal(stepEnv.METRICS_BEARER_TOKEN, "${{ secrets.METRICS_BEARER_TOKEN }}");
+  assert.equal(deployEnv.METRICS_BEARER_TOKEN, undefined);
+  assert.equal(compose.services.backend.environment.METRICS_BEARER_TOKEN, "${METRICS_BEARER_TOKEN:-}");
+  assert.equal(compose.services.web.environment.METRICS_BEARER_TOKEN, undefined);
+  assert.equal(compose.services.worker.environment.METRICS_BEARER_TOKEN, undefined);
+  for (const example of [rootEnvExample, backendEnvExample]) {
+    assert.match(example, /^RATE_LIMIT_ENABLED=true$/m);
+    assert.match(example, /^READINESS_MAX_QUEUE_DEPTH=1000$/m);
+    assert.match(example, /^METRICS_BEARER_TOKEN=$/m);
+  }
+});
+
 test("local deploy stops before Docker when Cartesia configuration is missing", () => {
   assert.match(deployWorkflow, /name:\s+Validate Cartesia configuration/);
   assert.match(

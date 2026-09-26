@@ -18,6 +18,13 @@ type DB struct {
 	pool *pgxpool.Pool
 }
 
+type PoolStats struct {
+	TotalConns    int32
+	IdleConns     int32
+	AcquiredConns int32
+	MaxConns      int32
+}
+
 func InitialSchemaSQL() string {
 	return migrations.InitialSchema
 }
@@ -70,6 +77,24 @@ func requireVerifiedTLS(config *pgxpool.Config) error {
 func (d *DB) Close() {
 	if d != nil && d.pool != nil {
 		d.pool.Close()
+	}
+}
+
+func (d *DB) Ping(ctx context.Context) error {
+	if d == nil || d.pool == nil {
+		return errors.New("database is not configured")
+	}
+	return d.pool.Ping(ctx)
+}
+
+func (d *DB) PoolStats() PoolStats {
+	if d == nil || d.pool == nil {
+		return PoolStats{}
+	}
+	stats := d.pool.Stat()
+	return PoolStats{
+		TotalConns: stats.TotalConns(), IdleConns: stats.IdleConns(),
+		AcquiredConns: stats.AcquiredConns(), MaxConns: stats.MaxConns(),
 	}
 }
 

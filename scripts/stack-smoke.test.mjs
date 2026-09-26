@@ -122,7 +122,7 @@ test("readiness timeout reports the last sanitized endpoint failure without leak
     if (apiAttempts === 1) throw new Error("superseded connection refusal");
 
     const cause = new Error([
-      "certificate verify failed for https://alice:password-secret@api.example.test/healthz?token=query-secret",
+      "certificate verify failed for https://alice:password-secret@api.example.test/readyz?token=query-secret",
       "Authorization: Bearer authorization-secret",
       "Cookie: session=cookie-secret",
       "Set-Cookie: session=set-cookie-secret",
@@ -158,7 +158,7 @@ test("readiness timeout reports the last sanitized endpoint failure without leak
   assert.ok(failure instanceof Error);
   assert.match(failure.message, /^Services did not become ready: API\./);
   assert.match(failure.message, /API: TypeError: fetch failed; caused by Error: certificate verify failed/);
-  assert.match(failure.message, /https:\/\/api\.example\.test\/healthz\?\[redacted\]/);
+  assert.match(failure.message, /https:\/\/api\.example\.test\/readyz\?\[redacted\]/);
   assert.match(failure.message, /Authorization=\[redacted\]/);
   assert.match(failure.message, /Cookie=\[redacted\]/);
   assert.match(failure.message, /Set-Cookie=\[redacted\]/);
@@ -201,7 +201,7 @@ test("readiness timeout keeps the generic endpoint message when requests return 
 test("readiness diagnostics redact response metadata even when it is embedded in an error message", async () => {
   let now = 0;
   const fetchImpl = async (url) => {
-    if (url.includes("/healthz") && !url.includes("/web-healthz")) {
+    if (url.includes("/readyz")) {
       return { ok: true, status: 200 };
     }
     throw new Error([

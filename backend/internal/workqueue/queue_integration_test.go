@@ -141,4 +141,14 @@ func TestQueueClaimsOnceRecoversExpiredLeaseAndFencesOldOwner(t *testing.T) {
 	if state != "succeeded" || attempts != 2 {
 		t.Fatalf("final state=%q attempts=%d", state, attempts)
 	}
+	if _, err := database.Exec(ctx, `UPDATE processing_jobs SET completed_at = NOW() - INTERVAL '31 days' WHERE id = $1`, jobID); err != nil {
+		t.Fatal(err)
+	}
+	removed, err := store.PruneTerminal(ctx, time.Now().UTC().Add(-30*24*time.Hour), 100)
+	if err != nil || removed != 1 {
+		t.Fatalf("pruned=%d err=%v", removed, err)
+	}
+	if err := database.QueryRow(ctx, `SELECT COUNT(*) FROM processing_jobs WHERE id = $1`, jobID).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("pruned job count=%d err=%v", count, err)
+	}
 }

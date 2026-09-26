@@ -89,8 +89,104 @@ type Store struct {
 	db *db.DB
 }
 
+type QueueStat struct {
+	Kind             string
+	State            string
+	Count            int64
+	OldestAgeSeconds float64
+	RecentTerminal   bool
+}
+
+type Pressure struct {
+	ActiveCount      int64
+	OldestAgeSeconds float64
+}
+
 func NewStore(database *db.DB) *Store {
 	return &Store{db: database}
+}
+
+func (s *Store) Stats(ctx context.Context) ([]QueueStat, error) {
+	if s == nil || s.db == nil {
+		return nil, errors.New("processing job store is not configured")
+	}
+	rows, err := s.db.Query(ctx, `
+		WITH measurements AS (
+		  SELECT kind, state, COUNT(*) AS job_count,
+		         COALESCE(EXTRACT(EPOCH FROM (NOW() - MIN(created_at))), 0) AS oldest_age,
+		         FALSE AS recent_terminal
+		  FROM processing_jobs
+		  WHERE state IN ('queued', 'running', 'retry_wait')
+		  GROUP BY kind, state
+		  UNION ALL
+		  SELECT kind, state, COUNT(*) AS job_count, 0 AS oldest_age,
+		         TRUE AS recent_terminal
+		  FROM processing_jobs
+		  WHERE state IN ('succeeded', 'failed', 'cancelled')
+		    AND completed_at >= NOW() - INTERVAL '1 hour'
+		  GROUP BY kind, state
+		)
+		SELECT kind, state, job_count, oldest_age, recent_terminal
+		FROM measurements
+		ORDER BY kind, state`)
+	if err != nil {
+		return nil, fmt.Errorf("query processing job stats: %w", err)
+	}
+	defer rows.Close()
+	stats := make([]QueueStat, 0)
+	for rows.Next() {
+		var stat QueueStat
+		if err := rows.Scan(&stat.Kind, &stat.State, &stat.Count, &stat.OldestAgeSeconds, &stat.RecentTerminal); err != nil {
+			return nil, fmt.Errorf("scan processing job stats: %w", err)
+		}
+		stats = append(stats, stat)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate processing job stats: %w", err)
+	}
+	return stats, nil
+}
+
+func (s *Store) Pressure(ctx context.Context) (Pressure, error) {
+	if s == nil || s.db == nil {
+		return Pressure{}, errors.New("processing job store is not configured")
+	}
+	var pressure Pressure
+	err := s.db.QueryRow(ctx, `
+		SELECT COUNT(*),
+		       COALESCE(EXTRACT(EPOCH FROM (NOW() - MIN(created_at))), 0)
+		FROM processing_jobs
+		WHERE state IN ('queued', 'running', 'retry_wait')`).Scan(&pressure.ActiveCount, &pressure.OldestAgeSeconds)
+	if err != nil {
+		return Pressure{}, fmt.Errorf("query processing job pressure: %w", err)
+	}
+	return pressure, nil
+}
+
+func (s *Store) PruneTerminal(ctx context.Context, completedBefore time.Time, limit int) (int64, error) {
+	if s == nil || s.db == nil {
+		return 0, errors.New("processing job store is not configured")
+	}
+	if completedBefore.IsZero() || limit <= 0 {
+		return 0, errors.New("terminal job prune boundary and limit are required")
+	}
+	result, err := s.db.Exec(ctx, `
+		WITH candidates AS (
+		  SELECT id
+		  FROM processing_jobs
+		  WHERE state IN ('succeeded', 'failed', 'cancelled')
+		    AND completed_at < $1
+		  ORDER BY completed_at ASC
+		  FOR UPDATE SKIP LOCKED
+		  LIMIT $2
+		)
+		DELETE FROM processing_jobs AS job
+		USING candidates
+		WHERE job.id = candidates.id`, completedBefore, limit)
+	if err != nil {
+		return 0, fmt.Errorf("prune terminal processing jobs: %w", err)
+	}
+	return result.RowsAffected(), nil
 }
 
 func (s *Store) Claim(ctx context.Context, owner string, kinds []string, leaseDuration time.Duration) (Job, bool, error) {

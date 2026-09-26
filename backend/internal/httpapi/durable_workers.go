@@ -12,6 +12,7 @@ import (
 
 	"daily-speaking-practice/backend/internal/logging"
 	"daily-speaking-practice/backend/internal/media"
+	"daily-speaking-practice/backend/internal/operations"
 	"daily-speaking-practice/backend/internal/workqueue"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -28,6 +29,7 @@ type WorkerConfig struct {
 	RetryBaseDelay          time.Duration
 	RetryMaxDelay           time.Duration
 	MediaSweepInterval      time.Duration
+	JobRetention            time.Duration
 }
 
 func WorkerConfigFromEnv() (WorkerConfig, error) {
@@ -42,6 +44,7 @@ func WorkerConfigFromEnv() (WorkerConfig, error) {
 		RetryBaseDelay:          5 * time.Second,
 		RetryMaxDelay:           5 * time.Minute,
 		MediaSweepInterval:      15 * time.Minute,
+		JobRetention:            30 * 24 * time.Hour,
 	}
 	var err error
 	if config.RecordingConcurrency, err = positiveEnvInt("WORKER_RECORDING_CONCURRENCY", config.RecordingConcurrency); err != nil {
@@ -73,6 +76,12 @@ func WorkerConfigFromEnv() (WorkerConfig, error) {
 	}
 	if config.MediaSweepInterval, err = positiveEnvDuration("MEDIA_SWEEP_INTERVAL", config.MediaSweepInterval); err != nil {
 		return WorkerConfig{}, err
+	}
+	if config.JobRetention, err = positiveEnvDuration("WORKER_JOB_RETENTION", config.JobRetention); err != nil {
+		return WorkerConfig{}, err
+	}
+	if config.JobRetention < 24*time.Hour {
+		return WorkerConfig{}, errors.New("WORKER_JOB_RETENTION must be at least 24h")
 	}
 	if config.HeartbeatInterval >= config.LeaseDuration {
 		return WorkerConfig{}, errors.New("WORKER_HEARTBEAT_INTERVAL must be shorter than WORKER_LEASE_DURATION")
@@ -167,7 +176,7 @@ func (s *Server) RunWorkers(ctx context.Context, config WorkerConfig) error {
 	wait.Add(1)
 	go func() {
 		defer wait.Done()
-		errCh <- s.runMediaMaintenanceLoop(ctx, config.MediaSweepInterval)
+		errCh <- s.runMaintenanceLoop(ctx, config.MediaSweepInterval, config.JobRetention)
 	}()
 	wait.Wait()
 	close(errCh)
@@ -179,7 +188,7 @@ func (s *Server) RunWorkers(ctx context.Context, config WorkerConfig) error {
 	return ctx.Err()
 }
 
-func (s *Server) runMediaMaintenanceLoop(ctx context.Context, interval time.Duration) error {
+func (s *Server) runMaintenanceLoop(ctx context.Context, interval time.Duration, jobRetention time.Duration) error {
 	if interval <= 0 {
 		interval = 15 * time.Minute
 	}
@@ -187,6 +196,22 @@ func (s *Server) runMediaMaintenanceLoop(ctx context.Context, interval time.Dura
 	run := func() {
 		if err := s.sweepExpiredMedia(ctx); err != nil && !errors.Is(err, context.Canceled) {
 			logger.Warn("media.sweep_failed", logging.ErrorMeta(err))
+		}
+		if s.jobStore != nil && jobRetention > 0 {
+			removed, err := s.jobStore.PruneTerminal(ctx, time.Now().UTC().Add(-jobRetention), 5000)
+			if err != nil && !errors.Is(err, context.Canceled) {
+				logger.Warn("jobs.prune_failed", logging.ErrorMeta(err))
+			} else if removed > 0 {
+				logger.Info("jobs.pruned", map[string]any{"count": removed})
+			}
+		}
+		if s.db != nil {
+			removed, err := operations.PruneExpiredRateLimits(ctx, s.db, time.Now().UTC(), 5000)
+			if err != nil && !errors.Is(err, context.Canceled) {
+				logger.Warn("rate_limits.prune_failed", logging.ErrorMeta(err))
+			} else if removed > 0 {
+				logger.Info("rate_limits.pruned", map[string]any{"count": removed})
+			}
 		}
 	}
 	run()

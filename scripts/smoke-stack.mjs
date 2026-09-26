@@ -196,7 +196,7 @@ export async function waitForServices(
 ) {
   const checks = [
     ["web", endpoint(webBaseURL, "/web-healthz")],
-    ["API", endpoint(apiBaseURL, "/healthz")],
+    ["API", endpoint(apiBaseURL, "/readyz")],
   ];
   const pending = new Map(checks);
   const lastFailures = new Map();
@@ -312,6 +312,11 @@ export async function runStackSmoke({ env = process.env, fetchImpl = fetch } = {
     await expectStatus(
       "API health",
       await request(fetchImpl, endpoint(apiBaseURL, "/healthz")),
+      200,
+    );
+    await expectStatus(
+      "API readiness",
+      await request(fetchImpl, endpoint(apiBaseURL, "/readyz")),
       200,
     );
 

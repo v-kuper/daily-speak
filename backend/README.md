@@ -16,7 +16,9 @@ goroutines.
 - `/api/v1/*`: stable, versioned mobile API endpoints;
 - `/api/*`: legacy web application endpoints retained during migration;
 - `/uploads/*`: backend-owned persisted media;
-- `/healthz`: API health;
+- `/healthz`: process liveness;
+- `/readyz`: PostgreSQL and durable-queue readiness;
+- `/metrics`: protected Prometheus metrics when an operations token is configured;
 - `/openapi.json`: canonical OpenAPI 3.1 document;
 - `/docs`: Swagger UI.
 
@@ -159,6 +161,21 @@ Runtime and storage:
   and deleting unattached expired media, default `15m`;
 - `SERVER_LOG_LEVEL`: log threshold such as `info` or `debug`.
 
+Operations and traffic admission:
+
+- `TRUSTED_PROXY_CIDRS`: comma-separated reverse-proxy CIDRs allowed to supply
+  `X-Forwarded-For` and `X-Forwarded-Proto`; empty trusts no proxy;
+- `RATE_LIMIT_ENABLED` and the `RATE_LIMIT_AUTH_*`, `RATE_LIMIT_WRITE_*`, and
+  `RATE_LIMIT_EXPENSIVE_*` request/window pairs configure distributed limits;
+- `READINESS_TIMEOUT`, `READINESS_MAX_QUEUE_DEPTH`, and
+  `READINESS_MAX_OLDEST_JOB_AGE` define load-balancer admission thresholds;
+- `METRICS_BEARER_TOKEN`: server-only secret enabling `/metrics`. Empty keeps
+  the metrics endpoint hidden.
+
+The operational model, initial alerts, worker/API scaling policy, backup and
+restore procedure, and remote load/failure checks are documented in
+[`../docs/BACKEND_OPERATIONS.md`](../docs/BACKEND_OPERATIONS.md).
+
 Durable worker controls:
 
 - `GUEST_PREVIEW_QUEUE_CAPACITY`: global database-backed admission bound for
@@ -171,6 +188,9 @@ Durable worker controls:
   lease, defaults `2m` and `30s`; heartbeat must be shorter than the lease;
 - `WORKER_RETRY_BASE_DELAY` and `WORKER_RETRY_MAX_DELAY`: exponential retry
   bounds, defaults `5s` and `5m`.
+- `WORKER_JOB_RETENTION`: retention for completed durable-job bookkeeping,
+  default `720h` (30 days). The maintenance worker prunes terminal rows in
+  bounded batches; user recordings and media are not deleted by this setting.
 
 Mobile identity:
 

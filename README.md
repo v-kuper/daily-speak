@@ -74,6 +74,7 @@ Default HTTP endpoints:
 - web health: [http://localhost:3218/web-healthz](http://localhost:3218/web-healthz)
 - API: [http://localhost:3219](http://localhost:3219)
 - API health: [http://localhost:3219/healthz](http://localhost:3219/healthz)
+- API readiness: [http://localhost:3219/readyz](http://localhost:3219/readyz)
 - OpenAPI: [http://localhost:3219/openapi.json](http://localhost:3219/openapi.json)
 - Swagger UI: [http://localhost:3219/docs](http://localhost:3219/docs)
 
@@ -188,4 +189,5 @@ transition has downtime and requires a current database/uploads backup.
 
 Backend-specific Ollama, Whisper, and Cartesia instructions live in
 [`backend/README.md`](backend/README.md). Follow-up architecture work is tracked
-in [`docs/TECH_DEBT.md`](docs/TECH_DEBT.md).
+in [`docs/TECH_DEBT.md`](docs/TECH_DEBT.md), and the scaling/backup/observability
+runbook lives in [`docs/BACKEND_OPERATIONS.md`](docs/BACKEND_OPERATIONS.md).
