@@ -45,6 +45,10 @@ func (service *Service) Available() bool {
 
 func (service *Service) CreateUpload(ctx context.Context, input CreateUploadInput) (UploadResource, error) {
 	input = normalizeCreateInput(input)
+	input, err := applyCreateOwnerPolicy(input)
+	if err != nil {
+		return UploadResource{}, err
+	}
 	extension, err := validateCreateInput(input)
 	if err != nil || !service.Available() {
 		if !service.Available() {

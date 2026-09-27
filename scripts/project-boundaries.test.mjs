@@ -254,8 +254,11 @@ test("recording query and retry keep persistence and queue mechanics outside HTT
 });
 
 test("legacy recording upload sessions stay retired", () => {
+  const deletionRepository = readFileSync("backend/internal/recording/delete_repository.go", "utf8");
+
   assert.equal(existsSync("backend/internal/storage/recording_sessions.go"), false);
   assert.equal(existsSync("backend/internal/httpapi/recording_sessions_handlers.go"), false);
+  assert.doesNotMatch(deletionRepository, /recording_upload_sessions/);
 });
 
 test("HTTP transport contains no production SQL and Feed owns its persistence", () => {
@@ -302,7 +305,7 @@ test("media ownership and guest policy stay in the media application service", (
   assert.doesNotMatch(transport, /internal\/storage|storage\./);
   assert.doesNotMatch(transport, /requiredMediaUserV1|identity\.Kind\s*!=\s*"user"|PurposeGuestPreviewAudio/);
   assert.match(service, /input\.OwnerKind[\s\S]*ErrAccountRequired/);
-  assert.match(uploadPolicy, /input\.OwnerKind\s*==\s*"guest"[\s\S]*PurposeGuestPreviewAudio/);
+  assert.match(uploadPolicy, /case "guest":[\s\S]*ErrGuestRestricted[\s\S]*PurposeGuestPreviewAudio/);
   assert.match(model, /func \(asset Asset\) ClientPurpose\(\)/);
 });
 

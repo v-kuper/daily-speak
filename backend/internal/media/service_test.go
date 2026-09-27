@@ -83,7 +83,7 @@ func TestStorageResponsesAreMappedToMediaModels(t *testing.T) {
 
 func TestCreateInputValidationRejectsUnsupportedOrOversizedMedia(t *testing.T) {
 	base := CreateUploadInput{
-		OwnerPrincipalID: "principal-1", SessionID: "session-1",
+		OwnerPrincipalID: "principal-1", OwnerKind: "user", SessionID: "session-1",
 		IdempotencyKey: "request-1234", Purpose: PurposeRecordingAudio,
 		ContentType: "audio/webm", SizeBytes: 1024,
 		ChecksumSHA256: strings.Repeat("a", 64),
@@ -105,7 +105,7 @@ func TestCreateInputValidationRejectsUnsupportedOrOversizedMedia(t *testing.T) {
 
 func TestGuestPreviewUploadUsesTighterAudioLimit(t *testing.T) {
 	input := CreateUploadInput{
-		OwnerPrincipalID: "guest-1", SessionID: "session-1",
+		OwnerPrincipalID: "guest-1", OwnerKind: "guest", SessionID: "session-1",
 		IdempotencyKey: "request-1234", Purpose: PurposeGuestPreviewAudio,
 		ContentType: "audio/webm", SizeBytes: 10 * 1024 * 1024,
 		ChecksumSHA256: strings.Repeat("a", 64),
@@ -120,24 +120,28 @@ func TestGuestPreviewUploadUsesTighterAudioLimit(t *testing.T) {
 }
 
 func TestCreateUploadPolicyMapsOnlyGuestAudioToPreviewPurpose(t *testing.T) {
-	guestAudio := normalizeCreateInput(CreateUploadInput{OwnerKind: " guest ", Purpose: PurposeRecordingAudio})
+	guestAudio, err := applyCreateOwnerPolicy(normalizeCreateInput(CreateUploadInput{OwnerKind: " guest ", Purpose: PurposeRecordingAudio}))
+	if err != nil {
+		t.Fatalf("guest audio policy: %v", err)
+	}
 	if guestAudio.Purpose != PurposeGuestPreviewAudio {
 		t.Fatalf("guest audio purpose = %q", guestAudio.Purpose)
 	}
 
-	guestPhoto := normalizeCreateInput(CreateUploadInput{OwnerKind: "guest", Purpose: PurposeRecordingPhoto})
-	if guestPhoto.Purpose != "" {
-		t.Fatalf("guest photo purpose = %q, want rejected purpose", guestPhoto.Purpose)
+	if _, err := applyCreateOwnerPolicy(normalizeCreateInput(CreateUploadInput{OwnerKind: "guest", Purpose: PurposeRecordingPhoto})); !errors.Is(err, ErrGuestRestricted) {
+		t.Fatalf("guest photo policy error = %v", err)
 	}
 
-	userAudio := normalizeCreateInput(CreateUploadInput{OwnerKind: "user", Purpose: PurposeRecordingAudio})
+	userAudio, err := applyCreateOwnerPolicy(normalizeCreateInput(CreateUploadInput{OwnerKind: "user", Purpose: PurposeRecordingAudio}))
+	if err != nil {
+		t.Fatalf("user audio policy: %v", err)
+	}
 	if userAudio.Purpose != PurposeRecordingAudio {
 		t.Fatalf("user audio purpose = %q", userAudio.Purpose)
 	}
 
-	internalPurpose := normalizeCreateInput(CreateUploadInput{OwnerKind: "user", Purpose: PurposeGuestPreviewAudio})
-	if internalPurpose.Purpose != "" {
-		t.Fatalf("public internal purpose = %q, want rejected purpose", internalPurpose.Purpose)
+	if _, err := applyCreateOwnerPolicy(normalizeCreateInput(CreateUploadInput{OwnerKind: "user", Purpose: PurposeGuestPreviewAudio})); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("public internal purpose error = %v", err)
 	}
 }
 

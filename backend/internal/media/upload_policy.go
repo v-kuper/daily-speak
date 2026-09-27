@@ -19,16 +19,24 @@ func normalizeCreateInput(input CreateUploadInput) CreateUploadInput {
 	input.Purpose = strings.ToLower(strings.TrimSpace(input.Purpose))
 	input.ContentType = strings.ToLower(strings.TrimSpace(strings.Split(input.ContentType, ";")[0]))
 	input.ChecksumSHA256 = strings.ToLower(strings.TrimSpace(input.ChecksumSHA256))
-	if input.OwnerKind == "guest" {
-		if input.Purpose == PurposeRecordingAudio {
-			input.Purpose = PurposeGuestPreviewAudio
-		} else {
-			input.Purpose = ""
-		}
-	} else if input.OwnerKind != "user" || input.Purpose == PurposeGuestPreviewAudio {
-		input.Purpose = ""
-	}
 	return input
+}
+
+func applyCreateOwnerPolicy(input CreateUploadInput) (CreateUploadInput, error) {
+	switch input.OwnerKind {
+	case "guest":
+		if input.Purpose != PurposeRecordingAudio {
+			return CreateUploadInput{}, ErrGuestRestricted
+		}
+		input.Purpose = PurposeGuestPreviewAudio
+	case "user":
+		if input.Purpose == PurposeGuestPreviewAudio {
+			return CreateUploadInput{}, ErrInvalidRequest
+		}
+	default:
+		return CreateUploadInput{}, ErrInvalidRequest
+	}
+	return input, nil
 }
 
 func validateCreateInput(input CreateUploadInput) (string, error) {

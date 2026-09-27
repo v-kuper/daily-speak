@@ -42,7 +42,6 @@ func TestDeleteRecordingCascadesDataAndRetriesQueuedFilesAfterRestart(t *testing
 	recordingID := uuid.NewString()
 	postID := uuid.NewString()
 	replyID := uuid.NewString()
-	uploadSessionID := uuid.NewString()
 	recordingURL := fmt.Sprintf("/uploads/recordings/%s/%s.webm", user.ID, recordingID)
 	shadowingURL := fmt.Sprintf("/uploads/shadowing/%s/%s.mp3", user.ID, recordingID)
 	replyURL := fmt.Sprintf("/uploads/feed-replies/%s/%s.webm", user.ID, replyID)
@@ -65,12 +64,6 @@ func TestDeleteRecordingCascadesDataAndRetriesQueuedFilesAfterRestart(t *testing
 		VALUES ($1, $2, 'Deletion test', 30, $3, 'Test transcript', $4, 'ready', 'ready', $5)`,
 		recordingID, user.ID, now, recordingURL, shadowingURL); err != nil {
 		t.Fatalf("insert recording: %v", err)
-	}
-	if _, err := database.Exec(ctx, `
-		INSERT INTO recording_upload_sessions (id, user_id, topic, duration, timestamp, status, recording_id)
-		VALUES ($1, $2, 'Deletion test', 30, $3, 'complete', $4)`,
-		uploadSessionID, user.ID, now, recordingID); err != nil {
-		t.Fatalf("insert upload session: %v", err)
 	}
 	if _, err := database.Exec(ctx, `
 		INSERT INTO feed_posts
@@ -107,7 +100,6 @@ func TestDeleteRecordingCascadesDataAndRetriesQueuedFilesAfterRestart(t *testing
 	}
 
 	assertTableRowCount(t, database, "recordings", "id", recordingID, 0)
-	assertTableRowCount(t, database, "recording_upload_sessions", "id", uploadSessionID, 0)
 	assertTableRowCount(t, database, "feed_posts", "id", postID, 0)
 	assertTableRowCount(t, database, "feed_replies", "id", replyID, 0)
 	assertTableRowCount(t, database, "feed_post_reactions", "post_id", postID, 0)
@@ -214,13 +206,12 @@ func assertUploadMissing(t *testing.T, uploadsDir string, publicURL string) {
 func assertTableRowCount(t *testing.T, database *db.DB, table string, column string, value string, expected int) {
 	t.Helper()
 	allowed := map[string]map[string]bool{
-		"recordings":                {"id": true},
-		"recording_upload_sessions": {"id": true},
-		"feed_posts":                {"id": true},
-		"feed_replies":              {"id": true},
-		"feed_post_reactions":       {"post_id": true},
-		"feed_reply_reactions":      {"reply_id": true},
-		"pending_file_deletions":    {"public_url": true},
+		"recordings":             {"id": true},
+		"feed_posts":             {"id": true},
+		"feed_replies":           {"id": true},
+		"feed_post_reactions":    {"post_id": true},
+		"feed_reply_reactions":   {"reply_id": true},
+		"pending_file_deletions": {"public_url": true},
 	}
 	if !allowed[table][column] {
 		t.Fatalf("unsafe test count target %s.%s", table, column)

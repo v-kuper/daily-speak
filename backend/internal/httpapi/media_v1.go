@@ -334,6 +334,8 @@ func (s *Server) writeMediaError(w http.ResponseWriter, r *http.Request, err err
 		writeV1Error(w, r, http.StatusUnprocessableEntity, "size_mismatch", "Media size does not match")
 	case errors.Is(err, media.ErrAccountRequired):
 		writeV1Error(w, r, http.StatusForbidden, "account_required", "An account is required for media")
+	case errors.Is(err, media.ErrGuestRestricted):
+		writeV1Error(w, r, http.StatusForbidden, "guest_media_restricted", "Guest media is restricted to recording previews")
 	default:
 		writeV1Error(w, r, http.StatusServiceUnavailable, "storage_unavailable", "Media storage is unavailable")
 	}

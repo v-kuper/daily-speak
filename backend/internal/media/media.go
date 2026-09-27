@@ -21,6 +21,7 @@ var (
 	ErrChecksumMismatch = errors.New("media checksum does not match")
 	ErrSizeMismatch     = errors.New("media size does not match")
 	ErrAccountRequired  = errors.New("media operation requires an account")
+	ErrGuestRestricted  = errors.New("guest media is restricted")
 )
 
 const (

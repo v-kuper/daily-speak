@@ -141,9 +141,6 @@ func (t *sqlDeletionTransaction) Remove(ctx context.Context, userID string, reco
 		  AND state IN ('queued', 'running', 'retry_wait')`, recordingID); err != nil {
 		return false, err
 	}
-	if _, err := t.tx.Exec(ctx, `DELETE FROM recording_upload_sessions WHERE recording_id = $1`, recordingID); err != nil {
-		return false, err
-	}
 	var deletedID string
 	err := t.tx.QueryRow(ctx, `
 		DELETE FROM recordings
