@@ -8,6 +8,7 @@ import (
 
 	"daily-speaking-practice/backend/internal/ai"
 	"daily-speaking-practice/backend/internal/quota"
+	"daily-speaking-practice/backend/internal/storage"
 )
 
 func stringPointer(value string) *string {
@@ -22,7 +23,7 @@ func TestRecordingProcessingTimeoutAllowsMultiPassRetries(t *testing.T) {
 
 func TestRecordingRetryWorkResumesTheStoredFailedStage(t *testing.T) {
 	uploadsDir := t.TempDir()
-	t.Setenv("UPLOADS_DIR", uploadsDir)
+	legacyUploads := storage.NewLegacyUploads(uploadsDir)
 	tests := []struct {
 		name      string
 		recording recordingResponse
@@ -67,7 +68,7 @@ func TestRecordingRetryWorkResumesTheStoredFailedStage(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			work, err := recordingRetryWorkFor(tc.recording, "b1")
+			work, err := recordingRetryWorkFor(tc.recording, "b1", legacyUploads)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -79,6 +80,7 @@ func TestRecordingRetryWorkResumesTheStoredFailedStage(t *testing.T) {
 }
 
 func TestRecordingRetryWorkRejectsUnavailableInput(t *testing.T) {
+	legacyUploads := storage.NewLegacyUploads(t.TempDir())
 	tests := []recordingResponse{
 		{Status: "ready", ProcessingStage: stringPointer("suggestions"), Transcript: "I went home."},
 		{Status: "failed", ProcessingStage: nil, Transcript: "I went home."},
@@ -86,7 +88,7 @@ func TestRecordingRetryWorkRejectsUnavailableInput(t *testing.T) {
 		{Status: "failed", ProcessingStage: stringPointer("transcribing"), AudioDataURL: nil},
 	}
 	for _, recording := range tests {
-		if _, err := recordingRetryWorkFor(recording, "b1"); err == nil {
+		if _, err := recordingRetryWorkFor(recording, "b1", legacyUploads); err == nil {
 			t.Fatalf("expected retry input to be rejected: %#v", recording)
 		}
 	}

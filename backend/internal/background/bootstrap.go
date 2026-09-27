@@ -87,7 +87,7 @@ func New(config Config) *Runtime {
 		Store: shadowStore, Synthesizer: synthesizer, MediaStore: config.MediaStore,
 		MediaBucket: config.MediaBucket, LocalSaver: shadowing.NewLocalSaver(uploadsDir), NewID: uuid.NewString,
 	})
-	cleanup := media.NewCleanup(config.DB, mediaService, config.MediaStore, legacyUploads.Remove)
+	cleanup := media.NewCleanup(config.DB, mediaService, config.MediaStore, legacyUploads)
 	return NewRuntime(Dependencies{
 		DB: config.DB, JobStore: workqueue.NewStore(config.DB),
 		RecordingProcessor: recordingProcessor, RecordingRepository: recordingRepository,

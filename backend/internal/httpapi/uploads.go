@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"daily-speaking-practice/backend/internal/domain"
-	"daily-speaking-practice/backend/internal/storage"
 )
 
 const uploadsURLPrefix = "/uploads/"
@@ -20,27 +19,25 @@ func resolveUploadsDir() string {
 	return filepath.Join("public", "uploads")
 }
 
-func uploadsHandler() http.Handler {
-	legacyFiles := http.StripPrefix(uploadsURLPrefix, http.FileServer(http.Dir(resolveUploadsDir())))
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet && r.Method != http.MethodHead {
-			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
-			return
-		}
-		// Only the two historical public URL shapes remain available here.
-		// New v1 objects, multipart state and metadata share the mounted local
-		// root but must only be reachable through owner-checked signed routes.
-		segments := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.Path, uploadsURLPrefix), "/"), "/")
-		if len(segments) != 3 || (segments[0] != "recordings" && segments[0] != "feed-replies") {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Not found"})
-			return
-		}
-		if _, err := storedUploadPath(r.URL.Path); err != nil {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Not found"})
-			return
-		}
-		legacyFiles.ServeHTTP(w, r)
-	})
+func (s *Server) handleLegacyUpload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
+		return
+	}
+	// Only the two historical public URL shapes remain available here.
+	// New v1 objects, multipart state and metadata share the mounted local
+	// root but must only be reachable through owner-checked signed routes.
+	segments := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.Path, uploadsURLPrefix), "/"), "/")
+	if len(segments) != 3 || (segments[0] != "recordings" && segments[0] != "feed-replies") {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Not found"})
+		return
+	}
+	absolutePath, err := s.legacyUploads.Path(r.URL.Path)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Not found"})
+		return
+	}
+	http.ServeFile(w, r, absolutePath)
 }
 
 func (s *Server) handleShadowingUpload(w http.ResponseWriter, r *http.Request) {
@@ -72,19 +69,11 @@ func (s *Server) handleShadowingUpload(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Not found"})
 		return
 	}
-	absolutePath, err := storedUploadPath(*publicURL)
+	absolutePath, err := s.legacyUploads.Path(*publicURL)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Not found"})
 		return
 	}
 	w.Header().Set("Cache-Control", "private, no-store")
 	http.ServeFile(w, r, absolutePath)
-}
-
-func storedUploadPath(publicURL string) (string, error) {
-	return storage.NewLegacyUploads(resolveUploadsDir()).Path(publicURL)
-}
-
-func removeStoredUploadFiles(publicURLs []string) error {
-	return storage.NewLegacyUploads(resolveUploadsDir()).Remove(publicURLs)
 }

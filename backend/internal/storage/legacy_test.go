@@ -16,8 +16,14 @@ func TestLegacyUploadsConfinesPathsAndRemovesFiles(t *testing.T) {
 	if path != filepath.Join(root, "shadowing", "user-1", "audio.mp3") {
 		t.Fatalf("path=%q", path)
 	}
-	if _, err := uploads.Path("/uploads/../private.txt"); err == nil {
-		t.Fatal("expected traversal rejection")
+	for _, value := range []string{
+		"/uploads/../private.txt",
+		"/uploads/shadowing/../../secret",
+		"/uploads/shadowing/user-1/nested/recording-1.mp3",
+	} {
+		if _, err := uploads.Path(value); err == nil {
+			t.Fatalf("expected %q to be rejected", value)
+		}
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
@@ -25,7 +31,10 @@ func TestLegacyUploadsConfinesPathsAndRemovesFiles(t *testing.T) {
 	if err := os.WriteFile(path, []byte("audio"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := uploads.Remove([]string{"/uploads/shadowing/user-1/audio.mp3"}); err != nil {
+	if err := uploads.Remove([]string{
+		"/uploads/shadowing/user-1/audio.mp3",
+		"/uploads/feed-replies/user-1/missing.webm",
+	}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {

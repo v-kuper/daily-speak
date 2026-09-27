@@ -186,7 +186,7 @@ test("OpenAPI inventories every API and upload route, including retained Feed en
     ["/api/feed/posts/{postId}/reactions", /parts\[1\] == "reactions"/],
     ["/api/feed/replies/{replyId}/reactions", /strings\.HasPrefix\(path, "\/api\/feed\/replies\/"\)/],
     ["/uploads/shadowing/{userId}/{fileName}", /mux\.HandleFunc\("\/uploads\/shadowing\/"/],
-    ["/uploads/{path}", /mux\.Handle\(uploadsURLPrefix, uploadsHandler\(\)\)/],
+    ["/uploads/{path}", /mux\.Handle\(uploadsURLPrefix, http\.HandlerFunc\(s\.handleLegacyUpload\)\)/],
   ];
   for (const [path, pattern] of sourceChecks) assert.match(routeSource, pattern, `server route not found for ${path}`);
 });

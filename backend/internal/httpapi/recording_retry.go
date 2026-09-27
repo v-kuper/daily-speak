@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"daily-speaking-practice/backend/internal/logging"
+	"daily-speaking-practice/backend/internal/storage"
 	"daily-speaking-practice/backend/internal/workqueue"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -47,7 +48,7 @@ func recordingAfterRetryClaim(recording recordingResponse, startedAt time.Time) 
 	return updated
 }
 
-func recordingRetryWorkFor(recording recordingResponse, englishLevel string) (recordingRetryWork, error) {
+func recordingRetryWorkFor(recording recordingResponse, englishLevel string, legacyUploads storage.LegacyUploadPathResolver) (recordingRetryWork, error) {
 	if recording.Status != "failed" || recording.ProcessingStage == nil {
 		return recordingRetryWork{}, errRecordingRetryUnavailable
 	}
@@ -70,7 +71,10 @@ func recordingRetryWorkFor(recording recordingResponse, englishLevel string) (re
 		if recording.AudioDataURL == nil {
 			return recordingRetryWork{}, errRecordingRetryUnavailable
 		}
-		audioPath, err := storedUploadPath(*recording.AudioDataURL)
+		if legacyUploads == nil {
+			return recordingRetryWork{}, errRecordingRetryUnavailable
+		}
+		audioPath, err := legacyUploads.Path(*recording.AudioDataURL)
 		if err != nil {
 			return recordingRetryWork{}, errRecordingRetryUnavailable
 		}
@@ -138,7 +142,7 @@ func (s *Server) scheduleRecordingRetry(ctx context.Context, userID string, reco
 	if recording.Status == "processing" {
 		return recording, false, nil
 	}
-	_, err = recordingRetryWorkFor(recording, englishLevel)
+	_, err = recordingRetryWorkFor(recording, englishLevel, s.legacyUploads)
 	if err != nil {
 		return recordingResponse{}, false, err
 	}

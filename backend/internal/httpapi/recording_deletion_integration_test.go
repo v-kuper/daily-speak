@@ -14,6 +14,7 @@ import (
 
 	"daily-speaking-practice/backend/internal/auth"
 	"daily-speaking-practice/backend/internal/db"
+	"daily-speaking-practice/backend/internal/storage"
 	"daily-speaking-practice/backend/internal/workqueue"
 	"github.com/google/uuid"
 )
@@ -127,10 +128,14 @@ func TestDeleteRecordingCascadesDataAndRetriesQueuedFilesAfterRestart(t *testing
 		t.Fatalf("prioritize deletion test jobs: %v", err)
 	}
 
-	restartedServer := NewServer(Config{DB: database})
-	restartedServer.removeStoredUploads = func([]string) error {
-		return errors.New("simulated Windows sharing violation")
-	}
+	legacyUploads := storage.NewLegacyUploads(uploadsDir)
+	restartedServer := NewServer(Config{
+		DB: database,
+		LegacyUploads: failingLegacyUploadStore{
+			LegacyUploadStore: legacyUploads,
+			err:               errors.New("simulated Windows sharing violation"),
+		},
+	})
 	processDeletionJobsOnce(t, restartedServer, 3, true)
 	assertDeletionJob(t, database, recordingURL, "retry_wait", 1)
 	assertDeletionJob(t, database, shadowingURL, "retry_wait", 1)
@@ -141,7 +146,7 @@ func TestDeleteRecordingCascadesDataAndRetriesQueuedFilesAfterRestart(t *testing
 		t.Fatal(err)
 	}
 
-	secondRestart := NewServer(Config{DB: database})
+	secondRestart := NewServer(Config{DB: database, LegacyUploads: legacyUploads})
 	processDeletionJobsOnce(t, secondRestart, 3, false)
 	assertTableRowCount(t, database, "pending_file_deletions", "public_url", recordingURL, 0)
 	assertTableRowCount(t, database, "pending_file_deletions", "public_url", shadowingURL, 0)
@@ -150,6 +155,13 @@ func TestDeleteRecordingCascadesDataAndRetriesQueuedFilesAfterRestart(t *testing
 	assertUploadMissing(t, uploadsDir, shadowingURL)
 	assertUploadMissing(t, uploadsDir, replyURL)
 }
+
+type failingLegacyUploadStore struct {
+	storage.LegacyUploadStore
+	err error
+}
+
+func (store failingLegacyUploadStore) Remove([]string) error { return store.err }
 
 func processDeletionJobsOnce(t *testing.T, server *Server, count int, wantError bool) {
 	t.Helper()

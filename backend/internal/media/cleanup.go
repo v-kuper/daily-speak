@@ -20,12 +20,12 @@ type Cleanup struct {
 	database     *db.DB
 	mediaService *Service
 	store        storage.Store
-	removeLegacy func([]string) error
+	legacy       storage.LegacyUploadRemover
 }
 
-func NewCleanup(database *db.DB, mediaService *Service, store storage.Store, removeLegacy func([]string) error) *Cleanup {
+func NewCleanup(database *db.DB, mediaService *Service, store storage.Store, legacy storage.LegacyUploadRemover) *Cleanup {
 	return &Cleanup{
-		database: database, mediaService: mediaService, store: store, removeLegacy: removeLegacy,
+		database: database, mediaService: mediaService, store: store, legacy: legacy,
 	}
 }
 
@@ -140,10 +140,10 @@ func (cleanup *Cleanup) Delete(ctx context.Context, resourceID string) error {
 		return errors.New("media cleanup database is not configured")
 	}
 	if strings.HasPrefix(resourceID, legacyUploadsURLPrefix) {
-		if cleanup.removeLegacy == nil {
+		if cleanup.legacy == nil {
 			return errors.New("legacy media cleanup is not configured")
 		}
-		if err := cleanup.removeLegacy([]string{resourceID}); err != nil {
+		if err := cleanup.legacy.Remove([]string{resourceID}); err != nil {
 			return err
 		}
 		_, err := cleanup.database.Exec(ctx, `DELETE FROM pending_file_deletions WHERE public_url = $1`, resourceID)

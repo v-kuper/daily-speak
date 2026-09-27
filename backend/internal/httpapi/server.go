@@ -48,6 +48,7 @@ type Config struct {
 	MediaSigningSecret       []byte
 	MediaPartSize            int64
 	MediaPresignTTL          time.Duration
+	LegacyUploads            storage.LegacyUploadStore
 	TranscribeAudio          func(context.Context, string) (string, error)
 	ProbeAudioDuration       func(context.Context, string) (time.Duration, error)
 	Operations               operations.Config
@@ -56,7 +57,7 @@ type Config struct {
 type Server struct {
 	db                       *db.DB
 	jobStore                 *workqueue.Store
-	removeStoredUploads      func([]string) error
+	legacyUploads            storage.LegacyUploadStore
 	synthesizer              tts.Synthesizer
 	aiClient                 ai.ChatClient
 	practiceGenerator        practice.Generator
@@ -148,6 +149,10 @@ func NewServer(config Config) *Server {
 	if len(signingSecret) == 0 {
 		signingSecret = []byte(strings.TrimSpace(os.Getenv("AUTH_ACCESS_TOKEN_SECRET")))
 	}
+	legacyUploads := config.LegacyUploads
+	if legacyUploads == nil {
+		legacyUploads = storage.NewLegacyUploads(resolveUploadsDir())
+	}
 	mediaSigner, _ := media.NewURLSigner(signingSecret)
 	transcribeAudio := config.TranscribeAudio
 	if transcribeAudio == nil {
@@ -174,7 +179,7 @@ func NewServer(config Config) *Server {
 	server := &Server{
 		db:                       config.DB,
 		jobStore:                 workqueue.NewStore(config.DB),
-		removeStoredUploads:      removeStoredUploadFiles,
+		legacyUploads:            legacyUploads,
 		synthesizer:              synthesizer,
 		aiClient:                 aiClient,
 		practiceGenerator:        practiceGenerator,
@@ -185,7 +190,7 @@ func NewServer(config Config) *Server {
 		recordingPreviewAnalyzer: recordingPreviewAnalyzer,
 		recordingCreator:         recording.NewCreator(recording.NewSQLCreateUnitOfWork(config.DB)),
 		recordingDeleter: recording.NewDeleter(
-			recordingDeletion, storage.NewLegacyUploads(resolveUploadsDir()),
+			recordingDeletion, legacyUploads,
 			recordingDeletion, uuid.NewString,
 		),
 		recordingRepository: recordingRepository,
@@ -209,7 +214,7 @@ func NewServer(config Config) *Server {
 	server.recordingProcessor = recording.NewProcessor(recording.ProcessingDependencies{
 		Repository:         recordingRepository,
 		Materializer:       server.mediaMaterializer,
-		ResolveLegacyAudio: storedUploadPath,
+		ResolveLegacyAudio: legacyUploads.Path,
 		ProbeAudioDuration: probeAudioDuration,
 		Transcribe:         transcribeForProcessing,
 		Analyzer:           recordingAnalyzer,
@@ -231,7 +236,7 @@ func NewServer(config Config) *Server {
 		RecordingProcessor: server.recordingProcessor, RecordingRepository: recordingRepository,
 		GuestPreviewProcessor: server.guestPreviewProcessor, GuestPreviewStore: guestPreviewStore,
 		ShadowingProcessor: server.shadowingProcessor, ShadowingStore: shadowingStore,
-		MediaCleanup: media.NewCleanup(config.DB, mediaService, mediaStore, server.removeStoredUploads),
+		MediaCleanup: media.NewCleanup(config.DB, mediaService, mediaStore, legacyUploads),
 	})
 	return server
 }
@@ -265,7 +270,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/", s.routeAPI)
 	mux.HandleFunc("/uploads/shadowing", s.handleShadowingUpload)
 	mux.HandleFunc("/uploads/shadowing/", s.handleShadowingUpload)
-	mux.Handle(uploadsURLPrefix, uploadsHandler())
+	mux.Handle(uploadsURLPrefix, http.HandlerFunc(s.handleLegacyUpload))
 	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Not found"})
 	})

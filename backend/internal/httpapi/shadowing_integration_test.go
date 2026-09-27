@@ -334,7 +334,7 @@ func TestReclaimedShadowingIgnoresOlderWorkerFailure(t *testing.T) {
 	if recording.ShadowingAudioURL == nil {
 		t.Fatal("new attempt did not publish audio URL")
 	}
-	absolutePath, err := storedUploadPath(*recording.ShadowingAudioURL)
+	absolutePath, err := newServer.legacyUploads.Path(*recording.ShadowingAudioURL)
 	if err != nil {
 		t.Fatal(err)
 	}

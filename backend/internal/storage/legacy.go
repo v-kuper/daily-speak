@@ -11,6 +11,19 @@ import (
 
 const LegacyUploadsURLPrefix = "/uploads/"
 
+type LegacyUploadPathResolver interface {
+	Path(string) (string, error)
+}
+
+type LegacyUploadRemover interface {
+	Remove([]string) error
+}
+
+type LegacyUploadStore interface {
+	LegacyUploadPathResolver
+	LegacyUploadRemover
+}
+
 type LegacyUploads struct{ root string }
 
 func NewLegacyUploads(root string) *LegacyUploads { return &LegacyUploads{root: filepath.Clean(root)} }
