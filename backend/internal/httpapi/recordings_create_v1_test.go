@@ -10,34 +10,11 @@ import (
 	"os"
 	"strings"
 	"testing"
-	"time"
 
 	"daily-speaking-practice/backend/internal/auth"
 	"daily-speaking-practice/backend/internal/db"
 	"github.com/google/uuid"
 )
-
-func TestNormalizeRecordingCreateV1RequiresPhotoForPhotoPractice(t *testing.T) {
-	_, err := normalizeRecordingCreateV1(recordingCreateV1Request{
-		Topic: "Describe it", Duration: 30, Timestamp: time.Now().UTC().Format(time.RFC3339Nano),
-		PracticeType: "photo_description", AudioAssetID: "audio-1",
-	})
-	if err == nil || !strings.Contains(err.Error(), "Photo asset") {
-		t.Fatalf("expected photo validation error, got %v", err)
-	}
-}
-
-func TestDeterministicRecordingCreateV1Identity(t *testing.T) {
-	firstID, firstDigest := deterministicRecordingCreateV1Identity("principal-1", "retry-key", "recording")
-	secondID, secondDigest := deterministicRecordingCreateV1Identity("principal-1", "retry-key", "recording")
-	otherID, _ := deterministicRecordingCreateV1Identity("principal-1", "other-key", "recording")
-	if firstID != secondID || firstDigest != secondDigest {
-		t.Fatal("same principal and idempotency key must produce the same identity")
-	}
-	if firstID == otherID || len(firstDigest) != 64 {
-		t.Fatalf("unexpected deterministic identity %q / %q", firstID, firstDigest)
-	}
-}
 
 func TestRecordingMediaExposesStableBackendPaths(t *testing.T) {
 	audioID := "audio asset"

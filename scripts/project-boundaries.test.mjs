@@ -211,6 +211,19 @@ test("recording analysis owns its policy outside HTTP and provider adapters", ()
   }
 });
 
+test("mobile recording creation keeps transport, policy, and SQL separate", () => {
+  const transport = readFileSync("backend/internal/httpapi/recordings_create_v1.go", "utf8");
+  const service = readFileSync("backend/internal/recording/create.go", "utf8");
+  const repository = readFileSync("backend/internal/recording/create_repository.go", "utf8");
+
+  assert.match(transport, /recordingCreator\.Create/);
+  assert.doesNotMatch(transport, /SELECT |INSERT INTO|UPDATE |DELETE FROM|pgx|workqueue/);
+  assert.match(service, /CreateUnitOfWork|validateCreateQuota|NormalizeCreateInput/);
+  assert.doesNotMatch(service, /SELECT |INSERT INTO|UPDATE |DELETE FROM|pgx|workqueue|net\/http/);
+  assert.match(repository, /SELECT |INSERT INTO|UPDATE |workqueue\.Enqueue/);
+  assert.doesNotMatch(repository, /http\.Status|writeJSON|writeV1Error/);
+});
+
 test("guest preview separates transport, processing policy, and SQL storage", () => {
   const model = readFileSync("backend/internal/guestpreview/model.go", "utf8");
   const processor = readFileSync("backend/internal/guestpreview/processor.go", "utf8");

@@ -123,7 +123,7 @@ func (s *Server) handleCreateRecording(w http.ResponseWriter, r *http.Request) {
 	// Recheck and reserve quota under the same user-row lock used by mobile
 	// recording creation and guest-preview promotion. The optimistic check above
 	// avoids unnecessary file work, while this check is the concurrency boundary.
-	qBefore, err = lockRecordingQuotaV1(r.Context(), tx, user.ID)
+	qBefore, err = quota.LockRecordingQuota(r.Context(), tx, user.ID, time.Now().UTC())
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to save recording."})
 		return
@@ -228,6 +228,10 @@ func saveAudioFile(kind string, userID string, id string, audio *domain.ParsedAu
 type quotaHTTPError struct {
 	status  int
 	message string
+}
+
+func (e *quotaHTTPError) Error() string {
+	return e.message
 }
 
 func recordingQuotaError(q quota.RecordingQuota, duration int) *quotaHTTPError {

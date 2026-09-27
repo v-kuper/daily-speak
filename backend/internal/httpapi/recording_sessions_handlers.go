@@ -312,7 +312,7 @@ func (s *Server) handleFinishRecordingSession(w http.ResponseWriter, r *http.Req
 	// The session lock preserves finalize idempotency; the user-row lock below
 	// serializes its quota reservation with direct web/mobile recordings and
 	// guest-preview promotion.
-	qBefore, err = lockRecordingQuotaV1(r.Context(), tx, user.ID)
+	qBefore, err = quota.LockRecordingQuota(r.Context(), tx, user.ID, time.Now().UTC())
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to save recording."})
 		return

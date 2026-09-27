@@ -61,6 +61,7 @@ type Server struct {
 	recordingAnalyzer        recording.Analyzer
 	recordingRewriter        recording.Rewriter
 	recordingPreviewAnalyzer recording.PreviewAnalyzer
+	recordingCreator         *recording.Creator
 	recordingRepository      *recording.SQLProcessingRepository
 	recordingProcessor       *recording.Processor
 	guestPreviewStore        *guestpreview.Store
@@ -174,6 +175,7 @@ func NewServer(config Config) *Server {
 		recordingAnalyzer:        recordingAnalyzer,
 		recordingRewriter:        recordingRewriter,
 		recordingPreviewAnalyzer: recordingPreviewAnalyzer,
+		recordingCreator:         recording.NewCreator(recording.NewSQLCreateUnitOfWork(config.DB)),
 		recordingRepository:      recordingRepository,
 		guestPreviewStore:        guestPreviewStore,
 		shadowingStore:           shadowingStore,
