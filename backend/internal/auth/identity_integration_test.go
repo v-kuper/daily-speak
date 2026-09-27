@@ -248,19 +248,22 @@ func TestMobileIdentityLifecycle(t *testing.T) {
 	if _, err := AuthenticateAccessToken(ctx, database, config, loggedIn.AccessToken); err != nil {
 		t.Fatalf("login access failed: %v", err)
 	}
-	if loggedIn.GuestPreviewPromotion == nil || loggedIn.GuestPreviewPromotion.Status != "not_promoted" || loggedIn.GuestPreviewPromotion.Reason != "promotion_already_used" {
-		t.Fatalf("repeat guest promotion was not bounded: %+v", loggedIn.GuestPreviewPromotion)
+	if loggedIn.GuestPreviewPromotion == nil || loggedIn.GuestPreviewPromotion.Status != "promoted" || loggedIn.GuestPreviewPromotion.RecordingID != queuedPreviewID {
+		t.Fatalf("existing-account guest promotion failed: %+v", loggedIn.GuestPreviewPromotion)
 	}
 	var queuedRecordingCount int
-	if err := database.QueryRow(ctx, `SELECT COUNT(*) FROM recordings WHERE id = $1`, queuedPreviewID).Scan(&queuedRecordingCount); err != nil || queuedRecordingCount != 0 {
-		t.Fatalf("repeat guest promotion created recordings=%d err=%v", queuedRecordingCount, err)
+	if err := database.QueryRow(ctx, `
+		SELECT COUNT(*) FROM recordings WHERE id = $1 AND user_id = $2`,
+		queuedPreviewID, registered.Identity.PrincipalID,
+	).Scan(&queuedRecordingCount); err != nil || queuedRecordingCount != 1 {
+		t.Fatalf("existing-account guest promotion created recordings=%d err=%v", queuedRecordingCount, err)
 	}
 	if err := database.QueryRow(ctx, `SELECT state FROM processing_jobs WHERE id = $1`, queuedPreviewJobID).Scan(&guestJobState); err != nil || guestJobState != "cancelled" {
 		t.Fatalf("queued preview job state=%q err=%v", guestJobState, err)
 	}
 	if err := database.QueryRow(ctx, `
-		SELECT owner_principal_id, purpose FROM media_assets WHERE id = $1`, queuedAssetID).Scan(&assetOwner, &assetPurpose); err != nil || assetOwner != secondGuest.Identity.PrincipalID || assetPurpose != "guest_preview_audio" {
-		t.Fatalf("non-promoted preview media owner=%q purpose=%q err=%v", assetOwner, assetPurpose, err)
+		SELECT owner_principal_id, purpose FROM media_assets WHERE id = $1`, queuedAssetID).Scan(&assetOwner, &assetPurpose); err != nil || assetOwner != registered.Identity.PrincipalID || assetPurpose != "recording_audio" {
+		t.Fatalf("promoted preview media owner=%q purpose=%q err=%v", assetOwner, assetPurpose, err)
 	}
 
 	otherDevice, err := LoginIdentityUser(ctx, database, config, credentials, nil, DeviceInfo{Name: "iPad", Platform: "iPadOS"})
@@ -359,11 +362,8 @@ func TestGuestPreviewPromotionReservesAccountQuota(t *testing.T) {
 	if loggedIn.GuestPreviewPromotion == nil || loggedIn.GuestPreviewPromotion.Status != "not_promoted" || loggedIn.GuestPreviewPromotion.Reason != "quota_exceeded" {
 		t.Fatalf("unexpected quota promotion result: %+v", loggedIn.GuestPreviewPromotion)
 	}
-	var promotedRecordings, entitlements int
+	var promotedRecordings int
 	if err := database.QueryRow(ctx, `SELECT COUNT(*) FROM recordings WHERE id = $1`, previewID).Scan(&promotedRecordings); err != nil || promotedRecordings != 0 {
 		t.Fatalf("quota rejection created recordings=%d err=%v", promotedRecordings, err)
-	}
-	if err := database.QueryRow(ctx, `SELECT COUNT(*) FROM guest_preview_entitlements WHERE user_id = $1`, account.Identity.PrincipalID).Scan(&entitlements); err != nil || entitlements != 0 {
-		t.Fatalf("quota rejection consumed entitlements=%d err=%v", entitlements, err)
 	}
 }

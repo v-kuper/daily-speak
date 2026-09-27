@@ -144,6 +144,23 @@ func TestRecordingContractMigrationRemovesLegacyUploadSessions(t *testing.T) {
 	}
 }
 
+func TestGuestPromotionMigrationRemovesLifetimeEntitlement(t *testing.T) {
+	catalog, err := migrations.All()
+	if err != nil {
+		t.Fatalf("load migrations: %v", err)
+	}
+	var sql string
+	for _, migration := range catalog {
+		if migration.Name == "0009_drop_guest_preview_entitlements.sql" {
+			sql = migration.SQL
+			break
+		}
+	}
+	if !strings.Contains(sql, "DROP TABLE IF EXISTS guest_preview_entitlements") {
+		t.Fatal("guest promotion migration must remove the lifetime entitlement table")
+	}
+}
+
 func TestMigrateConcurrentAndAdoptsLegacySchema(t *testing.T) {
 	databaseURL := strings.TrimSpace(os.Getenv("TEST_DATABASE_URL"))
 	if databaseURL == "" {

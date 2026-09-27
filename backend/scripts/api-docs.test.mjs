@@ -310,5 +310,5 @@ test("mobile media contract keeps mutations idempotent and storage requests opaq
   assert.equal(openapi.paths["/api/v1/guest/previews"].post.responses["503"].$ref, "#/components/responses/V1CapacityUnavailable");
   assert.deepEqual(openapi.components.schemas.IdentityGrantResponse.properties.guestPreviewPromotion.$ref, "#/components/schemas/GuestPreviewPromotion");
   assert.deepEqual(openapi.components.schemas.GuestPreviewPromotion.properties.status.enum, ["promoted", "not_promoted", "no_preview"]);
-  assert.deepEqual(openapi.components.schemas.GuestPreviewPromotion.properties.reason.enum, ["promotion_already_used", "quota_exceeded"]);
+  assert.deepEqual(openapi.components.schemas.GuestPreviewPromotion.properties.reason.enum, ["quota_exceeded"]);
 });

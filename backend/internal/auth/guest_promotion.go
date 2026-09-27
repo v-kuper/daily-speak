@@ -198,11 +198,6 @@ func promoteGuestPreview(ctx context.Context, tx pgx.Tx, guestPrincipalID string
 	}); err != nil {
 		return nil, err
 	}
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO guest_preview_entitlements (user_id, preview_id, consumed_at)
-		VALUES ($1, $2, $3)`, userPrincipalID, preview.ID, now); err != nil {
-		return nil, err
-	}
 	result, err := tx.Exec(ctx, `
 		UPDATE guest_previews
 		SET state = 'promoted', promoted_recording_id = $2,
@@ -223,14 +218,6 @@ func lockGuestPreviewPromotionEligibility(ctx context.Context, tx pgx.Tx, userID
 	recordingQuota, err := quota.LockRecordingQuota(ctx, tx, userID, now)
 	if err != nil {
 		return false, "", err
-	}
-	var entitlementConsumed bool
-	if err := tx.QueryRow(ctx, `
-		SELECT EXISTS (SELECT 1 FROM guest_preview_entitlements WHERE user_id = $1)`, userID).Scan(&entitlementConsumed); err != nil {
-		return false, "", err
-	}
-	if entitlementConsumed {
-		return false, "promotion_already_used", nil
 	}
 	if recordingQuota.IsSubscriber {
 		return true, "", nil

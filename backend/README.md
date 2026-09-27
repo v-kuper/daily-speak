@@ -119,9 +119,11 @@ contract. A guest may upload one audio asset (10 MiB maximum) and call
 `POST /api/v1/guest/previews` once. The backend verifies that the audio is no
 longer than 60 seconds, then returns only a transcript and up to two
 high-confidence corrections. Registration or login atomically promotes the
-same preview id to a normal recording, reuses a completed transcript, and
-queues the full analysis. Multipass analysis, rewrite, and shadowing never run
-for an unauthenticated guest.
+same preview id to a normal recording when account quota allows, reuses a
+completed transcript, and queues the full analysis. Each guest session can be
+promoted only once, while an existing account may receive a later guest
+session under its normal quota. Multipass analysis, rewrite, and shadowing
+never run for an unauthenticated guest.
 
 ## Environment
 

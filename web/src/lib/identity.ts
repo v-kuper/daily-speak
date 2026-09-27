@@ -16,7 +16,7 @@ export type IdentityPromotion = {
   status: "promoted" | "not_promoted" | "no_preview";
   previewId?: string;
   recordingId?: string;
-  reason?: "promotion_already_used" | "quota_exceeded";
+  reason?: "quota_exceeded";
 };
 
 export type BrowserIdentity = {
@@ -69,7 +69,7 @@ const parsePromotion = (value: unknown): IdentityPromotion | undefined => {
     return {
       status: "not_promoted",
       previewId: typeof candidate.previewId === "string" ? candidate.previewId : undefined,
-      reason: candidate.reason === "quota_exceeded" ? "quota_exceeded" : "promotion_already_used",
+      reason: candidate.reason === "quota_exceeded" ? "quota_exceeded" : undefined,
     };
   }
   if (candidate.status === "no_preview") return { status: "no_preview" };

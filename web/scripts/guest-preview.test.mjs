@@ -183,50 +183,53 @@ test("guest preview survives navigation, polls with its owner token, and limits 
   assert.equal(result.corrections.length, 2);
 });
 
-test("preview authentication promotes the stable ID through the unified browser identity", async (t) => {
-  browser(t, async (url, init = {}) => {
-    const path = new URL(String(url)).pathname;
-    if (path === "/api/v1/auth/anonymous") return json(identity());
-    if (path === "/api/v1/media/uploads") return json({
-      asset: { id: "asset-123" }, upload: { id: "upload-123", partSizeBytes: 3, partCount: 1 },
-    }, 201);
-    if (path.endsWith("/parts")) return json({ parts: [{ partNumber: 1, request: { method: "PUT", url: "/signed-part", headers: {} } }] });
-    if (path === "/signed-part") return new Response(null, { status: 200, headers: { ETag: "etag" } });
-    if (path.endsWith("/complete")) return json({ asset: { id: "asset-123", state: "ready" } });
-    if (path === "/api/v1/guest/previews") return json({ preview: preview("ready") }, 201);
-    if (path === "/api/v1/auth/register") {
-      assert.equal(init.headers.Authorization, "Bearer guest-access");
-      return json({
-        ...identity("user"),
-        user: { email: "person@example.test", isSubscriber: false, englishLevel: "b1" },
-        guestPreviewPromotion: { status: "promoted", previewId: "preview-123", recordingId: "preview-123" },
+for (const mode of ["signIn", "signUp"]) {
+  test(`preview ${mode} promotes the stable ID through the unified browser identity`, async (t) => {
+    const authPath = mode === "signIn" ? "/api/v1/auth/login" : "/api/v1/auth/register";
+    browser(t, async (url, init = {}) => {
+      const path = new URL(String(url)).pathname;
+      if (path === "/api/v1/auth/anonymous") return json(identity());
+      if (path === "/api/v1/media/uploads") return json({
+        asset: { id: "asset-123" }, upload: { id: "upload-123", partSizeBytes: 3, partCount: 1 },
       }, 201);
-    }
-    throw new Error(`Unexpected request: ${url}`);
-  });
-  await guest.createGuestPreview({
-    topic: "Travel", duration: 3, timestamp: "2026-09-27T09:00:00Z",
-    practiceType: "topic", audioDataUrl: "data:audio/webm;base64,YWJj",
-  });
+      if (path.endsWith("/parts")) return json({ parts: [{ partNumber: 1, request: { method: "PUT", url: "/signed-part", headers: {} } }] });
+      if (path === "/signed-part") return new Response(null, { status: 200, headers: { ETag: "etag" } });
+      if (path.endsWith("/complete")) return json({ asset: { id: "asset-123", state: "ready" } });
+      if (path === "/api/v1/guest/previews") return json({ preview: preview("ready") }, 201);
+      if (path === authPath) {
+        assert.equal(init.headers.Authorization, "Bearer guest-access");
+        return json({
+          ...identity("user"),
+          user: { email: "person@example.test", isSubscriber: false, englishLevel: "b1" },
+          guestPreviewPromotion: { status: "promoted", previewId: "preview-123", recordingId: "preview-123" },
+        }, mode === "signIn" ? 200 : 201);
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    await guest.createGuestPreview({
+      topic: "Travel", duration: 3, timestamp: "2026-09-27T09:00:00Z",
+      practiceType: "topic", audioDataUrl: "data:audio/webm;base64,YWJj",
+    });
 
-  const initial = app.default(undefined, { type: "test/init" });
-  const store = configureStore({
-    reducer: { app: app.default },
-    preloadedState: { app: {
-      ...initial,
-      authInitialized: true,
-      authEmailDraft: "person@example.test",
-      authPasswordDraft: "password123",
-    } },
+    const initial = app.default(undefined, { type: "test/init" });
+    const store = configureStore({
+      reducer: { app: app.default },
+      preloadedState: { app: {
+        ...initial,
+        authInitialized: true,
+        authEmailDraft: "person@example.test",
+        authPasswordDraft: "password123",
+      } },
+    });
+    const navigation = router();
+    await flows.authenticateAndNavigate(store, navigation, mode, "/preview/preview-123");
+    assert.equal(store.getState().app.isAuthenticated, true);
+    assert.equal(store.getState().app.speakState, "idle");
+    assert.equal(store.getState().app.pendingRecordingAudioDataUrl, null);
+    assert.deepEqual(navigation.visits, [["replace", "/history/preview-123"]]);
+    assert.equal(guest.readGuestPreviewSession(), null);
   });
-  const navigation = router();
-  await flows.authenticateAndNavigate(store, navigation, "signUp", "/preview/preview-123");
-  assert.equal(store.getState().app.isAuthenticated, true);
-  assert.equal(store.getState().app.speakState, "idle");
-  assert.equal(store.getState().app.pendingRecordingAudioDataUrl, null);
-  assert.deepEqual(navigation.visits, [["replace", "/history/preview-123"]]);
-  assert.equal(guest.readGuestPreviewSession(), null);
-});
+}
 
 test("a lost upload-create response retries with the same idempotency key", async (t) => {
   let uploadCreates = 0;

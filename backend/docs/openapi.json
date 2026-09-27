@@ -240,7 +240,7 @@
           "Auth"
         ],
         "summary": "Sign in and optionally merge a guest identity",
-        "description": "When a guest Bearer token is supplied, its identity is merged into the account atomically. An account may consume the guest-preview promotion only once and free accounts must have recording quota available; authentication still succeeds when promotion is declined, with the result in guestPreviewPromotion.",
+        "description": "When a guest Bearer token is supplied, its identity and current preview are merged into the account atomically. Normal account recording quota applies; authentication still succeeds when promotion is declined, with the result in guestPreviewPromotion.",
         "security": [
           {},
           {
@@ -3105,7 +3105,6 @@
           "reason": {
             "type": "string",
             "enum": [
-              "promotion_already_used",
               "quota_exceeded"
             ],
             "description": "Machine-readable reason, present only when status is not_promoted."
