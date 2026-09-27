@@ -14,6 +14,7 @@ import (
 	"daily-speaking-practice/backend/internal/auth"
 	"daily-speaking-practice/backend/internal/background"
 	"daily-speaking-practice/backend/internal/db"
+	"daily-speaking-practice/backend/internal/feed"
 	"daily-speaking-practice/backend/internal/guestpreview"
 	"daily-speaking-practice/backend/internal/logging"
 	"daily-speaking-practice/backend/internal/media"
@@ -61,6 +62,7 @@ type Server struct {
 	synthesizer              tts.Synthesizer
 	aiClient                 ai.ChatClient
 	practiceGenerator        practice.Generator
+	feedService              *feed.Service
 	profileService           *profile.Service
 	subscriptionService      *subscription.Service
 	recordingAnalyzer        recording.Analyzer
@@ -186,6 +188,7 @@ func NewServer(config Config) *Server {
 		synthesizer:              synthesizer,
 		aiClient:                 aiClient,
 		practiceGenerator:        practiceGenerator,
+		feedService:              feed.NewService(feed.NewSQLRepository(config.DB), feed.NewLocalReplyAudioStore(resolveUploadsDir()), uuid.NewString),
 		profileService:           profile.NewService(profile.NewSQLRepository(config.DB)),
 		subscriptionService:      subscription.NewService(subscription.NewSQLRepository(config.DB)),
 		recordingAnalyzer:        recordingAnalyzer,

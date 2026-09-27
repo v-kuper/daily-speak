@@ -32,7 +32,7 @@ OpenAPI contract and architecture documentation current:
 
 1. **Completed:** Move the web sandbox to the versioned media/recording flow and remove the
    duplicate legacy recording-create and recording-upload-session paths.
-2. Remove direct SQL and transaction management from `internal/httpapi`; HTTP
+2. **Completed:** Remove direct SQL and transaction management from `internal/httpapi`; HTTP
    handlers may validate transport data, call an application service, and map
    its result only.
 3. Move dependency construction and environment-driven adapter selection out
@@ -40,7 +40,7 @@ OpenAPI contract and architecture documentation current:
    and worker entry points where appropriate.
 4. Finish the media application boundary so ownership, guest restrictions, and
    lifecycle transitions are application policy rather than HTTP policy.
-5. Isolate the retained Feed backend behind its own repository and service
+5. **Completed:** Isolate the retained Feed backend behind its own repository and service
    boundary while keeping it absent from the web and mobile clients.
 6. Replace the catch-all `internal/domain` helpers with feature-owned helpers,
    then split large files only where the split follows a real responsibility.
@@ -107,20 +107,15 @@ queue remains the default until measured workload demonstrates a limitation.
 
 ## P1: feature-oriented backend split
 
-Most high-risk vertical slices now have explicit application boundaries:
+The retained vertical slices now have explicit application boundaries:
 practice generation, recording creation/deletion/processing and analysis,
-recording upload sessions, guest preview, shadowing, unified identity, profile,
-and subscription. Worker composition lives outside HTTP; local/S3 and legacy
+guest preview, shadowing, unified identity, profile, subscription, and Feed.
+Worker composition lives outside HTTP; local/S3 and legacy
 session files are injected adapters. Their HTTP handlers validate transport
 data, call a service, and map its result.
 
-Continue reducing the remaining direct persistence in `backend/internal/httpapi`
-in this order so every merge stays deployable:
-
-1. Finish the media HTTP/application boundary so authorization and completion
-   policy are not split between handlers and `internal/media`.
-2. Keep Feed isolated until the retained-Feed product decision is made; do not
-   intermingle its SQL or media policy with recording modules.
+Production HTTP transport no longer owns SQL or transactions. Keep that
+boundary enforced while finishing composition and feature-owned helpers.
 
 Each extraction must preserve routes, OpenAPI, persisted data, authorization,
 idempotency, retry behavior, and integration coverage. Avoid a single large

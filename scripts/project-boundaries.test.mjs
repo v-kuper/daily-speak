@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import test from "node:test";
 
 test("web and backend are standalone projects", () => {
@@ -259,6 +259,24 @@ test("recording query and retry keep persistence and queue mechanics outside HTT
 test("legacy recording upload sessions stay retired", () => {
   assert.equal(existsSync("backend/internal/storage/recording_sessions.go"), false);
   assert.equal(existsSync("backend/internal/httpapi/recording_sessions_handlers.go"), false);
+});
+
+test("HTTP transport contains no production SQL and Feed owns its persistence", () => {
+  const transport = readdirSync("backend/internal/httpapi")
+    .filter((name) => name.endsWith(".go") && !name.endsWith("_test.go"))
+    .map((name) => readFileSync(`backend/internal/httpapi/${name}`, "utf8"))
+    .join("\n");
+  const feedHandler = readFileSync("backend/internal/httpapi/feed_handlers.go", "utf8");
+  const feedService = readFileSync("backend/internal/feed/service.go", "utf8");
+  const feedRepository = readFileSync("backend/internal/feed/repository.go", "utf8");
+
+  assert.doesNotMatch(transport, /\bSELECT\b|\bINSERT INTO\b|\bUPDATE\b|\bDELETE FROM\b|s\.db\.(?:Query|QueryRow|Exec|Begin)\(/);
+  assert.match(feedHandler, /feedService\.(?:ListPosts|PublishRecording|GetThread|CreateReply|SetReaction)/);
+  assert.doesNotMatch(feedHandler, /pgx|internal\/db|os\.WriteFile|os\.Remove/);
+  assert.match(feedService, /type Repository interface|type ReplyAudioStore interface/);
+  assert.doesNotMatch(feedService, /net\/http|internal\/httpapi|SELECT |INSERT INTO|UPDATE |DELETE FROM|pgx/);
+  assert.match(feedRepository, /FROM feed_posts|INSERT INTO feed_replies|feed_post_reactions/);
+  assert.doesNotMatch(feedRepository, /net\/http|internal\/httpapi|writeJSON/);
 });
 
 test("guest preview separates transport, processing policy, and SQL storage", () => {

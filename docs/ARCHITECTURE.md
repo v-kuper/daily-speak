@@ -128,6 +128,7 @@ backend/internal/aiparse     provider-neutral model-output normalization
 backend/internal/auth        unified web/mobile identity and token lifecycle
 backend/internal/db          PostgreSQL connection and migrations
 backend/internal/httpapi     HTTP transport, authorization gates, response mapping
+backend/internal/feed        retained Feed service, persistence, and reply-media adapter
 backend/internal/media       authorized media lifecycle
 backend/internal/practice    speaking-practice generation application service
 backend/internal/practice/ollamaadapter  Ollama adapter for the practice port
@@ -144,10 +145,10 @@ backend/migrations           immutable ordered schema migrations
 backend/docs                 generated OpenAPI and Swagger assets
 ```
 
-Some legacy create, media, and retained-Feed persistence still lives
-in `backend/internal/httpapi`. Its remaining feature-oriented split is
-tracked in [`TECH_DEBT.md`](TECH_DEBT.md); new business rules must not be added
-to the transport package.
+Production SQL and transaction management live in feature repositories rather
+than `backend/internal/httpapi`. Remaining composition and helper ownership work
+is tracked in [`TECH_DEBT.md`](TECH_DEBT.md); new business rules must not be
+added to the transport package.
 
 ## Retained Feed backend
 
