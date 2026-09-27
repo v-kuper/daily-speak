@@ -96,10 +96,8 @@ func (s *Server) dispatchV1(w http.ResponseWriter, r *http.Request) {
 		s.handleCreateRecordingV1(w, r)
 	case path == "/api/v1/recordings":
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
-	case strings.HasPrefix(path, "/api/v1/recordings/") && !strings.Contains(strings.TrimPrefix(path, "/api/v1/recordings/"), "/") && r.Method == http.MethodGet:
-		s.handleGetRecording(w, r, strings.TrimPrefix(path, "/api/v1/recordings/"))
-	case strings.HasPrefix(path, "/api/v1/recordings/") && !strings.Contains(strings.TrimPrefix(path, "/api/v1/recordings/"), "/"):
-		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
+	case strings.HasPrefix(path, "/api/v1/recordings/"):
+		s.routeRecordingV1(w, r, strings.TrimPrefix(path, "/api/v1/recordings/"))
 	default:
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Not found"})
 	}

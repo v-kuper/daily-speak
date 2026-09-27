@@ -225,10 +225,11 @@ Windows host directory is:
 D:\DailySpeaking\data\uploads
 ```
 
-Recorded media is stored below `recordings\<user-id>`, Feed reply media below
-`feed-replies\<user-id>`, and generated pronunciation audio below
-`shadowing\<user-id>`. PostgreSQL stores `/uploads/...` URLs, and the backend
-serves those paths from the API origin. The web container has no upload mount.
+New recording originals, photos, and generated pronunciation audio are stored
+as private media objects below generated owner-scoped keys. PostgreSQL stores
+their media asset IDs; clients obtain short-lived download requests through
+`/api/v1/media/*`. Only retained old recording and Feed files use `/uploads/*`.
+The web container has no upload mount.
 
 Set the `UPLOADS_HOST_DIR` repository variable to move media to another durable
 drive. Never point it at the Actions checkout. Do not use `docker compose down

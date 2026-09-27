@@ -85,8 +85,8 @@ test("details render the shadowing guidance, audio, and retry action", () => {
     detailsSource,
     /Listen, then repeat with the same rhythm and pronunciation\./,
   );
-  assert.match(detailsSource, /requestMediaPlaybackTicket\(\{ downloadPath: shadowingDownloadPath/);
-  assert.match(detailsSource, /<audio[\s\S]*?src=\{shadowingPlaybackURL\}/);
+  assert.match(detailsSource, /useProtectedMediaURL\([\s\S]*?shadowingDownloadPath/);
+  assert.match(detailsSource, /<audio[\s\S]*?src=\{shadowingMediaURL\}/);
   assert.doesNotMatch(detailsSource, /src=\{recording\.shadowingAudioUrl\}/);
   assert.match(detailsSource, /dispatch\(generateShadowingAudio\(recording\.id\)\)/);
 });

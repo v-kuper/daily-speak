@@ -43,6 +43,7 @@ func (transaction *sqlRetryTransaction) Claim(ctx context.Context, userID string
 		    corrected_transcript = '',
 		    shadowing_status = 'pending',
 		    shadowing_audio_url = NULL,
+		    shadowing_asset_id = NULL,
 		    shadowing_error = NULL,
 		    shadowing_updated_at = NOW(),
 		    shadowing_attempt_id = NULL

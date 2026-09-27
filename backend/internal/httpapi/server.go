@@ -125,8 +125,6 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/v1/media/local/", s.routeSignedLocalMedia)
 	mux.HandleFunc("/api/v1/", s.routeV1)
 	mux.HandleFunc("/api/", s.routeAPI)
-	mux.HandleFunc("/uploads/shadowing", s.handleShadowingUpload)
-	mux.HandleFunc("/uploads/shadowing/", s.handleShadowingUpload)
 	mux.Handle(uploadsURLPrefix, http.HandlerFunc(s.handleLegacyUpload))
 	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Not found"})
@@ -171,14 +169,6 @@ func (s *Server) routeAPI(w http.ResponseWriter, r *http.Request) {
 		s.handleGetEnglishLevel(w, r)
 	case path == "/api/user/english-level" && r.Method == http.MethodPut:
 		s.handlePutEnglishLevel(w, r)
-	case strings.HasPrefix(path, "/api/recordings/") && strings.HasSuffix(path, "/retry") && r.Method == http.MethodPost:
-		s.routeRecordingRetryPath(w, r, strings.TrimPrefix(path, "/api/recordings/"))
-	case strings.HasPrefix(path, "/api/recordings/") && strings.HasSuffix(path, "/shadowing") && r.Method == http.MethodPost:
-		s.routeShadowingPath(w, r, strings.TrimPrefix(path, "/api/recordings/"))
-	case strings.HasPrefix(path, "/api/recordings/") && r.Method == http.MethodGet:
-		s.handleGetRecording(w, r, strings.TrimPrefix(path, "/api/recordings/"))
-	case strings.HasPrefix(path, "/api/recordings/") && r.Method == http.MethodDelete:
-		s.handleDeleteRecording(w, r, strings.TrimPrefix(path, "/api/recordings/"))
 	case path == "/api/feed/posts" && r.Method == http.MethodGet:
 		s.handleFeedPosts(w, r)
 	case path == "/api/feed/posts" && r.Method == http.MethodPost:

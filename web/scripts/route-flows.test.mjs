@@ -26,9 +26,13 @@ const draft = {
 const saved = {
   id: "permanent-123", topic: "Travel", duration: 20, timestamp: draft.timestamp,
   practiceType: "topic", status: "processing", transcript: "", correctedTranscript: "",
-  suggestions: [], processingStage: "transcription", audioDataUrl: "/uploads/saved.webm",
-  photoDataUrl: null, photoObject: null, processingError: null, shadowingStatus: "pending",
-  shadowingAudioUrl: null, shadowingError: null, shadowingUpdatedAt: draft.timestamp,
+  suggestions: [], processingStage: "transcription", photoObject: null, processingError: null,
+  shadowingStatus: "pending", shadowingError: null, shadowingUpdatedAt: draft.timestamp,
+  media: {
+    audio: { assetId: "audio-asset", downloadPath: "/api/v1/media/audio-asset/download" },
+    photo: null,
+    shadowing: null,
+  },
 };
 const guest = {
   authInitialized: true, authEmailDraft: "person@example.test", authPasswordDraft: "password123",
@@ -203,6 +207,30 @@ test("a history refresh keeps a pending or failed local recording visible", () =
   assert.equal(store.getState().app.recordingSaveError, "Storage unavailable");
 });
 
+test("user bootstrap loads recordings only from the v1 collection", async (t) => {
+  const store = storeFor({ isAuthenticated: true, userEmail: "person@example.test" });
+  const requests = [];
+  server(t, async (url) => {
+    requests.push(url);
+    if (url.endsWith("/api/user/data")) {
+      return response({
+        interestIds: [], englishLevel: "B1", quota: null, subscription: null,
+        recordings: [{ ...saved, id: "legacy-bootstrap-recording" }],
+      });
+    }
+    assert.equal(url, "https://api.example.test/api/v1/recordings?limit=100");
+    return response({ items: [saved], page: { limit: 100, nextCursor: null } });
+  });
+
+  const result = await store.dispatch(app.fetchUserData()).unwrap();
+  assert.deepEqual(requests, [
+    "https://api.example.test/api/user/data",
+    "https://api.example.test/api/v1/recordings?limit=100",
+  ]);
+  assert.deepEqual(result.recordings.map(({ id }) => id), ["permanent-123"]);
+  assert.deepEqual(store.getState().app.recordings.map(({ id }) => id), ["permanent-123"]);
+});
+
 test("fallback remains a background save while the fallback response is pending", async (t) => {
   const run = flow("saveAndNavigate"), store = storeFor({ isAuthenticated: true }), router = routerFor();
   const fallback = deferred();
@@ -241,9 +269,11 @@ for (const status of [403, 404]) {
   test(`detail ${status} response stays stable without retrying or trusting the route ID`, async (t) => {
     const select = flow("recordingDetailState"), store = storeFor({ isAuthenticated: true });
     server(t, async (url, init) => {
-      assert.equal(url, "https://api.example.test/api/recordings/other%20owner");
+      assert.equal(url, "https://api.example.test/api/v1/recordings/other%20owner");
       assert.equal(init.credentials, "include");
-      return response({ error: "Recording not accessible" }, status);
+      return response({
+        error: { code: "not_found", message: "Recording not accessible", requestId: "request-detail" },
+      }, status);
     });
     await store.dispatch(app.fetchRecording("other owner"));
     assert.equal(select(store.getState().app, "other owner").shouldFetch, false);
@@ -255,14 +285,20 @@ for (const status of [403, 404]) {
 test("deletion waits for success before leaving details and stays on rejection", async (t) => {
   const run = flow("deleteAndNavigate"), store = storeFor({ isAuthenticated: true, recordings: [saved] }), router = routerFor();
   const pending = deferred();
-  server(t, async () => pending.promise);
+  server(t, async (url, init) => {
+    assert.equal(url, "https://api.example.test/api/v1/recordings/permanent-123");
+    assert.equal(init.method, "DELETE");
+    return pending.promise;
+  });
   const attempt = run(store, router, "permanent-123");
   assert.deepEqual(router.visits, []);
   pending.resolve(response({ deletedRecordingId: "permanent-123" }));
   await attempt;
   assert.deepEqual(router.visits, [["replace", "/history"]]);
   assert.deepEqual(store.getState().app.recordings, []);
-  server(t, async () => response({ error: "Cannot delete" }, 503));
+  server(t, async () => response({
+    error: { code: "internal_error", message: "Cannot delete", requestId: "request-delete" },
+  }, 503));
   await run(store, router, "another-id");
   assert.equal(router.visits.length, 1);
   assert.equal(store.getState().app.recordingDeleteError, "Cannot delete");

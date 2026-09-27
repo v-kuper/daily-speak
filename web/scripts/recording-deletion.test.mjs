@@ -17,14 +17,24 @@ const firstRecording = {
   suggestions: [],
   processingStage: null,
   practiceType: "topic",
-  audioDataUrl: "https://api.example.test/uploads/recordings/recording-1.webm",
-  photoDataUrl: null,
+  localAudioDataUrl: null,
+  localPhotoDataUrl: null,
   photoObject: null,
   processingError: null,
   shadowingStatus: "ready",
-  shadowingAudioUrl: "https://api.example.test/uploads/recordings/recording-1-shadowing.wav",
   shadowingError: null,
   shadowingUpdatedAt: "2026-09-21T09:01:00Z",
+  media: {
+    audio: {
+      assetId: "recording-1-audio",
+      downloadPath: "/api/v1/media/recording-1-audio/download",
+    },
+    photo: null,
+    shadowing: {
+      assetId: "recording-1-shadowing",
+      downloadPath: "/api/v1/media/recording-1-shadowing/download",
+    },
+  },
 };
 const secondRecording = { ...firstRecording, id: "recording-2" };
 

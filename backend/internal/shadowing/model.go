@@ -28,13 +28,12 @@ type Work struct {
 }
 
 type Asset struct {
-	ID              string
-	OwnerID         string
-	StorageDriver   string
-	Bucket          string
-	ObjectKey       string
-	Size            int64
-	Checksum        string
-	ETag            string
-	LegacyPublicURL string
+	ID            string
+	OwnerID       string
+	StorageDriver string
+	Bucket        string
+	ObjectKey     string
+	Size          int64
+	Checksum      string
+	ETag          string
 }

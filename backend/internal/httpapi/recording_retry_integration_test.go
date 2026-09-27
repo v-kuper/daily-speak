@@ -15,6 +15,7 @@ import (
 	"daily-speaking-practice/backend/internal/ai"
 	"daily-speaking-practice/backend/internal/auth"
 	"daily-speaking-practice/backend/internal/db"
+	"daily-speaking-practice/backend/internal/recording"
 	"github.com/google/uuid"
 )
 
@@ -136,7 +137,7 @@ func newRecordingRetryFixture(t *testing.T, stage string, client *retryAIClient)
 
 func (fixture recordingRetryFixture) post(t *testing.T, accessToken string) *httptest.ResponseRecorder {
 	t.Helper()
-	request := httptest.NewRequest(http.MethodPost, "/api/recordings/"+fixture.recordingID+"/retry", nil)
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/recordings/"+fixture.recordingID+"/retry", nil)
 	if accessToken != "" {
 		request.Header.Set("Authorization", "Bearer "+accessToken)
 	}
@@ -145,34 +146,34 @@ func (fixture recordingRetryFixture) post(t *testing.T, accessToken string) *htt
 	return response
 }
 
-func (fixture recordingRetryFixture) waitForStatus(t *testing.T, want string) recordingResponse {
+func (fixture recordingRetryFixture) waitForStatus(t *testing.T, want string) recording.Record {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
-		recording, err := fixture.server.recordingForUser(context.Background(), fixture.owner.ID, fixture.recordingID)
-		if err == nil && recording.Status == want {
-			return recording
+		record, err := fixture.server.recordingReader.Get(context.Background(), fixture.owner.ID, fixture.recordingID)
+		if err == nil && record.Status == want {
+			return record
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	recording, err := fixture.server.recordingForUser(context.Background(), fixture.owner.ID, fixture.recordingID)
-	t.Fatalf("recording status did not become %q: recording=%#v err=%v", want, recording, err)
-	return recordingResponse{}
+	record, err := fixture.server.recordingReader.Get(context.Background(), fixture.owner.ID, fixture.recordingID)
+	t.Fatalf("recording status did not become %q: recording=%#v err=%v", want, record, err)
+	return recording.Record{}
 }
 
-func (fixture recordingRetryFixture) waitForShadowingStatus(t *testing.T, want string) recordingResponse {
+func (fixture recordingRetryFixture) waitForShadowingStatus(t *testing.T, want string) recording.Record {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
-		recording, err := fixture.server.recordingForUser(context.Background(), fixture.owner.ID, fixture.recordingID)
-		if err == nil && recording.ShadowingStatus == want {
-			return recording
+		record, err := fixture.server.recordingReader.Get(context.Background(), fixture.owner.ID, fixture.recordingID)
+		if err == nil && record.ShadowingStatus == want {
+			return record
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	recording, err := fixture.server.recordingForUser(context.Background(), fixture.owner.ID, fixture.recordingID)
-	t.Fatalf("shadowing status did not become %q: recording=%#v err=%v", want, recording, err)
-	return recordingResponse{}
+	record, err := fixture.server.recordingReader.Get(context.Background(), fixture.owner.ID, fixture.recordingID)
+	t.Fatalf("shadowing status did not become %q: recording=%#v err=%v", want, record, err)
+	return recording.Record{}
 }
 
 func TestRecordingRetryAnalysisClaimsOnceAndContinuesToReady(t *testing.T) {
@@ -240,10 +241,10 @@ func TestRecordingRetryRequiresOwner(t *testing.T) {
 	}
 }
 
-func decodeRetryRecording(t *testing.T, response *httptest.ResponseRecorder) recordingResponse {
+func decodeRetryRecording(t *testing.T, response *httptest.ResponseRecorder) recordingV1Response {
 	t.Helper()
 	var payload struct {
-		Recording recordingResponse `json:"recording"`
+		Recording recordingV1Response `json:"recording"`
 	}
 	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
 		t.Fatal(err)

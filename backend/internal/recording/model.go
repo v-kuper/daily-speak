@@ -56,12 +56,9 @@ type Record struct {
 	SuggestionsJSON     []byte
 	ProcessingStage     *string
 	PracticeType        string
-	AudioDataURL        *string
-	PhotoDataURL        *string
 	PhotoObject         *string
 	ProcessingError     *string
 	ShadowingStatus     string
-	ShadowingAudioURL   *string
 	ShadowingError      *string
 	ShadowingUpdatedAt  time.Time
 	AudioAssetID        *string

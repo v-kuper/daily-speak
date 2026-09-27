@@ -143,14 +143,14 @@ func TestProcessorResumesSuggestionStageWithoutAudioWork(t *testing.T) {
 func TestProcessorStopsWhenLeaseProtectedTransitionLosesRace(t *testing.T) {
 	repository := &processorRepository{
 		found:             true,
-		work:              ProcessingWork{UserID: "user-1", Stage: "transcribing", AudioURL: pointer("/uploads/recordings/user/audio.webm")},
+		work:              ProcessingWork{UserID: "user-1", Stage: "transcribing", AudioAssetID: pointer("asset-1")},
 		advanceTranscript: false,
 	}
 	processor := NewProcessor(ProcessingDependencies{
-		Repository:         repository,
-		ResolveLegacyAudio: func(string) (string, error) { return "/data/audio.webm", nil },
-		Transcribe:         func(context.Context, string) (string, error) { return "I went home.", nil },
-		Analyzer:           &processorAnalyzer{}, Rewriter: &processorRewriter{}, NewID: func() string { return "unused" },
+		Repository:   repository,
+		Materializer: &processorMaterializer{},
+		Transcribe:   func(context.Context, string) (string, error) { return "I went home.", nil },
+		Analyzer:     &processorAnalyzer{}, Rewriter: &processorRewriter{}, NewID: func() string { return "unused" },
 	})
 	if err := processor.Process(context.Background(), ProcessingJob{ID: "job-1", ResourceID: "recording-1"}, discardAnalysisLogger{}); err != nil {
 		t.Fatal(err)

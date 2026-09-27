@@ -172,14 +172,6 @@ test("JSON parsing preserves valid payloads and empty bodies but rejects malform
     { message: "The API returned an invalid response." });
 });
 
-test("only API-owned upload paths are resolved", () => {
-  const client = apiClient.createApiClient("https://api.example.com", fetch);
-  for (const value of [null, "", "data:audio/webm;base64,AAAA", "https://cdn.example/audio.mp3", "/other/image.png", "//cdn.example/audio.mp3"]) {
-    assert.equal(client.assetURL(value), value);
-  }
-  assert.equal(client.assetURL("/uploads/recordings/u/r.webm"), "https://api.example.com/uploads/recordings/u/r.webm");
-});
-
 test("the shared client requires initialization and uses the configured runtime origin", async (t) => {
   assert.throws(() => apiClient.apiFetch("/api/v1/auth/session"), /not configured/i);
   const calls = [];
@@ -191,7 +183,6 @@ test("the shared client requires initialization and uses the configured runtime 
   await apiClient.apiFetch("/api/v1/auth/session");
   assert.equal(calls[0].url, "https://runtime.example/api/v1/auth/session");
   assert.equal(calls[0].init.credentials, "include");
-  assert.equal(apiClient.resolveApiAssetURL("/uploads/photo.png"), "https://runtime.example/uploads/photo.png");
 });
 
 test("protected media playback exchanges an owned reference for a short-lived URL", async () => {
@@ -275,7 +266,7 @@ test("protected media playback rejects mismatched, expired, and header-bound tic
   );
 });
 
-test("recording requests resolve all server media and retain HTTP validation messages", async (t) => {
+test("recording requests use v1 media references and ignore legacy media URLs", async (t) => {
   const slice = importTypeScriptModule("src/store/slices/appSlice.ts");
   const { configureStore } = require("@reduxjs/toolkit");
   const store = configureStore({ reducer: { app: slice.default } });
@@ -294,29 +285,24 @@ test("recording requests resolve all server media and retain HTTP validation mes
   };
   let response = () => Response.json({ recording });
   t.mock.method(globalThis, "fetch", async (url, init) => {
-    assert.equal(url, "https://api.example.com/api/recordings/recording-1");
+    assert.equal(url, "https://api.example.com/api/v1/recordings/recording-1");
     assert.equal(init.credentials, "include");
     assert.equal(init.cache, "no-store");
     return response();
   });
   apiClient.configureApiClient("https://api.example.com");
   const parsed = await store.dispatch(slice.fetchRecording("recording-1")).unwrap();
-  assert.equal(parsed.audioDataUrl, "https://api.example.com/uploads/recordings/u/r.webm");
-  assert.equal(parsed.photoDataUrl, "https://api.example.com/uploads/photos/u/p.png");
-  assert.equal(parsed.shadowingAudioUrl, "https://api.example.com/uploads/shadowing/u/r.mp3");
+  assert.equal(parsed.localAudioDataUrl, null);
+  assert.equal(parsed.localPhotoDataUrl, null);
+  assert.equal("shadowingAudioUrl" in parsed, false);
   assert.deepEqual(parsed.media, {
     audio: { assetId: "audio-1", downloadPath: "/api/v1/media/audio-1/download" },
     photo: null,
     shadowing: { assetId: "shadowing-1", downloadPath: "/api/v1/media/shadowing-1/download" },
   });
-  recording.audioDataUrl = "https://cdn.example/audio.webm";
-  recording.photoDataUrl = "data:image/png;base64,AAAA";
-  recording.shadowingAudioUrl = "https://cdn.example/pronunciation.mp3";
-  const external = await store.dispatch(slice.fetchRecording("recording-1")).unwrap();
-  assert.equal(external.audioDataUrl, recording.audioDataUrl);
-  assert.equal(external.photoDataUrl, recording.photoDataUrl);
-  assert.equal(external.shadowingAudioUrl, recording.shadowingAudioUrl);
-  response = () => Response.json({ error: "Recording is unavailable." }, { status: 404 });
+  response = () => Response.json({
+    error: { code: "not_found", message: "Recording is unavailable.", requestId: "request-1" },
+  }, { status: 404 });
   await assert.rejects(() => store.dispatch(slice.fetchRecording("recording-1")).unwrap(),
     (error) => error === "Recording is unavailable.");
 });

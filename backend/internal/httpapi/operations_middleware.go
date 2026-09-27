@@ -136,7 +136,7 @@ func (s *Server) ratePolicy(r *http.Request) (ratePolicy, bool) {
 		return ratePolicy{scope: "auth", limit: s.operations.AuthLimit}, true
 	case "/api/v1/guest/previews":
 		return ratePolicy{scope: "guest_preview", limit: s.operations.ExpensiveLimit, principal: true, alsoIP: true}, true
-	case "/api/v1/recordings", "/api/user/recordings":
+	case "/api/v1/recordings":
 		return ratePolicy{scope: "recording_create", limit: s.operations.ExpensiveLimit, principal: true, alsoIP: true}, true
 	}
 	if strings.HasPrefix(path, "/api/") {
@@ -198,8 +198,6 @@ func operationalRoute(path string) string {
 		return "/api/v1/guest/previews/{id}"
 	case strings.HasPrefix(path, "/api/v1/recordings/"):
 		return "/api/v1/recordings/{id}"
-	case strings.HasPrefix(path, "/api/recordings/"):
-		return "/api/recordings/{id}"
 	case strings.HasPrefix(path, "/api/feed/posts/"):
 		return "/api/feed/posts/{id}"
 	case strings.HasPrefix(path, "/api/feed/replies/"):

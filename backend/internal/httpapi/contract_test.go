@@ -63,35 +63,47 @@ func TestV1MetadataAndStableErrors(t *testing.T) {
 		t.Fatalf("unexpected metadata response %d: %s", metadata.Code, metadata.Body.String())
 	}
 
-	unauthorized := httptest.NewRecorder()
-	handler.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodGet, "/api/v1/recordings/demo", nil))
-	if unauthorized.Code != http.StatusUnauthorized {
-		t.Fatalf("expected 401, got %d: %s", unauthorized.Code, unauthorized.Body.String())
-	}
-	var payload struct {
-		Error struct {
-			Code      string `json:"code"`
-			Message   string `json:"message"`
-			RequestID string `json:"requestId"`
-		} `json:"error"`
-	}
-	if err := json.Unmarshal(unauthorized.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("decode v1 error: %v", err)
-	}
-	if payload.Error.Code != "unauthorized" || payload.Error.Message != "Unauthorized" || payload.Error.RequestID == "" {
-		t.Fatalf("unexpected v1 error: %+v", payload.Error)
-	}
-	if payload.Error.RequestID != unauthorized.Header().Get("X-Request-ID") {
-		t.Fatalf("body and header request IDs differ")
+	for _, testCase := range []struct {
+		method string
+		path   string
+	}{
+		{method: http.MethodGet, path: "/api/v1/recordings/demo"},
+		{method: http.MethodDelete, path: "/api/v1/recordings/demo"},
+		{method: http.MethodPost, path: "/api/v1/recordings/demo/retry"},
+		{method: http.MethodPost, path: "/api/v1/recordings/demo/shadowing"},
+	} {
+		t.Run(testCase.method+" "+testCase.path, func(t *testing.T) {
+			unauthorized := httptest.NewRecorder()
+			handler.ServeHTTP(unauthorized, httptest.NewRequest(testCase.method, testCase.path, nil))
+			if unauthorized.Code != http.StatusUnauthorized {
+				t.Fatalf("expected 401, got %d: %s", unauthorized.Code, unauthorized.Body.String())
+			}
+			var payload struct {
+				Error struct {
+					Code      string `json:"code"`
+					Message   string `json:"message"`
+					RequestID string `json:"requestId"`
+				} `json:"error"`
+			}
+			if err := json.Unmarshal(unauthorized.Body.Bytes(), &payload); err != nil {
+				t.Fatalf("decode v1 error: %v", err)
+			}
+			if payload.Error.Code != "invalid_access_token" || payload.Error.Message != "Bearer access token is required" || payload.Error.RequestID == "" {
+				t.Fatalf("unexpected v1 error: %+v", payload.Error)
+			}
+			if payload.Error.RequestID != unauthorized.Header().Get("X-Request-ID") {
+				t.Fatalf("body and header request IDs differ")
+			}
+		})
 	}
 }
 
-func TestLegacyErrorsRemainCompatible(t *testing.T) {
+func TestLegacyRecordingRoutesAreRetired(t *testing.T) {
 	handler := newTestServer(Config{}).Handler()
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/recordings/demo", nil))
-	if strings.TrimSpace(recorder.Body.String()) != `{"error":"Unauthorized"}` {
-		t.Fatalf("legacy error contract changed: %s", recorder.Body.String())
+	if recorder.Code != http.StatusNotFound || strings.TrimSpace(recorder.Body.String()) != `{"error":"Not found"}` {
+		t.Fatalf("legacy recording route remains available: status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 }
 
@@ -142,10 +154,6 @@ func TestUnauthorizedAPIContractWithoutBearer(t *testing.T) {
 		body   string
 	}{
 		{http.MethodGet, "/api/user/data", ""},
-		{http.MethodGet, "/api/recordings/demo-recording", ""},
-		{http.MethodDelete, "/api/recordings/demo-recording", ""},
-		{http.MethodPost, "/api/recordings/demo-recording/retry", ""},
-		{http.MethodPost, "/api/recordings/demo-recording/shadowing", ""},
 		{http.MethodGet, "/api/feed/posts", ""},
 		{http.MethodPost, "/api/feed/posts", `{"recordingId":"demo"}`},
 		{http.MethodGet, "/api/feed/posts/demo-post", ""},

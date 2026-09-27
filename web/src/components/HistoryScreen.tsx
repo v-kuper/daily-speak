@@ -10,6 +10,7 @@ import { recordingProcessingLabel } from "../lib/recordingProcessing";
 import { formatTime, formatTimeOfDay, recordingDateKey } from "../lib/utils";
 import { useAppDispatch, useAppSelector, useAppStore } from "../store/hooks";
 import RecordingLoadError from "./RecordingLoadError";
+import ProtectedMediaImage from "./ProtectedMediaImage";
 import {
   nextMonth,
   previousMonth,
@@ -138,8 +139,13 @@ export default function HistoryScreen() {
               </div>
               <div className="recording-side">
                 <div className="recording-duration">{formatTime(recording.duration)}</div>
-                {recording.photoDataUrl && (
-                  <img src={recording.photoDataUrl} alt="Photo from recording" className="recording-thumb" />
+                {(recording.media?.photo || recording.localPhotoDataUrl) && (
+                  <ProtectedMediaImage
+                    downloadPath={recording.media?.photo?.downloadPath ?? null}
+                    localURL={recording.localPhotoDataUrl}
+                    alt="Photo from recording"
+                    className="recording-thumb"
+                  />
                 )}
               </div>
             </div>

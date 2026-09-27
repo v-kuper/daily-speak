@@ -22,7 +22,7 @@ type ProcessingJob struct {
 type ProcessingWork struct {
 	UserID               string
 	Stage                string
-	AudioURL             *string
+	AudioPath            *string
 	AudioAssetID         *string
 	Transcript           string
 	Suggestions          []Suggestion
@@ -49,7 +49,6 @@ type AudioMaterializer interface {
 type ProcessingDependencies struct {
 	Repository         ProcessingRepository
 	Materializer       AudioMaterializer
-	ResolveLegacyAudio func(string) (string, error)
 	ProbeAudioDuration func(context.Context, string) (time.Duration, error)
 	Transcribe         func(context.Context, string) (string, error)
 	Analyzer           Analyzer
@@ -78,14 +77,10 @@ func (p *Processor) Process(ctx context.Context, job ProcessingJob, logger Analy
 		if work.AudioAssetID != nil && p.dependencies.Materializer != nil {
 			path, cleanup, materializeErr := p.dependencies.Materializer.Materialize(ctx, *work.AudioAssetID)
 			if materializeErr == nil {
-				work.AudioURL = &path
+				work.AudioPath = &path
 				cleanupAudio = cleanup
 			}
 			err = materializeErr
-		} else if work.AudioURL != nil && p.dependencies.ResolveLegacyAudio != nil {
-			path, resolveErr := p.dependencies.ResolveLegacyAudio(*work.AudioURL)
-			work.AudioURL = &path
-			err = resolveErr
 		} else {
 			err = errors.New("recording audio is unavailable")
 		}
@@ -99,7 +94,7 @@ func (p *Processor) Process(ctx context.Context, job ProcessingJob, logger Analy
 		if p.dependencies.ProbeAudioDuration == nil {
 			return errors.New("recording audio duration could not be verified")
 		}
-		actualDuration, probeErr := p.dependencies.ProbeAudioDuration(ctx, valueOrEmpty(work.AudioURL))
+		actualDuration, probeErr := p.dependencies.ProbeAudioDuration(ctx, valueOrEmpty(work.AudioPath))
 		if probeErr != nil {
 			return errors.New("recording audio duration could not be verified")
 		}
@@ -134,7 +129,7 @@ func (p *Processor) transcribe(ctx context.Context, job ProcessingJob, work Proc
 	if err != nil {
 		return err
 	}
-	transcript, err := p.dependencies.Transcribe(ctx, valueOrEmpty(work.AudioURL))
+	transcript, err := p.dependencies.Transcribe(ctx, valueOrEmpty(work.AudioPath))
 	if err != nil {
 		return err
 	}

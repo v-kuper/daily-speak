@@ -239,16 +239,15 @@ test("recording deletion keeps cleanup policy outside HTTP and SQL adapters", ()
 });
 
 test("recording query and retry keep persistence and queue mechanics outside HTTP", () => {
-  const queryTransport = readFileSync("backend/internal/httpapi/recording_query.go", "utf8");
-  const retryTransport = readFileSync("backend/internal/httpapi/recording_retry.go", "utf8");
+  const transport = readFileSync("backend/internal/httpapi/recordings_v1.go", "utf8");
   const queryService = readFileSync("backend/internal/recording/query.go", "utf8");
   const retryService = readFileSync("backend/internal/recording/retry.go", "utf8");
   const queryRepository = readFileSync("backend/internal/recording/query_repository.go", "utf8");
   const retryRepository = readFileSync("backend/internal/recording/retry_repository.go", "utf8");
 
-  assert.match(queryTransport, /recordingReader\.Get|recordingResponseFromRecord/);
-  assert.match(retryTransport, /recordingRetryService\.Retry/);
-  assert.doesNotMatch(queryTransport + retryTransport, /SELECT |INSERT INTO|UPDATE |DELETE FROM|pgx|workqueue|s\.db/);
+  assert.match(transport, /recordingReader\.Get|recordingV1ResponseFromRecord/);
+  assert.match(transport, /recordingRetryService\.Retry/);
+  assert.doesNotMatch(transport, /SELECT |INSERT INTO|UPDATE |DELETE FROM|pgx|workqueue|s\.db/);
   assert.match(queryService, /type RecordRepository interface|type Reader struct/);
   assert.match(retryService, /type RetryUnitOfWork interface|type RetryService struct/);
   assert.doesNotMatch(queryService + retryService, /net\/http|internal\/httpapi|SELECT |INSERT INTO|UPDATE |DELETE FROM|pgx|workqueue/);
@@ -322,7 +321,6 @@ test("feature packages own shared vocabulary instead of a catch-all domain packa
     "backend/internal/practice/normalization_shared.go",
     "backend/internal/quota/quota.go",
     "backend/internal/recording/normalization.go",
-    "backend/internal/shadowing/path.go",
     "backend/internal/feed/reaction_repository.go",
   ]) {
     assert.equal(existsSync(path), true, `missing feature-owned module ${path}`);
@@ -351,14 +349,15 @@ test("guest preview separates transport, processing policy, and SQL storage", ()
 });
 
 test("shadowing separates transport, media processing, and persistence", () => {
-  const core = ["model.go", "local.go", "processor.go"]
+  const core = ["model.go", "processor.go"]
     .map((name) => readFileSync(`backend/internal/shadowing/${name}`, "utf8"))
     .join("\n");
   const store = readFileSync("backend/internal/shadowing/store.go", "utf8");
-  const transport = readFileSync("backend/internal/httpapi/shadowing.go", "utf8");
+  const transport = readFileSync("backend/internal/httpapi/recordings_v1.go", "utf8");
 
   assert.doesNotMatch(core, /net\/http|internal\/httpapi|pgx|QueryRow|\.Exec\(/);
-  assert.match(core, /ProcessingStore|MediaStore|LocalSaver/);
+  assert.match(core, /ProcessingStore|MediaStore/);
+  assert.doesNotMatch(core, /LocalSaver|LegacyPublicURL|\/uploads\//);
   assert.match(store, /shadowing_attempt_id|media_assets|processing_jobs/);
   assert.doesNotMatch(transport, /SELECT |UPDATE |INSERT INTO|Synthesize\(|media_assets/);
   assert.doesNotMatch(transport, /pgx|internal\/db/);

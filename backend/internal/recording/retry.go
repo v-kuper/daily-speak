@@ -9,10 +9,6 @@ import (
 
 var ErrRetryUnavailable = errors.New("This recording cannot be retried from its current stage.")
 
-type LegacyAudioResolver interface {
-	Path(string) (string, error)
-}
-
 type RetryTransaction interface {
 	Claim(context.Context, string, string, string) (bool, error)
 	Find(context.Context, string, string) (Record, bool, error)
@@ -31,13 +27,12 @@ type RetryResult struct {
 type RetryService struct {
 	records RecordRepository
 	unit    RetryUnitOfWork
-	legacy  LegacyAudioResolver
 	newID   func() string
 	now     func() time.Time
 }
 
-func NewRetryService(records RecordRepository, unit RetryUnitOfWork, legacy LegacyAudioResolver, newID func() string) *RetryService {
-	return &RetryService{records: records, unit: unit, legacy: legacy, newID: newID, now: time.Now}
+func NewRetryService(records RecordRepository, unit RetryUnitOfWork, newID func() string) *RetryService {
+	return &RetryService{records: records, unit: unit, newID: newID, now: time.Now}
 }
 
 func (service *RetryService) Retry(ctx context.Context, userID string, recordingID string) (RetryResult, error) {
@@ -105,13 +100,7 @@ func (service *RetryService) validate(record Record) error {
 	}
 	switch *record.ProcessingStage {
 	case "transcribing":
-		if record.AudioAssetID != nil && strings.TrimSpace(*record.AudioAssetID) != "" {
-			return nil
-		}
-		if record.AudioDataURL == nil || service.legacy == nil {
-			return ErrRetryUnavailable
-		}
-		if _, err := service.legacy.Path(*record.AudioDataURL); err != nil {
+		if record.AudioAssetID == nil || strings.TrimSpace(*record.AudioAssetID) == "" {
 			return ErrRetryUnavailable
 		}
 	case "suggestions", "rewriting":
@@ -129,7 +118,7 @@ func afterRetryClaim(record Record, startedAt time.Time) Record {
 	record.ProcessingError = nil
 	record.CorrectedTranscript = ""
 	record.ShadowingStatus = "pending"
-	record.ShadowingAudioURL = nil
+	record.ShadowingAssetID = nil
 	record.ShadowingError = nil
 	record.ShadowingUpdatedAt = startedAt.UTC()
 	if record.ProcessingStage != nil {

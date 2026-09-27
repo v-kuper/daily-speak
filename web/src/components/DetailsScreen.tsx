@@ -16,8 +16,8 @@ import {
   shadowingProgressLabel,
   shouldScheduleShadowing,
 } from "../lib/shadowing";
+import { useProtectedMediaURL } from "../lib/useProtectedMediaURL";
 import { formatTime } from "../lib/utils";
-import { requestMediaPlaybackTicket } from "../lib/mediaDownload";
 import { useAppDispatch, useAppSelector, useAppStore } from "../store/hooks";
 import {
   clearRecordingDeleteError,
@@ -29,6 +29,7 @@ import {
 } from "../store/slices/appSlice";
 import SuggestionCard from "./SuggestionCard";
 import RecordingLoadError from "./RecordingLoadError";
+import ProtectedMediaImage from "./ProtectedMediaImage";
 
 const formatPracticeLabel = (value: "free_talk" | "topic" | "photo_description"): string => {
   switch (value) {
@@ -114,14 +115,9 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
   const store = useAppStore();
   const router = useRouter();
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const shadowingPlaybackRetryRef = useRef(0);
   const autoShadowingRequestedRef = useRef(new Set<string>());
-  const [audioSrc, setAudioSrc] = useState<string | null>(null);
+  const [localAudioSrc, setLocalAudioSrc] = useState<string | null>(null);
   const [playbackError, setPlaybackError] = useState<string | null>(null);
-  const [shadowingPlaybackURL, setShadowingPlaybackURL] = useState<string | null>(null);
-  const [shadowingPlaybackLoading, setShadowingPlaybackLoading] = useState(false);
-  const [shadowingPlaybackError, setShadowingPlaybackError] = useState<string | null>(null);
-  const [shadowingPlaybackRevision, setShadowingPlaybackRevision] = useState(0);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const {
     isPlaying,
@@ -152,12 +148,33 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
     return startRecordingDetailLifecycle(store, routeRecordingId);
   }, [store, routeRecordingId]);
   const recordingId = recording?.id ?? null;
-  const recordingAudioDataUrl = recording?.audioDataUrl ?? null;
+  const recordingAudioDataUrl = recording?.localAudioDataUrl ?? null;
+  const recordingAudioDownloadPath = recording?.media?.audio?.downloadPath ?? null;
   const recordingStatus = recording?.status;
   const correctedTranscript = recording?.correctedTranscript ?? "";
   const shadowingStatus = recording?.shadowingStatus ?? "pending";
   const shadowingUpdatedAt = recording?.shadowingUpdatedAt ?? "";
   const shadowingDownloadPath = recording?.media?.shadowing?.downloadPath ?? null;
+  const {
+    url: recordingMediaURL,
+    loading: recordingMediaLoading,
+    error: recordingMediaError,
+    reportReady: reportRecordingMediaReady,
+    reportError: reportRecordingMediaError,
+    retry: retryRecordingMedia,
+  } = useProtectedMediaURL(recordingAudioDownloadPath);
+  const {
+    url: shadowingMediaURL,
+    loading: shadowingMediaLoading,
+    error: shadowingMediaError,
+    reportReady: reportShadowingMediaReady,
+    reportError: reportShadowingMediaError,
+    retry: retryShadowingMedia,
+  } = useProtectedMediaURL(
+    shadowingDownloadPath,
+    shadowingStatus === "ready",
+  );
+  const audioSrc = recordingAudioDownloadPath ? recordingMediaURL : localAudioSrc;
   const hasAudio = Boolean(audioSrc);
   const isProcessing = recording?.status === "processing";
   const isFailed = recording?.status === "failed";
@@ -220,56 +237,22 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
   useEffect(() => {
     setPlaybackError(null);
 
-    if (!recordingAudioDataUrl) {
-      setAudioSrc(null);
+    if (recordingAudioDownloadPath || !recordingAudioDataUrl) {
+      setLocalAudioSrc(null);
       return;
     }
 
     const objectUrl = createAudioObjectUrl(recordingAudioDataUrl);
     if (!objectUrl) {
-      setAudioSrc(recordingAudioDataUrl);
+      setLocalAudioSrc(recordingAudioDataUrl);
       return;
     }
 
-    setAudioSrc(objectUrl);
+    setLocalAudioSrc(objectUrl);
     return () => {
       URL.revokeObjectURL(objectUrl);
     };
-  }, [recordingAudioDataUrl, recordingId]);
-
-  useEffect(() => {
-    shadowingPlaybackRetryRef.current = 0;
-  }, [recordingId, shadowingDownloadPath]);
-
-  useEffect(() => {
-    setShadowingPlaybackURL(null);
-    setShadowingPlaybackError(null);
-
-    if (shadowingStatus !== "ready" || !shadowingDownloadPath) {
-      setShadowingPlaybackLoading(false);
-      return;
-    }
-
-    const controller = new AbortController();
-    setShadowingPlaybackLoading(true);
-    void requestMediaPlaybackTicket({ downloadPath: shadowingDownloadPath, signal: controller.signal })
-      .then((ticket) => {
-        if (!controller.signal.aborted) {
-          setShadowingPlaybackURL(ticket.url);
-          setShadowingPlaybackLoading(false);
-        }
-      })
-      .catch((error: unknown) => {
-        if (!controller.signal.aborted) {
-          setShadowingPlaybackLoading(false);
-          setShadowingPlaybackError(
-            error instanceof Error ? error.message : "Pronunciation audio is temporarily unavailable.",
-          );
-        }
-      });
-
-    return () => controller.abort();
-  }, [recordingId, shadowingDownloadPath, shadowingPlaybackRevision, shadowingStatus]);
+  }, [recordingAudioDataUrl, recordingAudioDownloadPath, recordingId]);
 
   useEffect(() => {
     if (!recordingId) {
@@ -308,8 +291,18 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
       audio.currentTime = 0;
     };
 
+    const handleCanPlay = () => {
+      if (recordingAudioDownloadPath) {
+        reportRecordingMediaReady();
+      }
+    };
+
     const handleError = () => {
       dispatch(setPlaybackPlaying(false));
+      if (recordingAudioDownloadPath) {
+        reportRecordingMediaError();
+        return;
+      }
       setPlaybackError("Cannot play this audio in your browser. Try recording again or use another browser.");
     };
 
@@ -317,6 +310,7 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
     audio.addEventListener("play", handlePlay);
     audio.addEventListener("pause", handlePause);
     audio.addEventListener("ended", handleEnded);
+    audio.addEventListener("canplay", handleCanPlay);
     audio.addEventListener("error", handleError);
 
     return () => {
@@ -324,9 +318,18 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
       audio.removeEventListener("play", handlePlay);
       audio.removeEventListener("pause", handlePause);
       audio.removeEventListener("ended", handleEnded);
+      audio.removeEventListener("canplay", handleCanPlay);
       audio.removeEventListener("error", handleError);
     };
-  }, [dispatch, hasAudio, recordingId, audioSrc]);
+  }, [
+    dispatch,
+    hasAudio,
+    recordingId,
+    audioSrc,
+    recordingAudioDownloadPath,
+    reportRecordingMediaError,
+    reportRecordingMediaReady,
+  ]);
 
   const onTogglePlayback = () => {
     if (!recording || !hasAudio) {
@@ -399,22 +402,6 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
       return;
     }
     void dispatch(generateShadowingAudio(recording.id)).unwrap().catch(() => undefined);
-  };
-
-  const onShadowingPlaybackError = () => {
-    setShadowingPlaybackURL(null);
-    if (shadowingPlaybackRetryRef.current === 0) {
-      shadowingPlaybackRetryRef.current = 1;
-      setShadowingPlaybackRevision((value) => value + 1);
-      return;
-    }
-    setShadowingPlaybackLoading(false);
-    setShadowingPlaybackError("Pronunciation audio could not be played. Please reload it.");
-  };
-
-  const onRetryShadowingPlayback = () => {
-    shadowingPlaybackRetryRef.current = 0;
-    setShadowingPlaybackRevision((value) => value + 1);
   };
 
   const onRetryRecordingProcessing = () => {
@@ -503,9 +490,14 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
         <div className="auth-error">{recording.processingError ?? "Recording processing failed. Try recording again."}</div>
       )}
 
-      {recording.photoDataUrl && (
+      {(recording.media?.photo || recording.localPhotoDataUrl) && (
         <div className="details-photo-card">
-          <img src={recording.photoDataUrl} alt="Photo from speaking practice" className="details-photo" />
+          <ProtectedMediaImage
+            downloadPath={recording.media?.photo?.downloadPath ?? null}
+            localURL={recording.localPhotoDataUrl}
+            alt="Photo from speaking practice"
+            className="details-photo"
+          />
           {recording.photoObject && <div className="details-photo-caption">Object: {recording.photoObject}</div>}
         </div>
       )}
@@ -518,12 +510,22 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
         <div>{formatPracticeLabel(recording.practiceType)}</div>
       </div>
 
-      {hasAudio ? (
+      {recordingMediaLoading ? (
+        <div className="notice">Preparing protected recording audio...</div>
+      ) : hasAudio ? (
         <audio ref={audioRef} src={audioSrc ?? undefined} preload="metadata" />
       ) : (
         <div className="notice">Audio is unavailable for this recording.</div>
       )}
       {playbackError && <div className="auth-error top-spaced">{playbackError}</div>}
+      {recordingMediaError && (
+        <div className="processing-retry top-spaced">
+          <div className="auth-error">{recordingMediaError}</div>
+          <button className="btn btn-secondary" onClick={retryRecordingMedia}>
+            Reload audio
+          </button>
+        </div>
+      )}
 
       <div className="player">
         <div className="player-controls">
@@ -606,25 +608,26 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
           <div className="empty-state">The natural version is unavailable for this recording.</div>
         )}
         {renderProcessingRetry("rewriting")}
-        {recording.shadowingStatus === "ready" && shadowingPlaybackLoading && (
+        {recording.shadowingStatus === "ready" && shadowingMediaLoading && (
           <div className="empty-state">Preparing protected pronunciation audio...</div>
         )}
-        {recording.shadowingStatus === "ready" && shadowingPlaybackURL && (
+        {recording.shadowingStatus === "ready" && shadowingMediaURL && (
           <audio
             className="shadowing-audio"
             controls
             preload="metadata"
-            src={shadowingPlaybackURL}
-            onError={onShadowingPlaybackError}
+            src={shadowingMediaURL}
+            onCanPlay={reportShadowingMediaReady}
+            onError={reportShadowingMediaError}
           />
         )}
         {recording.shadowingStatus === "ready" && !shadowingDownloadPath && (
           <div className="auth-error">The protected pronunciation audio reference is unavailable.</div>
         )}
-        {recording.shadowingStatus === "ready" && shadowingPlaybackError && (
+        {recording.shadowingStatus === "ready" && shadowingMediaError && (
           <div className="processing-retry">
-            <div className="auth-error">{shadowingPlaybackError}</div>
-            <button className="btn btn-secondary" onClick={onRetryShadowingPlayback}>
+            <div className="auth-error">{shadowingMediaError}</div>
+            <button className="btn btn-secondary" onClick={retryShadowingMedia}>
               Reload audio
             </button>
           </div>

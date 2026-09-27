@@ -107,7 +107,7 @@ func NewAPI(config APIConfig) *httpapi.Server {
 		RecordingDeleter: recording.NewDeleter(recordingDeletion, legacyUploads, recordingDeletion, uuid.NewString),
 		RecordingReader:  recording.NewReader(recordingRecords),
 		RecordingRetryService: recording.NewRetryService(
-			recordingRecords, recording.NewSQLRetryUnitOfWork(config.DB), legacyUploads, uuid.NewString,
+			recordingRecords, recording.NewSQLRetryUnitOfWork(config.DB), uuid.NewString,
 		),
 		GuestPreviewStore: guestpreview.NewStore(config.DB, guestpreview.QueueCapacityFromEnv()),
 		ShadowingStore:    shadowing.NewStore(config.DB),

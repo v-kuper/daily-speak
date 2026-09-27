@@ -41,30 +41,31 @@ const documentedAPIRoutes = [
   "/api/v1/auth/sessions", "/api/v1/auth/sessions/{sessionId}",
   "/api/v1/guest/previews", "/api/v1/guest/previews/{previewId}",
   "/api/v1/recordings", "/api/v1/recordings/{recordingId}",
+  "/api/v1/recordings/{recordingId}/retry", "/api/v1/recordings/{recordingId}/shadowing",
   "/api/v1/media/uploads", "/api/v1/media/uploads/{uploadId}",
   "/api/v1/media/uploads/{uploadId}/parts", "/api/v1/media/uploads/{uploadId}/complete",
   "/api/v1/media/{assetId}/download", "/api/v1/media/uploads/{uploadId}/parts/{partNumber}",
   "/api/v1/media/local/assets/{assetId}/content",
   "/api/daily-questions", "/api/topic-guidance", "/api/study-words", "/api/user/data",
   "/api/user/interests", "/api/user/ollama-model", "/api/user/subscription", "/api/user/english-level",
-  "/api/recordings/{recordingId}", "/api/recordings/{recordingId}/retry",
-  "/api/recordings/{recordingId}/shadowing", "/api/feed/posts", "/api/feed/posts/{postId}",
+  "/api/feed/posts", "/api/feed/posts/{postId}",
   "/api/feed/posts/{postId}/replies", "/api/feed/posts/{postId}/reactions",
-  "/api/feed/replies/{replyId}/reactions", "/uploads/shadowing/{userId}/{fileName}", "/uploads/{path}",
+  "/api/feed/replies/{replyId}/reactions", "/uploads/{path}",
 ];
 
 const protectedOperations = [
   ["/api/v1/recordings", "get"], ["/api/v1/recordings/{recordingId}", "get"],
+  ["/api/v1/recordings/{recordingId}", "delete"],
+  ["/api/v1/recordings/{recordingId}/retry", "post"],
+  ["/api/v1/recordings/{recordingId}/shadowing", "post"],
   ["/api/user/data", "get"],
   ["/api/user/interests", "put"], ["/api/user/ollama-model", "get"], ["/api/user/subscription", "get"],
   ["/api/user/subscription", "post"], ["/api/user/subscription", "delete"],
   ["/api/user/english-level", "get"], ["/api/user/english-level", "put"],
-  ["/api/recordings/{recordingId}", "get"],
-  ["/api/recordings/{recordingId}", "delete"], ["/api/recordings/{recordingId}/retry", "post"],
-  ["/api/recordings/{recordingId}/shadowing", "post"], ["/api/feed/posts", "get"],
+  ["/api/feed/posts", "get"],
   ["/api/feed/posts", "post"], ["/api/feed/posts/{postId}", "get"],
   ["/api/feed/posts/{postId}/replies", "post"], ["/api/feed/posts/{postId}/reactions", "post"],
-  ["/api/feed/replies/{replyId}/reactions", "post"], ["/uploads/shadowing/{userId}/{fileName}", "get"],
+  ["/api/feed/replies/{replyId}/reactions", "post"],
 ];
 
 const mutationBodies = [
@@ -166,7 +167,6 @@ test("OpenAPI inventories every API and upload route, including retained Feed en
     ["/api/feed/posts/{postId}/replies", /parts\[1\] == "replies"/],
     ["/api/feed/posts/{postId}/reactions", /parts\[1\] == "reactions"/],
     ["/api/feed/replies/{replyId}/reactions", /strings\.HasPrefix\(path, "\/api\/feed\/replies\/"\)/],
-    ["/uploads/shadowing/{userId}/{fileName}", /mux\.HandleFunc\("\/uploads\/shadowing\/"/],
     ["/uploads/{path}", /mux\.Handle\(uploadsURLPrefix, http\.HandlerFunc\(s\.handleLegacyUpload\)\)/],
   ];
   for (const [path, pattern] of sourceChecks) assert.match(routeSource, pattern, `server route not found for ${path}`);
@@ -195,6 +195,9 @@ test("identity and v1 resources declare bearer authentication", () => {
     ["/api/v1/auth/sessions/{sessionId}", "delete"], ["/api/v1/recordings", "get"],
     ["/api/v1/guest/previews", "post"], ["/api/v1/guest/previews/{previewId}", "get"],
     ["/api/v1/recordings", "post"], ["/api/v1/recordings/{recordingId}", "get"],
+    ["/api/v1/recordings/{recordingId}", "delete"],
+    ["/api/v1/recordings/{recordingId}/retry", "post"],
+    ["/api/v1/recordings/{recordingId}/shadowing", "post"],
     ["/api/v1/media/uploads", "post"], ["/api/v1/media/uploads/{uploadId}", "get"],
     ["/api/v1/media/uploads/{uploadId}", "delete"], ["/api/v1/media/uploads/{uploadId}/parts", "post"],
     ["/api/v1/media/uploads/{uploadId}/complete", "post"], ["/api/v1/media/{assetId}/download", "get"],
@@ -234,7 +237,7 @@ test("JSON and multipart mutations declare request bodies", () => {
 test("shared externally visible schemas have representative examples", () => {
   const expectedObjectSchemas = new Map([
     ["User", ["email", "isSubscriber", "englishLevel"]],
-    ["Recording", ["id", "topic", "duration", "timestamp", "status", "transcript", "correctedTranscript", "suggestions", "practiceType", "shadowingStatus", "shadowingAudioUrl", "shadowingError", "shadowingUpdatedAt"]],
+    ["V1Recording", ["id", "topic", "duration", "timestamp", "status", "transcript", "correctedTranscript", "suggestions", "practiceType", "shadowingStatus", "shadowingError", "shadowingUpdatedAt"]],
     ["Suggestion", ["wrong", "right", "explanation"]],
     ["SubscriptionState", ["isSubscriber", "subscriptionExpiresAt", "subscriptionCancelled"]],
     ["MediaAsset", ["id", "state", "purpose", "contentType", "sizeBytes", "checksum"]],
@@ -259,6 +262,23 @@ test("shared externally visible schemas have representative examples", () => {
   const processingSchema = openapi.components.schemas.RecordingProcessingStage;
   assert.ok(processingSchema, "missing RecordingProcessingStage schema");
   assert.ok(processingSchema.example, "RecordingProcessingStage needs an example");
+});
+
+test("v1 recording contracts expose only protected media references", () => {
+  const recording = openapi.components.schemas.V1Recording;
+  for (const legacyField of ["audioDataUrl", "photoDataUrl", "shadowingAudioUrl"]) {
+    assert.ok(!Object.hasOwn(recording.properties, legacyField), `V1Recording must not expose ${legacyField}`);
+  }
+  assert.equal(
+    openapi.components.schemas.V1RecordingResponse.properties.recording.$ref,
+    "#/components/schemas/V1Recording",
+  );
+  assert.equal(
+    openapi.components.schemas.RecordingPage.properties.items.items.$ref,
+    "#/components/schemas/V1Recording",
+  );
+  assert.equal(openapi.components.schemas.Recording, undefined);
+  assert.equal(openapi.components.schemas.RecordingResponse, undefined);
 });
 
 test("v1 operations expose request IDs and structured stable errors", () => {

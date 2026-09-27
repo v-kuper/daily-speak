@@ -1,7 +1,6 @@
 import { createAsyncThunk, createSlice, type PayloadAction } from "@reduxjs/toolkit";
 import { apiFetch, readApiJSON } from "../../lib/apiClient";
 import {
-  parseRecordingMediaURL,
   type PracticeType,
   type Recording,
   type RecordingMedia,
@@ -327,11 +326,14 @@ type AuthResult = {
 
 type UserDataResponse = {
   interestIds?: unknown;
-  recordings?: unknown;
   quota?: unknown;
   subscription?: unknown;
   englishLevel?: unknown;
   error?: string;
+};
+
+type RecordingPageResponse = V1ErrorResponse & {
+  items?: unknown;
 };
 
 type SaveInterestsResponse = {
@@ -345,10 +347,13 @@ type SaveRecordingResponse = {
   error?: string | { message?: unknown };
 };
 
-type DeleteRecordingResponse = {
+type V1ErrorResponse = {
+  error?: { message?: unknown };
+};
+
+type DeleteRecordingResponse = V1ErrorResponse & {
   deletedRecordingId?: unknown;
   quota?: unknown;
-  error?: string;
 };
 
 type SubscriptionResponse = {
@@ -673,16 +678,13 @@ const parseRecording = (value: unknown): Recording | null => {
   const timestamp = new Date(timestampRaw);
   const duration = Number.parseInt(String(candidate.duration ?? 0), 10);
   const suggestions = parseSuggestions(candidate.suggestions);
-  const audioDataUrl = parseRecordingMediaURL(candidate.audioDataUrl);
-  const photoDataUrl = parseRecordingMediaURL(candidate.photoDataUrl);
   const photoObject = normalizePhotoObject(candidate.photoObject);
   const processingError = typeof candidate.processingError === "string" ? candidate.processingError.trim() || null : null;
   const shadowingStatus = parseShadowingStatus(candidate.shadowingStatus);
-  const shadowingAudioUrl = parseRecordingMediaURL(candidate.shadowingAudioUrl);
   const shadowingError =
     typeof candidate.shadowingError === "string" ? candidate.shadowingError.trim() || null : null;
   const media = parseRecordingMedia(candidate.media);
-  const practiceType = parsePracticeType(candidate.practiceType, topic, Boolean(photoDataUrl));
+  const practiceType = parsePracticeType(candidate.practiceType, topic, Boolean(media?.photo));
 
   if (!id || !topic || Number.isNaN(timestamp.getTime()) || !Number.isFinite(duration) || duration < 0) {
     return null;
@@ -706,12 +708,11 @@ const parseRecording = (value: unknown): Recording | null => {
     suggestions,
     processingStage,
     practiceType,
-    audioDataUrl,
-    photoDataUrl,
+    localAudioDataUrl: null,
+    localPhotoDataUrl: null,
     photoObject,
     processingError,
     shadowingStatus,
-    shadowingAudioUrl,
     shadowingError,
     shadowingUpdatedAt,
     media
@@ -1080,8 +1081,23 @@ export const fetchUserData = createAsyncThunk<
       return rejectWithValue(payload?.error ?? "Failed to load user data.");
     }
 
+    const recordingsResponse = await apiFetch("/api/v1/recordings?limit=100", {
+      cache: "no-store",
+    });
+    const recordingsPayload = (await readApiJSON(recordingsResponse)) as RecordingPageResponse | null;
+    if (recordingsResponse.status === 401) {
+      return rejectWithValue("Unauthorized");
+    }
+    if (!recordingsResponse.ok) {
+      return rejectWithValue(
+        typeof recordingsPayload?.error?.message === "string"
+          ? recordingsPayload.error.message
+          : "Failed to load recordings.",
+      );
+    }
+
     const interestIds = normalizeInterestIds(payload?.interestIds);
-    const recordingsRaw = Array.isArray(payload?.recordings) ? payload.recordings : [];
+    const recordingsRaw = Array.isArray(recordingsPayload?.items) ? recordingsPayload.items : [];
     const recordings = recordingsRaw
       .map((item) => parseRecording(item))
       .filter((item): item is Recording => item !== null)
@@ -1282,16 +1298,22 @@ export const fetchRecording = createAsyncThunk<Recording, string, {
   "app/fetchRecording",
   async (recordingId, { rejectWithValue }) => {
     try {
-      const response = await apiFetch(`/api/recordings/${encodeURIComponent(recordingId)}`, {
+      const response = await apiFetch(`/api/v1/recordings/${encodeURIComponent(recordingId)}`, {
         cache: "no-store"
       });
       if (response.status === 401) {
         return rejectWithValue("Unauthorized", { failureKind: "unauthorized" });
       }
       const failureKind = response.status === 403 || response.status === 404 ? "terminal" : "transient";
-      const payload = (await readApiJSON(response).catch(() => null)) as { recording?: unknown; error?: string } | null;
+      const payload = (await readApiJSON(response).catch(() => null)) as {
+        recording?: unknown;
+        error?: { message?: unknown };
+      } | null;
       if (!response.ok) {
-        return rejectWithValue(payload?.error ?? "Failed to load recording.", { failureKind });
+        return rejectWithValue(
+          typeof payload?.error?.message === "string" ? payload.error.message : "Failed to load recording.",
+          { failureKind },
+        );
       }
       const recording = parseRecording(payload?.recording);
       if (!recording) {
@@ -1315,18 +1337,21 @@ export const generateShadowingAudio = createAsyncThunk<Recording, string, { reje
   "app/generateShadowingAudio",
   async (recordingId, { rejectWithValue }) => {
     try {
-      const response = await apiFetch(`/api/recordings/${encodeURIComponent(recordingId)}/shadowing`, {
+      const response = await apiFetch(`/api/v1/recordings/${encodeURIComponent(recordingId)}/shadowing`, {
         method: "POST",
       });
       const payload = (await readApiJSON(response)) as {
         recording?: unknown;
-        error?: string;
-      } | null;
+      } & V1ErrorResponse | null;
       if (response.status === 401) {
         return rejectWithValue("Unauthorized");
       }
       if (!response.ok) {
-        return rejectWithValue(payload?.error ?? "Failed to generate pronunciation audio.");
+        return rejectWithValue(
+          typeof payload?.error?.message === "string"
+            ? payload.error.message
+            : "Failed to generate pronunciation audio.",
+        );
       }
       const recording = parseRecording(payload?.recording);
       if (!recording) {
@@ -1343,18 +1368,21 @@ export const retryRecordingProcessing = createAsyncThunk<Recording, string, { re
   "app/retryRecordingProcessing",
   async (recordingId, { rejectWithValue }) => {
     try {
-      const response = await apiFetch(`/api/recordings/${encodeURIComponent(recordingId)}/retry`, {
+      const response = await apiFetch(`/api/v1/recordings/${encodeURIComponent(recordingId)}/retry`, {
         method: "POST",
       });
       const payload = (await readApiJSON(response)) as {
         recording?: unknown;
-        error?: string;
-      } | null;
+      } & V1ErrorResponse | null;
       if (response.status === 401) {
         return rejectWithValue("Unauthorized");
       }
       if (!response.ok) {
-        return rejectWithValue(payload?.error ?? "Failed to retry recording processing.");
+        return rejectWithValue(
+          typeof payload?.error?.message === "string"
+            ? payload.error.message
+            : "Failed to retry recording processing.",
+        );
       }
       const recording = parseRecording(payload?.recording);
       if (!recording) {
@@ -1385,7 +1413,7 @@ export const deleteRecording = createAsyncThunk<
   }
 
   try {
-    const response = await apiFetch(`/api/recordings/${encodeURIComponent(normalizedRecordingId)}`, {
+    const response = await apiFetch(`/api/v1/recordings/${encodeURIComponent(normalizedRecordingId)}`, {
       method: "DELETE"
     });
     const payload = (await readApiJSON(response)) as DeleteRecordingResponse | null;
@@ -1393,7 +1421,9 @@ export const deleteRecording = createAsyncThunk<
       return rejectWithValue("Unauthorized");
     }
     if (!response.ok) {
-      return rejectWithValue(payload?.error ?? "Failed to delete recording.");
+      return rejectWithValue(
+        typeof payload?.error?.message === "string" ? payload.error.message : "Failed to delete recording.",
+      );
     }
     const deletedRecordingId =
       typeof payload?.deletedRecordingId === "string" ? payload.deletedRecordingId.trim() : "";
@@ -1967,12 +1997,11 @@ const appSlice = createSlice({
         suggestions: [],
         processingStage: null,
         practiceType: draft.practiceType,
-        audioDataUrl: normalizeAudioDataUrl(draft.audioDataUrl),
-        photoDataUrl: normalizePhotoDataUrl(draft.photoDataUrl),
+        localAudioDataUrl: normalizeAudioDataUrl(draft.audioDataUrl),
+        localPhotoDataUrl: normalizePhotoDataUrl(draft.photoDataUrl),
         photoObject: normalizePhotoObject(draft.photoObject),
         processingError: null,
         shadowingStatus: "pending",
-        shadowingAudioUrl: null,
         shadowingError: null,
         shadowingUpdatedAt: timestamp,
         media: null

@@ -631,6 +631,9 @@
           "401": {
             "$ref": "#/components/responses/V1Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/V1Forbidden"
+          },
           "405": {
             "$ref": "#/components/responses/V1MethodNotAllowed"
           },
@@ -721,11 +724,150 @@
           "401": {
             "$ref": "#/components/responses/V1Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/V1Forbidden"
+          },
           "404": {
             "$ref": "#/components/responses/V1NotFound"
           },
           "405": {
             "$ref": "#/components/responses/V1MethodNotAllowed"
+          },
+          "500": {
+            "$ref": "#/components/responses/V1InternalServerError"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Mobile API v1",
+          "Recordings"
+        ],
+        "summary": "Delete one owned recording",
+        "description": "Deletes the recording, its attached product data, and durably queues owned media for removal.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RequestIdHeader"
+          },
+          {
+            "$ref": "#/components/parameters/RecordingIdPath"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/V1RecordingDeletedOK"
+          },
+          "400": {
+            "$ref": "#/components/responses/V1BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/V1Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/V1Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/V1NotFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/V1MethodNotAllowed"
+          },
+          "500": {
+            "$ref": "#/components/responses/V1InternalServerError"
+          }
+        }
+      }
+    },
+    "/api/v1/recordings/{recordingId}/retry": {
+      "post": {
+        "tags": [
+          "Mobile API v1",
+          "Recordings"
+        ],
+        "summary": "Retry one failed processing stage",
+        "description": "Resumes the owned recording from its persisted failed stage without duplicating already-running work.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RequestIdHeader"
+          },
+          {
+            "$ref": "#/components/parameters/RecordingIdPath"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/V1RecordingRetryOK"
+          },
+          "401": {
+            "$ref": "#/components/responses/V1Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/V1Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/V1NotFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/V1MethodNotAllowed"
+          },
+          "409": {
+            "$ref": "#/components/responses/V1Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/V1InternalServerError"
+          }
+        }
+      }
+    },
+    "/api/v1/recordings/{recordingId}/shadowing": {
+      "post": {
+        "tags": [
+          "Mobile API v1",
+          "Recordings"
+        ],
+        "summary": "Schedule pronunciation audio generation",
+        "description": "Claims an owned ready recording for durable shadowing synthesis without duplicating already-running work.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RequestIdHeader"
+          },
+          {
+            "$ref": "#/components/parameters/RecordingIdPath"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/V1RecordingOK"
+          },
+          "401": {
+            "$ref": "#/components/responses/V1Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/V1Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/V1NotFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/V1MethodNotAllowed"
+          },
+          "409": {
+            "$ref": "#/components/responses/V1Conflict"
           },
           "500": {
             "$ref": "#/components/responses/V1InternalServerError"
@@ -1546,162 +1688,6 @@
         }
       }
     },
-    "/api/recordings/{recordingId}": {
-      "get": {
-        "tags": [
-          "Recordings"
-        ],
-        "summary": "Load one recording by id",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/RecordingIdPath"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Recording.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RecordingResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "500": {
-            "$ref": "#/components/responses/InternalServerError"
-          }
-        }
-      },
-      "delete": {
-        "tags": [
-          "Recordings"
-        ],
-        "summary": "Permanently delete a recording and related feed content",
-        "description": "Deletes the owned recording, its Feed publication, replies and reactions, and durably queues recording and reply audio files for removal from server storage.",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/RecordingIdPath"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Recording deleted.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DeleteRecordingResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "500": {
-            "$ref": "#/components/responses/InternalServerError"
-          }
-        }
-      }
-    },
-    "/api/recordings/{recordingId}/retry": {
-      "post": {
-        "tags": [
-          "Recordings"
-        ],
-        "summary": "Retry a failed recording-processing stage",
-        "description": "Atomically claims an owned failed recording and resumes from its stored processing stage. Transcription reuses saved audio; AI analysis reuses the transcript; the natural rewrite reuses both the transcript and accepted suggestions. An already-processing recording is returned without starting a duplicate job.",
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/RecordingIdPath"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Current recording state and whether a new retry job was scheduled.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RecordingRetryResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
-          },
-          "500": {
-            "$ref": "#/components/responses/InternalServerError"
-          }
-        }
-      }
-    },
-    "/api/recordings/{recordingId}/shadowing": {
-      "post": {
-        "tags": [
-          "Recordings"
-        ],
-        "summary": "Generate pronunciation audio for the corrected transcript",
-        "description": "Claims an owned recording for background Cartesia synthesis. Ready or recently processing recordings are returned without starting a duplicate job.",
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/RecordingIdPath"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Current recording state after scheduling or deduplication.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RecordingResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
-          },
-          "500": {
-            "$ref": "#/components/responses/InternalServerError"
-          }
-        }
-      }
-    },
     "/api/feed/posts": {
       "get": {
         "tags": [
@@ -1934,69 +1920,13 @@
         }
       }
     },
-    "/uploads/shadowing/{userId}/{fileName}": {
-      "get": {
-        "tags": [
-          "Uploads"
-        ],
-        "summary": "Serve owned shadowing pronunciation audio",
-        "description": "Returns a persisted shadowing MP3 only when the Bearer-authenticated user owns the recording whose active shadowing URL matches this path. Directory requests are rejected.",
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "userId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^[a-zA-Z0-9_-]+$"
-            }
-          },
-          {
-            "name": "fileName",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^[a-zA-Z0-9_-]+\\.mp3$"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Owned shadowing MP3.",
-            "content": {
-              "audio/mpeg": {
-                "schema": {
-                  "type": "string",
-                  "format": "binary"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "500": {
-            "$ref": "#/components/responses/InternalServerError"
-          }
-        }
-      }
-    },
     "/uploads/{path}": {
       "get": {
         "tags": [
           "Uploads"
         ],
-        "summary": "Serve non-shadowing uploaded media",
-        "description": "Serves recording and Feed media. Shadowing MP3s use the authenticated route documented separately.",
+        "summary": "Serve retained legacy recording and Feed media",
+        "description": "Compatibility route for old recording and Feed files only. New recording media uses owner-protected `/api/v1/media/*` resources.",
         "security": [],
         "parameters": [
           {
@@ -2288,7 +2218,37 @@
         "content": {
           "application/json": {
             "schema": {
-              "$ref": "#/components/schemas/RecordingResponse"
+              "$ref": "#/components/schemas/V1RecordingResponse"
+            }
+          }
+        }
+      },
+      "V1RecordingRetryOK": {
+        "description": "Current owned recording and retry scheduling result.",
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestID"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/V1RecordingRetryResponse"
+            }
+          }
+        }
+      },
+      "V1RecordingDeletedOK": {
+        "description": "Owned recording deleted and its media cleanup scheduled.",
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestID"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/DeleteRecordingResponse"
             }
           }
         }
@@ -2303,7 +2263,7 @@
         "content": {
           "application/json": {
             "schema": {
-              "$ref": "#/components/schemas/RecordingWithQuotaResponse"
+              "$ref": "#/components/schemas/V1RecordingWithQuotaResponse"
             }
           }
         }
@@ -2762,16 +2722,6 @@
           "application/json": {
             "schema": {
               "$ref": "#/components/schemas/SubscriptionResponse"
-            }
-          }
-        }
-      },
-      "RecordingWithQuotaCreated": {
-        "description": "Recording and updated quota.",
-        "content": {
-          "application/json": {
-            "schema": {
-              "$ref": "#/components/schemas/RecordingWithQuotaResponse"
             }
           }
         }
@@ -3318,7 +3268,7 @@
           "items": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/Recording"
+              "$ref": "#/components/schemas/V1Recording"
             }
           },
           "page": {
@@ -4185,7 +4135,7 @@
           }
         }
       },
-      "Recording": {
+      "V1Recording": {
         "type": "object",
         "required": [
           "id",
@@ -4198,7 +4148,6 @@
           "suggestions",
           "practiceType",
           "shadowingStatus",
-          "shadowingAudioUrl",
           "shadowingError",
           "shadowingUpdatedAt"
         ],
@@ -4236,26 +4185,6 @@
           "practiceType": {
             "$ref": "#/components/schemas/PracticeType"
           },
-          "audioDataUrl": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/AudioDataUrl"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "photoDataUrl": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/PhotoDataUrl"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "photoObject": {
             "type": [
               "string",
@@ -4282,13 +4211,6 @@
           "shadowingStatus": {
             "$ref": "#/components/schemas/ShadowingStatus"
           },
-          "shadowingAudioUrl": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "pattern": "^/uploads/shadowing/[a-zA-Z0-9_-]+/[a-zA-Z0-9_-]+\\.mp3$"
-          },
           "shadowingError": {
             "type": [
               "string",
@@ -4301,7 +4223,7 @@
           },
           "media": {
             "$ref": "#/components/schemas/RecordingMedia",
-            "description": "Private media references for mobile clients. Omitted for legacy records that have not been indexed as media assets."
+            "description": "Private owned media references. Exchange each downloadPath for a short-lived opaque download request."
           }
         },
         "example": {
@@ -4320,35 +4242,36 @@
             }
           ],
           "practiceType": "free_talk",
-          "audioDataUrl": "/uploads/recordings/user-123/recording-123.webm",
-          "photoDataUrl": null,
           "photoObject": null,
           "processingStage": null,
           "processingError": null,
           "shadowingStatus": "ready",
-          "shadowingAudioUrl": "/uploads/shadowing/user-123/recording-123.mp3",
           "shadowingError": null,
           "shadowingUpdatedAt": "2026-09-21T10:31:00Z",
           "media": {
             "audio": {
               "assetId": "e8ca3d43-6c11-4e62-9566-d9f408ec1b65",
               "downloadPath": "/api/v1/media/e8ca3d43-6c11-4e62-9566-d9f408ec1b65/download"
+            },
+            "shadowing": {
+              "assetId": "63dca3cc-e9bb-43b7-9063-dda65fc6abc0",
+              "downloadPath": "/api/v1/media/63dca3cc-e9bb-43b7-9063-dda65fc6abc0/download"
             }
           }
         }
       },
-      "RecordingResponse": {
+      "V1RecordingResponse": {
         "type": "object",
         "required": [
           "recording"
         ],
         "properties": {
           "recording": {
-            "$ref": "#/components/schemas/Recording"
+            "$ref": "#/components/schemas/V1Recording"
           }
         }
       },
-      "RecordingRetryResponse": {
+      "V1RecordingRetryResponse": {
         "type": "object",
         "required": [
           "recording",
@@ -4356,10 +4279,31 @@
         ],
         "properties": {
           "recording": {
-            "$ref": "#/components/schemas/Recording"
+            "$ref": "#/components/schemas/V1Recording"
           },
           "scheduled": {
             "type": "boolean"
+          }
+        }
+      },
+      "V1RecordingWithQuotaResponse": {
+        "type": "object",
+        "required": [
+          "recording"
+        ],
+        "properties": {
+          "recording": {
+            "$ref": "#/components/schemas/V1Recording"
+          },
+          "quota": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RecordingQuota"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         }
       },
@@ -4469,7 +4413,6 @@
         "type": "object",
         "required": [
           "interestIds",
-          "recordings",
           "quota",
           "subscription",
           "englishLevel"
@@ -4479,12 +4422,6 @@
             "type": "array",
             "items": {
               "type": "string"
-            }
-          },
-          "recordings": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/Recording"
             }
           },
           "quota": {
@@ -4618,218 +4555,6 @@
           },
           "text": {
             "type": "string"
-          }
-        }
-      },
-      "RecordingDraft": {
-        "type": "object",
-        "required": [
-          "topic",
-          "duration",
-          "timestamp",
-          "practiceType",
-          "audioDataUrl"
-        ],
-        "properties": {
-          "topic": {
-            "type": "string",
-            "maxLength": 300
-          },
-          "duration": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "timestamp": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "practiceType": {
-            "$ref": "#/components/schemas/PracticeType"
-          },
-          "audioDataUrl": {
-            "$ref": "#/components/schemas/AudioDataUrl"
-          },
-          "photoDataUrl": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/PhotoDataUrl"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "photoObject": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "maxLength": 120
-          }
-        }
-      },
-      "CreateRecordingRequest": {
-        "type": "object",
-        "required": [
-          "recording"
-        ],
-        "properties": {
-          "recording": {
-            "$ref": "#/components/schemas/RecordingDraft"
-          }
-        }
-      },
-      "RecordingWithQuotaResponse": {
-        "type": "object",
-        "required": [
-          "recording"
-        ],
-        "properties": {
-          "recording": {
-            "$ref": "#/components/schemas/Recording"
-          },
-          "quota": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/RecordingQuota"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        }
-      },
-      "CreateRecordingSessionRequest": {
-        "type": "object",
-        "required": [
-          "topic"
-        ],
-        "properties": {
-          "topic": {
-            "type": "string",
-            "maxLength": 300
-          },
-          "duration": {
-            "type": "integer",
-            "minimum": 0,
-            "default": 0
-          },
-          "timestamp": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "practiceType": {
-            "$ref": "#/components/schemas/PracticeType"
-          },
-          "photoDataUrl": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/PhotoDataUrl"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "photoObject": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "maxLength": 120
-          }
-        }
-      },
-      "CreateRecordingSessionResponse": {
-        "type": "object",
-        "required": [
-          "sessionId",
-          "chunkSeconds"
-        ],
-        "properties": {
-          "sessionId": {
-            "type": "string"
-          },
-          "chunkSeconds": {
-            "type": "integer",
-            "example": 5
-          }
-        }
-      },
-      "UploadRecordingChunkRequest": {
-        "type": "object",
-        "required": [
-          "chunkIndex",
-          "audio"
-        ],
-        "properties": {
-          "chunkIndex": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "audio": {
-            "type": "string",
-            "format": "binary",
-            "description": "One MediaRecorder chunk; max 8MB."
-          }
-        }
-      },
-      "UploadRecordingChunkResponse": {
-        "type": "object",
-        "required": [
-          "sessionId",
-          "chunkIndex"
-        ],
-        "properties": {
-          "sessionId": {
-            "type": "string"
-          },
-          "chunkIndex": {
-            "type": "integer",
-            "minimum": 0
-          }
-        }
-      },
-      "UploadRecordingFinalAudioRequest": {
-        "type": "object",
-        "required": [
-          "audio"
-        ],
-        "properties": {
-          "audio": {
-            "type": "string",
-            "format": "binary",
-            "description": "Complete MediaRecorder Blob; max 80MB."
-          }
-        }
-      },
-      "UploadRecordingFinalAudioResponse": {
-        "type": "object",
-        "required": [
-          "sessionId",
-          "extension"
-        ],
-        "properties": {
-          "sessionId": {
-            "type": "string"
-          },
-          "extension": {
-            "type": "string",
-            "example": "webm"
-          }
-        }
-      },
-      "FinishRecordingSessionRequest": {
-        "type": "object",
-        "properties": {
-          "duration": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "timestamp": {
-            "type": "string",
-            "format": "date-time"
           }
         }
       },

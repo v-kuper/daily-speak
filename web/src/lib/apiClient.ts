@@ -1,6 +1,5 @@
 export type ApiClient = {
   fetch: (path: string, init?: RequestInit) => Promise<Response>;
-  assetURL: (value: string | null) => string | null;
   url: (path: string) => string;
 };
 
@@ -34,9 +33,6 @@ export const createApiClient = (baseURL: string, fetchImpl: typeof fetch = fetch
         }
         throw new ApiUnavailableError();
       }
-    },
-    assetURL(value) {
-      return value?.startsWith("/uploads/") ? `${normalizedBaseURL}${value}` : value;
     },
     url: resolveURL,
   };
@@ -101,7 +97,5 @@ export const apiFetch = (path: string, init: RequestInit = {}): Promise<Response
     return response;
   })();
 };
-
-export const resolveApiAssetURL = (value: string | null): string | null => getApiClient().assetURL(value);
 
 export const resolveApiURL = (path: string): string => getApiClient().url(path);

@@ -1,13 +1,177 @@
 package httpapi
 
 import (
+	"context"
+	"errors"
 	"net/http"
+	"strings"
+	"time"
 
+	"daily-speaking-practice/backend/internal/auth"
+	"daily-speaking-practice/backend/internal/logging"
+	"daily-speaking-practice/backend/internal/practice"
 	"daily-speaking-practice/backend/internal/recording"
+	"daily-speaking-practice/backend/internal/shadowing"
 )
 
+// recordingV1Response deliberately excludes the legacy inline/upload URL
+// fields. Persisted private media is exposed only through owned media
+// references that clients exchange for short-lived download requests.
+type recordingV1Response struct {
+	ID                  string                  `json:"id"`
+	Topic               string                  `json:"topic"`
+	Duration            int                     `json:"duration"`
+	Timestamp           string                  `json:"timestamp"`
+	Status              string                  `json:"status"`
+	Transcript          string                  `json:"transcript"`
+	CorrectedTranscript string                  `json:"correctedTranscript"`
+	Suggestions         []suggestion            `json:"suggestions"`
+	ProcessingStage     *string                 `json:"processingStage"`
+	PracticeType        string                  `json:"practiceType"`
+	PhotoObject         *string                 `json:"photoObject"`
+	ProcessingError     *string                 `json:"processingError"`
+	ShadowingStatus     string                  `json:"shadowingStatus"`
+	ShadowingError      *string                 `json:"shadowingError"`
+	ShadowingUpdatedAt  string                  `json:"shadowingUpdatedAt"`
+	Media               *recordingMediaResponse `json:"media,omitempty"`
+}
+
+func (s *Server) requiredRecordingIdentityV1(w http.ResponseWriter, r *http.Request) (*auth.Identity, bool) {
+	identity, ok := s.requiredIdentityV1(w, r)
+	if !ok {
+		return nil, false
+	}
+	if identity.Kind != "user" || identity.User == nil {
+		writeV1Error(w, r, http.StatusForbidden, "account_required", "An account is required to access recordings")
+		return nil, false
+	}
+	return identity, true
+}
+
+func (s *Server) routeRecordingV1(w http.ResponseWriter, r *http.Request, relativePath string) {
+	parts := strings.Split(strings.Trim(relativePath, "/"), "/")
+	if len(parts) == 1 && parts[0] != "" {
+		recordingID := pathUnescape(parts[0])
+		switch r.Method {
+		case http.MethodGet:
+			s.handleGetRecordingV1(w, r, recordingID)
+		case http.MethodDelete:
+			s.handleDeleteRecordingV1(w, r, recordingID)
+		default:
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
+		}
+		return
+	}
+	if len(parts) == 2 && parts[0] != "" && r.Method == http.MethodPost {
+		recordingID := pathUnescape(parts[0])
+		switch parts[1] {
+		case "retry":
+			s.handleRetryRecordingV1(w, r, recordingID)
+		case "shadowing":
+			s.handleGenerateShadowingV1(w, r, recordingID)
+		default:
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Not found"})
+		}
+		return
+	}
+	if len(parts) == 2 && parts[0] != "" && (parts[1] == "retry" || parts[1] == "shadowing") {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
+		return
+	}
+	writeJSON(w, http.StatusNotFound, map[string]string{"error": "Not found"})
+}
+
+func (s *Server) handleGetRecordingV1(w http.ResponseWriter, r *http.Request, recordingID string) {
+	identity, ok := s.requiredRecordingIdentityV1(w, r)
+	if !ok {
+		return
+	}
+	record, err := s.recordingReader.Get(r.Context(), identity.User.ID, recordingID)
+	if errors.Is(err, recording.ErrNotFound) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Recording not found."})
+		return
+	}
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to load recording."})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"recording": recordingV1ResponseFromRecord(record)})
+}
+
+func (s *Server) handleRetryRecordingV1(w http.ResponseWriter, r *http.Request, recordingID string) {
+	started := time.Now()
+	logger := logging.ForRequest("api.v1.recordings.retry", r)
+	identity, ok := s.requiredRecordingIdentityV1(w, r)
+	if !ok {
+		return
+	}
+	recordingID = strings.TrimSpace(recordingID)
+	if recordingID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Recording ID is required."})
+		return
+	}
+
+	result, err := s.recordingRetryService.Retry(r.Context(), identity.User.ID, recordingID)
+	if errors.Is(err, recording.ErrNotFound) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Recording not found."})
+		return
+	}
+	if errors.Is(err, recording.ErrRetryUnavailable) {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": recording.ErrRetryUnavailable.Error()})
+		return
+	}
+	if err != nil {
+		logger.Error("recording.retry_schedule_failed", map[string]any{"recordingId": recordingID})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to retry recording processing."})
+		return
+	}
+	logger.Info("request.success", map[string]any{
+		"status":      http.StatusOK,
+		"durationMs":  logging.ElapsedMs(started),
+		"recordingId": recordingID,
+		"scheduled":   result.Scheduled,
+	})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"recording": recordingV1ResponseFromRecord(result.Record),
+		"scheduled": result.Scheduled,
+	})
+}
+
+func (s *Server) handleGenerateShadowingV1(w http.ResponseWriter, r *http.Request, recordingID string) {
+	started := time.Now()
+	logger := logging.ForRequest("api.v1.recordings.shadowing", r)
+	identity, ok := s.requiredRecordingIdentityV1(w, r)
+	if !ok {
+		return
+	}
+	recordingID = strings.TrimSpace(recordingID)
+	if recordingID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Recording ID is required."})
+		return
+	}
+	record, scheduled, err := s.scheduleShadowingRecord(r.Context(), identity.User.ID, recordingID)
+	if errors.Is(err, shadowing.ErrNotFound) || errors.Is(err, recording.ErrNotFound) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Recording not found."})
+		return
+	}
+	if errors.Is(err, shadowing.ErrTranscriptUnavailable) {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "The natural transcript is not ready yet."})
+		return
+	}
+	if err != nil {
+		logger.Error("shadowing.schedule_failed", map[string]any{"recordingId": recordingID})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to generate pronunciation audio."})
+		return
+	}
+	logger.Info("request.success", map[string]any{
+		"status": http.StatusOK, "durationMs": logging.ElapsedMs(started),
+		"recordingId": recordingID, "scheduled": scheduled,
+	})
+	writeJSON(w, http.StatusOK, map[string]any{"recording": recordingV1ResponseFromRecord(record)})
+}
+
 func (s *Server) handleListRecordingsV1(w http.ResponseWriter, r *http.Request) {
-	user, ok := s.authorizedUser(w, r, "api.v1.recordings.list")
+	identity, ok := s.requiredRecordingIdentityV1(w, r)
 	if !ok {
 		return
 	}
@@ -21,7 +185,7 @@ func (s *Server) handleListRecordingsV1(w http.ResponseWriter, r *http.Request) 
 		options.BeforeTimestamp = &page.Cursor.Timestamp
 		options.BeforeID = page.Cursor.ID
 	}
-	records, err := s.recordingReader.List(r.Context(), user.ID, options)
+	records, err := s.recordingReader.List(r.Context(), identity.User.ID, options)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to load recordings."})
 		return
@@ -37,12 +201,85 @@ func (s *Server) handleListRecordingsV1(w http.ResponseWriter, r *http.Request) 
 		nextCursor = &encoded
 		records = records[:page.Limit]
 	}
-	responses := make([]recordingResponse, 0, len(records))
+	responses := make([]recordingV1Response, 0, len(records))
 	for _, record := range records {
-		responses = append(responses, recordingResponseFromRecord(record))
+		responses = append(responses, recordingV1ResponseFromRecord(record))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"items": responses,
 		"page":  pageInfo{Limit: page.Limit, NextCursor: nextCursor},
 	})
+}
+
+func recordingV1ResponseFromRecord(record recording.Record) recordingV1Response {
+	return recordingV1Response{
+		ID:                  record.ID,
+		Topic:               record.Topic,
+		Duration:            recording.NormalizeDurationSeconds(record.Duration),
+		Timestamp:           record.Timestamp.UTC().Format(time.RFC3339Nano),
+		Status:              normalizeRecordingStatus(record.Status),
+		Transcript:          record.Transcript,
+		CorrectedTranscript: record.CorrectedTranscript,
+		Suggestions:         normalizeSuggestions(record.SuggestionsJSON, 0),
+		ProcessingStage:     normalizeRecordingProcessingStage(record.ProcessingStage),
+		PracticeType:        practice.NormalizeType(record.PracticeType),
+		PhotoObject:         normalizeOptionalPhotoObject(record.PhotoObject),
+		ProcessingError:     normalizeOptionalProcessingError(record.ProcessingError),
+		ShadowingStatus:     normalizeShadowingStatus(record.ShadowingStatus),
+		ShadowingError:      normalizeOptionalProcessingError(record.ShadowingError),
+		ShadowingUpdatedAt:  record.ShadowingUpdatedAt.UTC().Format(time.RFC3339Nano),
+		Media:               recordingMedia(record.AudioAssetID, record.PhotoAssetID, record.ShadowingAssetID),
+	}
+}
+
+func normalizeRecordingStatus(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "processing", "ready", "failed":
+		return strings.ToLower(strings.TrimSpace(value))
+	default:
+		return "ready"
+	}
+}
+
+func normalizeRecordingProcessingStage(value *string) *string {
+	if value == nil {
+		return nil
+	}
+	normalized := strings.ToLower(strings.TrimSpace(*value))
+	switch normalized {
+	case "transcribing", "suggestions", "rewriting":
+		return &normalized
+	default:
+		return nil
+	}
+}
+
+func normalizeShadowingStatus(value string) string {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	switch normalized {
+	case "pending", "processing", "ready", "failed":
+		return normalized
+	default:
+		return "pending"
+	}
+}
+
+func normalizeOptionalProcessingError(value *string) *string {
+	if value == nil {
+		return nil
+	}
+	normalized := strings.TrimSpace(*value)
+	if normalized == "" {
+		return nil
+	}
+	return &normalized
+}
+
+func (s *Server) scheduleShadowingRecord(ctx context.Context, userID, recordingID string) (recording.Record, bool, error) {
+	scheduled, err := s.shadowingStore.Schedule(ctx, userID, recordingID)
+	if err != nil {
+		return recording.Record{}, false, err
+	}
+	record, err := s.recordingReader.Get(ctx, userID, recordingID)
+	return record, scheduled, err
 }

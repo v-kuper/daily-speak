@@ -10,16 +10,16 @@ import (
 func TestRetryServiceSchedulesFailedStageAtomically(t *testing.T) {
 	stage := "suggestions"
 	processingError := "failed"
-	shadowingURL := "/uploads/shadowing/user/old.mp3"
+	shadowingAssetID := "old-shadowing-asset"
 	records := &recordRepositoryStub{found: true, record: Record{
 		ID: "recording-id", Status: "failed", ProcessingStage: &stage,
 		Transcript: "I go yesterday.", SuggestionsJSON: []byte("[{\"wrong\":\"go\"}]"),
 		CorrectedTranscript: "stale", ProcessingError: &processingError,
-		ShadowingStatus: "failed", ShadowingAudioURL: &shadowingURL,
+		ShadowingStatus: "failed", ShadowingAssetID: &shadowingAssetID,
 	}}
 	tx := &retryTransactionStub{claimed: true}
 	unit := &retryUnitStub{tx: tx}
-	service := NewRetryService(records, unit, nil, func() string { return "job-id" })
+	service := NewRetryService(records, unit, func() string { return "job-id" })
 	startedAt := time.Date(2026, time.September, 27, 12, 30, 0, 0, time.UTC)
 	service.now = func() time.Time { return startedAt }
 
@@ -36,7 +36,7 @@ func TestRetryServiceSchedulesFailedStageAtomically(t *testing.T) {
 	if result.Record.Transcript != "I go yesterday." || string(result.Record.SuggestionsJSON) != "[]" {
 		t.Fatalf("stage inputs were not preserved correctly: %#v", result.Record)
 	}
-	if result.Record.CorrectedTranscript != "" || result.Record.ShadowingStatus != "pending" || result.Record.ShadowingAudioURL != nil {
+	if result.Record.CorrectedTranscript != "" || result.Record.ShadowingStatus != "pending" || result.Record.ShadowingAssetID != nil {
 		t.Fatalf("downstream state was not cleared: %#v", result.Record)
 	}
 	if !result.Record.ShadowingUpdatedAt.Equal(startedAt) {
@@ -52,7 +52,7 @@ func TestRetryServiceTreatsConcurrentClaimAsIdempotent(t *testing.T) {
 	current := records.record
 	current.Status = "processing"
 	tx := &retryTransactionStub{currentFound: true, current: current}
-	service := NewRetryService(records, &retryUnitStub{tx: tx}, nil, func() string { return "job-id" })
+	service := NewRetryService(records, &retryUnitStub{tx: tx}, func() string { return "job-id" })
 
 	result, err := service.Retry(context.Background(), "user-id", "recording-id")
 	if err != nil {
@@ -67,15 +67,12 @@ func TestRetryServiceValidatesPersistedResumeInputs(t *testing.T) {
 	stageTranscribing := "transcribing"
 	stageSuggestions := "suggestions"
 	assetID := "asset-id"
-	legacyURL := "/uploads/recordings/user-id/recording-id.webm"
 	tests := []struct {
 		name   string
 		record Record
-		legacy LegacyAudioResolver
 		ok     bool
 	}{
 		{name: "asset transcription", record: Record{Status: "failed", ProcessingStage: &stageTranscribing, AudioAssetID: &assetID}, ok: true},
-		{name: "legacy transcription", record: Record{Status: "failed", ProcessingStage: &stageTranscribing, AudioDataURL: &legacyURL}, legacy: legacyResolverStub{}, ok: true},
 		{name: "missing transcription media", record: Record{Status: "failed", ProcessingStage: &stageTranscribing}},
 		{name: "analysis transcript", record: Record{Status: "failed", ProcessingStage: &stageSuggestions, Transcript: "I go."}, ok: true},
 		{name: "missing analysis transcript", record: Record{Status: "failed", ProcessingStage: &stageSuggestions}},
@@ -84,7 +81,7 @@ func TestRetryServiceValidatesPersistedResumeInputs(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			records := &recordRepositoryStub{found: true, record: tc.record}
-			service := NewRetryService(records, &retryUnitStub{tx: &retryTransactionStub{claimed: true}}, tc.legacy, func() string { return "job-id" })
+			service := NewRetryService(records, &retryUnitStub{tx: &retryTransactionStub{claimed: true}}, func() string { return "job-id" })
 			_, err := service.Retry(context.Background(), "user-id", "recording-id")
 			if tc.ok && err != nil {
 				t.Fatalf("expected retryable record: %v", err)
@@ -99,7 +96,7 @@ func TestRetryServiceValidatesPersistedResumeInputs(t *testing.T) {
 func TestRetryServiceDoesNotOpenTransactionForProcessingRecord(t *testing.T) {
 	records := &recordRepositoryStub{found: true, record: Record{ID: "recording-id", Status: "processing"}}
 	unit := &retryUnitStub{tx: &retryTransactionStub{}}
-	service := NewRetryService(records, unit, nil, func() string { return "unused" })
+	service := NewRetryService(records, unit, func() string { return "unused" })
 
 	result, err := service.Retry(context.Background(), "user-id", "recording-id")
 	if err != nil || result.Scheduled || unit.calls != 0 {
@@ -169,7 +166,3 @@ func (transaction *retryTransactionStub) Enqueue(_ context.Context, jobID string
 	transaction.jobID = jobID
 	return nil
 }
-
-type legacyResolverStub struct{}
-
-func (legacyResolverStub) Path(string) (string, error) { return "/tmp/audio.webm", nil }

@@ -43,8 +43,7 @@ func (t *sqlCreateTransaction) Find(ctx context.Context, userID string, recordin
 	err := t.tx.QueryRow(ctx, `
 		SELECT id, topic, duration, timestamp, status, transcript,
 		       corrected_transcript, suggestions, processing_stage, practice_type,
-		       audio_data_url, photo_data_url, photo_object, processing_error,
-		       shadowing_status, shadowing_audio_url, shadowing_error,
+		       photo_object, processing_error, shadowing_status, shadowing_error,
 		       shadowing_updated_at, audio_asset_id, photo_asset_id
 		FROM recordings
 		WHERE id = $1 AND user_id = $2`, recordingID, userID).Scan(createdDestinations(&created)...)
@@ -73,15 +72,14 @@ func (t *sqlCreateTransaction) Insert(ctx context.Context, command CreateCommand
 	err := t.tx.QueryRow(ctx, `
 		INSERT INTO recordings
 		  (id, user_id, topic, duration, timestamp, transcript, corrected_transcript,
-		   suggestions, practice_type, audio_data_url, photo_data_url, photo_object,
+		   suggestions, practice_type, photo_object,
 		   status, processing_stage, processing_job_id, audio_asset_id, photo_asset_id)
 		VALUES
-		  ($1, $2, $3, $4, $5, '', '', '[]'::jsonb, $6, NULL, NULL, $10,
+		  ($1, $2, $3, $4, $5, '', '', '[]'::jsonb, $6, $10,
 		   'processing', 'transcribing', $7, $8, $9)
 		RETURNING id, topic, duration, timestamp, status, transcript,
 		          corrected_transcript, suggestions, processing_stage, practice_type,
-		          audio_data_url, photo_data_url, photo_object, processing_error,
-		          shadowing_status, shadowing_audio_url, shadowing_error,
+		          photo_object, processing_error, shadowing_status, shadowing_error,
 		          shadowing_updated_at, audio_asset_id, photo_asset_id`,
 		command.RecordingID, command.UserID, command.Input.Topic, command.Input.Duration,
 		command.Input.Timestamp, command.Input.PracticeType, command.JobID,
@@ -118,9 +116,8 @@ func createdDestinations(created *Created) []any {
 		&created.ID, &created.Topic, &created.Duration, &created.Timestamp,
 		&created.Status, &created.Transcript, &created.CorrectedTranscript,
 		&created.SuggestionsJSON, &created.ProcessingStage, &created.PracticeType,
-		&created.AudioDataURL, &created.PhotoDataURL, &created.PhotoObject,
-		&created.ProcessingError, &created.ShadowingStatus,
-		&created.ShadowingAudioURL, &created.ShadowingError,
+		&created.PhotoObject, &created.ProcessingError, &created.ShadowingStatus,
+		&created.ShadowingError,
 		&created.ShadowingUpdatedAt, &created.AudioAssetID, &created.PhotoAssetID,
 	}
 }

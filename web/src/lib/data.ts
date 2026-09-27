@@ -1,10 +1,4 @@
 import type { ShadowingStatus } from "./shadowing";
-import { resolveApiAssetURL } from "./apiClient";
-
-export const parseRecordingMediaURL = (value: unknown): string | null => {
-  const url = typeof value === "string" ? value.trim() : "";
-  return resolveApiAssetURL(url || null);
-};
 
 export type TopicData = {
   questions: string[];
@@ -62,12 +56,11 @@ export type Recording = {
   suggestions: Suggestion[];
   processingStage: RecordingProcessingStage | null;
   practiceType: PracticeType;
-  audioDataUrl: string | null;
-  photoDataUrl: string | null;
+  localAudioDataUrl: string | null;
+  localPhotoDataUrl: string | null;
   photoObject: string | null;
   processingError: string | null;
   shadowingStatus: ShadowingStatus;
-  shadowingAudioUrl: string | null;
   shadowingError: string | null;
   shadowingUpdatedAt: string;
   media: RecordingMedia | null;

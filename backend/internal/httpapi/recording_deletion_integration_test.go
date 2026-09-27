@@ -91,7 +91,7 @@ func TestDeleteRecordingCascadesDataAndRetriesQueuedFilesAfterRestart(t *testing
 	writeTestUpload(t, uploadsDir, shadowingURL)
 	writeTestUpload(t, uploadsDir, replyURL)
 
-	request := httptest.NewRequest(http.MethodDelete, "/api/recordings/"+recordingID, nil)
+	request := httptest.NewRequest(http.MethodDelete, "/api/v1/recordings/"+recordingID, nil)
 	request.Header.Set("Authorization", "Bearer "+grant.AccessToken)
 	response := httptest.NewRecorder()
 	newTestServer(Config{DB: database, IdentityTokens: tokenConfig}).Handler().ServeHTTP(response, request)

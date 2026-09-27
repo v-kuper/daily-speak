@@ -15,6 +15,7 @@ import (
 
 	"daily-speaking-practice/backend/internal/auth"
 	"daily-speaking-practice/backend/internal/db"
+	"daily-speaking-practice/backend/internal/recording"
 	"github.com/google/uuid"
 )
 
@@ -125,17 +126,6 @@ func newShadowingFixture(t *testing.T, synthesizer *fakeSynthesizer, correctedTr
 	}
 }
 
-func (f shadowingFixture) getAudio(t *testing.T, accessToken string, publicURL string) *httptest.ResponseRecorder {
-	t.Helper()
-	request := httptest.NewRequest(http.MethodGet, publicURL, nil)
-	if accessToken != "" {
-		request.Header.Set("Authorization", "Bearer "+accessToken)
-	}
-	response := httptest.NewRecorder()
-	f.server.Handler().ServeHTTP(response, request)
-	return response
-}
-
 func (f shadowingFixture) post(t *testing.T, accessToken string) *httptest.ResponseRecorder {
 	t.Helper()
 	return f.postToServer(t, f.server, accessToken)
@@ -143,7 +133,7 @@ func (f shadowingFixture) post(t *testing.T, accessToken string) *httptest.Respo
 
 func (f shadowingFixture) postToServer(t *testing.T, server *Server, accessToken string) *httptest.ResponseRecorder {
 	t.Helper()
-	request := httptest.NewRequest(http.MethodPost, "/api/recordings/"+f.recordingID+"/shadowing", nil)
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/recordings/"+f.recordingID+"/shadowing", nil)
 	if accessToken != "" {
 		request.Header.Set("Authorization", "Bearer "+accessToken)
 	}
@@ -170,19 +160,19 @@ func waitForControlledSynthesizerFinish(t *testing.T, synthesizer *controlledSyn
 	}
 }
 
-func (f shadowingFixture) waitForShadowingStatus(t *testing.T, want string) recordingResponse {
+func (f shadowingFixture) waitForShadowingStatus(t *testing.T, want string) recording.Record {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
-		recording, err := f.server.recordingForUser(context.Background(), f.owner.ID, f.recordingID)
-		if err == nil && recording.ShadowingStatus == want {
-			return recording
+		record, err := f.server.recordingReader.Get(context.Background(), f.owner.ID, f.recordingID)
+		if err == nil && record.ShadowingStatus == want {
+			return record
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	recording, err := f.server.recordingForUser(context.Background(), f.owner.ID, f.recordingID)
-	t.Fatalf("shadowing status did not become %q: recording=%#v err=%v", want, recording, err)
-	return recordingResponse{}
+	record, err := f.server.recordingReader.Get(context.Background(), f.owner.ID, f.recordingID)
+	t.Fatalf("shadowing status did not become %q: recording=%#v err=%v", want, record, err)
+	return recording.Record{}
 }
 
 func TestShadowingRetryRequiresOwner(t *testing.T) {
@@ -205,43 +195,6 @@ func TestShadowingRetryRequiresOwner(t *testing.T) {
 	}
 	if synthesizer.callCount() != 0 {
 		t.Fatalf("provider calls=%d", synthesizer.callCount())
-	}
-}
-
-func TestShadowingAudioPlaybackRequiresRecordingOwner(t *testing.T) {
-	fixture := newShadowingFixture(t, &fakeSynthesizer{}, "I went yesterday.", "ready", time.Now().UTC())
-	publicURL := "/uploads/shadowing/" + fixture.owner.ID + "/" + fixture.recordingID + ".mp3"
-	absolutePath := filepath.Join(fixture.uploadsDir, "shadowing", fixture.owner.ID, fixture.recordingID+".mp3")
-	if err := os.MkdirAll(filepath.Dir(absolutePath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(absolutePath, []byte("ID3-owner-audio"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := fixture.database.Exec(context.Background(), `
-		UPDATE recordings SET shadowing_audio_url = $2 WHERE id = $1`, fixture.recordingID, publicURL); err != nil {
-		t.Fatal(err)
-	}
-
-	other, err := auth.RegisterUser(context.Background(), fixture.database, fmt.Sprintf("media-other-%s@example.com", uuid.NewString()), "password123")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_, _ = fixture.database.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, other.ID)
-	})
-	otherGrant, err := auth.LoginIdentityUser(context.Background(), fixture.database, fixture.tokenConfig, auth.Credentials{Email: other.Email, Password: "password123"}, nil, auth.DeviceInfo{Name: "Other media test", Platform: "test"})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	nonOwnerResponse := fixture.getAudio(t, otherGrant.AccessToken, publicURL)
-	if nonOwnerResponse.Code != http.StatusNotFound {
-		t.Fatalf("non-owner status=%d body=%q", nonOwnerResponse.Code, nonOwnerResponse.Body.String())
-	}
-	ownerResponse := fixture.getAudio(t, fixture.ownerAccessToken, publicURL)
-	if ownerResponse.Code != http.StatusOK || ownerResponse.Body.String() != "ID3-owner-audio" {
-		t.Fatalf("owner status=%d body=%q", ownerResponse.Code, ownerResponse.Body.String())
 	}
 }
 
@@ -304,7 +257,7 @@ func TestShadowingStaleProcessingCanBeReclaimed(t *testing.T) {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
 	recording := fixture.waitForShadowingStatus(t, "ready")
-	if synthesizer.callCount() != 1 || recording.ShadowingAudioURL == nil {
+	if synthesizer.callCount() != 1 || recording.ShadowingAssetID == nil {
 		t.Fatalf("calls=%d recording=%#v", synthesizer.callCount(), recording)
 	}
 }
@@ -334,13 +287,14 @@ func TestReclaimedShadowingIgnoresOlderWorkerFailure(t *testing.T) {
 	waitForControlledSynthesizerFinish(t, oldSynthesizer)
 	newSynthesizer.release <- controlledSynthesisResult{audio: []byte("ID3-new-attempt")}
 	recording := fixture.waitForShadowingStatus(t, "ready")
-	if recording.ShadowingAudioURL == nil {
-		t.Fatal("new attempt did not publish audio URL")
+	if recording.ShadowingAssetID == nil {
+		t.Fatal("new attempt did not publish protected media")
 	}
-	absolutePath, err := newServer.legacyUploads.Path(*recording.ShadowingAudioURL)
-	if err != nil {
+	var objectKey string
+	if err := fixture.database.QueryRow(context.Background(), `SELECT object_key FROM media_assets WHERE id = $1`, *recording.ShadowingAssetID).Scan(&objectKey); err != nil {
 		t.Fatal(err)
 	}
+	absolutePath := filepath.Join(fixture.uploadsDir, filepath.FromSlash(objectKey))
 	data, err := os.ReadFile(absolutePath)
 	if err != nil || string(data) != "ID3-new-attempt" {
 		t.Fatalf("published audio=%q err=%v", data, err)

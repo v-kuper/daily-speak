@@ -26,7 +26,7 @@ func (r *SQLProcessingRepository) LoadProcessingWork(ctx context.Context, job Pr
 	var work ProcessingWork
 	var suggestionJSON []byte
 	err := r.db.QueryRow(ctx, `
-		SELECT r.user_id, COALESCE(r.processing_stage, ''), r.audio_data_url, r.audio_asset_id,
+		SELECT r.user_id, COALESCE(r.processing_stage, ''), r.audio_asset_id,
 		       r.transcript, r.suggestions, r.topic, r.practice_type, r.photo_object, u.english_level,
 		       EXISTS (
 		         SELECT 1 FROM guest_previews p
@@ -37,7 +37,7 @@ func (r *SQLProcessingRepository) LoadProcessingWork(ctx context.Context, job Pr
 		WHERE r.id = $1 AND r.status = 'processing' AND r.processing_job_id = $2`,
 		job.ResourceID, job.ID,
 	).Scan(
-		&work.UserID, &work.Stage, &work.AudioURL, &work.AudioAssetID, &work.Transcript,
+		&work.UserID, &work.Stage, &work.AudioAssetID, &work.Transcript,
 		&suggestionJSON, &work.Topic, &work.PracticeType, &work.PhotoObject, &work.EnglishLevel,
 		&work.PromotedGuestPreview,
 	)

@@ -34,28 +34,6 @@ type learningReference = recording.LearningReference
 
 type suggestion = recording.Suggestion
 
-type recordingResponse struct {
-	ID                  string                  `json:"id"`
-	Topic               string                  `json:"topic"`
-	Duration            int                     `json:"duration"`
-	Timestamp           string                  `json:"timestamp"`
-	Status              string                  `json:"status"`
-	Transcript          string                  `json:"transcript"`
-	CorrectedTranscript string                  `json:"correctedTranscript"`
-	Suggestions         []suggestion            `json:"suggestions"`
-	ProcessingStage     *string                 `json:"processingStage"`
-	PracticeType        string                  `json:"practiceType"`
-	AudioDataURL        *string                 `json:"audioDataUrl"`
-	PhotoDataURL        *string                 `json:"photoDataUrl"`
-	PhotoObject         *string                 `json:"photoObject"`
-	ProcessingError     *string                 `json:"processingError"`
-	ShadowingStatus     string                  `json:"shadowingStatus"`
-	ShadowingAudioURL   *string                 `json:"shadowingAudioUrl"`
-	ShadowingError      *string                 `json:"shadowingError"`
-	ShadowingUpdatedAt  string                  `json:"shadowingUpdatedAt"`
-	Media               *recordingMediaResponse `json:"media,omitempty"`
-}
-
 type recordingMediaResponse struct {
 	Audio     *recordingMediaAssetResponse `json:"audio,omitempty"`
 	Photo     *recordingMediaAssetResponse `json:"photo,omitempty"`

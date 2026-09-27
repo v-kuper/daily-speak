@@ -81,30 +81,25 @@ func (s *Store) Complete(ctx context.Context, job Job, asset Asset) (bool, error
 	if asset.Bucket != "" {
 		bucket = asset.Bucket
 	}
-	var legacyURL any
-	if asset.LegacyPublicURL != "" {
-		legacyURL = asset.LegacyPublicURL
-	}
 	_, err = tx.Exec(ctx, `
 		INSERT INTO media_assets
 		  (id, owner_principal_id, purpose, state, storage_driver, bucket, object_key,
 		   content_type, expected_size_bytes, verified_size_bytes,
-		   expected_checksum_sha256, verified_checksum_sha256, etag,
-		   legacy_public_url, verified_at, attached_at)
+		   expected_checksum_sha256, verified_checksum_sha256, etag, verified_at, attached_at)
 		VALUES ($1, $2, 'shadowing_audio', 'ready', $3, $4, $5,
-		   'audio/mpeg', $6, $6, $7, $7, NULLIF($8, ''), $9, NOW(), NOW())`,
+		   'audio/mpeg', $6, $6, $7, $7, NULLIF($8, ''), NOW(), NOW())`,
 		asset.ID, asset.OwnerID, asset.StorageDriver, bucket, asset.ObjectKey, asset.Size,
-		asset.Checksum, asset.ETag, legacyURL)
+		asset.Checksum, asset.ETag)
 	if err != nil {
 		return false, err
 	}
 	result, err := tx.Exec(ctx, `
 		UPDATE recordings
-		SET shadowing_status = 'ready', shadowing_audio_url = $2, shadowing_asset_id = $6,
+		SET shadowing_status = 'ready', shadowing_audio_url = NULL, shadowing_asset_id = $2,
 		    shadowing_error = NULL, shadowing_updated_at = NOW(), shadowing_attempt_id = NULL
 		WHERE id = $1 AND user_id = $3 AND shadowing_status = 'processing' AND shadowing_attempt_id = $4
 		  AND EXISTS (SELECT 1 FROM processing_jobs WHERE id = $4 AND state = 'running' AND lease_token = $5)`,
-		job.ResourceID, nullableString(asset.LegacyPublicURL), asset.OwnerID, job.ID, job.LeaseToken, asset.ID)
+		job.ResourceID, asset.ID, asset.OwnerID, job.ID, job.LeaseToken)
 	if err != nil || result.RowsAffected() == 0 {
 		return false, err
 	}
@@ -121,11 +116,4 @@ func (s *Store) FinalizeFailure(ctx context.Context, tx pgx.Tx, jobID, recording
 		WHERE id = $1 AND shadowing_status = 'processing' AND shadowing_attempt_id = $2`,
 		recordingID, jobID, FailureMessage)
 	return err
-}
-
-func nullableString(value string) any {
-	if value == "" {
-		return nil
-	}
-	return value
 }

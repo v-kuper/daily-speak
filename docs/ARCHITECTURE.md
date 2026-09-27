@@ -43,16 +43,17 @@ dependency. A native client can therefore call the same API directly.
 ## Public contracts
 
 - `/api/v1/*` is the stable client contract shared by mobile and web identity,
-  media, guest preview, and new recording development.
-- `/api/*` is the remaining legacy web resource surface for profile, practice,
-  recording detail/actions, and the retained Feed. Recording creation uses the
-  same v1 media-backed contract in web and mobile.
+  media, guest preview, and the complete recording lifecycle.
+- `/api/*` is the remaining legacy web sandbox surface for its aggregated user
+  bootstrap, profile, practice, and the retained Feed. Do not add recording
+  detail or action endpoints there.
 - `/openapi.json` and `/docs` expose the backend-owned OpenAPI contract and
   Swagger UI.
 - `/healthz` is process liveness; `/readyz` checks PostgreSQL and queue
   admission; `/metrics` is a protected operations endpoint.
-- `/uploads/*` is the legacy backend media path. New mobile media flows use
-  authorized media resources and short-lived signed requests.
+- `/uploads/*` is the deprecated backend media path. Current web and mobile
+  recording media use owner-protected media resources and short-lived signed
+  requests.
 
 Compatibility and deprecation rules live in
 [`api-compatibility.md`](api-compatibility.md).

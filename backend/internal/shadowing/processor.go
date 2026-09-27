@@ -6,7 +6,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"os"
 	"strings"
 	"time"
 
@@ -29,7 +28,6 @@ type ProcessorDependencies struct {
 	Synthesizer Synthesizer
 	MediaStore  storage.Store
 	MediaBucket string
-	LocalSaver  *LocalSaver
 	NewID       func() string
 }
 
@@ -72,33 +70,15 @@ func (p *Processor) Process(ctx context.Context, job Job, logger Logger) error {
 		return errors.New("media storage is not configured")
 	}
 	asset.StorageDriver = p.dependencies.MediaStore.Backend()
-	if asset.StorageDriver == storage.BackendLocal {
-		if p.dependencies.LocalSaver == nil {
-			return errors.New("local shadowing storage is not configured")
-		}
-		saved, saveErr := p.dependencies.LocalSaver.Save(work.UserID, job.ResourceID, job.ID+"-"+job.LeaseToken, audio)
-		if saveErr != nil {
-			return saveErr
-		}
-		asset.LegacyPublicURL = saved.PublicURL
-		asset.ObjectKey = strings.TrimPrefix(saved.PublicURL, "/uploads/")
-		info, statErr := p.dependencies.MediaStore.Stat(ctx, asset.ObjectKey)
-		if statErr != nil {
-			_ = os.Remove(saved.AbsolutePath)
-			return statErr
-		}
+	asset.Bucket = strings.TrimSpace(p.dependencies.MediaBucket)
+	asset.ObjectKey, err = storage.NewObjectKey(work.UserID, "shadowing_audio", "mp3")
+	if err == nil {
+		var info storage.ObjectInfo
+		info, err = p.dependencies.MediaStore.Put(ctx, storage.PutRequest{
+			Key: asset.ObjectKey, ContentType: "audio/mpeg", Size: int64(len(audio)), SHA256: checksum,
+			Metadata: map[string]string{"asset-id": assetID, "owner-principal-id": work.UserID, "purpose": "shadowing_audio"},
+		}, bytes.NewReader(audio))
 		asset.Size, asset.Checksum, asset.ETag = info.Size, info.SHA256, info.ETag
-	} else {
-		asset.Bucket = strings.TrimSpace(p.dependencies.MediaBucket)
-		asset.ObjectKey, err = storage.NewObjectKey(work.UserID, "shadowing_audio", "mp3")
-		if err == nil {
-			var info storage.ObjectInfo
-			info, err = p.dependencies.MediaStore.Put(ctx, storage.PutRequest{
-				Key: asset.ObjectKey, ContentType: "audio/mpeg", Size: int64(len(audio)), SHA256: checksum,
-				Metadata: map[string]string{"asset-id": assetID, "owner-principal-id": work.UserID, "purpose": "shadowing_audio"},
-			}, bytes.NewReader(audio))
-			asset.Size, asset.Checksum, asset.ETag = info.Size, info.SHA256, info.ETag
-		}
 	}
 	if err != nil {
 		return err

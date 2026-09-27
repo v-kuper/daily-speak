@@ -151,7 +151,7 @@ func newTestServer(config Config) *Server {
 		RecordingDeleter: recording.NewDeleter(recordingDeletion, legacyUploads, recordingDeletion, uuid.NewString),
 		RecordingReader:  recording.NewReader(recordingRecords),
 		RecordingRetryService: recording.NewRetryService(
-			recordingRecords, recording.NewSQLRetryUnitOfWork(config.DB), legacyUploads, uuid.NewString,
+			recordingRecords, recording.NewSQLRetryUnitOfWork(config.DB), uuid.NewString,
 		),
 		GuestPreviewStore: guestStore, ShadowingStore: shadowingStore,
 		BrowserCookie: config.BrowserCookie, IdentityTokens: config.IdentityTokens,
@@ -184,7 +184,7 @@ func newTestServer(config Config) *Server {
 	runtime := background.NewRuntime(background.Dependencies{
 		DB: config.DB, JobStore: jobStore,
 		RecordingProcessor: recording.NewProcessor(recording.ProcessingDependencies{
-			Repository: recordingRepository, Materializer: materializer, ResolveLegacyAudio: legacyUploads.Path,
+			Repository: recordingRepository, Materializer: materializer,
 			ProbeAudioDuration: probe, Transcribe: transcribeForProcessing, Analyzer: recordingAnalyzer,
 			Rewriter: recordingRewriter, NewID: uuid.NewString,
 		}),
@@ -196,7 +196,7 @@ func newTestServer(config Config) *Server {
 		GuestPreviewStore: guestStore,
 		ShadowingProcessor: shadowing.NewProcessor(shadowing.ProcessorDependencies{
 			Store: shadowingStore, Synthesizer: synthesizer, MediaStore: mediaStore,
-			MediaBucket: config.MediaBucket, LocalSaver: shadowing.NewLocalSaver(resolveUploadsDir()), NewID: uuid.NewString,
+			MediaBucket: config.MediaBucket, NewID: uuid.NewString,
 		}),
 		ShadowingStore: shadowingStore,
 		MediaCleanup:   media.NewCleanup(config.DB, mediaService, mediaStore, legacyUploads),

@@ -334,7 +334,7 @@ async function cleanupSession({ fetchImpl, apiBaseURL, webOrigin, accessToken, c
     try {
       const response = await request(
         fetchImpl,
-        endpoint(apiBaseURL, `/api/recordings/${encodeURIComponent(recordingID)}`),
+        endpoint(apiBaseURL, `/api/v1/recordings/${encodeURIComponent(recordingID)}`),
         { method: "DELETE", origin: webOrigin, cookie, headers: { Authorization: `Bearer ${accessToken}` } },
       );
       if (response.status !== 200 && response.status !== 404) {
@@ -539,7 +539,7 @@ export async function runStackSmoke({ env = process.env, fetchImpl = fetch } = {
       "delete disposable recording",
       await request(
         fetchImpl,
-        endpoint(apiBaseURL, `/api/recordings/${encodeURIComponent(recordingID)}`),
+        endpoint(apiBaseURL, `/api/v1/recordings/${encodeURIComponent(recordingID)}`),
         { method: "DELETE", origin: webOrigin, headers: { Authorization: `Bearer ${accessToken}` } },
       ),
       200,

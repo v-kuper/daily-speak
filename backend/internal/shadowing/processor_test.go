@@ -53,14 +53,14 @@ func TestProcessorSynthesizesAndPersistsLocalAsset(t *testing.T) {
 	logger := &processorLogger{}
 	processor := NewProcessor(ProcessorDependencies{
 		Store: repository, Synthesizer: synth, MediaStore: mediaStore,
-		LocalSaver: NewLocalSaver(root), NewID: func() string { return "asset-1" },
+		NewID: func() string { return "asset-1" },
 	})
 	job := Job{ID: "attempt-1", ResourceID: "recording-1", LeaseToken: "lease-1"}
 	if err := processor.Process(context.Background(), job, logger); err != nil {
 		t.Fatal(err)
 	}
 	if synth.text != "I went home." || repository.asset.ID != "asset-1" ||
-		repository.asset.StorageDriver != storage.BackendLocal || repository.asset.LegacyPublicURL == "" {
+		repository.asset.StorageDriver != storage.BackendLocal || repository.asset.ObjectKey == "" {
 		t.Fatalf("synth=%q asset=%#v", synth.text, repository.asset)
 	}
 	if logger.event != "shadowing.ready" || logger.meta["recordingId"] != "recording-1" {

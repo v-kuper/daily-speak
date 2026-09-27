@@ -95,8 +95,8 @@ func TestV1RecordingsCursorPagination(t *testing.T) {
 }
 
 func requestRecordingPage(t *testing.T, handler http.Handler, accessToken string, target string) struct {
-	Items []recordingResponse `json:"items"`
-	Page  pageInfo            `json:"page"`
+	Items []recordingV1Response `json:"items"`
+	Page  pageInfo              `json:"page"`
 } {
 	t.Helper()
 	request := httptest.NewRequest(http.MethodGet, target, nil)
@@ -107,8 +107,8 @@ func requestRecordingPage(t *testing.T, handler http.Handler, accessToken string
 		t.Fatalf("GET %s: status %d: %s", target, response.Code, response.Body.String())
 	}
 	var payload struct {
-		Items []recordingResponse `json:"items"`
-		Page  pageInfo            `json:"page"`
+		Items []recordingV1Response `json:"items"`
+		Page  pageInfo              `json:"page"`
 	}
 	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode page: %v", err)

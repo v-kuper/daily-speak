@@ -60,7 +60,7 @@ func TestHandlerDoesNotExposePrivateMediaStorageNamespaces(t *testing.T) {
 	}
 }
 
-func TestShadowingUploadRequiresAuthentication(t *testing.T) {
+func TestLegacyShadowingUploadIsRetired(t *testing.T) {
 	uploadsDir := t.TempDir()
 	t.Setenv("UPLOADS_DIR", uploadsDir)
 	audioPath := filepath.Join(uploadsDir, "shadowing", "user-123", "recording-456.mp3")
@@ -75,7 +75,7 @@ func TestShadowingUploadRequiresAuthentication(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "/uploads/shadowing/user-123/recording-456.mp3", nil)
 	newTestServer(Config{}).Handler().ServeHTTP(response, request)
 
-	if response.Code != http.StatusUnauthorized {
+	if response.Code != http.StatusNotFound {
 		t.Fatalf("status=%d body=%q", response.Code, response.Body.String())
 	}
 }

@@ -10,9 +10,11 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"daily-speaking-practice/backend/internal/auth"
 	"daily-speaking-practice/backend/internal/db"
+	"daily-speaking-practice/backend/internal/recording"
 	"github.com/google/uuid"
 )
 
@@ -28,6 +30,36 @@ func TestRecordingMediaExposesStableBackendPaths(t *testing.T) {
 	}
 	if empty := recordingMedia(nil, nil, nil); empty != nil {
 		t.Fatalf("empty media response must be omitted: %#v", empty)
+	}
+}
+
+func TestRecordingV1ResponseExcludesLegacyMediaFields(t *testing.T) {
+	audioAssetID := "audio-asset"
+	photoAssetID := "photo-asset"
+	shadowingAssetID := "shadowing-asset"
+	response := recordingV1ResponseFromRecord(recording.Record{
+		ID: "recording-1", Topic: "Travel", Timestamp: time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC),
+		Status: "ready", PracticeType: "topic", ShadowingStatus: "ready",
+		ShadowingUpdatedAt: time.Date(2026, 9, 27, 12, 1, 0, 0, time.UTC),
+		AudioAssetID:       &audioAssetID, PhotoAssetID: &photoAssetID, ShadowingAssetID: &shadowingAssetID,
+	})
+	encoded, err := json.Marshal(response)
+	if err != nil {
+		t.Fatalf("encode v1 recording: %v", err)
+	}
+	for _, legacyField := range []string{"audioDataUrl", "photoDataUrl", "shadowingAudioUrl", "/uploads/"} {
+		if bytes.Contains(encoded, []byte(legacyField)) {
+			t.Fatalf("v1 response contains legacy media %q: %s", legacyField, encoded)
+		}
+	}
+	for _, mediaPath := range []string{
+		"/api/v1/media/audio-asset/download",
+		"/api/v1/media/photo-asset/download",
+		"/api/v1/media/shadowing-asset/download",
+	} {
+		if !bytes.Contains(encoded, []byte(mediaPath)) {
+			t.Fatalf("v1 response is missing protected media path %q: %s", mediaPath, encoded)
+		}
 	}
 }
 
@@ -180,10 +212,10 @@ func (f recordingCreateV1Fixture) post(t *testing.T, accessToken string, idempot
 	return response
 }
 
-func decodeCreatedRecordingV1(t *testing.T, response *httptest.ResponseRecorder) recordingResponse {
+func decodeCreatedRecordingV1(t *testing.T, response *httptest.ResponseRecorder) recordingV1Response {
 	t.Helper()
 	var payload struct {
-		Recording recordingResponse `json:"recording"`
+		Recording recordingV1Response `json:"recording"`
 	}
 	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode recording: %v", err)

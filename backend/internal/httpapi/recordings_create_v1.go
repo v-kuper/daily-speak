@@ -24,12 +24,8 @@ type recordingCreateV1Request struct {
 }
 
 func (s *Server) handleCreateRecordingV1(w http.ResponseWriter, r *http.Request) {
-	identity, ok := s.requiredIdentityV1(w, r)
+	identity, ok := s.requiredRecordingIdentityV1(w, r)
 	if !ok {
-		return
-	}
-	if identity.Kind != "user" || identity.User == nil {
-		writeV1Error(w, r, http.StatusForbidden, "account_required", "An account is required to process a recording")
 		return
 	}
 	idempotencyKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
@@ -70,7 +66,7 @@ func (s *Server) handleCreateRecordingV1(w http.ResponseWriter, r *http.Request)
 		writeV1Error(w, r, http.StatusInternalServerError, "internal_error", "Failed to create recording")
 	default:
 		writeJSON(w, http.StatusCreated, map[string]any{
-			"recording": recordingResponseFromCreated(created),
+			"recording": recordingV1ResponseFromCreated(created),
 			"quota":     currentQuota,
 		})
 	}
@@ -89,21 +85,18 @@ func parseRecordingCreateV1(payload recordingCreateV1Request) (recording.CreateI
 	}, nil
 }
 
-func recordingResponseFromCreated(created recording.Created) recordingResponse {
+func recordingV1ResponseFromCreated(created recording.Created) recordingV1Response {
 	audioAssetID := created.AudioAssetID
-	return recordingResponse{
+	return recordingV1Response{
 		ID: created.ID, Topic: created.Topic, Duration: recording.NormalizeDurationSeconds(created.Duration),
 		Timestamp: created.Timestamp.UTC().Format(time.RFC3339Nano), Status: normalizeRecordingStatus(created.Status),
 		Transcript: created.Transcript, CorrectedTranscript: created.CorrectedTranscript,
 		Suggestions:        normalizeSuggestions(created.SuggestionsJSON, 0),
 		ProcessingStage:    normalizeRecordingProcessingStage(created.ProcessingStage),
 		PracticeType:       practice.NormalizeType(created.PracticeType),
-		AudioDataURL:       normalizeOptionalAudio(created.AudioDataURL, true),
-		PhotoDataURL:       normalizeOptionalPhoto(created.PhotoDataURL),
 		PhotoObject:        normalizeOptionalPhotoObject(created.PhotoObject),
 		ProcessingError:    normalizeOptionalProcessingError(created.ProcessingError),
 		ShadowingStatus:    normalizeShadowingStatus(created.ShadowingStatus),
-		ShadowingAudioURL:  normalizeOptionalShadowingAudio(created.ShadowingAudioURL),
 		ShadowingError:     normalizeOptionalProcessingError(created.ShadowingError),
 		ShadowingUpdatedAt: created.ShadowingUpdatedAt.UTC().Format(time.RFC3339Nano),
 		Media:              recordingMedia(&audioAssetID, created.PhotoAssetID, nil),

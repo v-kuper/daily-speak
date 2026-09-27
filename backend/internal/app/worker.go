@@ -70,8 +70,8 @@ func NewWorker(config WorkerConfig) *background.Runtime {
 	recordingRepository := recording.NewSQLProcessingRepository(config.DB)
 	recordingProcessor := recording.NewProcessor(recording.ProcessingDependencies{
 		Repository: recordingRepository, Materializer: materializer,
-		ResolveLegacyAudio: legacyUploads.Path, ProbeAudioDuration: probe,
-		Transcribe: transcribeForProcessing, Analyzer: analysis, Rewriter: analysis, NewID: uuid.NewString,
+		ProbeAudioDuration: probe,
+		Transcribe:         transcribeForProcessing, Analyzer: analysis, Rewriter: analysis, NewID: uuid.NewString,
 	})
 	guestStore := guestpreview.NewStore(config.DB, guestpreview.QueueCapacityFromEnv())
 	guestProcessor := guestpreview.NewProcessor(guestpreview.ProcessorDependencies{
@@ -81,7 +81,7 @@ func NewWorker(config WorkerConfig) *background.Runtime {
 	shadowStore := shadowing.NewStore(config.DB)
 	shadowProcessor := shadowing.NewProcessor(shadowing.ProcessorDependencies{
 		Store: shadowStore, Synthesizer: synthesizer, MediaStore: config.MediaStore,
-		MediaBucket: config.MediaBucket, LocalSaver: shadowing.NewLocalSaver(uploadsDir), NewID: uuid.NewString,
+		MediaBucket: config.MediaBucket, NewID: uuid.NewString,
 	})
 	cleanup := media.NewCleanup(config.DB, mediaService, config.MediaStore, legacyUploads)
 	return background.NewRuntime(background.Dependencies{

@@ -14,9 +14,7 @@ const (
 var photoDataURLPattern = regexp.MustCompile(`(?i)^data:image/(png|jpeg|jpg|webp|gif);base64,([A-Za-z0-9+/=]+)$`)
 var audioDataURLPattern = regexp.MustCompile(`(?i)^data:((?:audio|video)/[a-z0-9.+-]+(?:;[^,]+)*);base64,([A-Za-z0-9+/_=-]+)$`)
 var normalizedBase64Pattern = regexp.MustCompile(`^[A-Za-z0-9+/=]+$`)
-var recordingAudioFileURLPattern = regexp.MustCompile(`(?i)^/uploads/recordings/[a-z0-9/_-]+\.[a-z0-9]{2,10}$`)
 var genericAudioFileURLPattern = regexp.MustCompile(`(?i)^/uploads/[a-z0-9/_-]+\.[a-z0-9]{2,10}$`)
-var shadowingAudioFileURLPattern = regexp.MustCompile(`(?i)^/uploads/shadowing/[a-z0-9_-]+/[a-z0-9_-]+\.mp3$`)
 
 var audioExtensionByMIME = map[string]string{
 	"audio/webm": "webm", "video/webm": "webm", "audio/mp4": "m4a", "audio/x-m4a": "m4a",
@@ -100,20 +98,8 @@ func ResolveAudioExtension(baseMIME string) string {
 	return cleaned
 }
 
-func NormalizeStoredRecordingAudioSource(value string) *string {
-	return normalizeStoredAudio(value, recordingAudioFileURLPattern)
-}
-
 func NormalizeStoredGenericAudioSource(value string) *string {
 	return normalizeStoredAudio(value, genericAudioFileURLPattern)
-}
-
-func NormalizeStoredShadowingAudioSource(value string) *string {
-	normalized := strings.TrimSpace(value)
-	if !shadowingAudioFileURLPattern.MatchString(normalized) {
-		return nil
-	}
-	return &normalized
 }
 
 func DecodeBase64(value string) ([]byte, error) {

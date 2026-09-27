@@ -10,7 +10,6 @@ import (
 	"daily-speaking-practice/backend/internal/logging"
 	"daily-speaking-practice/backend/internal/media"
 	"daily-speaking-practice/backend/internal/profile"
-	"daily-speaking-practice/backend/internal/recording"
 	"daily-speaking-practice/backend/internal/subscription"
 )
 
@@ -132,16 +131,6 @@ func (s *Server) handleUserData(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to load user data."})
 		return
 	}
-	recordingRecords, err := s.recordingReader.List(r.Context(), user.ID, recording.ListOptions{})
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to load user data."})
-		return
-	}
-	recordings := make([]recordingResponse, 0, len(recordingRecords))
-	for _, record := range recordingRecords {
-		recordings = append(recordings, recordingResponseFromRecord(record))
-	}
-
 	overview, err := s.subscriptionService.Get(r.Context(), user.ID)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to load user data."})
@@ -149,15 +138,13 @@ func (s *Server) handleUserData(w http.ResponseWriter, r *http.Request) {
 	}
 
 	logger.Info("request.success", map[string]any{
-		"status":          200,
-		"durationMs":      logging.ElapsedMs(started),
-		"userId":          user.ID,
-		"interestsCount":  len(interestIDs),
-		"recordingsCount": len(recordings),
+		"status":         200,
+		"durationMs":     logging.ElapsedMs(started),
+		"userId":         user.ID,
+		"interestsCount": len(interestIDs),
 	})
 	writeJSON(w, http.StatusOK, map[string]any{
 		"interestIds":  interestIDs,
-		"recordings":   recordings,
 		"quota":        overview.Quota,
 		"subscription": subscriptionResponseFrom(overview.State),
 		"englishLevel": user.EnglishLevel,
@@ -187,23 +174,6 @@ func writeSubscriptionOverview(w http.ResponseWriter, overview subscription.Over
 		"subscription": subscriptionResponseFrom(overview.State),
 		"quota":        overview.Quota,
 	})
-}
-
-func normalizeOptionalAudio(value *string, recordingOnly bool) *string {
-	if value == nil {
-		return nil
-	}
-	if recordingOnly {
-		return media.NormalizeStoredRecordingAudioSource(*value)
-	}
-	return media.NormalizeStoredGenericAudioSource(*value)
-}
-
-func normalizeOptionalPhoto(value *string) *string {
-	if value == nil {
-		return nil
-	}
-	return media.NormalizePhotoDataURL(*value)
 }
 
 func normalizeOptionalPhotoObject(value *string) *string {

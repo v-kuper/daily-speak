@@ -12,7 +12,6 @@ var ErrNotFound = errors.New("recording not found")
 type RecordRepository interface {
 	Find(context.Context, string, string) (Record, bool, error)
 	List(context.Context, string, ListOptions) ([]Record, error)
-	OwnsLegacyShadowing(context.Context, string, string) (bool, error)
 }
 
 type ListOptions struct {
@@ -55,11 +54,4 @@ func (reader *Reader) List(ctx context.Context, userID string, options ListOptio
 		options.Limit = 0
 	}
 	return reader.repository.List(ctx, strings.TrimSpace(userID), options)
-}
-
-func (reader *Reader) OwnsLegacyShadowing(ctx context.Context, userID string, publicURL string) (bool, error) {
-	if reader == nil || reader.repository == nil {
-		return false, errors.New("recording reader is not configured")
-	}
-	return reader.repository.OwnsLegacyShadowing(ctx, strings.TrimSpace(userID), strings.TrimSpace(publicURL))
 }
