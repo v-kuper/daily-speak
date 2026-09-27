@@ -237,6 +237,25 @@ test("recording deletion keeps cleanup policy outside HTTP and SQL adapters", ()
   assert.doesNotMatch(repository, /http\.Status|writeJSON/);
 });
 
+test("recording query and retry keep persistence and queue mechanics outside HTTP", () => {
+  const queryTransport = readFileSync("backend/internal/httpapi/recording_query.go", "utf8");
+  const retryTransport = readFileSync("backend/internal/httpapi/recording_retry.go", "utf8");
+  const queryService = readFileSync("backend/internal/recording/query.go", "utf8");
+  const retryService = readFileSync("backend/internal/recording/retry.go", "utf8");
+  const queryRepository = readFileSync("backend/internal/recording/query_repository.go", "utf8");
+  const retryRepository = readFileSync("backend/internal/recording/retry_repository.go", "utf8");
+
+  assert.match(queryTransport, /recordingReader\.Get|recordingResponseFromRecord/);
+  assert.match(retryTransport, /recordingRetryService\.Retry/);
+  assert.doesNotMatch(queryTransport + retryTransport, /SELECT |INSERT INTO|UPDATE |DELETE FROM|pgx|workqueue|s\.db/);
+  assert.match(queryService, /type RecordRepository interface|type Reader struct/);
+  assert.match(retryService, /type RetryUnitOfWork interface|type RetryService struct/);
+  assert.doesNotMatch(queryService + retryService, /net\/http|internal\/httpapi|SELECT |INSERT INTO|UPDATE |DELETE FROM|pgx|workqueue/);
+  assert.match(queryRepository, /FROM recordings/);
+  assert.match(retryRepository, /UPDATE recordings|workqueue\.Enqueue/);
+  assert.doesNotMatch(queryRepository + retryRepository, /net\/http|internal\/httpapi|writeJSON/);
+});
+
 test("recording upload sessions separate transport, application policy, SQL, and files", () => {
   const transport = readFileSync("backend/internal/httpapi/recording_sessions_handlers.go", "utf8");
   const multipart = readFileSync("backend/internal/httpapi/recording_sessions_multipart.go", "utf8");

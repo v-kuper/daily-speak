@@ -1,0 +1,60 @@
+package recording
+
+import (
+	"context"
+	"errors"
+
+	"daily-speaking-practice/backend/internal/db"
+	"github.com/jackc/pgx/v5"
+)
+
+type SQLQueryRepository struct{ db *db.DB }
+
+func NewSQLQueryRepository(database *db.DB) *SQLQueryRepository {
+	return &SQLQueryRepository{db: database}
+}
+
+func (repository *SQLQueryRepository) Find(ctx context.Context, userID string, recordingID string) (Record, bool, error) {
+	if repository == nil || repository.db == nil {
+		return Record{}, false, errors.New("recording database is not configured")
+	}
+	return findRecord(ctx, repository.db, userID, recordingID)
+}
+
+type recordQuerier interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}
+
+func findRecord(ctx context.Context, querier recordQuerier, userID string, recordingID string) (Record, bool, error) {
+	var record Record
+	err := querier.QueryRow(ctx, recordSelectSQL, recordingID, userID).Scan(recordDestinations(&record)...)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Record{}, false, nil
+	}
+	return record, err == nil, err
+}
+
+const recordSelectSQL = `
+	SELECT id, topic, duration, timestamp, status, transcript, corrected_transcript,
+	       suggestions, processing_stage, practice_type, audio_data_url,
+	       photo_data_url, photo_object, processing_error, shadowing_status,
+	       shadowing_audio_url, shadowing_error, shadowing_updated_at,
+	       audio_asset_id, photo_asset_id, shadowing_asset_id
+	FROM recordings
+	WHERE id = $1 AND user_id = $2
+	LIMIT 1`
+
+func recordDestinations(record *Record) []any {
+	return []any{
+		&record.ID, &record.Topic, &record.Duration, &record.Timestamp,
+		&record.Status, &record.Transcript, &record.CorrectedTranscript,
+		&record.SuggestionsJSON, &record.ProcessingStage, &record.PracticeType,
+		&record.AudioDataURL, &record.PhotoDataURL, &record.PhotoObject,
+		&record.ProcessingError, &record.ShadowingStatus,
+		&record.ShadowingAudioURL, &record.ShadowingError,
+		&record.ShadowingUpdatedAt, &record.AudioAssetID, &record.PhotoAssetID,
+		&record.ShadowingAssetID,
+	}
+}
+
+var _ RecordRepository = (*SQLQueryRepository)(nil)

@@ -11,7 +11,7 @@ import (
 
 func TestServiceStartNormalizesPhotoSession(t *testing.T) {
 	repository := &fakeRepository{}
-	service := NewService(repository, &fakeFiles{}, func() string { return "session-id" })
+	service := NewService(repository, repository, &fakeFiles{}, func() string { return "session-id" })
 	timestamp := time.Date(2026, 9, 27, 10, 0, 0, 0, time.FixedZone("test", 2*60*60))
 
 	id, err := service.Start(context.Background(), "user-id", StartInput{
@@ -39,7 +39,7 @@ func TestServiceSaveChunkRejectsFormatChangeBeforeWriting(t *testing.T) {
 	extension := "webm"
 	repository := &fakeRepository{sessionFound: true, session: Session{ID: "session-id", Status: "open", AudioExtension: &extension}}
 	files := &fakeFiles{}
-	service := NewService(repository, files, func() string { return "unused" })
+	service := NewService(repository, repository, files, func() string { return "unused" })
 
 	err := service.SaveChunk(context.Background(), "user-id", "session-id", 1, "m4a", []byte("audio"))
 	if !errors.Is(err, ErrFormatChange) {
@@ -70,7 +70,7 @@ func TestServiceFinalizePublishesAndCommitsRecording(t *testing.T) {
 	}
 	files := &fakeFiles{finalExists: true, publishedURL: "/uploads/recordings/user-id/recording-id.webm"}
 	ids := []string{"recording-id", "job-id"}
-	service := NewService(repository, files, func() string {
+	service := NewService(repository, repository, files, func() string {
 		id := ids[0]
 		ids = ids[1:]
 		return id
@@ -111,7 +111,7 @@ func TestServiceFinalizeDiscardsPublishedAudioWhenTransactionFails(t *testing.T)
 		executeErr:   wanted,
 	}
 	files := &fakeFiles{finalExists: true, publishedURL: "/uploads/recordings/user-id/recording-id.webm"}
-	service := NewService(repository, files, sequentialIDs("recording-id", "job-id"))
+	service := NewService(repository, repository, files, sequentialIDs("recording-id", "job-id"))
 
 	_, err := service.Finalize(context.Background(), "user-id", false, "session-id", FinalizeInput{})
 	if !errors.Is(err, wanted) {
@@ -131,7 +131,7 @@ func TestServiceFinalizeReturnsExistingRecordingWithoutRepublishing(t *testing.T
 	existing := Recording{ID: recordingID, Topic: "Existing"}
 	repository := &fakeRepository{sessionFound: true, session: session, recordingFound: true, recording: existing}
 	files := &fakeFiles{}
-	service := NewService(repository, files, func() string { return "unused" })
+	service := NewService(repository, repository, files, func() string { return "unused" })
 
 	result, err := service.Finalize(context.Background(), "user-id", false, "session-id", FinalizeInput{})
 	if err != nil {
@@ -184,7 +184,7 @@ func (repository *fakeRepository) GetQuota(context.Context, string, bool) (quota
 	return result, nil
 }
 
-func (repository *fakeRepository) LoadRecording(context.Context, string, string) (Recording, bool, error) {
+func (repository *fakeRepository) Find(context.Context, string, string) (Recording, bool, error) {
 	return repository.recording, repository.recordingFound, nil
 }
 

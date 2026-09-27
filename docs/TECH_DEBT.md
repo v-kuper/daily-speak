@@ -81,9 +81,9 @@ data, call a service, and map its result.
 Continue reducing the remaining direct persistence in `backend/internal/httpapi`
 in this order so every merge stays deployable:
 
-1. Extract legacy recording retry and recording queries, then retire the
-   duplicate direct legacy recording-create path when the web sandbox uses the
-   versioned media/create contract.
+1. Retire the duplicate direct legacy recording-create path when the web
+   sandbox uses the versioned media/create contract. Recording queries, retry,
+   and upload sessions already use recording-owned services and repositories.
 2. Finish the media HTTP/application boundary so authorization and completion
    policy are not split between handlers and `internal/media`.
 3. Move the remaining cookie-auth orchestration behind the identity service

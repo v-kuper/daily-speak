@@ -142,8 +142,8 @@ backend/migrations           immutable ordered schema migrations
 backend/docs                 generated OpenAPI and Swagger assets
 ```
 
-Some legacy query, retry, media, cookie-auth, and retained-Feed persistence still
-lives in `backend/internal/httpapi`. Its remaining feature-oriented split is
+Some legacy create, media, cookie-auth, and retained-Feed persistence still lives
+in `backend/internal/httpapi`. Its remaining feature-oriented split is
 tracked in [`TECH_DEBT.md`](TECH_DEBT.md); new business rules must not be added
 to the transport package.
 

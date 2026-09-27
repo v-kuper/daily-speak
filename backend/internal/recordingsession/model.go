@@ -1,6 +1,10 @@
 package recordingsession
 
-import "time"
+import (
+	"time"
+
+	"daily-speaking-practice/backend/internal/recording"
+)
 
 type Session struct {
 	ID             string
@@ -17,26 +21,7 @@ type Session struct {
 	RecordingID    *string
 }
 
-type Recording struct {
-	ID                  string
-	Topic               string
-	Duration            int
-	Timestamp           time.Time
-	Status              string
-	Transcript          string
-	CorrectedTranscript string
-	SuggestionsJSON     []byte
-	ProcessingStage     *string
-	PracticeType        string
-	AudioDataURL        *string
-	PhotoDataURL        *string
-	PhotoObject         *string
-	ProcessingError     *string
-	ShadowingStatus     string
-	ShadowingAudioURL   *string
-	ShadowingError      *string
-	ShadowingUpdatedAt  time.Time
-}
+type Recording = recording.Record
 
 type StartInput struct {
 	Topic        string

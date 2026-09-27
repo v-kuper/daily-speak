@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"daily-speaking-practice/backend/internal/logging"
+	"daily-speaking-practice/backend/internal/recording"
 	"daily-speaking-practice/backend/internal/shadowing"
 	"daily-speaking-practice/backend/internal/workqueue"
 	"github.com/jackc/pgx/v5"
@@ -42,8 +43,8 @@ func (s *Server) handleGenerateShadowing(w http.ResponseWriter, r *http.Request,
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Recording ID is required."})
 		return
 	}
-	recording, scheduled, err := s.scheduleShadowing(r.Context(), user.ID, recordingID)
-	if errors.Is(err, pgx.ErrNoRows) {
+	record, scheduled, err := s.scheduleShadowing(r.Context(), user.ID, recordingID)
+	if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, recording.ErrNotFound) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Recording not found."})
 		return
 	}
@@ -57,7 +58,7 @@ func (s *Server) handleGenerateShadowing(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	logger.Info("request.success", map[string]any{"status": http.StatusOK, "durationMs": logging.ElapsedMs(started), "recordingId": recordingID, "scheduled": scheduled})
-	writeJSON(w, http.StatusOK, map[string]any{"recording": recording})
+	writeJSON(w, http.StatusOK, map[string]any{"recording": record})
 }
 
 func (s *Server) scheduleShadowing(ctx context.Context, userID, recordingID string) (recordingResponse, bool, error) {

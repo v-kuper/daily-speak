@@ -71,6 +71,8 @@ type Server struct {
 	recordingPreviewAnalyzer recording.PreviewAnalyzer
 	recordingCreator         *recording.Creator
 	recordingDeleter         *recording.Deleter
+	recordingReader          *recording.Reader
+	recordingRetryService    *recording.RetryService
 	recordingRepository      *recording.SQLProcessingRepository
 	recordingProcessor       *recording.Processor
 	guestPreviewStore        *guestpreview.Store
@@ -160,8 +162,9 @@ func NewServer(config Config) *Server {
 	if recordingSessions == nil {
 		recordingSessions = storage.NewLocalRecordingSessions(resolveUploadsDir())
 	}
+	recordingRecords := recording.NewSQLQueryRepository(config.DB)
 	recordingSessionService := recordingsession.NewService(
-		recordingsession.NewSQLRepository(config.DB), recordingSessions, uuid.NewString,
+		recordingsession.NewSQLRepository(config.DB), recordingRecords, recordingSessions, uuid.NewString,
 	)
 	mediaSigner, _ := media.NewURLSigner(signingSecret)
 	transcribeAudio := config.TranscribeAudio
@@ -204,23 +207,25 @@ func NewServer(config Config) *Server {
 			recordingDeletion, legacyUploads,
 			recordingDeletion, uuid.NewString,
 		),
-		recordingRepository: recordingRepository,
-		guestPreviewStore:   guestPreviewStore,
-		shadowingStore:      shadowingStore,
-		sessionCookie:       config.SessionCookie,
-		identityTokens:      config.IdentityTokens,
-		identityService:     auth.NewMobileService(config.DB, config.IdentityTokens),
-		cors:                config.CORS,
-		mediaService:        mediaService,
-		mediaSigner:         mediaSigner,
-		mediaStore:          mediaStore,
-		mediaMaterializer:   media.NewMaterializer(config.DB, mediaStore),
-		transcribeAudio:     transcribeAudio,
-		probeAudioDuration:  probeAudioDuration,
-		operations:          config.Operations,
-		limiter:             operations.NewLimiter(config.DB),
-		network:             operations.NewNetwork(config.Operations.TrustedProxies),
-		metrics:             operations.NewMetrics(),
+		recordingReader:       recording.NewReader(recordingRecords),
+		recordingRetryService: recording.NewRetryService(recordingRecords, recording.NewSQLRetryUnitOfWork(config.DB), legacyUploads, uuid.NewString),
+		recordingRepository:   recordingRepository,
+		guestPreviewStore:     guestPreviewStore,
+		shadowingStore:        shadowingStore,
+		sessionCookie:         config.SessionCookie,
+		identityTokens:        config.IdentityTokens,
+		identityService:       auth.NewMobileService(config.DB, config.IdentityTokens),
+		cors:                  config.CORS,
+		mediaService:          mediaService,
+		mediaSigner:           mediaSigner,
+		mediaStore:            mediaStore,
+		mediaMaterializer:     media.NewMaterializer(config.DB, mediaStore),
+		transcribeAudio:       transcribeAudio,
+		probeAudioDuration:    probeAudioDuration,
+		operations:            config.Operations,
+		limiter:               operations.NewLimiter(config.DB),
+		network:               operations.NewNetwork(config.Operations.TrustedProxies),
+		metrics:               operations.NewMetrics(),
 	}
 	server.recordingProcessor = recording.NewProcessor(recording.ProcessingDependencies{
 		Repository:         recordingRepository,

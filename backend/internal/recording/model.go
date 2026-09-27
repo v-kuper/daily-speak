@@ -3,6 +3,7 @@ package recording
 import (
 	"encoding/json"
 	"strings"
+	"time"
 )
 
 type SuggestionCategory string
@@ -40,6 +41,32 @@ type Suggestion struct {
 	Severity          SuggestionSeverity `json:"severity,omitempty"`
 	RuleID            string             `json:"ruleId,omitempty"`
 	LearningReference *LearningReference `json:"learningReference,omitempty"`
+}
+
+// Record is the persistence-neutral representation shared by recording use
+// cases. Delivery adapters are responsible for their own response formatting.
+type Record struct {
+	ID                  string
+	Topic               string
+	Duration            int
+	Timestamp           time.Time
+	Status              string
+	Transcript          string
+	CorrectedTranscript string
+	SuggestionsJSON     []byte
+	ProcessingStage     *string
+	PracticeType        string
+	AudioDataURL        *string
+	PhotoDataURL        *string
+	PhotoObject         *string
+	ProcessingError     *string
+	ShadowingStatus     string
+	ShadowingAudioURL   *string
+	ShadowingError      *string
+	ShadowingUpdatedAt  time.Time
+	AudioAssetID        *string
+	PhotoAssetID        *string
+	ShadowingAssetID    *string
 }
 
 func NormalizeSuggestions(input []byte, limit int) []Suggestion {

@@ -93,20 +93,6 @@ func (repository *SQLRepository) GetQuota(ctx context.Context, userID string, su
 	return quota.GetRecordingQuota(ctx, repository.db, userID, &subscriber)
 }
 
-func (repository *SQLRepository) LoadRecording(ctx context.Context, userID string, recordingID string) (Recording, bool, error) {
-	if err := repository.configured(); err != nil {
-		return Recording{}, false, err
-	}
-	var recording Recording
-	err := repository.db.QueryRow(ctx, recordingSelect+`
-		WHERE id = $1 AND user_id = $2
-		LIMIT 1`, recordingID, userID).Scan(recordingDestinations(&recording)...)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return Recording{}, false, nil
-	}
-	return recording, err == nil, err
-}
-
 func (repository *SQLRepository) ExecuteFinalize(ctx context.Context, operation func(FinalizeTransaction) error) error {
 	if err := repository.configured(); err != nil {
 		return err
@@ -167,7 +153,15 @@ func (transaction *sqlFinalizeTransaction) InsertRecording(ctx context.Context, 
 		command.RecordingID, command.Session.UserID, command.Session.Topic,
 		command.Duration, command.Timestamp, command.Session.PracticeType, command.AudioURL,
 		command.Session.PhotoDataURL, command.Session.PhotoObject, command.JobID,
-	).Scan(recordingDestinations(&created)...)
+	).Scan(
+		&created.ID, &created.Topic, &created.Duration, &created.Timestamp,
+		&created.Status, &created.Transcript, &created.CorrectedTranscript,
+		&created.SuggestionsJSON, &created.ProcessingStage, &created.PracticeType,
+		&created.AudioDataURL, &created.PhotoDataURL, &created.PhotoObject,
+		&created.ProcessingError, &created.ShadowingStatus,
+		&created.ShadowingAudioURL, &created.ShadowingError,
+		&created.ShadowingUpdatedAt,
+	)
 	return created, err
 }
 
@@ -190,31 +184,12 @@ func (transaction *sqlFinalizeTransaction) EnqueueProcessing(ctx context.Context
 	})
 }
 
-const recordingSelect = `
-	SELECT id, topic, duration, timestamp, status, transcript,
-	       corrected_transcript, suggestions, processing_stage, practice_type,
-	       audio_data_url, photo_data_url, photo_object, processing_error,
-	       shadowing_status, shadowing_audio_url, shadowing_error, shadowing_updated_at
-	FROM recordings`
-
 func sessionDestinations(session *Session) []any {
 	return []any{
 		&session.ID, &session.UserID, &session.Topic, &session.Duration,
 		&session.Timestamp, &session.PracticeType, &session.PhotoDataURL,
 		&session.PhotoObject, &session.AudioExtension, &session.ChunkCount,
 		&session.Status, &session.RecordingID,
-	}
-}
-
-func recordingDestinations(recording *Recording) []any {
-	return []any{
-		&recording.ID, &recording.Topic, &recording.Duration, &recording.Timestamp,
-		&recording.Status, &recording.Transcript, &recording.CorrectedTranscript,
-		&recording.SuggestionsJSON, &recording.ProcessingStage, &recording.PracticeType,
-		&recording.AudioDataURL, &recording.PhotoDataURL, &recording.PhotoObject,
-		&recording.ProcessingError, &recording.ShadowingStatus,
-		&recording.ShadowingAudioURL, &recording.ShadowingError,
-		&recording.ShadowingUpdatedAt,
 	}
 }
 

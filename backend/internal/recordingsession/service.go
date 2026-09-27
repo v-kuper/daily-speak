@@ -37,7 +37,6 @@ type Repository interface {
 	UpdateChunk(context.Context, string, string, string, int) error
 	UpdateFinal(context.Context, string, string, string) error
 	GetQuota(context.Context, string, bool) (quota.RecordingQuota, error)
-	LoadRecording(context.Context, string, string) (Recording, bool, error)
 	ExecuteFinalize(context.Context, func(FinalizeTransaction) error) error
 }
 
@@ -57,13 +56,14 @@ type FinalizeResult struct {
 
 type Service struct {
 	repository Repository
+	records    recording.RecordRepository
 	files      Files
 	newID      func() string
 	now        func() time.Time
 }
 
-func NewService(repository Repository, files Files, newID func() string) *Service {
-	return &Service{repository: repository, files: files, newID: newID, now: time.Now}
+func NewService(repository Repository, records recording.RecordRepository, files Files, newID func() string) *Service {
+	return &Service{repository: repository, records: records, files: files, newID: newID, now: time.Now}
 }
 
 func (service *Service) Start(ctx context.Context, userID string, input StartInput) (string, error) {
@@ -239,7 +239,7 @@ func (service *Service) existingFinalization(ctx context.Context, userID string,
 	if session.RecordingID == nil {
 		return FinalizeResult{}, ErrFinalized
 	}
-	existing, found, err := service.repository.LoadRecording(ctx, userID, *session.RecordingID)
+	existing, found, err := service.records.Find(ctx, userID, *session.RecordingID)
 	if err != nil {
 		return FinalizeResult{}, err
 	}
@@ -250,7 +250,7 @@ func (service *Service) existingFinalization(ctx context.Context, userID string,
 }
 
 func (service *Service) configured() error {
-	if service == nil || service.repository == nil || service.files == nil || service.newID == nil || service.now == nil {
+	if service == nil || service.repository == nil || service.records == nil || service.files == nil || service.newID == nil || service.now == nil {
 		return errors.New("recording session service is not configured")
 	}
 	return nil
