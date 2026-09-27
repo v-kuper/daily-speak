@@ -1,118 +1,109 @@
 package httpapi
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"time"
 
-	"daily-speaking-practice/backend/internal/ai"
 	"daily-speaking-practice/backend/internal/logging"
 	"daily-speaking-practice/backend/internal/media"
 	"daily-speaking-practice/backend/internal/profile"
 	"daily-speaking-practice/backend/internal/subscription"
 )
 
-func (s *Server) handleUserOllamaModel(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.authorizedUser(w, r, "api.user.ollama-model.get"); !ok {
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"selectedModel":   ai.DefaultModel(),
-		"isThinkingModel": ai.DefaultIsThinkingModel(),
-		"warning":         nil,
-	})
-}
-
 func (s *Server) handleGetEnglishLevel(w http.ResponseWriter, r *http.Request) {
-	user, ok := s.authorizedUser(w, r, "api.user.english-level.get")
+	identity, ok := s.requiredAccountIdentityV1(w, r)
 	if !ok {
 		return
 	}
-	level, err := s.profileService.EnglishLevel(r.Context(), user.ID)
+	level, err := s.profileService.EnglishLevel(r.Context(), identity.User.ID)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to load English level."})
+		writeV1Error(w, r, http.StatusInternalServerError, "profile_unavailable", "Failed to load English level")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"level": level})
 }
 
 func (s *Server) handlePutEnglishLevel(w http.ResponseWriter, r *http.Request) {
-	user, ok := s.authorizedUser(w, r, "api.user.english-level.put")
+	identity, ok := s.requiredAccountIdentityV1(w, r)
 	if !ok {
 		return
 	}
 	var payload struct {
 		Level string `json:"level"`
 	}
-	_ = json.NewDecoder(r.Body).Decode(&payload)
-	level, err := s.profileService.SaveEnglishLevel(r.Context(), user.ID, payload.Level)
+	if !decodeIdentityJSON(w, r, &payload) {
+		return
+	}
+	level, err := s.profileService.SaveEnglishLevel(r.Context(), identity.User.ID, payload.Level)
 	if err != nil {
 		if errors.Is(err, profile.ErrInvalidEnglishLevel) {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "English level is invalid."})
+			writeV1Error(w, r, http.StatusBadRequest, "invalid_english_level", "English level is invalid")
 			return
 		}
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to save English level."})
+		writeV1Error(w, r, http.StatusInternalServerError, "profile_unavailable", "Failed to save English level")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"level": level})
 }
 
 func (s *Server) handleUserInterests(w http.ResponseWriter, r *http.Request) {
-	user, ok := s.authorizedUser(w, r, "api.user.interests.put")
+	identity, ok := s.requiredAccountIdentityV1(w, r)
 	if !ok {
 		return
 	}
 	var payload struct {
 		InterestIDs []string `json:"interestIds"`
 	}
-	_ = json.NewDecoder(r.Body).Decode(&payload)
-	interestIDs, err := s.profileService.ReplaceInterests(r.Context(), user.ID, payload.InterestIDs)
+	if !decodeIdentityJSON(w, r, &payload) {
+		return
+	}
+	interestIDs, err := s.profileService.ReplaceInterests(r.Context(), identity.User.ID, payload.InterestIDs)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to save interests."})
+		writeV1Error(w, r, http.StatusInternalServerError, "profile_unavailable", "Failed to save interests")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"interestIds": interestIDs})
 }
 
 func (s *Server) handleGetSubscription(w http.ResponseWriter, r *http.Request) {
-	user, ok := s.authorizedUser(w, r, "api.user.subscription.get")
+	identity, ok := s.requiredAccountIdentityV1(w, r)
 	if !ok {
 		return
 	}
-	overview, err := s.subscriptionService.Get(r.Context(), user.ID)
+	overview, err := s.subscriptionService.Get(r.Context(), identity.User.ID)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to load subscription."})
+		writeV1Error(w, r, http.StatusInternalServerError, "subscription_unavailable", "Failed to load subscription")
 		return
 	}
 	writeSubscriptionOverview(w, overview)
 }
 
 func (s *Server) handleActivateSubscription(w http.ResponseWriter, r *http.Request) {
-	user, ok := s.authorizedUser(w, r, "api.user.subscription.post")
+	identity, ok := s.requiredAccountIdentityV1(w, r)
 	if !ok {
 		return
 	}
-	overview, err := s.subscriptionService.Activate(r.Context(), user.ID)
+	overview, err := s.subscriptionService.Activate(r.Context(), identity.User.ID)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to activate subscription."})
+		writeV1Error(w, r, http.StatusInternalServerError, "subscription_unavailable", "Failed to activate subscription")
 		return
 	}
 	writeSubscriptionOverview(w, overview)
 }
 
 func (s *Server) handleCancelSubscription(w http.ResponseWriter, r *http.Request) {
-	user, ok := s.authorizedUser(w, r, "api.user.subscription.delete")
+	identity, ok := s.requiredAccountIdentityV1(w, r)
 	if !ok {
 		return
 	}
-	overview, err := s.subscriptionService.Cancel(r.Context(), user.ID)
+	overview, err := s.subscriptionService.Cancel(r.Context(), identity.User.ID)
 	if err != nil {
 		if errors.Is(err, subscription.ErrNoActiveSubscription) {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "No active subscription to cancel."})
+			writeV1Error(w, r, http.StatusConflict, "subscription_not_active", "No active subscription to cancel")
 			return
 		}
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to cancel subscription."})
+		writeV1Error(w, r, http.StatusInternalServerError, "subscription_unavailable", "Failed to cancel subscription")
 		return
 	}
 	writeSubscriptionOverview(w, overview)
@@ -120,34 +111,34 @@ func (s *Server) handleCancelSubscription(w http.ResponseWriter, r *http.Request
 
 func (s *Server) handleUserData(w http.ResponseWriter, r *http.Request) {
 	started := time.Now()
-	logger := logging.ForRequest("api.user.data.get", r)
-	user, ok := s.authorizedUser(w, r, "api.user.data.get")
+	logger := logging.ForRequest("api.v1.profile.get", r)
+	identity, ok := s.requiredAccountIdentityV1(w, r)
 	if !ok {
 		return
 	}
 
-	interestIDs, err := s.profileService.Interests(r.Context(), user.ID)
+	interestIDs, err := s.profileService.Interests(r.Context(), identity.User.ID)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to load user data."})
+		writeV1Error(w, r, http.StatusInternalServerError, "profile_unavailable", "Failed to load profile")
 		return
 	}
-	overview, err := s.subscriptionService.Get(r.Context(), user.ID)
+	overview, err := s.subscriptionService.Get(r.Context(), identity.User.ID)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to load user data."})
+		writeV1Error(w, r, http.StatusInternalServerError, "profile_unavailable", "Failed to load profile")
 		return
 	}
 
 	logger.Info("request.success", map[string]any{
 		"status":         200,
 		"durationMs":     logging.ElapsedMs(started),
-		"userId":         user.ID,
+		"userId":         identity.User.ID,
 		"interestsCount": len(interestIDs),
 	})
 	writeJSON(w, http.StatusOK, map[string]any{
 		"interestIds":  interestIDs,
 		"quota":        overview.Quota,
 		"subscription": subscriptionResponseFrom(overview.State),
-		"englishLevel": user.EnglishLevel,
+		"englishLevel": identity.User.EnglishLevel,
 	})
 }
 

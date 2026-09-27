@@ -98,12 +98,14 @@ func TestV1MetadataAndStableErrors(t *testing.T) {
 	}
 }
 
-func TestLegacyRecordingRoutesAreRetired(t *testing.T) {
+func TestUnversionedAPIRoutesAreRetired(t *testing.T) {
 	handler := newTestServer(Config{}).Handler()
-	recorder := httptest.NewRecorder()
-	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/recordings/demo", nil))
-	if recorder.Code != http.StatusNotFound || strings.TrimSpace(recorder.Body.String()) != `{"error":"Not found"}` {
-		t.Fatalf("legacy recording route remains available: status=%d body=%s", recorder.Code, recorder.Body.String())
+	for _, path := range []string{"/api/recordings/demo", "/api/user/data", "/api/feed/posts", "/uploads/demo.webm"} {
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
+		if recorder.Code != http.StatusNotFound || strings.TrimSpace(recorder.Body.String()) != `{"error":"Not found"}` {
+			t.Fatalf("retired route %s remains available: status=%d body=%s", path, recorder.Code, recorder.Body.String())
+		}
 	}
 }
 
@@ -153,13 +155,13 @@ func TestUnauthorizedAPIContractWithoutBearer(t *testing.T) {
 		path   string
 		body   string
 	}{
-		{http.MethodGet, "/api/user/data", ""},
-		{http.MethodGet, "/api/feed/posts", ""},
-		{http.MethodPost, "/api/feed/posts", `{"recordingId":"demo"}`},
-		{http.MethodGet, "/api/feed/posts/demo-post", ""},
-		{http.MethodPost, "/api/feed/posts/demo-post/replies", `{"duration":10,"audioDataUrl":"data:audio/webm;base64,AAAA"}`},
-		{http.MethodPost, "/api/feed/posts/demo-post/reactions", `{"reaction":"like"}`},
-		{http.MethodPost, "/api/feed/replies/demo-reply/reactions", `{"reaction":"like"}`},
+		{http.MethodGet, "/api/v1/profile", ""},
+		{http.MethodPut, "/api/v1/profile/interests", `{"interestIds":[]}`},
+		{http.MethodGet, "/api/v1/profile/english-level", ""},
+		{http.MethodPut, "/api/v1/profile/english-level", `{"level":"b1"}`},
+		{http.MethodGet, "/api/v1/subscription", ""},
+		{http.MethodPost, "/api/v1/subscription", ""},
+		{http.MethodDelete, "/api/v1/subscription", ""},
 	}
 
 	for _, tc := range cases {
@@ -175,7 +177,7 @@ func TestUnauthorizedAPIContractWithoutBearer(t *testing.T) {
 			if recorder.Code != http.StatusUnauthorized {
 				t.Fatalf("expected 401, got %d with body %s", recorder.Code, recorder.Body.String())
 			}
-			if strings.TrimSpace(recorder.Body.String()) != `{"error":"Unauthorized"}` {
+			if !strings.Contains(recorder.Body.String(), `"code":"invalid_access_token"`) {
 				t.Fatalf("unexpected body %q", recorder.Body.String())
 			}
 		})

@@ -73,7 +73,7 @@ func TestQueueClaimsOnceRecoversExpiredLeaseAndFencesOldOwner(t *testing.T) {
 	job := NewJob{
 		ID:             jobID,
 		Kind:           KindMediaDelete,
-		ResourceID:     "/uploads/test/" + jobID + ".webm",
+		ResourceID:     "media-asset-" + jobID,
 		IdempotencyKey: idempotencyKey,
 		MaxAttempts:    3,
 	}

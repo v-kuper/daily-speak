@@ -3,9 +3,8 @@
 The backend serves Swagger UI at `/docs` and its canonical OpenAPI document at
 `/openapi.json`.
 
-The stable mobile surface starts at `/api/v1`. Compatibility and deprecation
-rules are documented in `../../docs/api-compatibility.md`; the unversioned
-`/api/*` routes remain the legacy web contract.
+The shared web/mobile application surface starts at `/api/v1`. Compatibility
+and deprecation rules are documented in `../../docs/api-compatibility.md`.
 
 Swagger's **Authorize** action accepts the short-lived Bearer access token.
 Refresh tokens are intentionally entered only in `POST /api/v1/auth/refresh`.

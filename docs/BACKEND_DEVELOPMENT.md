@@ -116,7 +116,7 @@ not silently create global clients or choose adapters.
 
 Use this order:
 
-1. Define the client-visible behavior. New mobile endpoints use `/api/v1`.
+1. Define the client-visible behavior. New application endpoints use `/api/v1`.
 2. Add feature-owned inputs, outputs, errors, ports, and service policy.
 3. Add repository/provider adapters and a migration when persistence changes.
 4. Wire concrete dependencies in `internal/app`.
@@ -143,7 +143,7 @@ line-count target.
 
 ## API contract rules
 
-- `/api/v1` is the stable web/mobile contract; unversioned `/api/*` is legacy.
+- `/api/v1` is the only application contract shared by web and mobile.
 - Protected resources use the same Bearer access token on web and mobile.
 - V1 failures use a stable machine-readable code and include `X-Request-ID`.
 - Retryable create/mutation flows use bounded idempotency keys.

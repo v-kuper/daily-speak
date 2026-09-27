@@ -1,7 +1,7 @@
 # Daily Speaking Backend
 
 `backend/` is a standalone Go HTTP API. It owns authentication, PostgreSQL
-migrations, recordings and uploads, AI/transcription integrations, Feed data,
+migrations, recordings, private media, and AI/transcription integrations,
 and the OpenAPI contract. It does not contain or proxy the Next.js application.
 Browser, mobile, and other HTTP clients can call the same API contract.
 
@@ -17,9 +17,7 @@ goroutines.
 
 ## Public surface
 
-- `/api/v1/*`: stable, versioned mobile API endpoints;
-- `/api/*`: legacy web application endpoints retained during migration;
-- `/uploads/*`: backend-owned persisted media;
+- `/api/v1/*`: stable, versioned web and mobile application endpoints;
 - `/healthz`: process liveness;
 - `/readyz`: PostgreSQL and durable-queue readiness;
 - `/metrics`: protected Prometheus metrics when an operations token is configured;
@@ -61,53 +59,6 @@ documentation at [http://localhost:3219/docs](http://localhost:3219/docs), or:
 ```bash
 open http://localhost:3219/docs
 ```
-
-The OpenAPI document includes the retained Feed endpoints even though the
-current web client does not expose Feed UI.
-
-## Migrate legacy local media to S3
-
-Legacy `/uploads/...` assets are moved only by the explicit
-`cmd/media-migrate` command. It is never started by the API, worker, Docker
-Compose, migrations, or CI deployment. The command always reads from
-`MEDIA_LOCAL_DIR` (falling back to the existing `UPLOADS_DIR`) and never deletes
-or modifies source media files.
-
-Configure the S3-compatible target and run the default dry-run first:
-
-```bash
-cd backend
-DATABASE_URL=postgres://postgres:postgres@localhost:5432/daily_speaking \
-MEDIA_STORAGE_DRIVER=s3 \
-MEDIA_LOCAL_DIR=/path/to/current/uploads \
-MEDIA_S3_REGION=us-east-1 \
-MEDIA_S3_BUCKET=daily-speaking-private \
-go run ./cmd/media-migrate
-```
-
-Dry-run hashes and audits at most 100 legacy assets by default. It does not
-write S3 objects or update PostgreSQL. After reviewing its summary, copy and
-publish one bounded batch with:
-
-```bash
-go run ./cmd/media-migrate --apply --limit=100
-```
-
-Use `--asset-id=<media-asset-id>` for a targeted retry. S3 credentials and an
-optional `MEDIA_S3_ENDPOINT`/`MEDIA_S3_FORCE_PATH_STYLE` are supplied through
-the same server-only variables as the API and worker. Each apply run:
-
-1. reads and hashes the local source;
-2. writes to a deterministic private S3 key and verifies size and SHA-256;
-3. atomically switches `media_assets.storage_driver`, bucket, key, and verified
-   metadata only after verification succeeds.
-
-The operation is resumable: an S3 object left by an interrupted run is reused
-only when its size and checksum match. Concurrent runs use a conditional
-database update. Failures leave the database pointed at the local source, and
-the source file is always retained. Repeat bounded apply runs until a dry-run
-reports both `planned=0` and `failed=0`. Back up PostgreSQL and the uploads directory before a
-production migration.
 
 The v1 surface includes unified web/mobile identity under `/api/v1/auth/*`, paginated
 `GET /api/v1/recordings`, and `GET /api/v1/recordings/{recordingId}`. Every
@@ -265,9 +216,10 @@ node scripts/build-api-docs.mjs --write
 node scripts/build-api-docs.mjs --check
 ```
 
-The API documentation tests inventory registered routes, require cookie auth on
-protected operations, and retain Feed operations. CI also exercises the API
-against PostgreSQL and builds `backend/Dockerfile` independently.
+The API documentation tests inventory registered routes, require Bearer auth
+on protected operations, and reject undocumented unversioned surfaces. CI also
+exercises the API against PostgreSQL and builds `backend/Dockerfile`
+independently.
 
 ## Docker image
 

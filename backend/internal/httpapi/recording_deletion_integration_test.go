@@ -1,13 +1,15 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -19,7 +21,7 @@ import (
 	"github.com/google/uuid"
 )
 
-func TestDeleteRecordingCascadesDataAndRetriesQueuedFilesAfterRestart(t *testing.T) {
+func TestDeleteRecordingQueuesAndRemovesPrivateMediaAsset(t *testing.T) {
 	databaseURL := strings.TrimSpace(os.Getenv("TEST_DATABASE_URL"))
 	if databaseURL == "" {
 		t.Skip("TEST_DATABASE_URL is not configured")
@@ -39,204 +41,85 @@ func TestDeleteRecordingCascadesDataAndRetriesQueuedFilesAfterRestart(t *testing
 	if err != nil {
 		t.Fatalf("register test user: %v", err)
 	}
-	recordingID := uuid.NewString()
-	postID := uuid.NewString()
-	replyID := uuid.NewString()
-	recordingURL := fmt.Sprintf("/uploads/recordings/%s/%s.webm", user.ID, recordingID)
-	shadowingURL := fmt.Sprintf("/uploads/shadowing/%s/%s.mp3", user.ID, recordingID)
-	replyURL := fmt.Sprintf("/uploads/feed-replies/%s/%s.webm", user.ID, replyID)
-	t.Cleanup(func() {
-		_, _ = database.Exec(context.Background(), `
-			DELETE FROM processing_jobs
-			WHERE kind = 'media.delete' AND resource_id = ANY($1::text[])`, []string{recordingURL, shadowingURL, replyURL})
-		_, _ = database.Exec(context.Background(), `DELETE FROM pending_file_deletions WHERE public_url = ANY($1::text[])`, []string{recordingURL, shadowingURL, replyURL})
-		_, _ = database.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, user.ID)
-	})
+	t.Cleanup(func() { _, _ = database.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, user.ID) })
 
 	tokenConfig := auth.TokenConfig{SigningKey: []byte(strings.Repeat("recording-deletion-secret-", 2))}
 	grant, err := auth.LoginIdentityUser(ctx, database, tokenConfig, auth.Credentials{Email: user.Email, Password: "password123"}, nil, auth.DeviceInfo{Name: "Deletion test", Platform: "test"})
 	if err != nil {
 		t.Fatalf("create test identity: %v", err)
 	}
-	now := time.Now().UTC()
+	mediaStore, err := storage.NewLocal(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := []byte("private recording audio")
+	digest := sha256.Sum256(body)
+	checksum := hex.EncodeToString(digest[:])
+	assetID := uuid.NewString()
+	objectKey := "recordings/" + user.ID + "/" + assetID + ".webm"
+	if _, err := mediaStore.Put(ctx, storage.PutRequest{
+		Key: objectKey, ContentType: "audio/webm", Size: int64(len(body)), SHA256: checksum,
+	}, bytes.NewReader(body)); err != nil {
+		t.Fatalf("store media: %v", err)
+	}
 	if _, err := database.Exec(ctx, `
-		INSERT INTO recordings (id, user_id, topic, duration, timestamp, transcript, audio_data_url, status, shadowing_status, shadowing_audio_url)
-		VALUES ($1, $2, 'Deletion test', 30, $3, 'Test transcript', $4, 'ready', 'ready', $5)`,
-		recordingID, user.ID, now, recordingURL, shadowingURL); err != nil {
+		INSERT INTO media_assets
+		  (id, owner_principal_id, purpose, state, storage_driver, object_key, content_type,
+		   expected_size_bytes, verified_size_bytes, expected_checksum_sha256,
+		   verified_checksum_sha256, verified_at, attached_at)
+		VALUES ($1, $2, 'recording_audio', 'ready', 'local', $3, 'audio/webm',
+		        $4, $4, $5, $5, NOW(), NOW())`, assetID, user.ID, objectKey, len(body), checksum); err != nil {
+		t.Fatalf("insert media asset: %v", err)
+	}
+	recordingID := uuid.NewString()
+	if _, err := database.Exec(ctx, `
+		INSERT INTO recordings
+		  (id, user_id, topic, duration, timestamp, transcript, status, shadowing_status, audio_asset_id)
+		VALUES ($1, $2, 'Deletion test', 30, $3, 'Test transcript', 'ready', 'pending', $4)`,
+		recordingID, user.ID, time.Now().UTC(), assetID); err != nil {
 		t.Fatalf("insert recording: %v", err)
 	}
-	if _, err := database.Exec(ctx, `
-		INSERT INTO feed_posts
-		  (id, user_id, source_recording_id, topic, duration, audio_data_url, transcript, source_timestamp)
-		VALUES ($1, $2, $3, 'Deletion test', 30, $4, 'Test transcript', $5)`,
-		postID, user.ID, recordingID, recordingURL, now); err != nil {
-		t.Fatalf("insert feed post: %v", err)
-	}
-	if _, err := database.Exec(ctx, `
-		INSERT INTO feed_replies (id, post_id, user_id, duration, audio_data_url, timestamp)
-		VALUES ($1, $2, $3, 5, $4, $5)`,
-		replyID, postID, user.ID, replyURL, now); err != nil {
-		t.Fatalf("insert feed reply: %v", err)
-	}
-	if _, err := database.Exec(ctx, `INSERT INTO feed_post_reactions (post_id, user_id, reaction) VALUES ($1, $2, 'like')`, postID, user.ID); err != nil {
-		t.Fatalf("insert post reaction: %v", err)
-	}
-	if _, err := database.Exec(ctx, `INSERT INTO feed_reply_reactions (reply_id, user_id, reaction) VALUES ($1, $2, 'like')`, replyID, user.ID); err != nil {
-		t.Fatalf("insert reply reaction: %v", err)
-	}
 
-	uploadsDir := t.TempDir()
-	t.Setenv("UPLOADS_DIR", uploadsDir)
-	writeTestUpload(t, uploadsDir, recordingURL)
-	writeTestUpload(t, uploadsDir, shadowingURL)
-	writeTestUpload(t, uploadsDir, replyURL)
-
+	server := newTestServer(Config{DB: database, IdentityTokens: tokenConfig, MediaStore: mediaStore})
 	request := httptest.NewRequest(http.MethodDelete, "/api/v1/recordings/"+recordingID, nil)
 	request.Header.Set("Authorization", "Bearer "+grant.AccessToken)
 	response := httptest.NewRecorder()
-	newTestServer(Config{DB: database, IdentityTokens: tokenConfig}).Handler().ServeHTTP(response, request)
+	server.Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
 		t.Fatalf("expected delete status 200, got %d: %s", response.Code, response.Body.String())
 	}
+	assertRecordingCount(t, database, recordingID, 0)
 
-	assertTableRowCount(t, database, "recordings", "id", recordingID, 0)
-	assertTableRowCount(t, database, "feed_posts", "id", postID, 0)
-	assertTableRowCount(t, database, "feed_replies", "id", replyID, 0)
-	assertTableRowCount(t, database, "feed_post_reactions", "post_id", postID, 0)
-	assertTableRowCount(t, database, "feed_reply_reactions", "reply_id", replyID, 0)
-	assertTableRowCount(t, database, "pending_file_deletions", "public_url", recordingURL, 1)
-	assertTableRowCount(t, database, "pending_file_deletions", "public_url", shadowingURL, 1)
-	assertTableRowCount(t, database, "pending_file_deletions", "public_url", replyURL, 1)
-	if _, err := database.Exec(ctx, `
-		INSERT INTO feed_posts
-		  (id, user_id, source_recording_id, topic, duration, transcript, source_timestamp)
-		VALUES ($1, $2, $3, 'Late publication', 30, 'Late transcript', $4)`,
-		uuid.NewString(), user.ID, recordingID, now); err == nil {
-		t.Fatal("expected the recording foreign key to reject a late Feed publication")
+	jobStore := testJobStore(t, server)
+	job, found, err := jobStore.Claim(ctx, "deletion-test", []string{workqueue.KindMediaDelete}, time.Minute)
+	if err != nil || !found {
+		t.Fatalf("claim deletion job: found=%t err=%v", found, err)
 	}
-	if _, err := database.Exec(ctx, `
-		UPDATE processing_jobs
-		SET priority = 100
-		WHERE kind = 'media.delete' AND resource_id = ANY($1::text[])`, []string{recordingURL, shadowingURL, replyURL}); err != nil {
-		t.Fatalf("prioritize deletion test jobs: %v", err)
+	if err := testBackgroundRuntime(t, server).Handle(ctx, job); err != nil {
+		t.Fatalf("delete media asset: %v", err)
 	}
-
-	legacyUploads := storage.NewLegacyUploads(uploadsDir)
-	restartedServer := newTestServer(Config{
-		DB: database,
-		LegacyUploads: failingLegacyUploadStore{
-			LegacyUploadStore: legacyUploads,
-			err:               errors.New("simulated Windows sharing violation"),
-		},
-	})
-	processDeletionJobsOnce(t, restartedServer, 3, true)
-	assertDeletionJob(t, database, recordingURL, "retry_wait", 1)
-	assertDeletionJob(t, database, shadowingURL, "retry_wait", 1)
-	assertDeletionJob(t, database, replyURL, "retry_wait", 1)
-	if _, err := database.Exec(ctx, `
-		UPDATE processing_jobs SET available_at = NOW()
-		WHERE kind = 'media.delete' AND resource_id = ANY($1::text[])`, []string{recordingURL, shadowingURL, replyURL}); err != nil {
+	if err := jobStore.Complete(ctx, job); err != nil {
+		t.Fatalf("complete deletion job: %v", err)
+	}
+	if _, err := mediaStore.Stat(ctx, objectKey); !errors.Is(err, storage.ErrNotFound) {
+		t.Fatalf("deleted object stat error = %v", err)
+	}
+	var state string
+	if err := database.QueryRow(ctx, `SELECT state FROM media_assets WHERE id = $1`, assetID).Scan(&state); err != nil {
 		t.Fatal(err)
 	}
-
-	secondRestart := newTestServer(Config{DB: database, LegacyUploads: legacyUploads})
-	processDeletionJobsOnce(t, secondRestart, 3, false)
-	assertTableRowCount(t, database, "pending_file_deletions", "public_url", recordingURL, 0)
-	assertTableRowCount(t, database, "pending_file_deletions", "public_url", shadowingURL, 0)
-	assertTableRowCount(t, database, "pending_file_deletions", "public_url", replyURL, 0)
-	assertUploadMissing(t, uploadsDir, recordingURL)
-	assertUploadMissing(t, uploadsDir, shadowingURL)
-	assertUploadMissing(t, uploadsDir, replyURL)
+	if state != "deleted" {
+		t.Fatalf("media asset state = %q", state)
+	}
 }
 
-type failingLegacyUploadStore struct {
-	storage.LegacyUploadStore
-	err error
-}
-
-func (store failingLegacyUploadStore) Remove([]string) error { return store.err }
-
-func processDeletionJobsOnce(t *testing.T, server *Server, count int, wantError bool) {
+func assertRecordingCount(t *testing.T, database *db.DB, recordingID string, expected int) {
 	t.Helper()
-	runtime := testBackgroundRuntime(t, server)
-	jobStore := testJobStore(t, server)
-	for range count {
-		job, found, err := jobStore.Claim(context.Background(), "deletion-test", []string{workqueue.KindMediaDelete}, time.Minute)
-		if err != nil || !found {
-			t.Fatalf("claim deletion job: found=%t err=%v", found, err)
-		}
-		handleErr := runtime.Handle(context.Background(), job)
-		if wantError {
-			if handleErr == nil {
-				t.Fatal("expected simulated deletion failure")
-			}
-			if _, err := jobStore.Fail(context.Background(), job, handleErr, time.Hour, runtime.FinalizeFailure); err != nil {
-				t.Fatalf("schedule deletion retry: %v", err)
-			}
-			continue
-		}
-		if handleErr != nil {
-			t.Fatalf("delete stored upload: %v", handleErr)
-		}
-		if err := jobStore.Complete(context.Background(), job); err != nil {
-			t.Fatalf("complete deletion job: %v", err)
-		}
-	}
-}
-
-func writeTestUpload(t *testing.T, uploadsDir string, publicURL string) {
-	t.Helper()
-	path := filepath.Join(uploadsDir, filepath.FromSlash(strings.TrimPrefix(publicURL, uploadsURLPrefix)))
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatalf("create upload directory: %v", err)
-	}
-	if err := os.WriteFile(path, []byte("audio"), 0o644); err != nil {
-		t.Fatalf("write upload: %v", err)
-	}
-}
-
-func assertUploadMissing(t *testing.T, uploadsDir string, publicURL string) {
-	t.Helper()
-	path := filepath.Join(uploadsDir, filepath.FromSlash(strings.TrimPrefix(publicURL, uploadsURLPrefix)))
-	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Fatalf("expected upload %q to be removed, got %v", publicURL, err)
-	}
-}
-
-func assertTableRowCount(t *testing.T, database *db.DB, table string, column string, value string, expected int) {
-	t.Helper()
-	allowed := map[string]map[string]bool{
-		"recordings":             {"id": true},
-		"feed_posts":             {"id": true},
-		"feed_replies":           {"id": true},
-		"feed_post_reactions":    {"post_id": true},
-		"feed_reply_reactions":   {"reply_id": true},
-		"pending_file_deletions": {"public_url": true},
-	}
-	if !allowed[table][column] {
-		t.Fatalf("unsafe test count target %s.%s", table, column)
-	}
 	var count int
-	query := fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE %s = $1", table, column)
-	if err := database.QueryRow(context.Background(), query, value).Scan(&count); err != nil {
-		t.Fatalf("count %s rows: %v", table, err)
+	if err := database.QueryRow(context.Background(), `SELECT COUNT(*) FROM recordings WHERE id = $1`, recordingID).Scan(&count); err != nil {
+		t.Fatal(err)
 	}
 	if count != expected {
-		t.Fatalf("expected %d rows in %s for %q, got %d", expected, table, value, count)
-	}
-}
-
-func assertDeletionJob(t *testing.T, database *db.DB, publicURL string, expectedState string, expectedAttempts int) {
-	t.Helper()
-	var state string
-	var attempts int
-	if err := database.QueryRow(context.Background(), `
-		SELECT state, attempts
-		FROM processing_jobs
-		WHERE kind = 'media.delete' AND resource_id = $1`, publicURL).Scan(&state, &attempts); err != nil {
-		t.Fatalf("load deletion job: %v", err)
-	}
-	if state != expectedState || attempts != expectedAttempts {
-		t.Fatalf("deletion job for %q: state=%q attempts=%d", publicURL, state, attempts)
+		t.Fatalf("recording count = %d, want %d", count, expected)
 	}
 }

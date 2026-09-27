@@ -1,13 +1,10 @@
 package httpapi
 
 import (
-	"encoding/json"
-	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
 
-	"daily-speaking-practice/backend/internal/auth"
 	"daily-speaking-practice/backend/internal/learner"
 	"daily-speaking-practice/backend/internal/recording"
 )
@@ -68,28 +65,6 @@ func recordingMediaAsset(assetID *string) *recordingMediaAssetResponse {
 	}
 }
 
-func (s *Server) optionalUser(r *http.Request) (*auth.User, error) {
-	token, present := bearerToken(r)
-	if !present {
-		return nil, nil
-	}
-	if token == "" {
-		return nil, auth.ErrInvalidAccessToken
-	}
-	identity, err := s.identityService.Authenticate(r.Context(), token)
-	if err != nil {
-		return nil, err
-	}
-	return identity.User, nil
-}
-
-func decodeJSON(r *http.Request, dest any) bool {
-	if r.Body == nil {
-		return false
-	}
-	return json.NewDecoder(r.Body).Decode(dest) == nil
-}
-
 func parseIntAny(value any) int {
 	switch typed := value.(type) {
 	case float64:
@@ -141,4 +116,12 @@ func errorMessage(err error, fallback string) string {
 		return fallback
 	}
 	return err.Error()
+}
+
+func pathUnescape(value string) string {
+	decoded, err := url.PathUnescape(value)
+	if err != nil {
+		return value
+	}
+	return decoded
 }

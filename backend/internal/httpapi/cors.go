@@ -44,7 +44,11 @@ func (c CORSConfig) Wrap(next http.Handler) http.Handler {
 				"origin": origin,
 				"reason": "origin_not_allowed",
 			})
-			writeJSON(w, http.StatusForbidden, map[string]string{"error": "Origin not allowed"})
+			if strings.HasPrefix(r.URL.Path, "/api/v1") {
+				writeV1Error(w, r, http.StatusForbidden, "origin_not_allowed", "Origin not allowed")
+			} else {
+				writeJSON(w, http.StatusForbidden, map[string]string{"error": "Origin not allowed"})
+			}
 			return
 		}
 		if allowed {

@@ -8,10 +8,10 @@ rules and persistence; media supports local and S3-compatible storage; and CI
 enforces the main package boundaries. Do not reopen a broad structural rewrite
 without evidence from a concrete feature or production measurement.
 
-Mobile development can start on the existing `/api/v1` identity, guest preview,
-recording, and media contracts. Add missing v1 feature operations incrementally
-when the mobile client needs profile, practice, deletion/retry, shadowing, or
-subscription flows. New mobile code must not depend on legacy `/api/*` routes.
+Mobile development can start on the existing `/api/v1` identity, profile,
+practice, subscription, guest preview, recording, and media contracts. New
+feature operations must extend this versioned contract or introduce a new
+major version when compatibility cannot be preserved.
 
 ## P0 before production release
 
@@ -74,10 +74,3 @@ Configured thresholds are hypotheses until these checks are measured remotely.
 - Pin third-party GitHub Actions to reviewed commit SHAs.
 - Add secret scanning and ensure diagnostics cannot print credentials.
 - Reject unapproved breaking changes to `/api/v1` in CI.
-
-## Product decision: retained Feed backend
-
-Feed data, handlers, migrations, and OpenAPI operations remain isolated, but no
-web or mobile UI exposes them. Restoring Feed requires publication consent,
-deletion, moderation, abuse handling, retention, and accessibility. Removing it
-requires a reviewed data/media migration and rollback plan.

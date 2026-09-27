@@ -33,19 +33,19 @@ const expectedChecks = [
   {
     name: "daily-questions requires date",
     method: "GET",
-    path: "/api/daily-questions",
+    path: "/api/v1/practice/daily-questions",
     expectedStatus: 400
   },
   {
     name: "topic-guidance requires topic",
     method: "GET",
-    path: "/api/topic-guidance",
+    path: "/api/v1/practice/topic-guidance",
     expectedStatus: 400
   },
   {
-    name: "user/data unauthorized",
+    name: "profile unauthorized",
     method: "GET",
-    path: "/api/user/data",
+    path: "/api/v1/profile",
     expectedStatus: 401
   },
   {
@@ -53,46 +53,6 @@ const expectedChecks = [
     method: "POST",
     path: "/api/v1/recordings",
     body: {},
-    expectedStatus: 401
-  },
-  {
-    name: "feed/posts unauthorized",
-    method: "GET",
-    path: "/api/feed/posts",
-    expectedStatus: 401
-  },
-  {
-    name: "feed/posts publish unauthorized",
-    method: "POST",
-    path: "/api/feed/posts",
-    body: { recordingId: "demo" },
-    expectedStatus: 401
-  },
-  {
-    name: "feed/post thread unauthorized",
-    method: "GET",
-    path: "/api/feed/posts/demo-post",
-    expectedStatus: 401
-  },
-  {
-    name: "feed/post reply unauthorized",
-    method: "POST",
-    path: "/api/feed/posts/demo-post/replies",
-    body: { duration: 10, audioDataUrl: "data:audio/webm;base64,AAAA" },
-    expectedStatus: 401
-  },
-  {
-    name: "feed/post reaction unauthorized",
-    method: "POST",
-    path: "/api/feed/posts/demo-post/reactions",
-    body: { reaction: "like" },
-    expectedStatus: 401
-  },
-  {
-    name: "feed/reply reaction unauthorized",
-    method: "POST",
-    path: "/api/feed/replies/demo-reply/reactions",
-    body: { reaction: "like" },
     expectedStatus: 401
   }
 ];
@@ -153,44 +113,6 @@ const runChecks = async () => {
 
     process.stdout.write(`✓ ${check.name}\n`);
   }
-};
-
-const runHiddenModelSettingsCheck = async () => {
-  const email = `smoke-model-${Date.now()}@example.com`;
-  const registerResponse = await fetch(`${apiBaseURL}/api/v1/auth/register`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password: "SmokeTest123!", deviceName: "API smoke", platform: "ci" })
-  });
-
-  if (registerResponse.status !== 201) {
-    const responseBody = await registerResponse.text();
-    throw new Error(`auth/register model settings setup failed: expected 201, got ${registerResponse.status}. Body: ${responseBody.slice(0, 300)}`);
-  }
-
-  const registerPayload = await registerResponse.json().catch(() => null);
-  const accessToken = registerPayload?.tokens?.accessToken;
-  if (typeof accessToken !== "string" || accessToken === "") {
-    throw new Error("auth/register model settings setup failed: missing access token.");
-  }
-
-  const initialResponse = await fetch(`${apiBaseURL}/api/user/ollama-model`, {
-    method: "GET",
-    headers: {
-      Authorization: `Bearer ${accessToken}`
-    }
-  });
-  const initialPayload = await initialResponse.json().catch(() => null);
-
-  if (initialResponse.status !== 200) {
-    throw new Error(`user/ollama-model initial settings failed: expected 200, got ${initialResponse.status}. Body: ${JSON.stringify(initialPayload).slice(0, 300)}`);
-  }
-
-  if (initialPayload?.selectedModel !== "gemma4:31b-cloud" || initialPayload?.isThinkingModel !== true) {
-    throw new Error(`user/ollama-model initial settings failed: expected hidden cloud model and server-side thinking flag, got ${JSON.stringify(initialPayload).slice(0, 300)}`);
-  }
-
-  process.stdout.write("✓ user/ollama-model hidden server settings\n");
 };
 
 const stopServer = async (child) => {
@@ -256,7 +178,6 @@ const main = async () => {
 
   try {
     await waitForServer();
-    await runHiddenModelSettingsCheck();
     await runChecks();
   } catch (error) {
     const details = logs.slice(-40).join("\n");

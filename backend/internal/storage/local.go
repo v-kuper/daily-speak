@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
@@ -169,37 +168,10 @@ func (store *LocalStore) Stat(ctx context.Context, key string) (ObjectInfo, erro
 	if err := readJSONFile(store.objectMetadataPath(key), &metadata); err == nil && metadata.Key == key && metadata.Size == fileInfo.Size() && checksumPattern.MatchString(metadata.SHA256) {
 		return objectInfoFromLocalMetadata(metadata), nil
 	}
-	// Legacy local objects have no sidecar. Hash them on first access and write
-	// the sidecar so they participate in the same integrity contract.
-	file, err := os.Open(objectPath)
-	if err != nil {
-		return ObjectInfo{}, fmt.Errorf("open legacy local object: %w", err)
-	}
-	hash := sha256.New()
-	first := make([]byte, 512)
-	read, readErr := io.ReadFull(file, first)
-	if readErr != nil && !errors.Is(readErr, io.EOF) && !errors.Is(readErr, io.ErrUnexpectedEOF) {
-		_ = file.Close()
-		return ObjectInfo{}, fmt.Errorf("read legacy local object: %w", readErr)
-	}
-	_, _ = hash.Write(first[:read])
-	if _, err := io.Copy(hash, file); err != nil {
-		_ = file.Close()
-		return ObjectInfo{}, fmt.Errorf("hash legacy local object: %w", err)
-	}
-	if err := file.Close(); err != nil {
-		return ObjectInfo{}, fmt.Errorf("close legacy local object: %w", err)
-	}
-	contentType := "application/octet-stream"
-	if read > 0 {
-		contentType = http.DetectContentType(first[:read])
-	}
-	info := ObjectInfo{
-		Key: key, ContentType: contentType, Size: fileInfo.Size(), SHA256: hex.EncodeToString(hash.Sum(nil)),
-		ETag: quoteETag(hex.EncodeToString(hash.Sum(nil))), LastModified: fileInfo.ModTime().UTC(), Metadata: map[string]string{},
-	}
-	_ = store.writeObjectMetadata(info)
-	return info, nil
+	// Only objects published by this store and paired with valid metadata are
+	// addressable. Unmanaged files under the mounted directory are never
+	// promoted into the private media namespace implicitly.
+	return ObjectInfo{}, ErrNotFound
 }
 
 func (store *LocalStore) Delete(ctx context.Context, key string) error {

@@ -92,26 +92,21 @@ func TestLocalStoreRejectsSizeChecksumAndTraversalWithoutPublishing(t *testing.T
 	}
 }
 
-func TestLocalStoreReadsAndIndexesLegacyObject(t *testing.T) {
+func TestLocalStoreRejectsUnmanagedObjectWithoutMetadata(t *testing.T) {
 	root := t.TempDir()
-	legacyPath := filepath.Join(root, "recordings", "user", "legacy.webm")
-	if err := os.MkdirAll(filepath.Dir(legacyPath), 0o750); err != nil {
+	unmanagedPath := filepath.Join(root, "recordings", "user", "unmanaged.webm")
+	if err := os.MkdirAll(filepath.Dir(unmanagedPath), 0o750); err != nil {
 		t.Fatal(err)
 	}
-	body := []byte{0x1a, 0x45, 0xdf, 0xa3}
-	if err := os.WriteFile(legacyPath, body, 0o640); err != nil {
+	if err := os.WriteFile(unmanagedPath, []byte{0x1a, 0x45, 0xdf, 0xa3}, 0o640); err != nil {
 		t.Fatal(err)
 	}
 	store, err := NewLocal(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	info, err := store.Stat(context.Background(), "recordings/user/legacy.webm")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if info.Size != int64(len(body)) || info.SHA256 != checksum(body) {
-		t.Fatalf("legacy info = %#v", info)
+	if _, err := store.Stat(context.Background(), "recordings/user/unmanaged.webm"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("unmanaged object must not be addressable: %v", err)
 	}
 }
 

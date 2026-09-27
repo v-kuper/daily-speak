@@ -154,7 +154,7 @@ test("network failures hide host details while abort errors keep their identity"
     error instanceof apiClient.ApiUnavailableError && error.message === "The API is temporarily unavailable.");
   const abort = new DOMException("Cancelled", "AbortError");
   const cancelled = apiClient.createApiClient("https://api.example.com", async () => { throw abort; });
-  await assert.rejects(() => cancelled.fetch("/api/topic-guidance"), (error) => error === abort);
+  await assert.rejects(() => cancelled.fetch("/api/v1/practice/topic-guidance"), (error) => error === abort);
 });
 
 test("shared API requests reject absolute URLs while opaque storage URLs can be resolved separately", async () => {
@@ -266,7 +266,7 @@ test("protected media playback rejects mismatched, expired, and header-bound tic
   );
 });
 
-test("recording requests use v1 media references and ignore legacy media URLs", async (t) => {
+test("recording requests use v1 media references and ignore retired public media URLs", async (t) => {
   const slice = importTypeScriptModule("src/store/slices/appSlice.ts");
   const { configureStore } = require("@reduxjs/toolkit");
   const store = configureStore({ reducer: { app: slice.default } });

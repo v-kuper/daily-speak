@@ -176,10 +176,10 @@ func promoteGuestPreview(ctx context.Context, tx pgx.Tx, guestPrincipalID string
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO recordings
 		  (id, user_id, topic, duration, timestamp, transcript, corrected_transcript,
-		   suggestions, practice_type, audio_data_url, photo_data_url, photo_object,
+		   suggestions, practice_type, photo_object,
 		   status, processing_stage, processing_job_id, audio_asset_id)
 		VALUES
-		  ($1, $2, $3, $4, $5, $6, '', '[]'::jsonb, $7, NULL, NULL, NULL,
+		  ($1, $2, $3, $4, $5, $6, '', '[]'::jsonb, $7, NULL,
 		   'processing', $8, $9, $10)`,
 		preview.ID, userPrincipalID, preview.Topic, recordingDuration,
 		preview.RecordingTimestamp, transcript, preview.PracticeType,

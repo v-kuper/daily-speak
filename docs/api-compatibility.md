@@ -1,6 +1,6 @@
 # DailySpeak API compatibility policy
 
-The mobile API uses a major version in its path, starting with `/api/v1`.
+The application API uses a major version in its path, starting with `/api/v1`.
 Within one major version, existing fields, meanings, status codes, and error
 codes are not removed or repurposed. New optional response fields and new
 endpoints may be added; clients must ignore fields they do not recognize.
@@ -13,11 +13,9 @@ Every response carries `X-Request-ID`. Clients should include it in support and
 diagnostic reports. A caller may supply a safe `X-Request-ID`; otherwise the
 server creates one.
 
-The unversioned `/api/*` routes are the remaining legacy web sandbox contract.
-All protected routes use the same short-lived Bearer access token as
-`/api/v1/*`, but new mobile clients must use `/api/v1/*` exclusively. Missing
-mobile feature operations are added to v1 when the mobile product needs them;
-legacy routes are not promoted into the native contract.
+Web and native clients use the same `/api/v1/*` contract. Unversioned
+application routes are not supported. The web sandbox may move faster in its
+UI, but it does not receive a private backend protocol.
 
 A successful refresh replaces the single-use opaque refresh token; submitting
 an already used token revokes that device session. Native clients submit the

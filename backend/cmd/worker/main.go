@@ -47,7 +47,6 @@ func main() {
 	runtime := app.NewWorker(app.WorkerConfig{
 		DB: database, MediaStore: mediaStore, MediaBucket: mediaConfig.S3Bucket,
 		MediaPartSize: mediaConfig.MultipartPartSize, MediaPresignTTL: mediaConfig.PresignTTL,
-		UploadsDir: strings.TrimSpace(os.Getenv("UPLOADS_DIR")),
 	})
 	log.Printf("daily-speaking worker started")
 	if err := runtime.Run(ctx, config); err != nil && !errors.Is(err, context.Canceled) {

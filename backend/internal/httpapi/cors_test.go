@@ -16,7 +16,7 @@ func TestCORSAllowsConfiguredCredentialedOrigin(t *testing.T) {
 		t.Run(origin, func(t *testing.T) {
 			called := false
 			handler := config.Wrap(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { called = true }))
-			request := httptest.NewRequest(http.MethodOptions, "/api/user/data", nil)
+			request := httptest.NewRequest(http.MethodOptions, "/api/v1/profile", nil)
 			request.Header.Set("Origin", origin)
 			request.Header.Set("Access-Control-Request-Method", http.MethodGet)
 			request.Header.Set("Access-Control-Request-Headers", "Content-Type, X-Not-Allowed")
@@ -52,7 +52,7 @@ func TestCORSAllowsSwaggerMutationsFromConfiguredAPIOriginOnly(t *testing.T) {
 
 	for _, method := range []string{http.MethodOptions, http.MethodPost, http.MethodPut, http.MethodDelete} {
 		t.Run("allowed "+method, func(t *testing.T) {
-			request := httptest.NewRequest(method, "/api/user/recordings", nil)
+			request := httptest.NewRequest(method, "/api/v1/recordings", nil)
 			request.Header.Set("Origin", "https://api.example.com")
 			if method == http.MethodOptions {
 				request.Header.Set("Access-Control-Request-Method", http.MethodPost)
@@ -69,12 +69,15 @@ func TestCORSAllowsSwaggerMutationsFromConfiguredAPIOriginOnly(t *testing.T) {
 		})
 	}
 
-	request := httptest.NewRequest(http.MethodPost, "/api/user/recordings", nil)
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/recordings", nil)
 	request.Header.Set("Origin", "https://evil.example")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusForbidden || response.Header().Get("Access-Control-Allow-Origin") != "" {
 		t.Fatalf("untrusted docs origin received mutation access: status=%d headers=%v", response.Code, response.Header())
+	}
+	if body := strings.TrimSpace(response.Body.String()); body != `{"error":{"code":"origin_not_allowed","message":"Origin not allowed","requestId":""}}` {
+		t.Fatalf("unexpected v1 CORS error: %s", body)
 	}
 }
 
@@ -128,7 +131,7 @@ func TestCORSActualRequestsAndNonBrowserClients(t *testing.T) {
 				w.Header().Add("Vary", "Accept-Encoding")
 				w.WriteHeader(http.StatusCreated)
 			}))
-			request := httptest.NewRequest(tc.method, "/api/user/data", nil)
+			request := httptest.NewRequest(tc.method, "/api/v1/profile", nil)
 			request.Header.Set("Origin", tc.origin)
 			response := httptest.NewRecorder()
 			handler.ServeHTTP(response, request)
@@ -165,7 +168,7 @@ func TestCORSIsAppliedToServerRoutes(t *testing.T) {
 		t.Fatal(err)
 	}
 	handler := newTestServer(Config{CORS: config}).Handler()
-	for _, path := range []string{"/healthz", "/api/v1/auth/session", "/uploads/example.webm", "/unknown"} {
+	for _, path := range []string{"/healthz", "/api/v1/auth/session", "/api/v1/profile", "/unknown"} {
 		request := httptest.NewRequest(http.MethodOptions, path, nil)
 		request.Header.Set("Origin", "https://app.example.com")
 		request.Header.Set("Access-Control-Request-Method", http.MethodGet)

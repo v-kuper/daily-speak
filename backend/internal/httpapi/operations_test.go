@@ -120,7 +120,6 @@ func TestOperationalRoutesDoNotUseResourceIdentifiers(t *testing.T) {
 	cases := map[string]string{
 		"/api/v1/recordings/secret-recording-id":       "/api/v1/recordings/{id}",
 		"/api/v1/media/uploads/private-upload/parts/1": "/api/v1/media/uploads/{id}",
-		"/api/feed/posts/private-post/replies":         "/api/feed/posts/{id}",
 		"/api/private-value/another-secret":            "api_unmatched",
 		"/unexpected/private-value":                    "unmatched",
 	}

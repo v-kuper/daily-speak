@@ -13,24 +13,24 @@ import (
 func (s *Server) handleDeleteRecordingV1(w http.ResponseWriter, r *http.Request, recordingID string) {
 	started := time.Now()
 	logger := logging.ForRequest("api.v1.recordings.delete", r)
-	identity, ok := s.requiredRecordingIdentityV1(w, r)
+	identity, ok := s.requiredAccountIdentityV1(w, r)
 	if !ok {
 		return
 	}
 	recordingID = strings.TrimSpace(pathUnescape(recordingID))
 	if recordingID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Recording ID is required."})
+		writeV1Error(w, r, http.StatusBadRequest, "invalid_recording_id", "Recording ID is required")
 		return
 	}
 
 	result, err := s.recordingDeleter.Delete(r.Context(), identity.User.ID, identity.User.IsSubscriber, recordingID)
 	if errors.Is(err, recording.ErrDeleteNotFound) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Recording not found."})
+		writeV1Error(w, r, http.StatusNotFound, "recording_not_found", "Recording not found")
 		return
 	}
 	if err != nil {
 		logger.Error("recording.delete_failed", logging.ErrorMeta(err))
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to delete recording."})
+		writeV1Error(w, r, http.StatusInternalServerError, "recording_unavailable", "Failed to delete recording")
 		return
 	}
 	if result.QuotaRefreshFailed {

@@ -42,18 +42,14 @@ dependency. A native client can therefore call the same API directly.
 
 ## Public contracts
 
-- `/api/v1/*` is the stable client contract shared by mobile and web identity,
-  media, guest preview, and the complete recording lifecycle.
-- `/api/*` is the remaining legacy web sandbox surface for its aggregated user
-  bootstrap, profile, practice, and the retained Feed. Do not add recording
-  detail or action endpoints there.
+- `/api/v1/*` is the only application contract. Mobile and web share identity,
+  profile, practice, subscription, media, guest preview, and recording APIs.
 - `/openapi.json` and `/docs` expose the backend-owned OpenAPI contract and
   Swagger UI.
 - `/healthz` is process liveness; `/readyz` checks PostgreSQL and queue
   admission; `/metrics` is a protected operations endpoint.
-- `/uploads/*` is the deprecated backend media path. Current web and mobile
-  recording media use owner-protected media resources and short-lived signed
-  requests.
+- Recording media is available only through owner-protected media resources
+  and short-lived signed requests; the API does not expose a public file tree.
 
 Compatibility and deprecation rules live in
 [`api-compatibility.md`](api-compatibility.md).
@@ -137,7 +133,6 @@ backend/internal/aiparse     provider-neutral model-output normalization
 backend/internal/auth        unified web/mobile identity and token lifecycle
 backend/internal/db          PostgreSQL connection and migrations
 backend/internal/httpapi     HTTP transport, authorization gates, response mapping
-backend/internal/feed        retained Feed service, persistence, and reply-media adapter
 backend/internal/learner     shared learner level and interest vocabulary
 backend/internal/media       authorized media lifecycle
 backend/internal/practice    speaking-practice generation application service
@@ -163,10 +158,3 @@ to `media`, practice normalization to `practice`, recording text to
 `recording`, and local shadowing paths to `shadowing`. There is no catch-all
 domain or utilities package. New business rules must not be added to the
 transport or composition packages.
-
-## Retained Feed backend
-
-The web Feed UI and publication controls are intentionally absent. Feed API,
-data, migrations, and OpenAPI operations remain until product, privacy,
-moderation, retention, and migration requirements support either restoration
-or removal. New clients must not expose Feed merely because routes still exist.

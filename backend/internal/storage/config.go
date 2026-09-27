@@ -37,9 +37,9 @@ type Config struct {
 	MultipartPartSize int64
 }
 
-// ConfigFromEnv defaults to local storage so the existing Windows deployment
-// continues to use UPLOADS_DIR and its UPLOADS_HOST_DIR bind mount without any
-// S3 secrets. S3 settings become mandatory only when MEDIA_STORAGE_DRIVER=s3.
+// ConfigFromEnv defaults to local storage so a single-node deployment can use
+// its persistent UPLOADS_DIR mount without S3 credentials. S3 settings become
+// mandatory only when MEDIA_STORAGE_DRIVER=s3.
 func ConfigFromEnv() (Config, error) {
 	backend := strings.ToLower(strings.TrimSpace(os.Getenv("MEDIA_STORAGE_DRIVER")))
 	if backend == "" {

@@ -39,14 +39,13 @@ type sqlDeletionTransaction struct{ tx pgx.Tx }
 
 func (t *sqlDeletionTransaction) Load(ctx context.Context, userID string, recordingID string) (DeletionSource, bool, error) {
 	var source DeletionSource
-	var recordingAudioURL, shadowingAudioURL, recordingAudioAssetID, recordingPhotoAssetID, shadowingAssetID *string
+	var recordingAudioAssetID, recordingPhotoAssetID, shadowingAssetID *string
 	err := t.tx.QueryRow(ctx, `
-		SELECT audio_data_url, shadowing_audio_url, audio_asset_id, photo_asset_id, shadowing_asset_id
+		SELECT audio_asset_id, photo_asset_id, shadowing_asset_id
 		FROM recordings
 		WHERE id = $1 AND user_id = $2
 		FOR UPDATE`, recordingID, userID).Scan(
-		&recordingAudioURL, &shadowingAudioURL, &recordingAudioAssetID,
-		&recordingPhotoAssetID, &shadowingAssetID,
+		&recordingAudioAssetID, &recordingPhotoAssetID, &shadowingAssetID,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return DeletionSource{}, false, nil
@@ -54,68 +53,8 @@ func (t *sqlDeletionTransaction) Load(ctx context.Context, userID string, record
 	if err != nil {
 		return DeletionSource{}, false, err
 	}
-	source.LegacyURLs = append(source.LegacyURLs, recordingAudioURL, shadowingAudioURL)
 	source.AssetIDs = append(source.AssetIDs, recordingAudioAssetID, recordingPhotoAssetID, shadowingAssetID)
-
-	postIDs := []string{}
-	postRows, err := t.tx.Query(ctx, `
-		SELECT id, audio_data_url, audio_asset_id, photo_asset_id
-		FROM feed_posts
-		WHERE source_recording_id = $1
-		FOR UPDATE`, recordingID)
-	if err != nil {
-		return DeletionSource{}, false, err
-	}
-	for postRows.Next() {
-		var postID string
-		var audioURL, audioAssetID, photoAssetID *string
-		if err := postRows.Scan(&postID, &audioURL, &audioAssetID, &photoAssetID); err != nil {
-			return DeletionSource{}, false, err
-		}
-		postIDs = append(postIDs, postID)
-		source.LegacyURLs = append(source.LegacyURLs, audioURL)
-		source.AssetIDs = append(source.AssetIDs, audioAssetID, photoAssetID)
-	}
-	postRowsErr := postRows.Err()
-	postRows.Close()
-	if postRowsErr != nil {
-		return DeletionSource{}, false, postRowsErr
-	}
-	if len(postIDs) == 0 {
-		return source, true, nil
-	}
-	replyRows, err := t.tx.Query(ctx, `
-		SELECT audio_data_url, audio_asset_id
-		FROM feed_replies
-		WHERE post_id = ANY($1::text[])
-		FOR UPDATE`, postIDs)
-	if err != nil {
-		return DeletionSource{}, false, err
-	}
-	for replyRows.Next() {
-		var audioURL, audioAssetID *string
-		if err := replyRows.Scan(&audioURL, &audioAssetID); err != nil {
-			return DeletionSource{}, false, err
-		}
-		source.LegacyURLs = append(source.LegacyURLs, audioURL)
-		source.AssetIDs = append(source.AssetIDs, audioAssetID)
-	}
-	replyRowsErr := replyRows.Err()
-	replyRows.Close()
-	return source, true, replyRowsErr
-}
-
-func (t *sqlDeletionTransaction) QueueLegacyMedia(ctx context.Context, publicURL string, jobID string) error {
-	if _, err := t.tx.Exec(ctx, `
-		INSERT INTO pending_file_deletions (public_url)
-		VALUES ($1)
-		ON CONFLICT (public_url) DO NOTHING`, publicURL); err != nil {
-		return err
-	}
-	return workqueue.Enqueue(ctx, t.tx, workqueue.NewJob{
-		ID: jobID, Kind: workqueue.KindMediaDelete, ResourceID: publicURL,
-		IdempotencyKey: "media.delete:" + publicURL, MaxAttempts: 20,
-	})
+	return source, true, nil
 }
 
 func (t *sqlDeletionTransaction) QueueAsset(ctx context.Context, assetID string, jobID string) error {

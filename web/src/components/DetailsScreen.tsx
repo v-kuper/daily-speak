@@ -575,7 +575,7 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
         {hasSuggestions ? (
           recording.suggestions.map((suggestion, index) => (
             <SuggestionCard
-              key={`${suggestion.wrong}-${suggestion.right}-${suggestion.category ?? "legacy"}-${index}`}
+              key={`${suggestion.wrong}-${suggestion.right}-${suggestion.category ?? "uncategorized"}-${index}`}
               suggestion={suggestion}
             />
           ))

@@ -16,7 +16,6 @@ import (
 	"daily-speaking-practice/backend/internal/auth"
 	"daily-speaking-practice/backend/internal/background"
 	"daily-speaking-practice/backend/internal/db"
-	"daily-speaking-practice/backend/internal/feed"
 	"daily-speaking-practice/backend/internal/guestpreview"
 	"daily-speaking-practice/backend/internal/media"
 	"daily-speaking-practice/backend/internal/operations"
@@ -50,7 +49,6 @@ type Config struct {
 	MediaSigningSecret       []byte
 	MediaPartSize            int64
 	MediaPresignTTL          time.Duration
-	LegacyUploads            storage.LegacyUploadStore
 	TranscribeAudio          func(context.Context, string) (string, error)
 	ProbeAudioDuration       func(context.Context, string) (time.Duration, error)
 	Operations               operations.Config
@@ -117,10 +115,6 @@ func newTestServer(config Config) *Server {
 	if mediaStore == nil && config.DB != nil {
 		mediaStore, _ = storage.NewLocal(resolveUploadsDir())
 	}
-	legacyUploads := config.LegacyUploads
-	if legacyUploads == nil {
-		legacyUploads = storage.NewLegacyUploads(resolveUploadsDir())
-	}
 	var mediaService *media.Service
 	if config.DB != nil && mediaStore != nil {
 		mediaService = media.NewService(media.NewSQLRepository(config.DB), mediaStore, media.Config{
@@ -141,14 +135,13 @@ func newTestServer(config Config) *Server {
 	guestStore := guestpreview.NewStore(config.DB, guestpreview.QueueCapacityFromEnv())
 	shadowingStore := shadowing.NewStore(config.DB)
 	server := NewServer(Dependencies{
-		OperationsMonitor: operations.NewMonitor(config.DB, jobStore), LegacyUploads: legacyUploads,
+		OperationsMonitor:   operations.NewMonitor(config.DB, jobStore),
 		PracticeGenerator:   practiceGenerator,
-		FeedService:         feed.NewService(feed.NewSQLRepository(config.DB), feed.NewLocalReplyAudioStore(resolveUploadsDir()), uuid.NewString),
 		ProfileService:      profile.NewService(profile.NewSQLRepository(config.DB)),
 		SubscriptionService: subscription.NewService(subscription.NewSQLRepository(config.DB)),
 		RecordingAnalyzer:   recordingAnalyzer, RecordingRewriter: recordingRewriter,
 		RecordingCreator: recording.NewCreator(recording.NewSQLCreateUnitOfWork(config.DB)),
-		RecordingDeleter: recording.NewDeleter(recordingDeletion, legacyUploads, recordingDeletion, uuid.NewString),
+		RecordingDeleter: recording.NewDeleter(recordingDeletion, recordingDeletion, uuid.NewString),
 		RecordingReader:  recording.NewReader(recordingRecords),
 		RecordingRetryService: recording.NewRetryService(
 			recordingRecords, recording.NewSQLRetryUnitOfWork(config.DB), uuid.NewString,
@@ -199,7 +192,7 @@ func newTestServer(config Config) *Server {
 			MediaBucket: config.MediaBucket, NewID: uuid.NewString,
 		}),
 		ShadowingStore: shadowingStore,
-		MediaCleanup:   media.NewCleanup(config.DB, mediaService, mediaStore, legacyUploads),
+		MediaCleanup:   media.NewCleanup(config.DB, mediaService, mediaStore),
 	})
 	testBackgroundRuntimes.Store(server, runtime)
 	testJobStores.Store(server, jobStore)

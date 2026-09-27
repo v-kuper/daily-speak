@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"daily-speaking-practice/backend/internal/db"
@@ -14,19 +13,14 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-const legacyUploadsURLPrefix = "/uploads/"
-
 type Cleanup struct {
 	database     *db.DB
 	mediaService *Service
 	store        storage.Store
-	legacy       storage.LegacyUploadRemover
 }
 
-func NewCleanup(database *db.DB, mediaService *Service, store storage.Store, legacy storage.LegacyUploadRemover) *Cleanup {
-	return &Cleanup{
-		database: database, mediaService: mediaService, store: store, legacy: legacy,
-	}
+func NewCleanup(database *db.DB, mediaService *Service, store storage.Store) *Cleanup {
+	return &Cleanup{database: database, mediaService: mediaService, store: store}
 }
 
 func (cleanup *Cleanup) Available() bool {
@@ -139,16 +133,6 @@ func (cleanup *Cleanup) Delete(ctx context.Context, resourceID string) error {
 	if cleanup == nil || cleanup.database == nil {
 		return errors.New("media cleanup database is not configured")
 	}
-	if strings.HasPrefix(resourceID, legacyUploadsURLPrefix) {
-		if cleanup.legacy == nil {
-			return errors.New("legacy media cleanup is not configured")
-		}
-		if err := cleanup.legacy.Remove([]string{resourceID}); err != nil {
-			return err
-		}
-		_, err := cleanup.database.Exec(ctx, `DELETE FROM pending_file_deletions WHERE public_url = $1`, resourceID)
-		return err
-	}
 	if cleanup.store == nil {
 		return errors.New("media storage is not configured")
 	}
@@ -176,27 +160,10 @@ func (cleanup *Cleanup) Delete(ctx context.Context, resourceID string) error {
 	return err
 }
 
-func (cleanup *Cleanup) FinalizeFailure(ctx context.Context, tx pgx.Tx, resourceID string, attempts int, message string) error {
-	if !strings.HasPrefix(resourceID, legacyUploadsURLPrefix) {
-		_, err := tx.Exec(ctx, `
-			UPDATE media_assets
-			SET state = 'failed', updated_at = NOW()
-			WHERE id = $1 AND state = 'deleting'`, resourceID)
-		return err
-	}
+func (cleanup *Cleanup) FinalizeFailure(ctx context.Context, tx pgx.Tx, resourceID string, _ int, _ string) error {
 	_, err := tx.Exec(ctx, `
-		INSERT INTO pending_file_deletions (public_url, attempts, last_error, updated_at)
-		VALUES ($1, $2, $3, NOW())
-		ON CONFLICT (public_url) DO UPDATE
-		SET attempts = EXCLUDED.attempts, last_error = EXCLUDED.last_error, updated_at = NOW()`,
-		resourceID, attempts, truncateCleanupMessage(message, 500))
+		UPDATE media_assets
+		SET state = 'failed', updated_at = NOW()
+		WHERE id = $1 AND state = 'deleting'`, resourceID)
 	return err
-}
-
-func truncateCleanupMessage(value string, limit int) string {
-	runes := []rune(value)
-	if len(runes) <= limit {
-		return value
-	}
-	return string(runes[:limit])
 }

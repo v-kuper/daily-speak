@@ -7,15 +7,13 @@ import (
 	"strings"
 	"time"
 
-	"daily-speaking-practice/backend/internal/auth"
 	"daily-speaking-practice/backend/internal/logging"
 	"daily-speaking-practice/backend/internal/practice"
 	"daily-speaking-practice/backend/internal/recording"
 	"daily-speaking-practice/backend/internal/shadowing"
 )
 
-// recordingV1Response deliberately excludes the legacy inline/upload URL
-// fields. Persisted private media is exposed only through owned media
+// recordingV1Response exposes persisted private media only through owned media
 // references that clients exchange for short-lived download requests.
 type recordingV1Response struct {
 	ID                  string                  `json:"id"`
@@ -36,18 +34,6 @@ type recordingV1Response struct {
 	Media               *recordingMediaResponse `json:"media,omitempty"`
 }
 
-func (s *Server) requiredRecordingIdentityV1(w http.ResponseWriter, r *http.Request) (*auth.Identity, bool) {
-	identity, ok := s.requiredIdentityV1(w, r)
-	if !ok {
-		return nil, false
-	}
-	if identity.Kind != "user" || identity.User == nil {
-		writeV1Error(w, r, http.StatusForbidden, "account_required", "An account is required to access recordings")
-		return nil, false
-	}
-	return identity, true
-}
-
 func (s *Server) routeRecordingV1(w http.ResponseWriter, r *http.Request, relativePath string) {
 	parts := strings.Split(strings.Trim(relativePath, "/"), "/")
 	if len(parts) == 1 && parts[0] != "" {
@@ -58,7 +44,7 @@ func (s *Server) routeRecordingV1(w http.ResponseWriter, r *http.Request, relati
 		case http.MethodDelete:
 			s.handleDeleteRecordingV1(w, r, recordingID)
 		default:
-			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
+			writeV1Error(w, r, http.StatusMethodNotAllowed, "method_not_allowed", "Method not allowed")
 		}
 		return
 	}
@@ -70,29 +56,29 @@ func (s *Server) routeRecordingV1(w http.ResponseWriter, r *http.Request, relati
 		case "shadowing":
 			s.handleGenerateShadowingV1(w, r, recordingID)
 		default:
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Not found"})
+			writeV1Error(w, r, http.StatusNotFound, "not_found", "Not found")
 		}
 		return
 	}
 	if len(parts) == 2 && parts[0] != "" && (parts[1] == "retry" || parts[1] == "shadowing") {
-		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
+		writeV1Error(w, r, http.StatusMethodNotAllowed, "method_not_allowed", "Method not allowed")
 		return
 	}
-	writeJSON(w, http.StatusNotFound, map[string]string{"error": "Not found"})
+	writeV1Error(w, r, http.StatusNotFound, "not_found", "Not found")
 }
 
 func (s *Server) handleGetRecordingV1(w http.ResponseWriter, r *http.Request, recordingID string) {
-	identity, ok := s.requiredRecordingIdentityV1(w, r)
+	identity, ok := s.requiredAccountIdentityV1(w, r)
 	if !ok {
 		return
 	}
 	record, err := s.recordingReader.Get(r.Context(), identity.User.ID, recordingID)
 	if errors.Is(err, recording.ErrNotFound) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Recording not found."})
+		writeV1Error(w, r, http.StatusNotFound, "recording_not_found", "Recording not found")
 		return
 	}
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to load recording."})
+		writeV1Error(w, r, http.StatusInternalServerError, "recording_unavailable", "Failed to load recording")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"recording": recordingV1ResponseFromRecord(record)})
@@ -101,28 +87,28 @@ func (s *Server) handleGetRecordingV1(w http.ResponseWriter, r *http.Request, re
 func (s *Server) handleRetryRecordingV1(w http.ResponseWriter, r *http.Request, recordingID string) {
 	started := time.Now()
 	logger := logging.ForRequest("api.v1.recordings.retry", r)
-	identity, ok := s.requiredRecordingIdentityV1(w, r)
+	identity, ok := s.requiredAccountIdentityV1(w, r)
 	if !ok {
 		return
 	}
 	recordingID = strings.TrimSpace(recordingID)
 	if recordingID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Recording ID is required."})
+		writeV1Error(w, r, http.StatusBadRequest, "invalid_recording_id", "Recording ID is required")
 		return
 	}
 
 	result, err := s.recordingRetryService.Retry(r.Context(), identity.User.ID, recordingID)
 	if errors.Is(err, recording.ErrNotFound) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Recording not found."})
+		writeV1Error(w, r, http.StatusNotFound, "recording_not_found", "Recording not found")
 		return
 	}
 	if errors.Is(err, recording.ErrRetryUnavailable) {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": recording.ErrRetryUnavailable.Error()})
+		writeV1Error(w, r, http.StatusConflict, "recording_retry_unavailable", recording.ErrRetryUnavailable.Error())
 		return
 	}
 	if err != nil {
 		logger.Error("recording.retry_schedule_failed", map[string]any{"recordingId": recordingID})
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to retry recording processing."})
+		writeV1Error(w, r, http.StatusInternalServerError, "recording_unavailable", "Failed to retry recording processing")
 		return
 	}
 	logger.Info("request.success", map[string]any{
@@ -140,27 +126,27 @@ func (s *Server) handleRetryRecordingV1(w http.ResponseWriter, r *http.Request, 
 func (s *Server) handleGenerateShadowingV1(w http.ResponseWriter, r *http.Request, recordingID string) {
 	started := time.Now()
 	logger := logging.ForRequest("api.v1.recordings.shadowing", r)
-	identity, ok := s.requiredRecordingIdentityV1(w, r)
+	identity, ok := s.requiredAccountIdentityV1(w, r)
 	if !ok {
 		return
 	}
 	recordingID = strings.TrimSpace(recordingID)
 	if recordingID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Recording ID is required."})
+		writeV1Error(w, r, http.StatusBadRequest, "invalid_recording_id", "Recording ID is required")
 		return
 	}
 	record, scheduled, err := s.scheduleShadowingRecord(r.Context(), identity.User.ID, recordingID)
 	if errors.Is(err, shadowing.ErrNotFound) || errors.Is(err, recording.ErrNotFound) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Recording not found."})
+		writeV1Error(w, r, http.StatusNotFound, "recording_not_found", "Recording not found")
 		return
 	}
 	if errors.Is(err, shadowing.ErrTranscriptUnavailable) {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "The natural transcript is not ready yet."})
+		writeV1Error(w, r, http.StatusConflict, "shadowing_not_ready", "The natural transcript is not ready yet")
 		return
 	}
 	if err != nil {
 		logger.Error("shadowing.schedule_failed", map[string]any{"recordingId": recordingID})
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to generate pronunciation audio."})
+		writeV1Error(w, r, http.StatusInternalServerError, "shadowing_unavailable", "Failed to generate pronunciation audio")
 		return
 	}
 	logger.Info("request.success", map[string]any{
@@ -171,13 +157,13 @@ func (s *Server) handleGenerateShadowingV1(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *Server) handleListRecordingsV1(w http.ResponseWriter, r *http.Request) {
-	identity, ok := s.requiredRecordingIdentityV1(w, r)
+	identity, ok := s.requiredAccountIdentityV1(w, r)
 	if !ok {
 		return
 	}
 	page, err := parsePageRequest(r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid pagination parameters."})
+		writeV1Error(w, r, http.StatusBadRequest, "invalid_pagination", "Invalid pagination parameters")
 		return
 	}
 	options := recording.ListOptions{Limit: page.Limit + 1}
@@ -187,7 +173,7 @@ func (s *Server) handleListRecordingsV1(w http.ResponseWriter, r *http.Request) 
 	}
 	records, err := s.recordingReader.List(r.Context(), identity.User.ID, options)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to load recordings."})
+		writeV1Error(w, r, http.StatusInternalServerError, "recording_unavailable", "Failed to load recordings")
 		return
 	}
 	var nextCursor *string
@@ -195,7 +181,7 @@ func (s *Server) handleListRecordingsV1(w http.ResponseWriter, r *http.Request) 
 		last := records[page.Limit-1]
 		encoded, err := encodePageCursor(pageCursor{Timestamp: last.Timestamp, ID: last.ID})
 		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to paginate recordings."})
+			writeV1Error(w, r, http.StatusInternalServerError, "recording_unavailable", "Failed to paginate recordings")
 			return
 		}
 		nextCursor = &encoded

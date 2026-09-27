@@ -11,23 +11,17 @@ import (
 var ErrDeleteNotFound = errors.New("recording not found")
 
 type DeletionSource struct {
-	LegacyURLs []*string
-	AssetIDs   []*string
+	AssetIDs []*string
 }
 
 type DeletionTransaction interface {
 	Load(context.Context, string, string) (DeletionSource, bool, error)
-	QueueLegacyMedia(context.Context, string, string) error
 	QueueAsset(context.Context, string, string) error
 	Remove(context.Context, string, string) (bool, error)
 }
 
 type DeletionUnitOfWork interface {
 	Execute(context.Context, func(DeletionTransaction) error) error
-}
-
-type LegacyUploadValidator interface {
-	Path(string) (string, error)
 }
 
 type DeletionQuotaReader interface {
@@ -42,13 +36,12 @@ type DeletionResult struct {
 
 type Deleter struct {
 	unitOfWork DeletionUnitOfWork
-	legacy     LegacyUploadValidator
 	quota      DeletionQuotaReader
 	newID      func() string
 }
 
-func NewDeleter(unitOfWork DeletionUnitOfWork, legacy LegacyUploadValidator, quotaReader DeletionQuotaReader, newID func() string) *Deleter {
-	return &Deleter{unitOfWork: unitOfWork, legacy: legacy, quota: quotaReader, newID: newID}
+func NewDeleter(unitOfWork DeletionUnitOfWork, quotaReader DeletionQuotaReader, newID func() string) *Deleter {
+	return &Deleter{unitOfWork: unitOfWork, quota: quotaReader, newID: newID}
 }
 
 func (d *Deleter) Delete(ctx context.Context, userID string, subscriber bool, recordingID string) (DeletionResult, error) {
@@ -66,11 +59,6 @@ func (d *Deleter) Delete(ctx context.Context, userID string, subscriber bool, re
 		}
 		if !found {
 			return ErrDeleteNotFound
-		}
-		for _, publicURL := range d.uniqueLegacyURLs(source.LegacyURLs) {
-			if err := tx.QueueLegacyMedia(ctx, publicURL, d.newID()); err != nil {
-				return err
-			}
 		}
 		for _, assetID := range uniqueDeletionValues(source.AssetIDs) {
 			if err := tx.QueueAsset(ctx, assetID, d.newID()); err != nil {
@@ -100,20 +88,6 @@ func (d *Deleter) Delete(ctx context.Context, userID string, subscriber bool, re
 	}
 	result.Quota = &current
 	return result, nil
-}
-
-func (d *Deleter) uniqueLegacyURLs(values []*string) []string {
-	unique := uniqueDeletionValues(values)
-	if d.legacy == nil {
-		return nil
-	}
-	valid := make([]string, 0, len(unique))
-	for _, value := range unique {
-		if _, err := d.legacy.Path(value); err == nil {
-			valid = append(valid, value)
-		}
-	}
-	return valid
 }
 
 func uniqueDeletionValues(values []*string) []string {

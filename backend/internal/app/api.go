@@ -3,14 +3,12 @@ package app
 import (
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"daily-speaking-practice/backend/internal/ai"
 	"daily-speaking-practice/backend/internal/auth"
 	"daily-speaking-practice/backend/internal/db"
-	"daily-speaking-practice/backend/internal/feed"
 	"daily-speaking-practice/backend/internal/guestpreview"
 	"daily-speaking-practice/backend/internal/httpapi"
 	"daily-speaking-practice/backend/internal/media"
@@ -41,8 +39,6 @@ type APIConfig struct {
 	MediaSigningSecret []byte
 	MediaPartSize      int64
 	MediaPresignTTL    time.Duration
-	LegacyUploads      storage.LegacyUploadStore
-	UploadsDir         string
 	Operations         operations.Config
 }
 
@@ -50,7 +46,6 @@ func NewAPI(config APIConfig) *httpapi.Server {
 	if config.BrowserCookie.SameSite == 0 {
 		config.BrowserCookie.SameSite = http.SameSiteLaxMode
 	}
-	uploadsDir := resolveUploadsDir(config.UploadsDir)
 	aiClient := config.AIClient
 	if aiClient == nil {
 		aiClient = ai.OllamaClient{}
@@ -69,9 +64,6 @@ func NewAPI(config APIConfig) *httpapi.Server {
 		recordingRewriter = recordingService
 	}
 	mediaStore := config.MediaStore
-	if mediaStore == nil && config.DB != nil {
-		mediaStore, _ = storage.NewLocal(uploadsDir)
-	}
 	mediaBucket := strings.TrimSpace(config.MediaBucket)
 	if mediaBucket == "" && mediaStore != nil && mediaStore.Backend() == storage.BackendS3 {
 		mediaBucket = strings.TrimSpace(os.Getenv("MEDIA_S3_BUCKET"))
@@ -90,21 +82,16 @@ func NewAPI(config APIConfig) *httpapi.Server {
 		signingSecret = []byte(strings.TrimSpace(os.Getenv("AUTH_ACCESS_TOKEN_SECRET")))
 	}
 	mediaSigner, _ := media.NewURLSigner(signingSecret)
-	legacyUploads := config.LegacyUploads
-	if legacyUploads == nil {
-		legacyUploads = storage.NewLegacyUploads(uploadsDir)
-	}
 	recordingRecords := recording.NewSQLQueryRepository(config.DB)
 	recordingDeletion := recording.NewSQLDeletionRepository(config.DB)
 	return httpapi.NewServer(httpapi.Dependencies{
-		OperationsMonitor: operations.NewMonitor(config.DB, workqueue.NewStore(config.DB)), LegacyUploads: legacyUploads,
+		OperationsMonitor:   operations.NewMonitor(config.DB, workqueue.NewStore(config.DB)),
 		PracticeGenerator:   practiceGenerator,
-		FeedService:         feed.NewService(feed.NewSQLRepository(config.DB), feed.NewLocalReplyAudioStore(uploadsDir), uuid.NewString),
 		ProfileService:      profile.NewService(profile.NewSQLRepository(config.DB)),
 		SubscriptionService: subscription.NewService(subscription.NewSQLRepository(config.DB)),
 		RecordingAnalyzer:   recordingAnalyzer, RecordingRewriter: recordingRewriter,
 		RecordingCreator: recording.NewCreator(recording.NewSQLCreateUnitOfWork(config.DB)),
-		RecordingDeleter: recording.NewDeleter(recordingDeletion, legacyUploads, recordingDeletion, uuid.NewString),
+		RecordingDeleter: recording.NewDeleter(recordingDeletion, recordingDeletion, uuid.NewString),
 		RecordingReader:  recording.NewReader(recordingRecords),
 		RecordingRetryService: recording.NewRetryService(
 			recordingRecords, recording.NewSQLRetryUnitOfWork(config.DB), uuid.NewString,
@@ -117,14 +104,4 @@ func NewAPI(config APIConfig) *httpapi.Server {
 		Operations: config.Operations, Limiter: operations.NewLimiter(config.DB),
 		Network: operations.NewNetwork(config.Operations.TrustedProxies), Metrics: operations.NewMetrics(),
 	})
-}
-
-func resolveUploadsDir(configured string) string {
-	if value := strings.TrimSpace(configured); value != "" {
-		return value
-	}
-	if value := strings.TrimSpace(os.Getenv("UPLOADS_DIR")); value != "" {
-		return value
-	}
-	return filepath.Join("public", "uploads")
 }

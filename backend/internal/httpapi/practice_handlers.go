@@ -24,7 +24,7 @@ func (s *Server) handleDailyQuestions(w http.ResponseWriter, r *http.Request) {
 		logger.Warn("request.rejected", map[string]any{
 			"status": 400, "durationMs": logging.ElapsedMs(started), "reason": "invalid_date",
 		})
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Query param `date` must be in YYYY-MM-DD format."})
+		writeV1Error(w, r, http.StatusBadRequest, "invalid_date", "Query param `date` must be in YYYY-MM-DD format")
 		return
 	}
 
@@ -38,7 +38,7 @@ func (s *Server) handleDailyQuestions(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		writePracticeGenerationError(
-			w, err, practice.ErrQuestionsExhausted,
+			w, r, err, practice.ErrQuestionsExhausted,
 			"Could not generate a sufficiently new set of questions. Try regenerate again.",
 		)
 		return
@@ -59,11 +59,11 @@ func (s *Server) handleTopicGuidance(w http.ResponseWriter, r *http.Request) {
 		logger.Warn("request.rejected", map[string]any{
 			"status": 400, "durationMs": logging.ElapsedMs(started), "reason": "missing_topic",
 		})
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Query param `topic` is required."})
+		writeV1Error(w, r, http.StatusBadRequest, "missing_topic", "Query param `topic` is required")
 		return
 	}
 	if len([]rune(topic)) > 300 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Topic is too long."})
+		writeV1Error(w, r, http.StatusBadRequest, "invalid_topic", "Topic is too long")
 		return
 	}
 
@@ -78,7 +78,7 @@ func (s *Server) handleTopicGuidance(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		writePracticeGenerationError(
-			w, err, practice.ErrGuidanceExhausted,
+			w, r, err, practice.ErrGuidanceExhausted,
 			"Could not generate sufficiently new guidance. Try regenerate again.",
 		)
 		return
@@ -104,7 +104,7 @@ func (s *Server) handleStudyWords(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		writePracticeGenerationError(
-			w, err, practice.ErrStudyPackExhausted,
+			w, r, err, practice.ErrStudyPackExhausted,
 			"Could not generate a valid words pack. Try regenerate.",
 		)
 		return
@@ -117,9 +117,8 @@ func (s *Server) handleStudyWords(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) practiceEnglishLevel(w http.ResponseWriter, r *http.Request, requested string) (string, bool) {
-	user, err := s.optionalUser(r)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to load session."})
+	user, ok := s.optionalAccountUserV1(w, r)
+	if !ok {
 		return "", false
 	}
 	if user != nil {
@@ -128,17 +127,15 @@ func (s *Server) practiceEnglishLevel(w http.ResponseWriter, r *http.Request, re
 	return learner.NormalizeEnglishLevel(requested), true
 }
 
-func writePracticeGenerationError(w http.ResponseWriter, err error, exhausted error, exhaustedMessage string) {
+func writePracticeGenerationError(w http.ResponseWriter, r *http.Request, err error, exhausted error, exhaustedMessage string) {
 	if errors.Is(err, exhausted) {
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": exhaustedMessage})
+		writeV1Error(w, r, http.StatusBadGateway, "generation_exhausted", exhaustedMessage)
 		return
 	}
 	var chatErr ai.ChatError
 	if errors.As(err, &chatErr) {
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": chatErr.Message})
+		writeV1Error(w, r, http.StatusBadGateway, "generation_failed", chatErr.Message)
 		return
 	}
-	writeJSON(w, http.StatusBadGateway, map[string]string{
-		"error": "Cannot connect to local Ollama. Check OLLAMA_BASE_URL and running Ollama service.",
-	})
+	writeV1Error(w, r, http.StatusBadGateway, "generation_unavailable", "Cannot connect to the configured language model")
 }

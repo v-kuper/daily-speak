@@ -198,12 +198,6 @@ func operationalRoute(path string) string {
 		return "/api/v1/guest/previews/{id}"
 	case strings.HasPrefix(path, "/api/v1/recordings/"):
 		return "/api/v1/recordings/{id}"
-	case strings.HasPrefix(path, "/api/feed/posts/"):
-		return "/api/feed/posts/{id}"
-	case strings.HasPrefix(path, "/api/feed/replies/"):
-		return "/api/feed/replies/{id}"
-	case strings.HasPrefix(path, "/uploads/"):
-		return "/uploads/{asset}"
 	case strings.HasPrefix(path, "/api/"):
 		return "api_unmatched"
 	default:
@@ -217,9 +211,9 @@ var operationalStaticRoutes = map[string]struct{}{
 	"/api/v1/auth/refresh": {}, "/api/v1/auth/session": {}, "/api/v1/auth/logout": {},
 	"/api/v1/auth/logout-all": {}, "/api/v1/auth/sessions": {},
 	"/api/v1/guest/previews": {}, "/api/v1/recordings": {}, "/api/v1/media/uploads": {},
-	"/api/daily-questions": {}, "/api/topic-guidance": {}, "/api/study-words": {},
-	"/api/user/data": {}, "/api/user/interests": {}, "/api/user/ollama-model": {},
-	"/api/user/subscription": {}, "/api/user/english-level": {}, "/api/feed/posts": {},
+	"/api/v1/practice/daily-questions": {}, "/api/v1/practice/topic-guidance": {}, "/api/v1/practice/study-words": {},
+	"/api/v1/profile": {}, "/api/v1/profile/interests": {}, "/api/v1/profile/english-level": {},
+	"/api/v1/subscription": {},
 }
 
 func isOperationalStaticRoute(path string) bool {

@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-func TestConfigFromEnvDefaultsToLegacyCompatibleLocalStorage(t *testing.T) {
+func TestConfigFromEnvDefaultsToLocalStorage(t *testing.T) {
 	clearStorageEnv(t)
 	uploadsDir := filepath.Join(t.TempDir(), "windows-volume")
 	t.Setenv("UPLOADS_DIR", uploadsDir)

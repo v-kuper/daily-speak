@@ -5,28 +5,22 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
-	"time"
 
 	apidocs "daily-speaking-practice/backend/docs"
 	"daily-speaking-practice/backend/internal/auth"
-	"daily-speaking-practice/backend/internal/feed"
 	"daily-speaking-practice/backend/internal/guestpreview"
-	"daily-speaking-practice/backend/internal/logging"
 	"daily-speaking-practice/backend/internal/media"
 	"daily-speaking-practice/backend/internal/operations"
 	"daily-speaking-practice/backend/internal/practice"
 	"daily-speaking-practice/backend/internal/profile"
 	"daily-speaking-practice/backend/internal/recording"
 	"daily-speaking-practice/backend/internal/shadowing"
-	"daily-speaking-practice/backend/internal/storage"
 	"daily-speaking-practice/backend/internal/subscription"
 )
 
 type Dependencies struct {
 	OperationsMonitor     *operations.Monitor
-	LegacyUploads         storage.LegacyUploadStore
 	PracticeGenerator     practice.Generator
-	FeedService           *feed.Service
 	ProfileService        *profile.Service
 	SubscriptionService   *subscription.Service
 	RecordingAnalyzer     recording.Analyzer
@@ -51,9 +45,7 @@ type Dependencies struct {
 
 type Server struct {
 	operationsMonitor     *operations.Monitor
-	legacyUploads         storage.LegacyUploadStore
 	practiceGenerator     practice.Generator
-	feedService           *feed.Service
 	profileService        *profile.Service
 	subscriptionService   *subscription.Service
 	recordingAnalyzer     recording.Analyzer
@@ -83,9 +75,8 @@ type requestLimiter interface {
 func NewServer(dependencies Dependencies) *Server {
 	return &Server{
 		operationsMonitor: dependencies.OperationsMonitor,
-		legacyUploads:     dependencies.LegacyUploads,
-		practiceGenerator: dependencies.PracticeGenerator, feedService: dependencies.FeedService,
-		profileService: dependencies.ProfileService, subscriptionService: dependencies.SubscriptionService,
+		practiceGenerator: dependencies.PracticeGenerator,
+		profileService:    dependencies.ProfileService, subscriptionService: dependencies.SubscriptionService,
 		recordingAnalyzer: dependencies.RecordingAnalyzer, recordingRewriter: dependencies.RecordingRewriter,
 		recordingCreator: dependencies.RecordingCreator, recordingDeleter: dependencies.RecordingDeleter,
 		recordingReader: dependencies.RecordingReader, recordingRetryService: dependencies.RecordingRetryService,
@@ -124,8 +115,6 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/v1/media/uploads/", s.routeMediaUploadEntry)
 	mux.HandleFunc("/api/v1/media/local/", s.routeSignedLocalMedia)
 	mux.HandleFunc("/api/v1/", s.routeV1)
-	mux.HandleFunc("/api/", s.routeAPI)
-	mux.Handle(uploadsURLPrefix, http.HandlerFunc(s.handleLegacyUpload))
 	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Not found"})
 	})
@@ -142,73 +131,6 @@ func (s *Server) Handler() http.Handler {
 
 func (s *Server) healthz(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
-}
-
-func (s *Server) routeAPI(w http.ResponseWriter, r *http.Request) {
-	path := strings.TrimSuffix(r.URL.Path, "/")
-	switch {
-	case path == "/api/daily-questions" && r.Method == http.MethodGet:
-		s.handleDailyQuestions(w, r)
-	case path == "/api/topic-guidance" && r.Method == http.MethodGet:
-		s.handleTopicGuidance(w, r)
-	case path == "/api/study-words" && r.Method == http.MethodGet:
-		s.handleStudyWords(w, r)
-	case path == "/api/user/data" && r.Method == http.MethodGet:
-		s.handleUserData(w, r)
-	case path == "/api/user/interests" && r.Method == http.MethodPut:
-		s.handleUserInterests(w, r)
-	case path == "/api/user/ollama-model" && r.Method == http.MethodGet:
-		s.handleUserOllamaModel(w, r)
-	case path == "/api/user/subscription" && r.Method == http.MethodGet:
-		s.handleGetSubscription(w, r)
-	case path == "/api/user/subscription" && r.Method == http.MethodPost:
-		s.handleActivateSubscription(w, r)
-	case path == "/api/user/subscription" && r.Method == http.MethodDelete:
-		s.handleCancelSubscription(w, r)
-	case path == "/api/user/english-level" && r.Method == http.MethodGet:
-		s.handleGetEnglishLevel(w, r)
-	case path == "/api/user/english-level" && r.Method == http.MethodPut:
-		s.handlePutEnglishLevel(w, r)
-	case path == "/api/feed/posts" && r.Method == http.MethodGet:
-		s.handleFeedPosts(w, r)
-	case path == "/api/feed/posts" && r.Method == http.MethodPost:
-		s.handleCreateFeedPost(w, r)
-	case strings.HasPrefix(path, "/api/feed/posts/"):
-		s.routeFeedPostPath(w, r, strings.TrimPrefix(path, "/api/feed/posts/"))
-	case strings.HasPrefix(path, "/api/feed/replies/"):
-		s.routeFeedReplyPath(w, r, strings.TrimPrefix(path, "/api/feed/replies/"))
-	default:
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Not found"})
-	}
-}
-
-func (s *Server) authorizedUser(w http.ResponseWriter, r *http.Request, scope string) (*auth.User, bool) {
-	return s.authorize(w, r, scope)
-}
-
-func (s *Server) authorize(w http.ResponseWriter, r *http.Request, scope string) (*auth.User, bool) {
-	started := time.Now()
-	logger := logging.ForRequest(scope, r)
-	writeError := func(status int, message string) {
-		writeJSON(w, status, map[string]string{"error": message})
-	}
-	if bearer, present := bearerToken(r); present {
-		identity, err := s.identityService.Authenticate(r.Context(), bearer)
-		if err != nil {
-			logger.Info("request.unauthorized", map[string]any{"status": 401, "durationMs": logging.ElapsedMs(started)})
-			writeError(http.StatusUnauthorized, "Unauthorized")
-			return nil, false
-		}
-		if identity.User == nil {
-			logger.Info("request.unauthorized", map[string]any{"status": 401, "durationMs": logging.ElapsedMs(started)})
-			writeError(http.StatusUnauthorized, "Unauthorized")
-			return nil, false
-		}
-		return identity.User, true
-	}
-	logger.Info("request.unauthorized", map[string]any{"status": 401, "durationMs": logging.ElapsedMs(started)})
-	writeError(http.StatusUnauthorized, "Unauthorized")
-	return nil, false
 }
 
 func bearerToken(r *http.Request) (string, bool) {

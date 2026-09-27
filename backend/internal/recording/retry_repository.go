@@ -42,7 +42,6 @@ func (transaction *sqlRetryTransaction) Claim(ctx context.Context, userID string
 		    suggestions = CASE WHEN processing_stage IN ('transcribing', 'suggestions') THEN '[]'::jsonb ELSE suggestions END,
 		    corrected_transcript = '',
 		    shadowing_status = 'pending',
-		    shadowing_audio_url = NULL,
 		    shadowing_asset_id = NULL,
 		    shadowing_error = NULL,
 		    shadowing_updated_at = NOW(),

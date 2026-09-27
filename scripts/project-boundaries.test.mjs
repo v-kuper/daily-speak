@@ -74,7 +74,6 @@ test("web build traces are rooted in the standalone web project", () => {
 test("standalone backend upload defaults are ignored by Git", () => {
   for (const path of [
     "backend/public/uploads/recordings/user/recording.webm",
-    "backend/public/uploads/feed-replies/user/reply.webm",
     "backend/public/uploads/shadowing/user/pronunciation.mp3",
   ]) {
     const result = spawnSync("git", ["check-ignore", "--quiet", "--no-index", path]);
@@ -128,7 +127,7 @@ test("API and durable worker have separate process entrypoints", () => {
   assert.equal(existsSync("backend/internal/httpapi/media_workers.go"), false);
   assert.equal(existsSync("backend/internal/httpapi/guest_preview_probe.go"), false);
   assert.match(readFileSync("backend/internal/media/probe.go", "utf8"), /func ProbeAudioDuration/);
-  assert.match(readFileSync("backend/internal/storage/legacy.go", "utf8"), /type LegacyUploads/);
+  assert.equal(existsSync("backend/internal/storage/legacy.go"), false);
 });
 
 test("practice generation is an application service outside HTTP transport", () => {
@@ -232,9 +231,10 @@ test("recording deletion keeps cleanup policy outside HTTP and SQL adapters", ()
 
   assert.match(transport, /recordingDeleter\.Delete/);
   assert.doesNotMatch(transport, /SELECT |INSERT INTO|UPDATE |DELETE FROM|pgx|workqueue/);
-  assert.match(service, /DeletionUnitOfWork|uniqueLegacyURLs|QueueAsset/);
+  assert.match(service, /DeletionUnitOfWork|uniqueDeletionValues|QueueAsset/);
   assert.doesNotMatch(service, /SELECT |INSERT INTO|UPDATE |DELETE FROM|pgx|workqueue|net\/http/);
-  assert.match(repository, /pending_file_deletions|media_assets|processing_jobs|workqueue\.Enqueue/);
+  assert.match(repository, /media_assets|processing_jobs|workqueue\.Enqueue/);
+  assert.doesNotMatch(repository, /pending_file_deletions|feed_/);
   assert.doesNotMatch(repository, /http\.Status|writeJSON/);
 });
 
@@ -256,7 +256,7 @@ test("recording query and retry keep persistence and queue mechanics outside HTT
   assert.doesNotMatch(queryRepository + retryRepository, /net\/http|internal\/httpapi|writeJSON/);
 });
 
-test("legacy recording upload sessions stay retired", () => {
+test("retired recording upload sessions stay removed", () => {
   const deletionRepository = readFileSync("backend/internal/recording/delete_repository.go", "utf8");
 
   assert.equal(existsSync("backend/internal/storage/recording_sessions.go"), false);
@@ -264,25 +264,30 @@ test("legacy recording upload sessions stay retired", () => {
   assert.doesNotMatch(deletionRepository, /recording_upload_sessions/);
 });
 
-test("HTTP transport contains no production SQL and Feed owns its persistence", () => {
+test("HTTP transport contains no production SQL or retired Feed surface", () => {
   const transport = readdirSync("backend/internal/httpapi")
     .filter((name) => name.endsWith(".go") && !name.endsWith("_test.go"))
     .map((name) => readFileSync(`backend/internal/httpapi/${name}`, "utf8"))
     .join("\n");
-  const feedHandler = readFileSync("backend/internal/httpapi/feed_handlers.go", "utf8");
-  const feedService = readFileSync("backend/internal/feed/service.go", "utf8");
-  const feedRepository = readFileSync("backend/internal/feed/repository.go", "utf8");
-  const feedReactionRepository = readFileSync("backend/internal/feed/reaction_repository.go", "utf8");
-
   assert.doesNotMatch(transport, /\bSELECT\b|\bINSERT INTO\b|\bUPDATE\b|\bDELETE FROM\b|s\.db\.(?:Query|QueryRow|Exec|Begin)\(/);
   assert.doesNotMatch(transport, /internal\/db|github\.com\/jackc\/pgx/);
-  assert.match(feedHandler, /feedService\.(?:ListPosts|PublishRecording|GetThread|CreateReply|SetReaction)/);
-  assert.doesNotMatch(feedHandler, /pgx|internal\/db|os\.WriteFile|os\.Remove/);
-  assert.match(feedService, /type Repository interface|type ReplyAudioStore interface/);
-  assert.doesNotMatch(feedService, /net\/http|internal\/httpapi|SELECT |INSERT INTO|UPDATE |DELETE FROM|pgx/);
-  assert.match(feedRepository, /FROM feed_posts|INSERT INTO feed_replies/);
-  assert.match(feedReactionRepository, /feed_post_reactions|feed_reply_reactions/);
-  assert.doesNotMatch(feedRepository + feedReactionRepository, /net\/http|internal\/httpapi|writeJSON/);
+  assert.equal(existsSync("backend/internal/httpapi/feed_handlers.go"), false);
+  assert.equal(existsSync("backend/internal/feed/service.go"), false);
+  assert.equal(existsSync("backend/internal/httpapi/uploads.go"), false);
+});
+
+test("web and backend expose only the versioned application contract", () => {
+  const webSource = readdirSync("web/src", { recursive: true })
+    .filter((name) => /\.(?:ts|tsx)$/.test(name))
+    .map((name) => readFileSync(`web/src/${name}`, "utf8"))
+    .join("\n");
+  const server = readFileSync("backend/internal/httpapi/server.go", "utf8");
+
+  assert.doesNotMatch(webSource, /["'`]\/api\/(?!v1(?:\/|["'`]))/);
+  assert.doesNotMatch(server, /mux\.HandleFunc\("\/api\/(?!v1(?:\/|"))/);
+  assert.equal(existsSync("backend/internal/httpapi/uploads.go"), false);
+  const feedFiles = existsSync("backend/internal/feed") ? readdirSync("backend/internal/feed") : [];
+  assert.deepEqual(feedFiles, []);
 });
 
 test("API dependency construction lives in the application composition root", () => {
@@ -293,8 +298,9 @@ test("API dependency construction lives in the application composition root", ()
   assert.match(server, /func NewServer\(dependencies Dependencies\)/);
   assert.doesNotMatch(server, /os\.Getenv|ConfigFromEnv|NewSQL|NewLocal|NewLimiter|NewIdentityService|NewRuntime/);
   assert.doesNotMatch(server, /internal\/(?:db|background|worker|transcription|tts|workqueue)/);
-  assert.match(composition, /recording\.NewCreator|feed\.NewService|auth\.NewIdentityService|operations\.NewMonitor/);
-  assert.match(composition, /storage\.NewLocal|media\.NewService|recording\.NewSQLQueryRepository/);
+  assert.match(composition, /recording\.NewCreator|auth\.NewIdentityService|operations\.NewMonitor/);
+  assert.match(composition, /media\.NewService|recording\.NewSQLQueryRepository/);
+  assert.doesNotMatch(composition, /feed\.|LegacyUploads|NewLegacyUploads/);
   assert.match(apiMain, /app\.NewAPI\(app\.APIConfig/);
 });
 
@@ -321,7 +327,6 @@ test("feature packages own shared vocabulary instead of a catch-all domain packa
     "backend/internal/practice/normalization_shared.go",
     "backend/internal/quota/quota.go",
     "backend/internal/recording/normalization.go",
-    "backend/internal/feed/reaction_repository.go",
   ]) {
     assert.equal(existsSync(path), true, `missing feature-owned module ${path}`);
   }

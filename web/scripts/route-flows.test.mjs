@@ -212,7 +212,7 @@ test("user bootstrap loads recordings only from the v1 collection", async (t) =>
   const requests = [];
   server(t, async (url) => {
     requests.push(url);
-    if (url.endsWith("/api/user/data")) {
+    if (url.endsWith("/api/v1/profile")) {
       return response({
         interestIds: [], englishLevel: "B1", quota: null, subscription: null,
         recordings: [{ ...saved, id: "legacy-bootstrap-recording" }],
@@ -224,7 +224,7 @@ test("user bootstrap loads recordings only from the v1 collection", async (t) =>
 
   const result = await store.dispatch(app.fetchUserData()).unwrap();
   assert.deepEqual(requests, [
-    "https://api.example.test/api/user/data",
+    "https://api.example.test/api/v1/profile",
     "https://api.example.test/api/v1/recordings?limit=100",
   ]);
   assert.deepEqual(result.recordings.map(({ id }) => id), ["permanent-123"]);
@@ -414,7 +414,7 @@ test("background save 401 preserves both its retry draft and a newer speaking dr
 
 test("a later user-data 401 preserves the already recovered background audio and visible error", async (t) => {
   const store = storeFor({ isAuthenticated: true, userEmail: "person@example.test" }), router = routerFor(), userData = deferred();
-  server(t, async (url) => url.endsWith("/api/user/data") ? userData.promise : response({ error: "Unauthorized" }, 401));
+  server(t, async (url) => url.endsWith("/api/v1/profile") ? userData.promise : response({ error: { code: "unauthorized", message: "Unauthorized", requestId: "test" } }, 401));
   const fetching = store.dispatch(app.fetchUserData());
   await flow("saveAndNavigate")(store, router, draft, router.currentPath);
   const recovery = store.getState().app.pendingAuthSaveDraft;

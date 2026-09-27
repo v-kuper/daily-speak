@@ -33,7 +33,7 @@ func TestRecordingMediaExposesStableBackendPaths(t *testing.T) {
 	}
 }
 
-func TestRecordingV1ResponseExcludesLegacyMediaFields(t *testing.T) {
+func TestRecordingV1ResponseExcludesPublicMediaFields(t *testing.T) {
 	audioAssetID := "audio-asset"
 	photoAssetID := "photo-asset"
 	shadowingAssetID := "shadowing-asset"
@@ -47,9 +47,9 @@ func TestRecordingV1ResponseExcludesLegacyMediaFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("encode v1 recording: %v", err)
 	}
-	for _, legacyField := range []string{"audioDataUrl", "photoDataUrl", "shadowingAudioUrl", "/uploads/"} {
-		if bytes.Contains(encoded, []byte(legacyField)) {
-			t.Fatalf("v1 response contains legacy media %q: %s", legacyField, encoded)
+	for _, publicField := range []string{"audioDataUrl", "photoDataUrl", "shadowingAudioUrl", "/uploads/"} {
+		if bytes.Contains(encoded, []byte(publicField)) {
+			t.Fatalf("v1 response contains public media %q: %s", publicField, encoded)
 		}
 	}
 	for _, mediaPath := range []string{
@@ -95,13 +95,6 @@ func TestCreateRecordingV1AttachesReadyMediaAndIsIdempotent(t *testing.T) {
 	var attached int
 	if err := fixture.database.QueryRow(context.Background(), `SELECT COUNT(*) FROM media_assets WHERE id = ANY($1::text[]) AND attached_at IS NOT NULL`, []string{audioID, photoID}).Scan(&attached); err != nil || attached != 2 {
 		t.Fatalf("attached assets = %d, err=%v", attached, err)
-	}
-	var audioURL, photoURL *string
-	if err := fixture.database.QueryRow(context.Background(), `SELECT audio_data_url, photo_data_url FROM recordings WHERE id = $1`, firstID).Scan(&audioURL, &photoURL); err != nil {
-		t.Fatalf("load legacy URLs: %v", err)
-	}
-	if audioURL != nil || photoURL != nil {
-		t.Fatalf("legacy URLs must stay null, got audio=%v photo=%v", audioURL, photoURL)
 	}
 }
 

@@ -270,6 +270,35 @@ func (s *Server) requiredIdentityV1(w http.ResponseWriter, r *http.Request) (*au
 	return identity, true
 }
 
+func (s *Server) requiredAccountIdentityV1(w http.ResponseWriter, r *http.Request) (*auth.Identity, bool) {
+	identity, ok := s.requiredIdentityV1(w, r)
+	if !ok {
+		return nil, false
+	}
+	if identity.Kind != "user" || identity.User == nil {
+		writeV1Error(w, r, http.StatusForbidden, "account_required", "An account is required")
+		return nil, false
+	}
+	return identity, true
+}
+
+func (s *Server) optionalAccountUserV1(w http.ResponseWriter, r *http.Request) (*auth.User, bool) {
+	token, present := bearerToken(r)
+	if !present {
+		return nil, true
+	}
+	if token == "" {
+		writeV1Error(w, r, http.StatusUnauthorized, "invalid_access_token", "Bearer access token is invalid")
+		return nil, false
+	}
+	identity, err := s.identityService.Authenticate(r.Context(), token)
+	if err != nil {
+		s.writeIdentityError(w, r, err)
+		return nil, false
+	}
+	return identity.User, true
+}
+
 func decodeIdentityJSON(w http.ResponseWriter, r *http.Request, destination any) bool {
 	if r.Body == nil {
 		writeV1Error(w, r, http.StatusBadRequest, "invalid_request", "A JSON request body is required")

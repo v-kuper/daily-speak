@@ -25,7 +25,7 @@ func TestDailyQuestionsUsesServerAIClient(t *testing.T) {
 	client := &practiceChatClient{}
 	handler := newTestServer(Config{AIClient: client}).Handler()
 	response := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodGet, "/api/daily-questions?date=2026-09-27&level=b1", nil)
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/practice/daily-questions?date=2026-09-27&level=b1", nil)
 
 	handler.ServeHTTP(response, request)
 

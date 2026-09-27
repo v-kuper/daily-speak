@@ -250,7 +250,6 @@ const MIN_TOPIC_GUIDANCE_WORDS = 16;
 const PHOTO_PRACTICE_MAX_OBJECT_LENGTH = 120;
 const MAX_RECORDING_AUDIO_BYTES = 80 * 1024 * 1024;
 const AUDIO_DATA_URL_PATTERN = /^data:((?:audio|video)\/[a-z0-9.+-]+(?:;[^,]+)*);base64,([A-Za-z0-9+/_=-]+)$/i;
-const AUDIO_FILE_URL_PATTERN = /^\/uploads\/recordings\/[a-z0-9/_-]+\.[a-z0-9]{2,10}$/i;
 export const PHOTO_PRACTICE_MAX_BYTES = 4 * 1024 * 1024;
 const PHOTO_DATA_URL_PATTERN = /^data:image\/(png|jpeg|jpg|webp|gif);base64,([A-Za-z0-9+/=]+)$/i;
 const PRACTICE_TYPE_SET = new Set<PracticeType>(["free_talk", "topic", "photo_description"]);
@@ -273,8 +272,7 @@ type FetchDailyQuestionsResult = {
 
 type DailyQuestionsResponse = {
   questions?: unknown;
-  error?: string;
-};
+} & V1ErrorResponse;
 
 export type FetchTopicGuidanceArgs = {
   topic: string;
@@ -295,8 +293,7 @@ type FetchTopicGuidanceResult = {
 type TopicGuidanceResponse = {
   questions?: unknown;
   words?: unknown;
-  error?: string;
-};
+} & V1ErrorResponse;
 
 type FetchStudyWordsArgs = {
   force?: boolean;
@@ -314,8 +311,7 @@ type FetchStudyWordsResult = {
 type StudyWordsResponse = {
   words?: unknown;
   text?: unknown;
-  error?: string;
-};
+} & V1ErrorResponse;
 
 type AuthResult = {
   email: string;
@@ -329,8 +325,7 @@ type UserDataResponse = {
   quota?: unknown;
   subscription?: unknown;
   englishLevel?: unknown;
-  error?: string;
-};
+} & V1ErrorResponse;
 
 type RecordingPageResponse = V1ErrorResponse & {
   items?: unknown;
@@ -338,8 +333,7 @@ type RecordingPageResponse = V1ErrorResponse & {
 
 type SaveInterestsResponse = {
   interestIds?: unknown;
-  error?: string;
-};
+} & V1ErrorResponse;
 
 type SaveRecordingResponse = {
   recording?: unknown;
@@ -351,6 +345,10 @@ type V1ErrorResponse = {
   error?: { message?: unknown };
 };
 
+const apiErrorMessage = (payload: V1ErrorResponse | null, fallback: string): string => {
+  return typeof payload?.error?.message === "string" ? payload.error.message : fallback;
+};
+
 type DeleteRecordingResponse = V1ErrorResponse & {
   deletedRecordingId?: unknown;
   quota?: unknown;
@@ -359,13 +357,11 @@ type DeleteRecordingResponse = V1ErrorResponse & {
 type SubscriptionResponse = {
   subscription?: unknown;
   quota?: unknown;
-  error?: string;
-};
+} & V1ErrorResponse;
 
 type EnglishLevelResponse = {
   level?: unknown;
-  error?: string;
-};
+} & V1ErrorResponse;
 
 type RecordingQuota = {
   isSubscriber: boolean;
@@ -584,10 +580,6 @@ const normalizeAudioDataUrl = (value: unknown): string | null => {
   }
 
   const normalized = value.trim();
-  if (AUDIO_FILE_URL_PATTERN.test(normalized)) {
-    return normalized;
-  }
-
   const match = normalized.match(AUDIO_DATA_URL_PATTERN);
   if (!match) {
     return null;
@@ -749,13 +741,13 @@ export const fetchDailyQuestions = createAsyncThunk<
         .filter((item) => item.trim().length > 0)
         .forEach((item) => params.append("avoid", item.trim()));
 
-      const response = await apiFetch(`/api/daily-questions?${params.toString()}`, {
+      const response = await apiFetch(`/api/v1/practice/daily-questions?${params.toString()}`, {
         cache: "no-store"
       });
       const payload = (await readApiJSON(response)) as DailyQuestionsResponse | null;
 
       if (!response.ok) {
-        return rejectWithValue(payload?.error ?? "Failed to load daily questions from Ollama.");
+        return rejectWithValue(apiErrorMessage(payload, "Failed to load daily questions from Ollama."));
       }
 
       const questions = Array.isArray(payload?.questions)
@@ -821,14 +813,14 @@ export const fetchTopicGuidance = createAsyncThunk<
         .filter((item) => item.trim().length > 0)
         .forEach((item) => params.append("avoidWord", item.trim()));
 
-      const response = await apiFetch(`/api/topic-guidance?${params.toString()}`, {
+      const response = await apiFetch(`/api/v1/practice/topic-guidance?${params.toString()}`, {
         cache: "no-store",
         signal
       });
       const payload = (await readApiJSON(response)) as TopicGuidanceResponse | null;
 
       if (!response.ok) {
-        return rejectWithValue(payload?.error ?? "Failed to generate questions and useful words.");
+        return rejectWithValue(apiErrorMessage(payload, "Failed to generate questions and useful words."));
       }
 
       const questions = Array.isArray(payload?.questions)
@@ -905,13 +897,13 @@ export const fetchStudyWords = createAsyncThunk<
         .filter((item) => item.length > 0)
         .forEach((item) => params.append("avoidWord", item));
 
-      const response = await apiFetch(`/api/study-words?${params.toString()}`, {
+      const response = await apiFetch(`/api/v1/practice/study-words?${params.toString()}`, {
         cache: "no-store"
       });
       const payload = (await readApiJSON(response)) as StudyWordsResponse | null;
 
       if (!response.ok) {
-        return rejectWithValue(payload?.error ?? "Failed to generate study words.");
+        return rejectWithValue(apiErrorMessage(payload, "Failed to generate study words."));
       }
 
       const parsed = parseStudyWordsResponse(payload);
@@ -1068,7 +1060,7 @@ export const fetchUserData = createAsyncThunk<
   { rejectValue: string }
 >("app/fetchUserData", async (_, { rejectWithValue }) => {
   try {
-    const response = await apiFetch("/api/user/data", {
+    const response = await apiFetch("/api/v1/profile", {
       cache: "no-store"
     });
     const payload = (await readApiJSON(response)) as UserDataResponse | null;
@@ -1078,7 +1070,7 @@ export const fetchUserData = createAsyncThunk<
     }
 
     if (!response.ok) {
-      return rejectWithValue(payload?.error ?? "Failed to load user data.");
+      return rejectWithValue(apiErrorMessage(payload, "Failed to load user data."));
     }
 
     const recordingsResponse = await apiFetch("/api/v1/recordings?limit=100", {
@@ -1122,7 +1114,7 @@ export const saveInterests = createAsyncThunk<string[], void, { state: { app: Ap
     }
 
     try {
-      const response = await apiFetch("/api/user/interests", {
+      const response = await apiFetch("/api/v1/profile/interests", {
         method: "PUT",
         headers: {
           "Content-Type": "application/json"
@@ -1137,7 +1129,7 @@ export const saveInterests = createAsyncThunk<string[], void, { state: { app: Ap
       }
 
       if (!response.ok) {
-        return rejectWithValue(payload?.error ?? "Failed to save interests.");
+        return rejectWithValue(apiErrorMessage(payload, "Failed to save interests."));
       }
 
       return normalizeInterestIds(payload?.interestIds);
@@ -1449,7 +1441,7 @@ export const subscribeMonthly = createAsyncThunk<
   }
 
   try {
-    const response = await apiFetch("/api/user/subscription", {
+    const response = await apiFetch("/api/v1/subscription", {
       method: "POST"
     });
     const payload = (await readApiJSON(response)) as SubscriptionResponse | null;
@@ -1459,7 +1451,7 @@ export const subscribeMonthly = createAsyncThunk<
     }
 
     if (!response.ok) {
-      return rejectWithValue(payload?.error ?? "Failed to activate subscription.");
+      return rejectWithValue(apiErrorMessage(payload, "Failed to activate subscription."));
     }
 
     const subscription = parseSubscriptionState(payload?.subscription);
@@ -1484,7 +1476,7 @@ export const cancelSubscription = createAsyncThunk<
   }
 
   try {
-    const response = await apiFetch("/api/user/subscription", {
+    const response = await apiFetch("/api/v1/subscription", {
       method: "DELETE"
     });
     const payload = (await readApiJSON(response)) as SubscriptionResponse | null;
@@ -1494,7 +1486,7 @@ export const cancelSubscription = createAsyncThunk<
     }
 
     if (!response.ok) {
-      return rejectWithValue(payload?.error ?? "Failed to cancel subscription.");
+      return rejectWithValue(apiErrorMessage(payload, "Failed to cancel subscription."));
     }
 
     const subscription = parseSubscriptionState(payload?.subscription);
@@ -1524,7 +1516,7 @@ export const saveEnglishLevel = createAsyncThunk<
   }
 
   try {
-    const response = await apiFetch("/api/user/english-level", {
+    const response = await apiFetch("/api/v1/profile/english-level", {
       method: "PUT",
       headers: {
         "Content-Type": "application/json"
@@ -1538,7 +1530,7 @@ export const saveEnglishLevel = createAsyncThunk<
     }
 
     if (!response.ok) {
-      return rejectWithValue(payload?.error ?? "Failed to save English level.");
+      return rejectWithValue(apiErrorMessage(payload, "Failed to save English level."));
     }
 
     return normalizeEnglishLevel(payload?.level, normalizedLevel);

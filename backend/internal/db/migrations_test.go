@@ -161,7 +161,33 @@ func TestGuestPromotionMigrationRemovesLifetimeEntitlement(t *testing.T) {
 	}
 }
 
-func TestMigrateConcurrentAndAdoptsLegacySchema(t *testing.T) {
+func TestLegacySurfaceRemovalMigrationDropsRetiredSchema(t *testing.T) {
+	catalog, err := migrations.All()
+	if err != nil {
+		t.Fatalf("load migrations: %v", err)
+	}
+	var sql string
+	for _, migration := range catalog {
+		if migration.Name == "0010_remove_legacy_surfaces.sql" {
+			sql = migration.SQL
+			break
+		}
+	}
+	for _, fragment := range []string{
+		"DROP TABLE IF EXISTS feed_posts",
+		"DROP TABLE IF EXISTS pending_file_deletions",
+		"DROP COLUMN IF EXISTS audio_data_url",
+		"DROP COLUMN IF EXISTS photo_data_url",
+		"DROP COLUMN IF EXISTS shadowing_audio_url",
+		"DROP COLUMN IF EXISTS legacy_public_url",
+	} {
+		if !strings.Contains(sql, fragment) {
+			t.Fatalf("legacy surface removal migration missing %q", fragment)
+		}
+	}
+}
+
+func TestMigrateConcurrentAndRetiresHistoricalSchema(t *testing.T) {
 	databaseURL := strings.TrimSpace(os.Getenv("TEST_DATABASE_URL"))
 	if databaseURL == "" {
 		t.Skip("TEST_DATABASE_URL is not configured")
@@ -232,24 +258,22 @@ func TestMigrateConcurrentAndAdoptsLegacySchema(t *testing.T) {
 				if err := database.QueryRow(ctx, `SELECT kind FROM principals WHERE id = $1 AND user_id = $1`, userID).Scan(&principalKind); err != nil || principalKind != "user" {
 					t.Fatalf("legacy user principal was not backfilled: kind=%q err=%v", principalKind, err)
 				}
-				var recordingAssetID, feedAssetID, ownerID, purpose, driver, objectKey, legacyURL string
-				if err := database.QueryRow(ctx, `
-					SELECT r.audio_asset_id, p.audio_asset_id, a.owner_principal_id,
-					       a.purpose, a.storage_driver, a.object_key, a.legacy_public_url
-					FROM recordings r
-					JOIN feed_posts p ON p.id = $2
-					JOIN media_assets a ON a.id = r.audio_asset_id
-					WHERE r.id = $1`, legacyRecordingID, legacyFeedPostID).Scan(
-					&recordingAssetID, &feedAssetID, &ownerID, &purpose, &driver, &objectKey, &legacyURL,
-				); err != nil {
-					t.Fatalf("load migrated media asset: %v", err)
+				var recordingAssetID *string
+				if err := database.QueryRow(ctx, `SELECT audio_asset_id FROM recordings WHERE id = $1`, legacyRecordingID).Scan(&recordingAssetID); err != nil {
+					t.Fatalf("load retained recording: %v", err)
 				}
-				if recordingAssetID == "" || feedAssetID != recordingAssetID || ownerID != userID || purpose != "recording_audio" || driver != "local" || objectKey != "recordings/owner/legacy.webm" || legacyURL != "/uploads/recordings/owner/legacy.webm" {
-					t.Fatalf("unexpected migrated media: recording=%q feed=%q owner=%q purpose=%q driver=%q key=%q url=%q", recordingAssetID, feedAssetID, ownerID, purpose, driver, objectKey, legacyURL)
+				if recordingAssetID != nil {
+					t.Fatalf("retired public media asset was retained: %v", recordingAssetID)
 				}
 				var dataURLAssetID *string
 				if err := database.QueryRow(ctx, `SELECT audio_asset_id FROM recordings WHERE id = $1`, dataURLRecordingID).Scan(&dataURLAssetID); err != nil || dataURLAssetID != nil {
 					t.Fatalf("data URL should not be migrated: asset=%v err=%v", dataURLAssetID, err)
+				}
+				for _, table := range []string{"feed_posts", "feed_replies", "pending_file_deletions"} {
+					var relation *string
+					if err := database.QueryRow(ctx, `SELECT to_regclass($1)`, table).Scan(&relation); err != nil || relation != nil {
+						t.Fatalf("retired table %s still exists: relation=%v err=%v", table, relation, err)
+					}
 				}
 				if _, err := database.Exec(ctx, `UPDATE schema_migrations SET checksum = 'tampered' WHERE name = '0001_init.sql'`); err != nil {
 					t.Fatalf("tamper test migration ledger: %v", err)
@@ -326,7 +350,9 @@ func TestPendingMigrations(t *testing.T) {
 	}
 }
 
-func TestInitialMigrationContainsCurrentTables(t *testing.T) {
+// The initial migration is an immutable historical baseline. Later migrations
+// remove these retired surfaces from the effective schema.
+func TestInitialMigrationContainsHistoricalBaseline(t *testing.T) {
 	sql := InitialSchemaSQL()
 	required := []string{
 		"CREATE TABLE IF NOT EXISTS users",

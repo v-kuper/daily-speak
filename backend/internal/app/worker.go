@@ -26,7 +26,6 @@ type WorkerConfig struct {
 	MediaBucket        string
 	MediaPartSize      int64
 	MediaPresignTTL    time.Duration
-	UploadsDir         string
 	AIClient           ai.ChatClient
 	Synthesizer        shadowing.Synthesizer
 	TranscribeAudio    func(context.Context, string) (string, error)
@@ -34,7 +33,6 @@ type WorkerConfig struct {
 }
 
 func NewWorker(config WorkerConfig) *background.Runtime {
-	uploadsDir := resolveUploadsDir(config.UploadsDir)
 	aiClient := config.AIClient
 	if aiClient == nil {
 		aiClient = ai.OllamaClient{}
@@ -66,7 +64,6 @@ func NewWorker(config WorkerConfig) *background.Runtime {
 		Bucket: config.MediaBucket, PartSizeBytes: config.MediaPartSize, SignedRequestTTL: config.MediaPresignTTL,
 	})
 	materializer := media.NewMaterializer(config.DB, config.MediaStore)
-	legacyUploads := storage.NewLegacyUploads(uploadsDir)
 	recordingRepository := recording.NewSQLProcessingRepository(config.DB)
 	recordingProcessor := recording.NewProcessor(recording.ProcessingDependencies{
 		Repository: recordingRepository, Materializer: materializer,
@@ -83,7 +80,7 @@ func NewWorker(config WorkerConfig) *background.Runtime {
 		Store: shadowStore, Synthesizer: synthesizer, MediaStore: config.MediaStore,
 		MediaBucket: config.MediaBucket, NewID: uuid.NewString,
 	})
-	cleanup := media.NewCleanup(config.DB, mediaService, config.MediaStore, legacyUploads)
+	cleanup := media.NewCleanup(config.DB, mediaService, config.MediaStore)
 	return background.NewRuntime(background.Dependencies{
 		DB: config.DB, JobStore: workqueue.NewStore(config.DB),
 		RecordingProcessor: recordingProcessor, RecordingRepository: recordingRepository,

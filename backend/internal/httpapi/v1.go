@@ -81,7 +81,7 @@ func (s *Server) dispatchV1(w http.ResponseWriter, r *http.Request) {
 	case strings.HasPrefix(path, "/api/v1/auth/sessions/") && !strings.Contains(strings.TrimPrefix(path, "/api/v1/auth/sessions/"), "/") && r.Method == http.MethodDelete:
 		s.handleRevokeIdentitySessionV1(w, r, strings.TrimPrefix(path, "/api/v1/auth/sessions/"))
 	case isIdentityV1Resource(path):
-		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
+		writeV1Error(w, r, http.StatusMethodNotAllowed, "method_not_allowed", "Method not allowed")
 	case path == "/api/v1" && r.Method == http.MethodGet:
 		writeJSON(w, http.StatusOK, struct {
 			Version       string `json:"version"`
@@ -89,17 +89,49 @@ func (s *Server) dispatchV1(w http.ResponseWriter, r *http.Request) {
 			Documentation string `json:"documentation"`
 		}{Version: "v1", Status: "stable", Documentation: "/docs"})
 	case path == "/api/v1":
-		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
+		writeV1Error(w, r, http.StatusMethodNotAllowed, "method_not_allowed", "Method not allowed")
 	case path == "/api/v1/recordings" && r.Method == http.MethodGet:
 		s.handleListRecordingsV1(w, r)
 	case path == "/api/v1/recordings" && r.Method == http.MethodPost:
 		s.handleCreateRecordingV1(w, r)
 	case path == "/api/v1/recordings":
-		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
+		writeV1Error(w, r, http.StatusMethodNotAllowed, "method_not_allowed", "Method not allowed")
 	case strings.HasPrefix(path, "/api/v1/recordings/"):
 		s.routeRecordingV1(w, r, strings.TrimPrefix(path, "/api/v1/recordings/"))
+	case path == "/api/v1/practice/daily-questions" && r.Method == http.MethodGet:
+		s.handleDailyQuestions(w, r)
+	case path == "/api/v1/practice/topic-guidance" && r.Method == http.MethodGet:
+		s.handleTopicGuidance(w, r)
+	case path == "/api/v1/practice/study-words" && r.Method == http.MethodGet:
+		s.handleStudyWords(w, r)
+	case path == "/api/v1/profile" && r.Method == http.MethodGet:
+		s.handleUserData(w, r)
+	case path == "/api/v1/profile/interests" && r.Method == http.MethodPut:
+		s.handleUserInterests(w, r)
+	case path == "/api/v1/profile/english-level" && r.Method == http.MethodGet:
+		s.handleGetEnglishLevel(w, r)
+	case path == "/api/v1/profile/english-level" && r.Method == http.MethodPut:
+		s.handlePutEnglishLevel(w, r)
+	case path == "/api/v1/subscription" && r.Method == http.MethodGet:
+		s.handleGetSubscription(w, r)
+	case path == "/api/v1/subscription" && r.Method == http.MethodPost:
+		s.handleActivateSubscription(w, r)
+	case path == "/api/v1/subscription" && r.Method == http.MethodDelete:
+		s.handleCancelSubscription(w, r)
+	case isApplicationV1Resource(path):
+		writeV1Error(w, r, http.StatusMethodNotAllowed, "method_not_allowed", "Method not allowed")
 	default:
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Not found"})
+		writeV1Error(w, r, http.StatusNotFound, "not_found", "Not found")
+	}
+}
+
+func isApplicationV1Resource(path string) bool {
+	switch path {
+	case "/api/v1/practice/daily-questions", "/api/v1/practice/topic-guidance", "/api/v1/practice/study-words",
+		"/api/v1/profile", "/api/v1/profile/interests", "/api/v1/profile/english-level", "/api/v1/subscription":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -129,22 +161,15 @@ func commitV1Response(w http.ResponseWriter, r *http.Request, buffered *buffered
 		_, _ = w.Write(buffered.body.Bytes())
 		return
 	}
-	message := http.StatusText(status)
 	var structured v1ErrorEnvelope
 	if json.Unmarshal(buffered.body.Bytes(), &structured) == nil && strings.TrimSpace(structured.Error.Code) != "" {
 		structured.Error.RequestID = requestIDFrom(r)
 		writeJSON(w, status, structured)
 		return
 	}
-	var legacy struct {
-		Error string `json:"error"`
-	}
-	if json.Unmarshal(buffered.body.Bytes(), &legacy) == nil && strings.TrimSpace(legacy.Error) != "" {
-		message = legacy.Error
-	}
 	writeJSON(w, status, v1ErrorEnvelope{Error: v1Error{
 		Code:      v1ErrorCode(status),
-		Message:   message,
+		Message:   http.StatusText(status),
 		RequestID: requestIDFrom(r),
 	}})
 }

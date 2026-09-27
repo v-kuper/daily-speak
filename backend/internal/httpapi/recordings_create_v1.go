@@ -24,7 +24,7 @@ type recordingCreateV1Request struct {
 }
 
 func (s *Server) handleCreateRecordingV1(w http.ResponseWriter, r *http.Request) {
-	identity, ok := s.requiredRecordingIdentityV1(w, r)
+	identity, ok := s.requiredAccountIdentityV1(w, r)
 	if !ok {
 		return
 	}

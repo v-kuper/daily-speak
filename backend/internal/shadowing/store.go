@@ -95,7 +95,7 @@ func (s *Store) Complete(ctx context.Context, job Job, asset Asset) (bool, error
 	}
 	result, err := tx.Exec(ctx, `
 		UPDATE recordings
-		SET shadowing_status = 'ready', shadowing_audio_url = NULL, shadowing_asset_id = $2,
+		SET shadowing_status = 'ready', shadowing_asset_id = $2,
 		    shadowing_error = NULL, shadowing_updated_at = NOW(), shadowing_attempt_id = NULL
 		WHERE id = $1 AND user_id = $3 AND shadowing_status = 'processing' AND shadowing_attempt_id = $4
 		  AND EXISTS (SELECT 1 FROM processing_jobs WHERE id = $4 AND state = 'running' AND lease_token = $5)`,
@@ -111,7 +111,7 @@ func (s *Store) Complete(ctx context.Context, job Job, asset Asset) (bool, error
 
 func (s *Store) FinalizeFailure(ctx context.Context, tx pgx.Tx, jobID, recordingID string) error {
 	_, err := tx.Exec(ctx, `
-		UPDATE recordings SET shadowing_status = 'failed', shadowing_audio_url = NULL,
+		UPDATE recordings SET shadowing_status = 'failed',
 		    shadowing_error = $3, shadowing_updated_at = NOW(), shadowing_attempt_id = NULL
 		WHERE id = $1 AND shadowing_status = 'processing' AND shadowing_attempt_id = $2`,
 		recordingID, jobID, FailureMessage)

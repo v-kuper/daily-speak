@@ -49,9 +49,6 @@
       "name": "Recording upload sessions"
     },
     {
-      "name": "Feed"
-    },
-    {
       "name": "Uploads"
     }
   ],
@@ -1279,7 +1276,7 @@
         }
       }
     },
-    "/api/daily-questions": {
+    "/api/v1/practice/daily-questions": {
       "get": {
         "tags": [
           "AI"
@@ -1293,6 +1290,9 @@
           {}
         ],
         "parameters": [
+          {
+            "$ref": "#/components/parameters/RequestIdHeader"
+          },
           {
             "$ref": "#/components/parameters/DateQuery"
           },
@@ -1321,32 +1321,18 @@
         ],
         "responses": {
           "200": {
-            "description": "Generated questions.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DailyQuestionsResponse"
-                },
-                "example": {
-                  "questions": [
-                    "How do you usually plan a short trip?",
-                    "What technology helps you study better?",
-                    "How do you keep a healthy morning routine?"
-                  ]
-                }
-              }
-            }
+            "$ref": "#/components/responses/V1DailyQuestionsOK"
           },
           "400": {
-            "$ref": "#/components/responses/BadRequest"
+            "$ref": "#/components/responses/V1BadRequest"
           },
           "502": {
-            "$ref": "#/components/responses/BadGateway"
+            "$ref": "#/components/responses/V1BadGateway"
           }
         }
       }
     },
-    "/api/topic-guidance": {
+    "/api/v1/practice/topic-guidance": {
       "get": {
         "tags": [
           "AI"
@@ -1359,6 +1345,9 @@
           {}
         ],
         "parameters": [
+          {
+            "$ref": "#/components/parameters/RequestIdHeader"
+          },
           {
             "name": "topic",
             "in": "query",
@@ -1404,25 +1393,18 @@
         ],
         "responses": {
           "200": {
-            "description": "Topic guidance.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TopicGuidanceResponse"
-                }
-              }
-            }
+            "$ref": "#/components/responses/V1TopicGuidanceOK"
           },
           "400": {
-            "$ref": "#/components/responses/BadRequest"
+            "$ref": "#/components/responses/V1BadRequest"
           },
           "502": {
-            "$ref": "#/components/responses/BadGateway"
+            "$ref": "#/components/responses/V1BadGateway"
           }
         }
       }
     },
-    "/api/study-words": {
+    "/api/v1/practice/study-words": {
       "get": {
         "tags": [
           "AI"
@@ -1435,6 +1417,9 @@
           {}
         ],
         "parameters": [
+          {
+            "$ref": "#/components/parameters/RequestIdHeader"
+          },
           {
             "$ref": "#/components/parameters/RefreshQuery"
           },
@@ -1459,48 +1444,39 @@
         ],
         "responses": {
           "200": {
-            "description": "Study words and context text.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/StudyWordsResponse"
-                }
-              }
-            }
+            "$ref": "#/components/responses/V1StudyWordsOK"
           },
           "502": {
-            "$ref": "#/components/responses/BadGateway"
+            "$ref": "#/components/responses/V1BadGateway"
           }
         }
       }
     },
-    "/api/user/data": {
+    "/api/v1/profile": {
       "get": {
         "tags": [
           "User"
         ],
-        "summary": "Load user profile data, recordings, quota and subscription",
+        "summary": "Load user profile, quota and subscription",
         "responses": {
           "200": {
-            "description": "User data.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UserDataResponse"
-                }
-              }
-            }
+            "$ref": "#/components/responses/V1ProfileOK"
           },
           "401": {
-            "$ref": "#/components/responses/Unauthorized"
+            "$ref": "#/components/responses/V1Unauthorized"
           },
           "500": {
-            "$ref": "#/components/responses/InternalServerError"
+            "$ref": "#/components/responses/V1InternalServerError"
           }
-        }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RequestIdHeader"
+          }
+        ]
       }
     },
-    "/api/user/interests": {
+    "/api/v1/profile/interests": {
       "put": {
         "tags": [
           "User"
@@ -1525,48 +1501,23 @@
         },
         "responses": {
           "200": {
-            "description": "Saved interests.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SaveInterestsResponse"
-                }
-              }
-            }
+            "$ref": "#/components/responses/V1InterestsOK"
           },
           "401": {
-            "$ref": "#/components/responses/Unauthorized"
+            "$ref": "#/components/responses/V1Unauthorized"
           },
           "500": {
-            "$ref": "#/components/responses/InternalServerError"
+            "$ref": "#/components/responses/V1InternalServerError"
           }
-        }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RequestIdHeader"
+          }
+        ]
       }
     },
-    "/api/user/ollama-model": {
-      "get": {
-        "tags": [
-          "User"
-        ],
-        "summary": "Read configured Ollama model",
-        "responses": {
-          "200": {
-            "description": "Configured model.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OllamaModelResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          }
-        }
-      }
-    },
-    "/api/user/subscription": {
+    "/api/v1/subscription": {
       "get": {
         "tags": [
           "User"
@@ -1574,15 +1525,20 @@
         "summary": "Read subscription and recording quota",
         "responses": {
           "200": {
-            "$ref": "#/components/responses/SubscriptionOK"
+            "$ref": "#/components/responses/V1SubscriptionOK"
           },
           "401": {
-            "$ref": "#/components/responses/Unauthorized"
+            "$ref": "#/components/responses/V1Unauthorized"
           },
           "500": {
-            "$ref": "#/components/responses/InternalServerError"
+            "$ref": "#/components/responses/V1InternalServerError"
           }
-        }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RequestIdHeader"
+          }
+        ]
       },
       "post": {
         "tags": [
@@ -1591,15 +1547,20 @@
         "summary": "Activate or extend subscription by one month",
         "responses": {
           "200": {
-            "$ref": "#/components/responses/SubscriptionOK"
+            "$ref": "#/components/responses/V1SubscriptionOK"
           },
           "401": {
-            "$ref": "#/components/responses/Unauthorized"
+            "$ref": "#/components/responses/V1Unauthorized"
           },
           "500": {
-            "$ref": "#/components/responses/InternalServerError"
+            "$ref": "#/components/responses/V1InternalServerError"
           }
-        }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RequestIdHeader"
+          }
+        ]
       },
       "delete": {
         "tags": [
@@ -1608,21 +1569,26 @@
         "summary": "Mark active subscription as cancelled",
         "responses": {
           "200": {
-            "$ref": "#/components/responses/SubscriptionOK"
+            "$ref": "#/components/responses/V1SubscriptionOK"
           },
           "400": {
-            "$ref": "#/components/responses/BadRequest"
+            "$ref": "#/components/responses/V1BadRequest"
           },
           "401": {
-            "$ref": "#/components/responses/Unauthorized"
+            "$ref": "#/components/responses/V1Unauthorized"
           },
           "500": {
-            "$ref": "#/components/responses/InternalServerError"
+            "$ref": "#/components/responses/V1InternalServerError"
           }
-        }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RequestIdHeader"
+          }
+        ]
       }
     },
-    "/api/user/english-level": {
+    "/api/v1/profile/english-level": {
       "get": {
         "tags": [
           "User"
@@ -1630,22 +1596,20 @@
         "summary": "Read saved English level",
         "responses": {
           "200": {
-            "description": "Current level.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EnglishLevelResponse"
-                }
-              }
-            }
+            "$ref": "#/components/responses/V1EnglishLevelOK"
           },
           "401": {
-            "$ref": "#/components/responses/Unauthorized"
+            "$ref": "#/components/responses/V1Unauthorized"
           },
           "500": {
-            "$ref": "#/components/responses/InternalServerError"
+            "$ref": "#/components/responses/V1InternalServerError"
           }
-        }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RequestIdHeader"
+          }
+        ]
       },
       "put": {
         "tags": [
@@ -1667,306 +1631,23 @@
         },
         "responses": {
           "200": {
-            "description": "Saved level.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EnglishLevelResponse"
-                }
-              }
-            }
+            "$ref": "#/components/responses/V1EnglishLevelOK"
           },
           "400": {
-            "$ref": "#/components/responses/BadRequest"
+            "$ref": "#/components/responses/V1BadRequest"
           },
           "401": {
-            "$ref": "#/components/responses/Unauthorized"
+            "$ref": "#/components/responses/V1Unauthorized"
           },
           "500": {
-            "$ref": "#/components/responses/InternalServerError"
-          }
-        }
-      }
-    },
-    "/api/feed/posts": {
-      "get": {
-        "tags": [
-          "Feed"
-        ],
-        "summary": "List feed posts",
-        "responses": {
-          "200": {
-            "description": "Feed posts.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/FeedPostsResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "500": {
-            "$ref": "#/components/responses/InternalServerError"
-          }
-        }
-      },
-      "post": {
-        "tags": [
-          "Feed"
-        ],
-        "summary": "Publish a saved recording to the feed",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateFeedPostRequest"
-              },
-              "example": {
-                "recordingId": "recording-uuid"
-              }
-            }
+            "$ref": "#/components/responses/V1InternalServerError"
           }
         },
-        "responses": {
-          "200": {
-            "$ref": "#/components/responses/FeedPostOK"
-          },
-          "201": {
-            "$ref": "#/components/responses/FeedPostOK"
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "500": {
-            "$ref": "#/components/responses/InternalServerError"
-          }
-        }
-      }
-    },
-    "/api/feed/posts/{postId}": {
-      "get": {
-        "tags": [
-          "Feed"
-        ],
-        "summary": "Load feed post and replies",
         "parameters": [
           {
-            "$ref": "#/components/parameters/PostIdPath"
+            "$ref": "#/components/parameters/RequestIdHeader"
           }
-        ],
-        "responses": {
-          "200": {
-            "description": "Feed thread.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/FeedThreadResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "500": {
-            "$ref": "#/components/responses/InternalServerError"
-          }
-        }
-      }
-    },
-    "/api/feed/posts/{postId}/replies": {
-      "post": {
-        "tags": [
-          "Feed"
-        ],
-        "summary": "Create a voice reply for a feed post",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/PostIdPath"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateFeedReplyRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Reply created.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CreateFeedReplyResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "402": {
-            "$ref": "#/components/responses/PaymentRequired"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "500": {
-            "$ref": "#/components/responses/InternalServerError"
-          }
-        }
-      }
-    },
-    "/api/feed/posts/{postId}/reactions": {
-      "post": {
-        "tags": [
-          "Feed"
-        ],
-        "summary": "Set or clear current user's reaction for a post",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/PostIdPath"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ReactionRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "$ref": "#/components/responses/ReactionSummaryOK"
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "500": {
-            "$ref": "#/components/responses/InternalServerError"
-          }
-        }
-      }
-    },
-    "/api/feed/replies/{replyId}/reactions": {
-      "post": {
-        "tags": [
-          "Feed"
-        ],
-        "summary": "Set or clear current user's reaction for a reply",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/ReplyIdPath"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ReactionRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "$ref": "#/components/responses/ReactionSummaryOK"
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "500": {
-            "$ref": "#/components/responses/InternalServerError"
-          }
-        }
-      }
-    },
-    "/uploads/{path}": {
-      "get": {
-        "tags": [
-          "Uploads"
-        ],
-        "summary": "Serve retained legacy recording and Feed media",
-        "description": "Compatibility route for old recording and Feed files only. New recording media uses owner-protected `/api/v1/media/*` resources.",
-        "security": [],
-        "parameters": [
-          {
-            "name": "path",
-            "in": "path",
-            "required": true,
-            "description": "Path under the configured uploads directory, for example `recordings/user-id/recording.webm`.",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Uploaded media file.",
-            "content": {
-              "audio/webm": {
-                "schema": {
-                  "type": "string",
-                  "format": "binary"
-                }
-              },
-              "audio/mp4": {
-                "schema": {
-                  "type": "string",
-                  "format": "binary"
-                }
-              },
-              "audio/mpeg": {
-                "schema": {
-                  "type": "string",
-                  "format": "binary"
-                }
-              }
-            }
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          }
-        }
+        ]
       }
     }
   },
@@ -2716,7 +2397,7 @@
           }
         }
       },
-      "SubscriptionOK": {
+      "V1SubscriptionOK": {
         "description": "Subscription and quota.",
         "content": {
           "application/json": {
@@ -2724,108 +2405,122 @@
               "$ref": "#/components/schemas/SubscriptionResponse"
             }
           }
-        }
-      },
-      "FeedPostOK": {
-        "description": "Feed post.",
-        "content": {
-          "application/json": {
-            "schema": {
-              "$ref": "#/components/schemas/FeedPostResponse"
-            }
+        },
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestID"
           }
         }
       },
-      "ReactionSummaryOK": {
-        "description": "Updated reaction summary.",
+      "V1BadGateway": {
+        "description": "The configured upstream service could not complete the request.",
         "content": {
           "application/json": {
             "schema": {
-              "$ref": "#/components/schemas/ReactionSummaryResponse"
+              "$ref": "#/components/schemas/V1ErrorResponse"
             }
+          }
+        },
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestID"
           }
         }
       },
-      "BadRequest": {
-        "description": "Invalid request.",
+      "V1DailyQuestionsOK": {
+        "description": "Generated questions.",
         "content": {
           "application/json": {
             "schema": {
-              "$ref": "#/components/schemas/ErrorResponse"
-            }
-          }
-        }
-      },
-      "Unauthorized": {
-        "description": "Session cookie is missing or invalid.",
-        "content": {
-          "application/json": {
-            "schema": {
-              "$ref": "#/components/schemas/ErrorResponse"
+              "$ref": "#/components/schemas/DailyQuestionsResponse"
             },
             "example": {
-              "error": "Unauthorized"
+              "questions": [
+                "How do you usually plan a short trip?",
+                "What technology helps you study better?",
+                "How do you keep a healthy morning routine?"
+              ]
             }
+          }
+        },
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestID"
           }
         }
       },
-      "PaymentRequired": {
-        "description": "Recording quota exceeded.",
+      "V1TopicGuidanceOK": {
+        "description": "Topic guidance.",
         "content": {
           "application/json": {
             "schema": {
-              "$ref": "#/components/schemas/ErrorResponse"
+              "$ref": "#/components/schemas/TopicGuidanceResponse"
             }
+          }
+        },
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestID"
           }
         }
       },
-      "NotFound": {
-        "description": "Resource not found.",
+      "V1StudyWordsOK": {
+        "description": "Study words and context text.",
         "content": {
           "application/json": {
             "schema": {
-              "$ref": "#/components/schemas/ErrorResponse"
+              "$ref": "#/components/schemas/StudyWordsResponse"
             }
+          }
+        },
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestID"
           }
         }
       },
-      "Conflict": {
-        "description": "Resource conflict.",
+      "V1ProfileOK": {
+        "description": "User data.",
         "content": {
           "application/json": {
             "schema": {
-              "$ref": "#/components/schemas/ErrorResponse"
+              "$ref": "#/components/schemas/UserDataResponse"
             }
+          }
+        },
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestID"
           }
         }
       },
-      "UnprocessableEntity": {
-        "description": "Valid request, but audio could not be transcribed.",
+      "V1InterestsOK": {
+        "description": "Saved interests.",
         "content": {
           "application/json": {
             "schema": {
-              "$ref": "#/components/schemas/ErrorResponse"
+              "$ref": "#/components/schemas/SaveInterestsResponse"
             }
+          }
+        },
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestID"
           }
         }
       },
-      "InternalServerError": {
-        "description": "Server error.",
+      "V1EnglishLevelOK": {
+        "description": "Saved level.",
         "content": {
           "application/json": {
             "schema": {
-              "$ref": "#/components/schemas/ErrorResponse"
+              "$ref": "#/components/schemas/EnglishLevelResponse"
             }
           }
-        }
-      },
-      "BadGateway": {
-        "description": "Local AI/Whisper/Ollama backend failed.",
-        "content": {
-          "application/json": {
-            "schema": {
-              "$ref": "#/components/schemas/ErrorResponse"
-            }
+        },
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestID"
           }
         }
       }
@@ -3176,6 +2871,12 @@
                 "description": "Stable machine-readable error code.",
                 "enum": [
                   "invalid_request",
+                  "invalid_date",
+                  "missing_topic",
+                  "invalid_topic",
+                  "invalid_english_level",
+                  "invalid_recording_id",
+                  "invalid_pagination",
                   "idempotency_key_required",
                   "invalid_checksum",
                   "invalid_part",
@@ -3196,12 +2897,13 @@
                   "guest_media_restricted",
                   "not_found",
                   "media_not_found",
+                  "recording_not_found",
                   "method_not_allowed",
                   "conflict",
                   "idempotency_conflict",
                   "guest_preview_conflict",
-                  "idempotency_key_required",
-                  "invalid_checksum",
+                  "recording_retry_unavailable",
+                  "shadowing_not_ready",
                   "upload_expired",
                   "unsupported_media_type",
                   "checksum_mismatch",
@@ -3211,6 +2913,14 @@
                   "rate_limited",
                   "internal_error",
                   "upstream_unavailable",
+                  "generation_exhausted",
+                  "generation_failed",
+                  "generation_unavailable",
+                  "profile_unavailable",
+                  "subscription_unavailable",
+                  "subscription_not_active",
+                  "recording_unavailable",
+                  "shadowing_unavailable",
                   "service_unavailable",
                   "storage_unavailable",
                   "capacity_exhausted",
@@ -3986,20 +3696,6 @@
           }
         }
       },
-      "ErrorResponse": {
-        "type": "object",
-        "required": [
-          "error"
-        ],
-        "properties": {
-          "error": {
-            "type": "string"
-          }
-        },
-        "example": {
-          "error": "Unauthorized"
-        }
-      },
       "User": {
         "type": "object",
         "required": [
@@ -4070,14 +3766,6 @@
           "rewriting"
         ],
         "example": "suggestions"
-      },
-      "AudioDataUrl": {
-        "type": "string",
-        "description": "A `data:audio/*;base64,...` payload for incoming requests, or `/uploads/...` URL in stored responses."
-      },
-      "PhotoDataUrl": {
-        "type": "string",
-        "description": "A `data:image/(png|jpeg|webp|gif);base64,...` payload, max 4MB."
       },
       "Suggestion": {
         "type": "object",
@@ -4464,28 +4152,6 @@
           }
         }
       },
-      "OllamaModelResponse": {
-        "type": "object",
-        "required": [
-          "selectedModel",
-          "isThinkingModel",
-          "warning"
-        ],
-        "properties": {
-          "selectedModel": {
-            "type": "string"
-          },
-          "isThinkingModel": {
-            "type": "boolean"
-          },
-          "warning": {
-            "type": [
-              "string",
-              "null"
-            ]
-          }
-        }
-      },
       "EnglishLevelResponse": {
         "type": "object",
         "required": [
@@ -4600,51 +4266,6 @@
           }
         }
       },
-      "ReactionSummary": {
-        "type": "object",
-        "required": [
-          "counts",
-          "currentReaction"
-        ],
-        "properties": {
-          "counts": {
-            "$ref": "#/components/schemas/ReactionCounts"
-          },
-          "currentReaction": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Reaction"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        }
-      },
-      "ReactionRequest": {
-        "type": "object",
-        "required": [
-          "reaction"
-        ],
-        "properties": {
-          "reaction": {
-            "description": "Set one reaction. Use null or empty string to clear current reaction.",
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Reaction"
-              },
-              {
-                "type": "null"
-              },
-              {
-                "type": "string",
-                "maxLength": 0
-              }
-            ]
-          }
-        }
-      },
       "ReactionSummaryResponse": {
         "type": "object",
         "required": [
@@ -4653,269 +4274,6 @@
         "properties": {
           "reactions": {
             "$ref": "#/components/schemas/ReactionSummary"
-          }
-        }
-      },
-      "FeedPost": {
-        "type": "object",
-        "required": [
-          "id",
-          "sourceRecordingId",
-          "topic",
-          "duration",
-          "transcript",
-          "practiceType",
-          "sourceTimestamp",
-          "createdAt",
-          "authorMaskedEmail",
-          "replyCount",
-          "reactions"
-        ],
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "sourceRecordingId": {
-            "type": "string"
-          },
-          "topic": {
-            "type": "string"
-          },
-          "duration": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "transcript": {
-            "type": "string"
-          },
-          "practiceType": {
-            "$ref": "#/components/schemas/PracticeType"
-          },
-          "audioDataUrl": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/AudioDataUrl"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "photoDataUrl": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/PhotoDataUrl"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "photoObject": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "maxLength": 120
-          },
-          "sourceTimestamp": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "authorMaskedEmail": {
-            "type": "string"
-          },
-          "replyCount": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "reactions": {
-            "$ref": "#/components/schemas/ReactionSummary"
-          }
-        },
-        "example": {
-          "id": "post-123",
-          "sourceRecordingId": "recording-123",
-          "topic": "My weekend",
-          "duration": 42,
-          "transcript": "I went home after work.",
-          "practiceType": "free_talk",
-          "audioDataUrl": "/uploads/recordings/user-123/recording-123.webm",
-          "photoDataUrl": null,
-          "photoObject": null,
-          "sourceTimestamp": "2026-09-21T10:30:00Z",
-          "createdAt": "2026-09-21T10:32:00Z",
-          "authorMaskedEmail": "s***@example.com",
-          "replyCount": 1,
-          "reactions": {
-            "counts": {
-              "like": 1,
-              "love": 0,
-              "fire": 0,
-              "laugh": 0,
-              "support": 0
-            },
-            "currentReaction": "like"
-          }
-        }
-      },
-      "FeedReply": {
-        "type": "object",
-        "required": [
-          "id",
-          "postId",
-          "duration",
-          "timestamp",
-          "createdAt",
-          "authorMaskedEmail",
-          "reactions"
-        ],
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "postId": {
-            "type": "string"
-          },
-          "duration": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "audioDataUrl": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/AudioDataUrl"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "timestamp": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "authorMaskedEmail": {
-            "type": "string"
-          },
-          "reactions": {
-            "$ref": "#/components/schemas/ReactionSummary"
-          }
-        },
-        "example": {
-          "id": "reply-123",
-          "postId": "post-123",
-          "duration": 16,
-          "audioDataUrl": "/uploads/feed-replies/user-456/reply-123.webm",
-          "timestamp": "2026-09-21T10:34:00Z",
-          "createdAt": "2026-09-21T10:34:01Z",
-          "authorMaskedEmail": "r***@example.com",
-          "reactions": {
-            "counts": {
-              "like": 0,
-              "love": 1,
-              "fire": 0,
-              "laugh": 0,
-              "support": 0
-            },
-            "currentReaction": null
-          }
-        }
-      },
-      "FeedPostsResponse": {
-        "type": "object",
-        "required": [
-          "posts"
-        ],
-        "properties": {
-          "posts": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/FeedPost"
-            }
-          }
-        }
-      },
-      "CreateFeedPostRequest": {
-        "type": "object",
-        "required": [
-          "recordingId"
-        ],
-        "properties": {
-          "recordingId": {
-            "type": "string"
-          }
-        }
-      },
-      "FeedPostResponse": {
-        "type": "object",
-        "required": [
-          "post"
-        ],
-        "properties": {
-          "post": {
-            "$ref": "#/components/schemas/FeedPost"
-          }
-        }
-      },
-      "FeedThreadResponse": {
-        "type": "object",
-        "required": [
-          "post",
-          "replies"
-        ],
-        "properties": {
-          "post": {
-            "$ref": "#/components/schemas/FeedPost"
-          },
-          "replies": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/FeedReply"
-            }
-          }
-        }
-      },
-      "CreateFeedReplyRequest": {
-        "type": "object",
-        "required": [
-          "duration",
-          "audioDataUrl"
-        ],
-        "properties": {
-          "duration": {
-            "type": "integer",
-            "minimum": 1
-          },
-          "audioDataUrl": {
-            "$ref": "#/components/schemas/AudioDataUrl"
-          },
-          "timestamp": {
-            "type": "string",
-            "format": "date-time"
-          }
-        }
-      },
-      "CreateFeedReplyResponse": {
-        "type": "object",
-        "required": [
-          "reply",
-          "quota"
-        ],
-        "properties": {
-          "reply": {
-            "$ref": "#/components/schemas/FeedReply"
-          },
-          "quota": {
-            "$ref": "#/components/schemas/RecordingQuota"
           }
         }
       }

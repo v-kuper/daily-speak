@@ -43,7 +43,7 @@ test("web login uses the v1 contract and keeps refresh credentials out of JavaSc
   assert.equal(JSON.parse(calls[0].init.body).platform, "web");
   assert.equal("refreshToken" in active, false);
 
-  await api.apiFetch("/api/user/data");
+  await api.apiFetch("/api/v1/profile");
   assert.equal(calls[1].init.headers.Authorization, "Bearer access-1");
 });
 
@@ -74,7 +74,7 @@ test("a protected request refreshes once and retries with the rotated access tok
   });
 
   await identity.authenticateBrowserIdentity("signIn", "person@example.test", "password123");
-  const response = await api.apiFetch("/api/user/data");
+  const response = await api.apiFetch("/api/v1/profile");
   assert.equal(response.status, 200);
   assert.deepEqual(authorizations, ["Bearer access-1", "Bearer access-2"]);
 });
@@ -100,8 +100,8 @@ test("late 401 responses reuse the already rotated access token", async (t) => {
   });
 
   await identity.authenticateBrowserIdentity("signIn", "person@example.test", "password123");
-  const first = api.apiFetch("/api/user/data");
-  const second = api.apiFetch("/api/user/subscription");
+	const first = api.apiFetch("/api/v1/profile");
+	const second = api.apiFetch("/api/v1/subscription");
   assert.equal((await first).status, 200);
   releaseLateResponse();
   assert.equal((await second).status, 200);

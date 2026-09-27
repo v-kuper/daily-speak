@@ -31,7 +31,6 @@ const routeSource = [
   readFileSync("internal/httpapi/media_v1.go", "utf8"),
   readFileSync("internal/httpapi/guest_preview.go", "utf8"),
   readFileSync("internal/httpapi/recordings_create_v1.go", "utf8"),
-  readFileSync("internal/httpapi/feed_handlers.go", "utf8"),
 ].join("\n");
 
 const httpMethods = new Set(["get", "post", "put", "delete", "patch"]);
@@ -46,11 +45,9 @@ const documentedAPIRoutes = [
   "/api/v1/media/uploads/{uploadId}/parts", "/api/v1/media/uploads/{uploadId}/complete",
   "/api/v1/media/{assetId}/download", "/api/v1/media/uploads/{uploadId}/parts/{partNumber}",
   "/api/v1/media/local/assets/{assetId}/content",
-  "/api/daily-questions", "/api/topic-guidance", "/api/study-words", "/api/user/data",
-  "/api/user/interests", "/api/user/ollama-model", "/api/user/subscription", "/api/user/english-level",
-  "/api/feed/posts", "/api/feed/posts/{postId}",
-  "/api/feed/posts/{postId}/replies", "/api/feed/posts/{postId}/reactions",
-  "/api/feed/replies/{replyId}/reactions", "/uploads/{path}",
+  "/api/v1/practice/daily-questions", "/api/v1/practice/topic-guidance", "/api/v1/practice/study-words",
+  "/api/v1/profile", "/api/v1/profile/interests", "/api/v1/profile/english-level",
+  "/api/v1/subscription",
 ];
 
 const protectedOperations = [
@@ -58,14 +55,10 @@ const protectedOperations = [
   ["/api/v1/recordings/{recordingId}", "delete"],
   ["/api/v1/recordings/{recordingId}/retry", "post"],
   ["/api/v1/recordings/{recordingId}/shadowing", "post"],
-  ["/api/user/data", "get"],
-  ["/api/user/interests", "put"], ["/api/user/ollama-model", "get"], ["/api/user/subscription", "get"],
-  ["/api/user/subscription", "post"], ["/api/user/subscription", "delete"],
-  ["/api/user/english-level", "get"], ["/api/user/english-level", "put"],
-  ["/api/feed/posts", "get"],
-  ["/api/feed/posts", "post"], ["/api/feed/posts/{postId}", "get"],
-  ["/api/feed/posts/{postId}/replies", "post"], ["/api/feed/posts/{postId}/reactions", "post"],
-  ["/api/feed/replies/{replyId}/reactions", "post"],
+  ["/api/v1/profile", "get"], ["/api/v1/profile/interests", "put"],
+  ["/api/v1/profile/english-level", "get"], ["/api/v1/profile/english-level", "put"],
+  ["/api/v1/subscription", "get"], ["/api/v1/subscription", "post"],
+  ["/api/v1/subscription", "delete"],
 ];
 
 const mutationBodies = [
@@ -77,19 +70,17 @@ const mutationBodies = [
   ["/api/v1/media/uploads/{uploadId}/parts", "post", "application/json"],
   ["/api/v1/media/uploads/{uploadId}/complete", "post", "application/json"],
   ["/api/v1/media/uploads/{uploadId}/parts/{partNumber}", "put", "application/octet-stream"],
-  ["/api/user/interests", "put", "application/json"], ["/api/user/english-level", "put", "application/json"],
-  ["/api/feed/posts", "post", "application/json"], ["/api/feed/posts/{postId}/replies", "post", "application/json"],
-  ["/api/feed/posts/{postId}/reactions", "post", "application/json"],
-  ["/api/feed/replies/{replyId}/reactions", "post", "application/json"],
+  ["/api/v1/profile/interests", "put", "application/json"],
+  ["/api/v1/profile/english-level", "put", "application/json"],
 ];
 
 const expectedQueryParameters = new Map([
   ["get /api/v1/recordings", ["limit", "cursor"]],
   ["put /api/v1/media/uploads/{uploadId}/parts/{partNumber}", ["sizeBytes", "checksumSha256", "expires", "signature"]],
   ["get /api/v1/media/local/assets/{assetId}/content", ["expires", "signature"]],
-  ["get /api/daily-questions", ["date", "refresh", "interest", "level", "avoid"]],
-  ["get /api/topic-guidance", ["topic", "refresh", "interest", "level", "avoidQuestion", "avoidWord"]],
-  ["get /api/study-words", ["refresh", "interest", "level", "avoidWord"]],
+  ["get /api/v1/practice/daily-questions", ["date", "refresh", "interest", "level", "avoid"]],
+  ["get /api/v1/practice/topic-guidance", ["topic", "refresh", "interest", "level", "avoidQuestion", "avoidWord"]],
+  ["get /api/v1/practice/study-words", ["refresh", "interest", "level", "avoidWord"]],
 ]);
 
 test("OpenAPI check accepts canonical JSON checked out with Windows line endings", (t) => {
@@ -143,7 +134,7 @@ test("backend registers GET-only OpenAPI and Swagger routes", () => {
   assert.match(serverSource, /apidocs\.SwaggerHTML/);
 });
 
-test("OpenAPI inventories every API and upload route, including retained Feed endpoints", () => {
+test("OpenAPI inventories every supported API route", () => {
   for (const path of documentedAPIRoutes) assert.ok(openapi.paths[path], `missing OpenAPI path ${path}`);
   const sourceChecks = [
     ["/healthz", /mux\.HandleFunc\("\/healthz"/],
@@ -162,14 +153,22 @@ test("OpenAPI inventories every API and upload route, including retained Feed en
     ["/api/v1/media/{assetId}/download", /strings\.HasSuffix\(path, "\/download"\)/],
     ["/api/v1/media/uploads/{uploadId}/parts/{partNumber}", /mux\.HandleFunc\("\/api\/v1\/media\/uploads\/"/],
     ["/api/v1/media/local/assets/{assetId}/content", /mux\.HandleFunc\("\/api\/v1\/media\/local\/"/],
-    ["/api/feed/posts", /path == "\/api\/feed\/posts"/],
-    ["/api/feed/posts/{postId}", /strings\.HasPrefix\(path, "\/api\/feed\/posts\/"\)/],
-    ["/api/feed/posts/{postId}/replies", /parts\[1\] == "replies"/],
-    ["/api/feed/posts/{postId}/reactions", /parts\[1\] == "reactions"/],
-    ["/api/feed/replies/{replyId}/reactions", /strings\.HasPrefix\(path, "\/api\/feed\/replies\/"\)/],
-    ["/uploads/{path}", /mux\.Handle\(uploadsURLPrefix, http\.HandlerFunc\(s\.handleLegacyUpload\)\)/],
+    ["/api/v1/practice/daily-questions", /path == "\/api\/v1\/practice\/daily-questions"/],
+    ["/api/v1/profile", /path == "\/api\/v1\/profile"/],
+    ["/api/v1/subscription", /path == "\/api\/v1\/subscription"/],
   ];
   for (const [path, pattern] of sourceChecks) assert.match(routeSource, pattern, `server route not found for ${path}`);
+});
+
+test("OpenAPI exposes only the versioned application contract", () => {
+  for (const path of Object.keys(openapi.paths)) {
+    if (path.startsWith("/api/")) {
+      assert.match(path, /^\/api\/v1(?:\/|$)/, `unversioned API path returned: ${path}`);
+    }
+  }
+  for (const retiredSchema of ["FeedPost", "FeedReply", "FeedReaction", "AudioDataUrl", "PhotoDataUrl"]) {
+    assert.equal(openapi.components.schemas[retiredSchema], undefined, `retired schema returned: ${retiredSchema}`);
+  }
 });
 
 test("every documented operation has a summary, success response, and applicable shared error response", () => {
@@ -242,9 +241,7 @@ test("shared externally visible schemas have representative examples", () => {
     ["SubscriptionState", ["isSubscriber", "subscriptionExpiresAt", "subscriptionCancelled"]],
     ["MediaAsset", ["id", "state", "purpose", "contentType", "sizeBytes", "checksum"]],
     ["MediaUpload", ["id", "state", "partSizeBytes", "partCount", "expiresAt", "uploadedParts"]],
-    ["FeedPost", ["id", "sourceRecordingId", "topic", "duration", "transcript", "practiceType", "sourceTimestamp", "createdAt", "authorMaskedEmail", "replyCount", "reactions"]],
-    ["FeedReply", ["id", "postId", "duration", "timestamp", "createdAt", "authorMaskedEmail", "reactions"]],
-    ["ErrorResponse", ["error"]],
+    ["V1ErrorResponse", ["error"]],
     ["GuestPreview", ["id", "state", "topic", "duration", "timestamp", "practiceType", "transcript", "corrections", "expiresAt", "createdAt", "updatedAt"]],
   ]);
   for (const [name, fields] of expectedObjectSchemas) {

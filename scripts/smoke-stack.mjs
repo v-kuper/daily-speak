@@ -45,18 +45,6 @@ export function selectStackURLs(env = process.env) {
   };
 }
 
-export function resolveApiUploadURL(value, apiBaseURL) {
-  if (typeof value !== "string" || value.trim() === "") {
-    throw new Error("Recording response did not include an audioDataUrl.");
-  }
-  const apiURL = new URL(apiBaseURL);
-  const uploadURL = new URL(value, `${apiURL.origin}/`);
-  if (uploadURL.origin !== apiURL.origin) {
-    throw new Error("Recording audioDataUrl must belong to the API origin.");
-  }
-  return uploadURL.href;
-}
-
 function splitCombinedSetCookie(value) {
   return value.split(/,\s*(?=[^=;,]+=[^;,]+)/);
 }
@@ -480,7 +468,7 @@ export async function runStackSmoke({ env = process.env, fetchImpl = fetch } = {
     );
     await expectStatus(
       "authenticated user data",
-      await request(fetchImpl, endpoint(apiBaseURL, "/api/user/data"), {
+      await request(fetchImpl, endpoint(apiBaseURL, "/api/v1/profile"), {
         origin: webOrigin,
         headers: { Authorization: `Bearer ${accessToken}` },
       }),

@@ -5,7 +5,6 @@ import test from "node:test";
 import * as stackSmoke from "./smoke-stack.mjs";
 import {
   extractCookieHeader,
-  resolveApiUploadURL,
   selectStackURLs,
   verifyIdentityConfiguration,
 } from "./smoke-stack.mjs";
@@ -80,21 +79,6 @@ test("stack smoke selects independent default and configured service URLs", () =
     webOrigin: "https://web.example.test",
     expectedWebRedirectBaseURL: "https://web.example.test:3443",
   });
-});
-
-test("stack smoke resolves backend-owned upload URLs against the API origin", () => {
-  assert.equal(
-    resolveApiUploadURL("/uploads/recordings/user/recording.webm", "https://api.example.test/base"),
-    "https://api.example.test/uploads/recordings/user/recording.webm",
-  );
-  assert.equal(
-    resolveApiUploadURL("https://api.example.test/uploads/recording.webm", "https://api.example.test/base"),
-    "https://api.example.test/uploads/recording.webm",
-  );
-  assert.throws(
-    () => resolveApiUploadURL("https://cdn.example.test/recording.webm", "https://api.example.test"),
-    /API origin/,
-  );
 });
 
 test("stack smoke extracts request cookies without retaining Set-Cookie attributes", () => {

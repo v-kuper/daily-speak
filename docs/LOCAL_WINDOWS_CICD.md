@@ -228,8 +228,8 @@ D:\DailySpeaking\data\uploads
 New recording originals, photos, and generated pronunciation audio are stored
 as private media objects below generated owner-scoped keys. PostgreSQL stores
 their media asset IDs; clients obtain short-lived download requests through
-`/api/v1/media/*`. Only retained old recording and Feed files use `/uploads/*`.
-The web container has no upload mount.
+`/api/v1/media/*`. There is no public `/uploads/*` route. The web container has
+no media mount.
 
 Set the `UPLOADS_HOST_DIR` repository variable to move media to another durable
 drive. Never point it at the Actions checkout. Do not use `docker compose down
@@ -323,7 +323,8 @@ must not be inferred from static/local tests:
 - recording save replaces a temporary `local-*` URL with the permanent ID;
 - original/shadowing audio, photos, deletion, logout, and session restore work;
 - no Feed tab, publication button, comments, or `/feed` web page is exposed;
-- API Swagger still lists the retained Feed endpoints and targets port `3444`;
+- API Swagger lists only the supported `/api/v1` application endpoints and
+  targets port `3444`;
 - a second LAN device loads web HTTPS `3443` and calls API HTTPS `3444`.
 
 These user-journey checks remain remote deployment acceptance. Static tests do
