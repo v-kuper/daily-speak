@@ -134,3 +134,50 @@ func TestLocalRecordingSessionsRemovesOnlyRequestedSession(t *testing.T) {
 		t.Fatalf("expected second session to remain: %v", err)
 	}
 }
+
+func TestLocalRecordingSessionsPublishesAndDiscardsRecording(t *testing.T) {
+	uploadsDir := t.TempDir()
+	store := NewLocalRecordingSessions(uploadsDir)
+	if err := store.SaveFinal("session-id", "webm", []byte("audio")); err != nil {
+		t.Fatalf("save final audio: %v", err)
+	}
+
+	publicURL, err := store.Publish("session-id", "user-id", "recording-id", "webm", 0)
+	if err != nil {
+		t.Fatalf("publish recording: %v", err)
+	}
+	if publicURL != "/uploads/recordings/user-id/recording-id.webm" {
+		t.Fatalf("unexpected public URL %q", publicURL)
+	}
+	publishedPath := filepath.Join(uploadsDir, "recordings", "user-id", "recording-id.webm")
+	if saved, err := os.ReadFile(publishedPath); err != nil || string(saved) != "audio" {
+		t.Fatalf("expected published audio, got %q, %v", string(saved), err)
+	}
+
+	if err := store.DiscardPublished(publicURL); err != nil {
+		t.Fatalf("discard recording: %v", err)
+	}
+	if _, err := os.Stat(publishedPath); !os.IsNotExist(err) {
+		t.Fatalf("expected published audio removal, got %v", err)
+	}
+}
+
+func TestLocalRecordingSessionsAllowsIdempotentChunkReplacement(t *testing.T) {
+	uploadsDir := t.TempDir()
+	store := NewLocalRecordingSessions(uploadsDir)
+	if err := store.SaveChunk("session-id", 0, "webm", []byte("first")); err != nil {
+		t.Fatalf("save initial chunk: %v", err)
+	}
+	if err := store.SaveChunk("session-id", 0, "webm", []byte("replacement")); err != nil {
+		t.Fatalf("replace chunk: %v", err)
+	}
+
+	path := filepath.Join(uploadsDir, "tmp", "recording-sessions", "session-id", "000000.webm")
+	saved, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read replacement chunk: %v", err)
+	}
+	if string(saved) != "replacement" {
+		t.Fatalf("expected replacement bytes, got %q", string(saved))
+	}
+}

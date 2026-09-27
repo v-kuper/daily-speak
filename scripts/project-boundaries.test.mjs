@@ -237,16 +237,22 @@ test("recording deletion keeps cleanup policy outside HTTP and SQL adapters", ()
   assert.doesNotMatch(repository, /http\.Status|writeJSON/);
 });
 
-test("recording upload sessions keep filesystem work outside HTTP transport", () => {
+test("recording upload sessions separate transport, application policy, SQL, and files", () => {
   const transport = readFileSync("backend/internal/httpapi/recording_sessions_handlers.go", "utf8");
   const multipart = readFileSync("backend/internal/httpapi/recording_sessions_multipart.go", "utf8");
+  const service = readFileSync("backend/internal/recordingsession/service.go", "utf8");
+  const repository = readFileSync("backend/internal/recordingsession/repository.go", "utf8");
   const store = readFileSync("backend/internal/storage/recording_sessions.go", "utf8");
 
-  assert.match(transport, /recordingSessions\.(SaveChunk|SaveFinal|Assemble|Remove)/);
-  assert.doesNotMatch(transport, /os\.WriteFile|os\.RemoveAll|recordingSessionChunksDir/);
+  assert.match(transport, /recordingSessionService\.(Start|SaveChunk|SaveFinal|Finalize)/);
+  assert.doesNotMatch(transport, /SELECT |INSERT INTO|UPDATE |DELETE FROM|pgx|workqueue|os\.WriteFile|os\.RemoveAll/);
   assert.match(multipart, /ParseMultipartForm|FormFile/);
   assert.doesNotMatch(multipart, /os\.WriteFile|os\.RemoveAll|MkdirAll/);
-  assert.match(store, /type RecordingSessionStore interface/);
+  assert.match(service, /type Files interface|type Repository interface|ExecuteFinalize/);
+  assert.doesNotMatch(service, /net\/http|internal\/httpapi|SELECT |INSERT INTO|UPDATE |DELETE FROM|pgx|workqueue/);
+  assert.match(repository, /recording_upload_sessions|INSERT INTO recordings|workqueue\.Enqueue/);
+  assert.doesNotMatch(repository, /net\/http|internal\/httpapi|writeJSON/);
+  assert.match(store, /func \(store \*LocalRecordingSessions\) Publish/);
   assert.doesNotMatch(store, /net\/http|internal\/httpapi/);
   assert.equal(existsSync("backend/internal/httpapi/recording_sessions_storage.go"), false);
 });

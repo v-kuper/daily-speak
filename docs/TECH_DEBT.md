@@ -71,28 +71,25 @@ queue remains the default until measured workload demonstrates a limitation.
 
 ## P1: feature-oriented backend split
 
-Practice generation is the first extracted vertical slice: HTTP owns request
-validation and response mapping, the application service owns use cases and
-business rules, and its Ollama adapter owns the provider request format.
-Worker configuration and pool lifecycle now live in `backend/internal/worker`;
-media expiry and deletion live in `backend/internal/media`. Concrete recording
-and guest-preview processors still need to leave `httpapi`.
+Most high-risk vertical slices now have explicit application boundaries:
+practice generation, recording creation/deletion/processing and analysis,
+recording upload sessions, guest preview, shadowing, mobile identity, profile,
+and subscription. Worker composition lives outside HTTP; local/S3 and legacy
+session files are injected adapters. Their HTTP handlers validate transport
+data, call a service, and map its result.
 
-Incrementally reduce `backend/internal/httpapi` by extracting identity,
-recordings, analysis, guest preview, profile/subscription, and Feed services
-with explicit repositories and transport-neutral inputs/outputs. HTTP handlers
-should validate transport data, call one service boundary, and map its result.
+Continue reducing the remaining direct persistence in `backend/internal/httpapi`
+in this order so every merge stays deployable:
 
-Use this order to keep every merge deployable:
-
-1. Move worker runtime composition out of `httpapi`; `cmd/worker` must not build
-   an HTTP server to process durable jobs.
-2. Extract recording ingestion, processing, retry, deletion, and shadowing
-   behind one recording application boundary and explicit repositories.
-3. Extract guest preview and its lifecycle using the same job/media ports.
-4. Extract identity plus profile/subscription orchestration while preserving
-   the existing access/refresh-token and anonymous-claim contracts.
-5. Keep Feed isolated until the retained-Feed product decision is made.
+1. Extract legacy recording retry and recording queries, then retire the
+   duplicate direct legacy recording-create path when the web sandbox uses the
+   versioned media/create contract.
+2. Finish the media HTTP/application boundary so authorization and completion
+   policy are not split between handlers and `internal/media`.
+3. Move the remaining cookie-auth orchestration behind the identity service
+   without changing the mobile access/refresh-token contract.
+4. Keep Feed isolated until the retained-Feed product decision is made; do not
+   intermingle its SQL or media policy with recording modules.
 
 Each extraction must preserve routes, OpenAPI, persisted data, authorization,
 idempotency, retry behavior, and integration coverage. Avoid a single large

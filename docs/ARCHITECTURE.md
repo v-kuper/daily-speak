@@ -24,8 +24,8 @@ Go worker ----------+
 
 - `web/` is a Next.js sandbox client. It owns browser routes and UI state, but
   no backend business logic or server credentials.
-- `backend/cmd/api` owns the HTTP API, authentication, authorization,
-  validation, persistence transactions, admission control, and API contract.
+- `backend/cmd/api` composes the HTTP API, application services, repositories,
+  storage adapters, admission control, and the published API contract.
 - `backend/cmd/worker` owns paid or slow transcription, analysis, TTS, and
   cleanup work. It uses the same backend image but is a separate process.
 - PostgreSQL is the source of truth for identities, sessions, recordings,
@@ -124,10 +124,16 @@ backend/cmd/worker           durable worker process composition
 backend/internal/aiparse     provider-neutral model-output normalization
 backend/internal/auth        cookie and mobile identity
 backend/internal/db          PostgreSQL connection and migrations
-backend/internal/httpapi     current HTTP transport and orchestration
+backend/internal/httpapi     HTTP transport, authorization gates, response mapping
 backend/internal/media       authorized media lifecycle
 backend/internal/practice    speaking-practice generation application service
 backend/internal/practice/ollamaadapter  Ollama adapter for the practice port
+backend/internal/recording   recording creation, deletion, processing, analysis
+backend/internal/recordingsession  legacy web upload-session application boundary
+backend/internal/guestpreview     bounded anonymous preview lifecycle
+backend/internal/shadowing        pronunciation generation lifecycle
+backend/internal/profile          profile application service and repository
+backend/internal/subscription     subscription application service and repository
 backend/internal/storage     local and S3 storage adapters
 backend/internal/worker      worker configuration and pool lifecycle
 backend/internal/workqueue   durable PostgreSQL queue
@@ -136,9 +142,10 @@ backend/migrations           immutable ordered schema migrations
 backend/docs                 generated OpenAPI and Swagger assets
 ```
 
-`backend/internal/httpapi` is intentionally listed as a current boundary, not
-the desired final modular shape. Its incremental feature-oriented split is
-tracked in [`TECH_DEBT.md`](TECH_DEBT.md).
+Some legacy query, retry, media, cookie-auth, and retained-Feed persistence still
+lives in `backend/internal/httpapi`. Its remaining feature-oriented split is
+tracked in [`TECH_DEBT.md`](TECH_DEBT.md); new business rules must not be added
+to the transport package.
 
 ## Retained Feed backend
 

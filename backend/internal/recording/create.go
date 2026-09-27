@@ -112,7 +112,7 @@ func (c *Creator) Create(ctx context.Context, principalID, userID, idempotencyKe
 			created = existing
 			return nil
 		}
-		if violation := validateCreateQuota(lockedQuota, input.Duration); violation != nil {
+		if violation := ValidateQuota(lockedQuota, input.Duration); violation != nil {
 			return violation
 		}
 		if err := tx.LockMedia(ctx, principalID, input.AudioAssetID, "recording_audio"); err != nil {
@@ -135,7 +135,7 @@ func (c *Creator) Create(ctx context.Context, principalID, userID, idempotencyKe
 		if err := tx.EnqueueProcessing(ctx, command); err != nil {
 			return err
 		}
-		currentQuota = quotaAfterCreate(lockedQuota, input.Duration)
+		currentQuota = QuotaAfterCreate(lockedQuota, input.Duration)
 		return nil
 	})
 	return created, currentQuota, err
@@ -211,7 +211,7 @@ func (e *QuotaViolation) Error() string {
 	return "recording exceeds weekly quota"
 }
 
-func validateCreateQuota(current quota.RecordingQuota, duration int) *QuotaViolation {
+func ValidateQuota(current quota.RecordingQuota, duration int) *QuotaViolation {
 	if current.IsSubscriber {
 		if duration > domain.SubscriberMaxSessionSeconds {
 			return &QuotaViolation{SubscriberLimit: true}
@@ -228,7 +228,7 @@ func validateCreateQuota(current quota.RecordingQuota, duration int) *QuotaViola
 	return nil
 }
 
-func quotaAfterCreate(before quota.RecordingQuota, duration int) quota.RecordingQuota {
+func QuotaAfterCreate(before quota.RecordingQuota, duration int) quota.RecordingQuota {
 	after := before
 	savedSeconds := domain.ToNonNegativeInt(duration)
 	after.WeeklyUsedSeconds = domain.ToNonNegativeInt(before.WeeklyUsedSeconds) + savedSeconds

@@ -13,17 +13,6 @@ import (
 
 const MaxRecordingChunkBytes = 8 * 1024 * 1024
 
-// RecordingSessionStore owns the temporary files used while a client uploads
-// one recording. Callers decide when a session is complete; the store only
-// persists, assembles, and removes its bytes.
-type RecordingSessionStore interface {
-	SaveChunk(sessionID string, index int, extension string, data []byte) error
-	SaveFinal(sessionID string, extension string, data []byte) error
-	FinalExists(sessionID string, extension string) (bool, error)
-	Assemble(sessionID string, extension string, expectedChunks int, outputPath string) error
-	Remove(sessionID string) error
-}
-
 type LocalRecordingSessions struct {
 	root string
 }
@@ -108,6 +97,28 @@ func (store *LocalRecordingSessions) Assemble(sessionID string, extension string
 		return errors.New("recording session has no audio")
 	}
 	return assembleChunks(directory, extension, expectedChunks, outputPath)
+}
+
+func (store *LocalRecordingSessions) Publish(sessionID string, userID string, recordingID string, extension string, expectedChunks int) (string, error) {
+	if strings.TrimSpace(userID) == "" || strings.TrimSpace(recordingID) == "" {
+		return "", errors.New("recording publication is invalid")
+	}
+	extension, err := normalizeAudioExtension(extension)
+	if err != nil {
+		return "", errors.New("recording publication is invalid")
+	}
+	userSegment := domain.SanitizePathSegment(userID)
+	recordingSegment := domain.SanitizePathSegment(recordingID)
+	publicURL := LegacyUploadsURLPrefix + filepath.ToSlash(filepath.Join("recordings", userSegment, recordingSegment+"."+extension))
+	outputPath := filepath.Join(store.root, "recordings", userSegment, recordingSegment+"."+extension)
+	if err := store.Assemble(sessionID, extension, expectedChunks, outputPath); err != nil {
+		return "", err
+	}
+	return publicURL, nil
+}
+
+func (store *LocalRecordingSessions) DiscardPublished(publicURL string) error {
+	return NewLegacyUploads(store.root).Remove([]string{publicURL})
 }
 
 func (store *LocalRecordingSessions) Remove(sessionID string) error {
@@ -214,13 +225,14 @@ func writeFileAtomic(path string, data []byte) error {
 	if err := os.Chmod(temporaryPath, 0o640); err != nil {
 		return err
 	}
-	if err := os.Rename(temporaryPath, path); err == nil {
+	renameErr := os.Rename(temporaryPath, path)
+	if renameErr == nil {
 		return nil
 	}
 	// Windows cannot atomically replace an existing file with os.Rename. A
 	// retried chunk/final upload is allowed to replace its own prior bytes.
 	if _, err := os.Stat(path); err != nil {
-		return err
+		return renameErr
 	}
 	if err := os.Remove(path); err != nil {
 		return err
@@ -273,5 +285,3 @@ func createAtomicOutput(outputPath string) (*os.File, string, error) {
 	}
 	return out, out.Name(), nil
 }
-
-var _ RecordingSessionStore = (*LocalRecordingSessions)(nil)

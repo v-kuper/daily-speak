@@ -23,6 +23,7 @@ import (
 	"daily-speaking-practice/backend/internal/profile"
 	"daily-speaking-practice/backend/internal/recording"
 	recordingollama "daily-speaking-practice/backend/internal/recording/ollamaadapter"
+	"daily-speaking-practice/backend/internal/recordingsession"
 	"daily-speaking-practice/backend/internal/shadowing"
 	"daily-speaking-practice/backend/internal/storage"
 	"daily-speaking-practice/backend/internal/subscription"
@@ -49,7 +50,7 @@ type Config struct {
 	MediaPartSize            int64
 	MediaPresignTTL          time.Duration
 	LegacyUploads            storage.LegacyUploadStore
-	RecordingSessions        storage.RecordingSessionStore
+	RecordingSessions        recordingsession.Files
 	TranscribeAudio          func(context.Context, string) (string, error)
 	ProbeAudioDuration       func(context.Context, string) (time.Duration, error)
 	Operations               operations.Config
@@ -59,7 +60,7 @@ type Server struct {
 	db                       *db.DB
 	jobStore                 *workqueue.Store
 	legacyUploads            storage.LegacyUploadStore
-	recordingSessions        storage.RecordingSessionStore
+	recordingSessionService  *recordingsession.Service
 	synthesizer              tts.Synthesizer
 	aiClient                 ai.ChatClient
 	practiceGenerator        practice.Generator
@@ -159,6 +160,9 @@ func NewServer(config Config) *Server {
 	if recordingSessions == nil {
 		recordingSessions = storage.NewLocalRecordingSessions(resolveUploadsDir())
 	}
+	recordingSessionService := recordingsession.NewService(
+		recordingsession.NewSQLRepository(config.DB), recordingSessions, uuid.NewString,
+	)
 	mediaSigner, _ := media.NewURLSigner(signingSecret)
 	transcribeAudio := config.TranscribeAudio
 	if transcribeAudio == nil {
@@ -186,7 +190,7 @@ func NewServer(config Config) *Server {
 		db:                       config.DB,
 		jobStore:                 workqueue.NewStore(config.DB),
 		legacyUploads:            legacyUploads,
-		recordingSessions:        recordingSessions,
+		recordingSessionService:  recordingSessionService,
 		synthesizer:              synthesizer,
 		aiClient:                 aiClient,
 		practiceGenerator:        practiceGenerator,

@@ -1,43 +1,22 @@
 package httpapi
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"daily-speaking-practice/backend/internal/domain"
-	"daily-speaking-practice/backend/internal/quota"
-	"daily-speaking-practice/backend/internal/workqueue"
-	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
+	"daily-speaking-practice/backend/internal/recording"
+	"daily-speaking-practice/backend/internal/recordingsession"
 )
-
-type recordingSessionRow struct {
-	ID             string
-	UserID         string
-	Topic          string
-	Duration       int
-	Timestamp      time.Time
-	PracticeType   string
-	PhotoDataURL   *string
-	PhotoObject    *string
-	AudioExtension *string
-	ChunkCount     int
-	Status         string
-	RecordingID    *string
-}
 
 func (s *Server) handleCreateRecordingSession(w http.ResponseWriter, r *http.Request) {
 	user, ok := s.authorizedUser(w, r, "api.recording-sessions.post")
 	if !ok {
 		return
 	}
-
 	var payload struct {
 		Topic        string `json:"topic"`
 		Duration     int    `json:"duration"`
@@ -47,40 +26,16 @@ func (s *Server) handleCreateRecordingSession(w http.ResponseWriter, r *http.Req
 		PhotoObject  string `json:"photoObject"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&payload)
-	practiceType := domain.NormalizePracticeType(payload.PracticeType)
-	topic := strings.TrimSpace(payload.Topic)
-	duration := domain.ToNonNegativeInt(payload.Duration)
-	photoDataURL := domain.NormalizePhotoDataURL(payload.PhotoDataURL)
-	photoObject := domain.NormalizePhotoObject(payload.PhotoObject)
-	if practiceType == "photo_description" {
-		if photoDataURL == nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Photo is required for photo description practice."})
-			return
-		}
-		if topic == "" {
-			topic = "Photo description"
-		}
-	}
-	if topic == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Recording topic is required."})
+	sessionID, err := s.recordingSessionService.Start(r.Context(), user.ID, recordingsession.StartInput{
+		Topic: payload.Topic, Duration: payload.Duration,
+		Timestamp: domain.ParseTimestamp(payload.Timestamp), PracticeType: payload.PracticeType,
+		PhotoDataURL: payload.PhotoDataURL, PhotoObject: payload.PhotoObject,
+	})
+	var validationError *recordingsession.ValidationError
+	if errors.As(err, &validationError) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": validationError.Message})
 		return
 	}
-
-	sessionID := uuid.NewString()
-	timestamp := domain.ParseTimestamp(payload.Timestamp)
-	_, err := s.db.Exec(r.Context(), `
-		INSERT INTO recording_upload_sessions
-		  (id, user_id, topic, duration, timestamp, practice_type, photo_data_url, photo_object)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-		sessionID,
-		user.ID,
-		truncateRunes(topic, 300),
-		duration,
-		timestamp,
-		practiceType,
-		stringOrNil(practiceType == "photo_description", photoDataURL),
-		stringOrNil(practiceType == "photo_description", photoObject),
-	)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to start recording upload."})
 		return
@@ -113,44 +68,26 @@ func (s *Server) handleUploadRecordingSessionChunk(w http.ResponseWriter, r *htt
 	if !ok {
 		return
 	}
-	session, err := s.recordingSessionForUser(r.Context(), user.ID, sessionID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Recording upload session not found."})
-		return
-	}
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to load recording upload session."})
-		return
-	}
-	if session.Status != "open" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Recording upload session is already finalized."})
-		return
-	}
 	chunk, err := readMultipartChunkRequest(r)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Recording chunk is invalid."})
 		return
 	}
-	if session.AudioExtension != nil && *session.AudioExtension != chunk.Extension {
+	err = s.recordingSessionService.SaveChunk(
+		r.Context(), user.ID, sessionID, chunk.Index, chunk.Extension, chunk.Bytes,
+	)
+	switch {
+	case errors.Is(err, recordingsession.ErrNotFound):
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Recording upload session not found."})
+	case errors.Is(err, recordingsession.ErrFinalized):
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Recording upload session is already finalized."})
+	case errors.Is(err, recordingsession.ErrFormatChange):
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Recording chunk format changed during upload."})
-		return
-	}
-	if err := s.recordingSessions.SaveChunk(session.ID, chunk.Index, chunk.Extension, chunk.Bytes); err != nil {
+	case err != nil:
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to save recording chunk."})
-		return
+	default:
+		writeJSON(w, http.StatusCreated, map[string]any{"sessionId": sessionID, "chunkIndex": chunk.Index})
 	}
-	_, err = s.db.Exec(r.Context(), `
-		UPDATE recording_upload_sessions
-		SET audio_extension = COALESCE(audio_extension, $3),
-		    chunk_count = GREATEST(chunk_count, $4),
-		    updated_at = NOW()
-		WHERE id = $1 AND user_id = $2`,
-		session.ID, user.ID, chunk.Extension, chunk.Index+1)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to save recording chunk."})
-		return
-	}
-	writeJSON(w, http.StatusCreated, map[string]any{"sessionId": session.ID, "chunkIndex": chunk.Index})
 }
 
 func (s *Server) handleUploadRecordingSessionAudio(w http.ResponseWriter, r *http.Request, sessionID string) {
@@ -158,39 +95,22 @@ func (s *Server) handleUploadRecordingSessionAudio(w http.ResponseWriter, r *htt
 	if !ok {
 		return
 	}
-	session, err := s.recordingSessionForUser(r.Context(), user.ID, sessionID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Recording upload session not found."})
-		return
-	}
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to load recording upload session."})
-		return
-	}
-	if session.Status != "open" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Recording upload session is already finalized."})
-		return
-	}
 	audio, err := readMultipartFinalAudioRequest(r)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Recording audio is invalid."})
 		return
 	}
-	if err := s.recordingSessions.SaveFinal(session.ID, audio.Extension, audio.Bytes); err != nil {
+	err = s.recordingSessionService.SaveFinal(r.Context(), user.ID, sessionID, audio.Extension, audio.Bytes)
+	switch {
+	case errors.Is(err, recordingsession.ErrNotFound):
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Recording upload session not found."})
+	case errors.Is(err, recordingsession.ErrFinalized):
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Recording upload session is already finalized."})
+	case err != nil:
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to save recording audio."})
-		return
+	default:
+		writeJSON(w, http.StatusCreated, map[string]any{"sessionId": sessionID, "extension": audio.Extension})
 	}
-	_, err = s.db.Exec(r.Context(), `
-		UPDATE recording_upload_sessions
-		SET audio_extension = $3,
-		    updated_at = NOW()
-		WHERE id = $1 AND user_id = $2`,
-		session.ID, user.ID, audio.Extension)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to save recording audio."})
-		return
-	}
-	writeJSON(w, http.StatusCreated, map[string]any{"sessionId": session.ID, "extension": audio.Extension})
 }
 
 func (s *Server) handleFinishRecordingSession(w http.ResponseWriter, r *http.Request, sessionID string) {
@@ -203,342 +123,56 @@ func (s *Server) handleFinishRecordingSession(w http.ResponseWriter, r *http.Req
 		Timestamp string `json:"timestamp"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&payload)
-	session, err := s.recordingSessionForUser(r.Context(), user.ID, sessionID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Recording upload session not found."})
-		return
-	}
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to finish recording upload."})
-		return
-	}
-	if session.Status != "open" {
-		if session.RecordingID != nil {
-			recording, err := s.recordingForUser(r.Context(), user.ID, *session.RecordingID)
-			if err == nil {
-				writeJSON(w, http.StatusOK, map[string]any{"recording": recording})
-				return
-			}
-		}
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Recording upload session is already finalized."})
-		return
-	}
-	hasFinalAudio := false
-	if session.AudioExtension != nil {
-		hasFinalAudio, err = s.recordingSessions.FinalExists(session.ID, *session.AudioExtension)
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to inspect recording audio."})
-			return
-		}
-	}
-	if session.AudioExtension == nil || !hasFinalAudio {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "Recording audio is still uploading."})
-		return
-	}
-
-	duration := session.Duration
-	if payload.Duration > 0 {
-		duration = domain.ToNonNegativeInt(payload.Duration)
-	}
-	timestamp := session.Timestamp
+	var timestamp *time.Time
 	if strings.TrimSpace(payload.Timestamp) != "" {
-		timestamp = domain.ParseTimestamp(payload.Timestamp)
+		parsed := domain.ParseTimestamp(payload.Timestamp)
+		timestamp = &parsed
 	}
-
-	qBefore, err := quota.GetRecordingQuota(r.Context(), s.db, user.ID, &user.IsSubscriber)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to save recording."})
-		return
-	}
-	if quotaError := recordingQuotaError(qBefore, duration); quotaError != nil {
-		writeJSON(w, quotaError.status, map[string]string{"error": quotaError.message})
-		return
-	}
-
-	recordingID := uuid.NewString()
-	processingJobID := uuid.NewString()
-	audioPath := filepath.Join(resolveUploadsDir(), "recordings", domain.SanitizePathSegment(user.ID), recordingID+"."+*session.AudioExtension)
-	if err := s.recordingSessions.Assemble(session.ID, *session.AudioExtension, session.ChunkCount, audioPath); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to assemble recording audio."})
-		return
-	}
-	keepAudio := false
-	defer func() {
-		if !keepAudio {
-			_ = os.Remove(audioPath)
-		}
-	}()
-	audioURL := "/uploads/recordings/" + domain.SanitizePathSegment(user.ID) + "/" + recordingID + "." + *session.AudioExtension
-	var inserted struct {
-		ID                  string
-		Topic               string
-		Duration            int
-		Timestamp           time.Time
-		Status              string
-		Transcript          string
-		CorrectedTranscript string
-		Suggestions         []byte
-		ProcessingStage     *string
-		PracticeType        string
-		AudioDataURL        *string
-		PhotoDataURL        *string
-		PhotoObject         *string
-		ProcessingError     *string
-		ShadowingStatus     string
-		ShadowingAudioURL   *string
-		ShadowingError      *string
-		ShadowingUpdatedAt  time.Time
-	}
-	tx, err := s.db.Begin(r.Context())
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to save recording."})
-		return
-	}
-	defer tx.Rollback(r.Context())
-	var lockedStatus string
-	var lockedRecordingID *string
-	if err := tx.QueryRow(r.Context(), `
-		SELECT status, recording_id
-		FROM recording_upload_sessions
-		WHERE id = $1 AND user_id = $2
-		FOR UPDATE`, session.ID, user.ID).Scan(&lockedStatus, &lockedRecordingID); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to finalize recording upload."})
-		return
-	}
-	if lockedStatus != "open" {
-		_ = tx.Rollback(r.Context())
-		if lockedRecordingID != nil {
-			if existing, loadErr := s.recordingForUser(r.Context(), user.ID, *lockedRecordingID); loadErr == nil {
-				writeJSON(w, http.StatusOK, map[string]any{"recording": existing})
-				return
-			}
-		}
+	result, err := s.recordingSessionService.Finalize(
+		r.Context(), user.ID, user.IsSubscriber, sessionID,
+		recordingsession.FinalizeInput{Duration: payload.Duration, Timestamp: timestamp},
+	)
+	var quotaViolation *recording.QuotaViolation
+	switch {
+	case errors.Is(err, recordingsession.ErrNotFound):
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Recording upload session not found."})
+	case errors.Is(err, recordingsession.ErrFinalized):
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Recording upload session is already finalized."})
-		return
+	case errors.Is(err, recordingsession.ErrAudioPending):
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "Recording audio is still uploading."})
+	case errors.As(err, &quotaViolation) && quotaViolation.SubscriberLimit:
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Subscribers can save recordings up to 10:00 per session."})
+	case errors.As(err, &quotaViolation):
+		message := "Weekly free limit exceeded. You have " + domain.FormatSeconds(quotaViolation.Remaining) +
+			" left out of " + domain.FormatSeconds(domain.FreeWeeklyLimitSeconds) + " this week."
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": message})
+	case err != nil:
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to finish recording upload."})
+	case !result.Created:
+		writeJSON(w, http.StatusOK, map[string]any{"recording": recordingResponseFromUploadSession(result.Recording)})
+	default:
+		writeJSON(w, http.StatusCreated, map[string]any{
+			"recording": recordingResponseFromUploadSession(result.Recording),
+			"quota":     result.Quota,
+		})
 	}
-	// The session lock preserves finalize idempotency; the user-row lock below
-	// serializes its quota reservation with direct web/mobile recordings and
-	// guest-preview promotion.
-	qBefore, err = quota.LockRecordingQuota(r.Context(), tx, user.ID, time.Now().UTC())
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to save recording."})
-		return
-	}
-	if quotaError := recordingQuotaError(qBefore, duration); quotaError != nil {
-		writeJSON(w, quotaError.status, map[string]string{"error": quotaError.message})
-		return
-	}
-	err = tx.QueryRow(r.Context(), `
-		INSERT INTO recordings
-		  (id, user_id, topic, duration, timestamp, transcript, corrected_transcript, suggestions, practice_type, audio_data_url, photo_data_url, photo_object, status, processing_stage, processing_job_id)
-		VALUES
-		  ($1, $2, $3, $4, $5, '', '', '[]'::jsonb, $6, $7, $8, $9, 'processing', 'transcribing', $10)
-		RETURNING id, topic, duration, timestamp, status, transcript, corrected_transcript, suggestions, processing_stage, practice_type, audio_data_url, photo_data_url, photo_object, processing_error,
-		          shadowing_status, shadowing_audio_url, shadowing_error, shadowing_updated_at`,
-		recordingID,
-		user.ID,
-		session.Topic,
-		duration,
-		timestamp,
-		session.PracticeType,
-		audioURL,
-		stringOrNil(session.PracticeType == "photo_description", session.PhotoDataURL),
-		stringOrNil(session.PracticeType == "photo_description", session.PhotoObject),
-		processingJobID,
-	).Scan(&inserted.ID, &inserted.Topic, &inserted.Duration, &inserted.Timestamp, &inserted.Status, &inserted.Transcript, &inserted.CorrectedTranscript, &inserted.Suggestions, &inserted.ProcessingStage, &inserted.PracticeType, &inserted.AudioDataURL, &inserted.PhotoDataURL, &inserted.PhotoObject, &inserted.ProcessingError, &inserted.ShadowingStatus, &inserted.ShadowingAudioURL, &inserted.ShadowingError, &inserted.ShadowingUpdatedAt)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to save recording."})
-		return
-	}
-	recording := recordingResponse{
-		ID:                  inserted.ID,
-		Topic:               inserted.Topic,
-		Duration:            domain.ToNonNegativeInt(inserted.Duration),
-		Timestamp:           inserted.Timestamp.UTC().Format(time.RFC3339Nano),
-		Status:              normalizeRecordingStatus(inserted.Status),
-		Transcript:          inserted.Transcript,
-		CorrectedTranscript: inserted.CorrectedTranscript,
-		Suggestions:         normalizeSuggestions(inserted.Suggestions, 0),
-		ProcessingStage:     normalizeRecordingProcessingStage(inserted.ProcessingStage),
-		PracticeType:        domain.NormalizePracticeType(inserted.PracticeType),
-		AudioDataURL:        normalizeOptionalAudio(inserted.AudioDataURL, true),
-		PhotoDataURL:        normalizeOptionalPhoto(inserted.PhotoDataURL),
-		PhotoObject:         normalizeOptionalPhotoObject(inserted.PhotoObject),
-		ProcessingError:     normalizeOptionalProcessingError(inserted.ProcessingError),
-		ShadowingStatus:     normalizeShadowingStatus(inserted.ShadowingStatus),
-		ShadowingAudioURL:   normalizeOptionalShadowingAudio(inserted.ShadowingAudioURL),
-		ShadowingError:      normalizeOptionalProcessingError(inserted.ShadowingError),
-		ShadowingUpdatedAt:  inserted.ShadowingUpdatedAt.UTC().Format(time.RFC3339Nano),
-	}
-
-	result, err := tx.Exec(r.Context(), `
-		UPDATE recording_upload_sessions
-		SET status = 'finalized', recording_id = $3, updated_at = NOW()
-		WHERE id = $1 AND user_id = $2 AND status = 'open'`, session.ID, user.ID, recordingID)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to finalize recording upload."})
-		return
-	}
-	if result.RowsAffected() != 1 {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "Recording upload session is already finalized."})
-		return
-	}
-	if err := workqueue.Enqueue(r.Context(), tx, workqueue.NewJob{
-		ID:             processingJobID,
-		Kind:           workqueue.KindRecordingProcess,
-		ResourceID:     recordingID,
-		IdempotencyKey: "recording:" + processingJobID,
-		MaxAttempts:    3,
-	}); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to finalize recording upload."})
-		return
-	}
-	if err := tx.Commit(r.Context()); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to finalize recording upload."})
-		return
-	}
-	keepAudio = true
-	_ = s.recordingSessions.Remove(session.ID)
-	q := recordingQuotaAfterSave(qBefore, duration)
-	if refreshedQuota, quotaErr := quota.GetRecordingQuota(r.Context(), s.db, user.ID, &user.IsSubscriber); quotaErr == nil {
-		q = refreshedQuota
-	}
-	writeJSON(w, http.StatusCreated, map[string]any{"recording": recording, "quota": q})
 }
 
-func (s *Server) handleGetRecording(w http.ResponseWriter, r *http.Request, recordingID string) {
-	user, ok := s.authorizedUser(w, r, "api.recordings.by-id.get")
-	if !ok {
-		return
-	}
-	recording, err := s.recordingForUser(r.Context(), user.ID, recordingID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Recording not found."})
-		return
-	}
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to load recording."})
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"recording": recording})
-}
-
-func (s *Server) recordingSessionForUser(ctx context.Context, userID string, sessionID string) (recordingSessionRow, error) {
-	var row recordingSessionRow
-	err := s.db.QueryRow(ctx, `
-		SELECT id, user_id, topic, duration, timestamp, practice_type,
-		       photo_data_url, photo_object, audio_extension, chunk_count,
-		       status, recording_id
-		FROM recording_upload_sessions
-		WHERE id = $1 AND user_id = $2
-		LIMIT 1`, strings.TrimSpace(sessionID), userID).Scan(&row.ID, &row.UserID, &row.Topic, &row.Duration, &row.Timestamp, &row.PracticeType, &row.PhotoDataURL, &row.PhotoObject, &row.AudioExtension, &row.ChunkCount, &row.Status, &row.RecordingID)
-	return row, err
-}
-
-func (s *Server) recordingForUser(ctx context.Context, userID string, recordingID string) (recordingResponse, error) {
-	var row struct {
-		ID                  string
-		Topic               string
-		Duration            int
-		Timestamp           time.Time
-		Status              string
-		Transcript          string
-		CorrectedTranscript string
-		Suggestions         []byte
-		ProcessingStage     *string
-		PracticeType        string
-		AudioDataURL        *string
-		PhotoDataURL        *string
-		PhotoObject         *string
-		ProcessingError     *string
-		ShadowingStatus     string
-		ShadowingAudioURL   *string
-		ShadowingError      *string
-		ShadowingUpdatedAt  time.Time
-		AudioAssetID        *string
-		PhotoAssetID        *string
-		ShadowingAssetID    *string
-	}
-	err := s.db.QueryRow(ctx, `
-		SELECT id, topic, duration, timestamp, status, transcript, corrected_transcript, suggestions,
-		       processing_stage, practice_type, audio_data_url, photo_data_url, photo_object, processing_error,
-		       shadowing_status, shadowing_audio_url, shadowing_error, shadowing_updated_at,
-		       audio_asset_id, photo_asset_id, shadowing_asset_id
-		FROM recordings
-		WHERE id = $1 AND user_id = $2
-		LIMIT 1`, strings.TrimSpace(recordingID), userID).Scan(&row.ID, &row.Topic, &row.Duration, &row.Timestamp, &row.Status, &row.Transcript, &row.CorrectedTranscript, &row.Suggestions, &row.ProcessingStage, &row.PracticeType, &row.AudioDataURL, &row.PhotoDataURL, &row.PhotoObject, &row.ProcessingError, &row.ShadowingStatus, &row.ShadowingAudioURL, &row.ShadowingError, &row.ShadowingUpdatedAt, &row.AudioAssetID, &row.PhotoAssetID, &row.ShadowingAssetID)
-	if err != nil {
-		return recordingResponse{}, err
-	}
+func recordingResponseFromUploadSession(created recordingsession.Recording) recordingResponse {
 	return recordingResponse{
-		ID:                  row.ID,
-		Topic:               row.Topic,
-		Duration:            domain.ToNonNegativeInt(row.Duration),
-		Timestamp:           row.Timestamp.UTC().Format(time.RFC3339Nano),
-		Status:              normalizeRecordingStatus(row.Status),
-		Transcript:          row.Transcript,
-		CorrectedTranscript: row.CorrectedTranscript,
-		Suggestions:         normalizeSuggestions(row.Suggestions, 0),
-		ProcessingStage:     normalizeRecordingProcessingStage(row.ProcessingStage),
-		PracticeType:        domain.NormalizePracticeType(row.PracticeType),
-		AudioDataURL:        normalizeOptionalAudio(row.AudioDataURL, true),
-		PhotoDataURL:        normalizeOptionalPhoto(row.PhotoDataURL),
-		PhotoObject:         normalizeOptionalPhotoObject(row.PhotoObject),
-		ProcessingError:     normalizeOptionalProcessingError(row.ProcessingError),
-		ShadowingStatus:     normalizeShadowingStatus(row.ShadowingStatus),
-		ShadowingAudioURL:   normalizeOptionalShadowingAudio(row.ShadowingAudioURL),
-		ShadowingError:      normalizeOptionalProcessingError(row.ShadowingError),
-		ShadowingUpdatedAt:  row.ShadowingUpdatedAt.UTC().Format(time.RFC3339Nano),
-		Media:               recordingMedia(row.AudioAssetID, row.PhotoAssetID, row.ShadowingAssetID),
-	}, nil
-}
-
-func normalizeRecordingStatus(value string) string {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "processing", "ready", "failed":
-		return strings.ToLower(strings.TrimSpace(value))
-	default:
-		return "ready"
+		ID: created.ID, Topic: created.Topic, Duration: domain.ToNonNegativeInt(created.Duration),
+		Timestamp: created.Timestamp.UTC().Format(time.RFC3339Nano), Status: normalizeRecordingStatus(created.Status),
+		Transcript: created.Transcript, CorrectedTranscript: created.CorrectedTranscript,
+		Suggestions:        normalizeSuggestions(created.SuggestionsJSON, 0),
+		ProcessingStage:    normalizeRecordingProcessingStage(created.ProcessingStage),
+		PracticeType:       domain.NormalizePracticeType(created.PracticeType),
+		AudioDataURL:       normalizeOptionalAudio(created.AudioDataURL, true),
+		PhotoDataURL:       normalizeOptionalPhoto(created.PhotoDataURL),
+		PhotoObject:        normalizeOptionalPhotoObject(created.PhotoObject),
+		ProcessingError:    normalizeOptionalProcessingError(created.ProcessingError),
+		ShadowingStatus:    normalizeShadowingStatus(created.ShadowingStatus),
+		ShadowingAudioURL:  normalizeOptionalShadowingAudio(created.ShadowingAudioURL),
+		ShadowingError:     normalizeOptionalProcessingError(created.ShadowingError),
+		ShadowingUpdatedAt: created.ShadowingUpdatedAt.UTC().Format(time.RFC3339Nano),
 	}
-}
-
-func normalizeRecordingProcessingStage(value *string) *string {
-	if value == nil {
-		return nil
-	}
-	normalized := strings.ToLower(strings.TrimSpace(*value))
-	switch normalized {
-	case "transcribing", "suggestions", "rewriting":
-		return &normalized
-	default:
-		return nil
-	}
-}
-
-func normalizeShadowingStatus(value string) string {
-	normalized := strings.ToLower(strings.TrimSpace(value))
-	switch normalized {
-	case "pending", "processing", "ready", "failed":
-		return normalized
-	default:
-		return "pending"
-	}
-}
-
-func normalizeOptionalShadowingAudio(value *string) *string {
-	if value == nil {
-		return nil
-	}
-	return domain.NormalizeStoredShadowingAudioSource(*value)
-}
-
-func normalizeOptionalProcessingError(value *string) *string {
-	if value == nil {
-		return nil
-	}
-	normalized := strings.TrimSpace(*value)
-	if normalized == "" {
-		return nil
-	}
-	return &normalized
 }
