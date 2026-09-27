@@ -49,6 +49,7 @@ type Config struct {
 	MediaPartSize            int64
 	MediaPresignTTL          time.Duration
 	LegacyUploads            storage.LegacyUploadStore
+	RecordingSessions        storage.RecordingSessionStore
 	TranscribeAudio          func(context.Context, string) (string, error)
 	ProbeAudioDuration       func(context.Context, string) (time.Duration, error)
 	Operations               operations.Config
@@ -58,6 +59,7 @@ type Server struct {
 	db                       *db.DB
 	jobStore                 *workqueue.Store
 	legacyUploads            storage.LegacyUploadStore
+	recordingSessions        storage.RecordingSessionStore
 	synthesizer              tts.Synthesizer
 	aiClient                 ai.ChatClient
 	practiceGenerator        practice.Generator
@@ -153,6 +155,10 @@ func NewServer(config Config) *Server {
 	if legacyUploads == nil {
 		legacyUploads = storage.NewLegacyUploads(resolveUploadsDir())
 	}
+	recordingSessions := config.RecordingSessions
+	if recordingSessions == nil {
+		recordingSessions = storage.NewLocalRecordingSessions(resolveUploadsDir())
+	}
 	mediaSigner, _ := media.NewURLSigner(signingSecret)
 	transcribeAudio := config.TranscribeAudio
 	if transcribeAudio == nil {
@@ -180,6 +186,7 @@ func NewServer(config Config) *Server {
 		db:                       config.DB,
 		jobStore:                 workqueue.NewStore(config.DB),
 		legacyUploads:            legacyUploads,
+		recordingSessions:        recordingSessions,
 		synthesizer:              synthesizer,
 		aiClient:                 aiClient,
 		practiceGenerator:        practiceGenerator,

@@ -237,6 +237,20 @@ test("recording deletion keeps cleanup policy outside HTTP and SQL adapters", ()
   assert.doesNotMatch(repository, /http\.Status|writeJSON/);
 });
 
+test("recording upload sessions keep filesystem work outside HTTP transport", () => {
+  const transport = readFileSync("backend/internal/httpapi/recording_sessions_handlers.go", "utf8");
+  const multipart = readFileSync("backend/internal/httpapi/recording_sessions_multipart.go", "utf8");
+  const store = readFileSync("backend/internal/storage/recording_sessions.go", "utf8");
+
+  assert.match(transport, /recordingSessions\.(SaveChunk|SaveFinal|Assemble|Remove)/);
+  assert.doesNotMatch(transport, /os\.WriteFile|os\.RemoveAll|recordingSessionChunksDir/);
+  assert.match(multipart, /ParseMultipartForm|FormFile/);
+  assert.doesNotMatch(multipart, /os\.WriteFile|os\.RemoveAll|MkdirAll/);
+  assert.match(store, /type RecordingSessionStore interface/);
+  assert.doesNotMatch(store, /net\/http|internal\/httpapi/);
+  assert.equal(existsSync("backend/internal/httpapi/recording_sessions_storage.go"), false);
+});
+
 test("guest preview separates transport, processing policy, and SQL storage", () => {
   const model = readFileSync("backend/internal/guestpreview/model.go", "utf8");
   const processor = readFileSync("backend/internal/guestpreview/processor.go", "utf8");

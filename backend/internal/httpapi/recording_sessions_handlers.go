@@ -135,7 +135,7 @@ func (s *Server) handleUploadRecordingSessionChunk(w http.ResponseWriter, r *htt
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Recording chunk format changed during upload."})
 		return
 	}
-	if _, err := saveRecordingSessionChunk(session.ID, chunk.Index, chunk.Extension, chunk.Bytes); err != nil {
+	if err := s.recordingSessions.SaveChunk(session.ID, chunk.Index, chunk.Extension, chunk.Bytes); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to save recording chunk."})
 		return
 	}
@@ -176,7 +176,7 @@ func (s *Server) handleUploadRecordingSessionAudio(w http.ResponseWriter, r *htt
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Recording audio is invalid."})
 		return
 	}
-	if _, err := saveRecordingSessionFinalAudio(session.ID, audio.Extension, audio.Bytes); err != nil {
+	if err := s.recordingSessions.SaveFinal(session.ID, audio.Extension, audio.Bytes); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to save recording audio."})
 		return
 	}
@@ -223,7 +223,14 @@ func (s *Server) handleFinishRecordingSession(w http.ResponseWriter, r *http.Req
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Recording upload session is already finalized."})
 		return
 	}
-	hasFinalAudio := session.AudioExtension != nil && recordingSessionFinalAudioExists(session.ID, *session.AudioExtension)
+	hasFinalAudio := false
+	if session.AudioExtension != nil {
+		hasFinalAudio, err = s.recordingSessions.FinalExists(session.ID, *session.AudioExtension)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to inspect recording audio."})
+			return
+		}
+	}
 	if session.AudioExtension == nil || !hasFinalAudio {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "Recording audio is still uploading."})
 		return
@@ -251,7 +258,7 @@ func (s *Server) handleFinishRecordingSession(w http.ResponseWriter, r *http.Req
 	recordingID := uuid.NewString()
 	processingJobID := uuid.NewString()
 	audioPath := filepath.Join(resolveUploadsDir(), "recordings", domain.SanitizePathSegment(user.ID), recordingID+"."+*session.AudioExtension)
-	if err := assembleRecordingSessionAudio(session.ID, *session.AudioExtension, session.ChunkCount, audioPath); err != nil {
+	if err := s.recordingSessions.Assemble(session.ID, *session.AudioExtension, session.ChunkCount, audioPath); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to assemble recording audio."})
 		return
 	}
@@ -391,7 +398,7 @@ func (s *Server) handleFinishRecordingSession(w http.ResponseWriter, r *http.Req
 		return
 	}
 	keepAudio = true
-	_ = os.RemoveAll(recordingSessionChunksDir(session.ID))
+	_ = s.recordingSessions.Remove(session.ID)
 	q := recordingQuotaAfterSave(qBefore, duration)
 	if refreshedQuota, quotaErr := quota.GetRecordingQuota(r.Context(), s.db, user.ID, &user.IsSubscriber); quotaErr == nil {
 		q = refreshedQuota
