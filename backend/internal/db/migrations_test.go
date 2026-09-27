@@ -187,6 +187,31 @@ func TestLegacySurfaceRemovalMigrationDropsRetiredSchema(t *testing.T) {
 	}
 }
 
+func TestShadowingMediaInvariantMigrationRepairsFalseReadyState(t *testing.T) {
+	catalog, err := migrations.All()
+	if err != nil {
+		t.Fatalf("load migrations: %v", err)
+	}
+	var sql string
+	for _, migration := range catalog {
+		if migration.Name == "0011_enforce_shadowing_media_invariant.sql" {
+			sql = migration.SQL
+			break
+		}
+	}
+	for _, fragment := range []string{
+		"SET shadowing_status = 'pending'",
+		"shadowing_status = 'ready'",
+		"shadowing_asset_id IS NULL",
+		"ADD CONSTRAINT recordings_shadowing_ready_asset_check",
+		"shadowing_status <> 'ready' OR shadowing_asset_id IS NOT NULL",
+	} {
+		if !strings.Contains(sql, fragment) {
+			t.Fatalf("shadowing invariant migration missing %q", fragment)
+		}
+	}
+}
+
 func TestMigrateConcurrentAndRetiresHistoricalSchema(t *testing.T) {
 	databaseURL := strings.TrimSpace(os.Getenv("TEST_DATABASE_URL"))
 	if databaseURL == "" {
@@ -212,10 +237,14 @@ func TestMigrateConcurrentAndRetiresHistoricalSchema(t *testing.T) {
 					t.Fatalf("insert legacy user: %v", err)
 				}
 				if _, err := database.Exec(ctx, `
-					INSERT INTO recordings (id, user_id, topic, duration, timestamp, transcript, audio_data_url)
+					INSERT INTO recordings
+					  (id, user_id, topic, duration, timestamp, transcript, corrected_transcript,
+					   audio_data_url, shadowing_status, shadowing_audio_url)
 					VALUES
-					  ($1, $3, 'Legacy file', 10, NOW(), '', '/uploads/recordings/owner/legacy.webm'),
-					  ($2, $3, 'Inline data', 5, NOW(), '', 'data:audio/webm;base64,AAAA')`, legacyRecordingID, dataURLRecordingID, userID); err != nil {
+					  ($1, $3, 'Legacy file', 10, NOW(), '', 'A corrected sentence.',
+					   '/uploads/recordings/owner/legacy.webm', 'ready', '/uploads/shadowing/owner/legacy.mp3'),
+					  ($2, $3, 'Inline data', 5, NOW(), '', '',
+					   'data:audio/webm;base64,AAAA', 'pending', NULL)`, legacyRecordingID, dataURLRecordingID, userID); err != nil {
 					t.Fatalf("insert legacy recordings: %v", err)
 				}
 				if _, err := database.Exec(ctx, `
@@ -258,12 +287,25 @@ func TestMigrateConcurrentAndRetiresHistoricalSchema(t *testing.T) {
 				if err := database.QueryRow(ctx, `SELECT kind FROM principals WHERE id = $1 AND user_id = $1`, userID).Scan(&principalKind); err != nil || principalKind != "user" {
 					t.Fatalf("legacy user principal was not backfilled: kind=%q err=%v", principalKind, err)
 				}
-				var recordingAssetID *string
-				if err := database.QueryRow(ctx, `SELECT audio_asset_id FROM recordings WHERE id = $1`, legacyRecordingID).Scan(&recordingAssetID); err != nil {
+				var recordingAssetID, shadowingAssetID *string
+				var shadowingStatus string
+				if err := database.QueryRow(ctx, `
+					SELECT audio_asset_id, shadowing_asset_id, shadowing_status
+					FROM recordings WHERE id = $1`, legacyRecordingID).Scan(
+					&recordingAssetID, &shadowingAssetID, &shadowingStatus,
+				); err != nil {
 					t.Fatalf("load retained recording: %v", err)
 				}
 				if recordingAssetID != nil {
 					t.Fatalf("retired public media asset was retained: %v", recordingAssetID)
+				}
+				if shadowingAssetID != nil || shadowingStatus != "pending" {
+					t.Fatalf("retired shadowing media was not queued for regeneration: asset=%v status=%q", shadowingAssetID, shadowingStatus)
+				}
+				if _, err := database.Exec(ctx, `
+					UPDATE recordings SET shadowing_status = 'ready', shadowing_asset_id = NULL
+					WHERE id = $1`, legacyRecordingID); err == nil {
+					t.Fatal("database accepted shadowing ready without a private media asset")
 				}
 				var dataURLAssetID *string
 				if err := database.QueryRow(ctx, `SELECT audio_asset_id FROM recordings WHERE id = $1`, dataURLRecordingID).Scan(&dataURLAssetID); err != nil || dataURLAssetID != nil {
