@@ -7,7 +7,6 @@ import (
 	"math"
 	"time"
 
-	"daily-speaking-practice/backend/internal/domain"
 	"daily-speaking-practice/backend/internal/recording"
 )
 
@@ -85,7 +84,7 @@ func (p *Processor) Process(ctx context.Context, job Job) error {
 		if err != nil {
 			return fmt.Errorf("transcribe guest preview: %w", err)
 		}
-		transcript = domain.NormalizeTranscript(transcript)
+		transcript = recording.NormalizeTranscript(transcript)
 		if transcript == "" {
 			return errors.New("guest preview transcription is empty")
 		}

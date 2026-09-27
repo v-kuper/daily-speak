@@ -5,8 +5,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-
-	"daily-speaking-practice/backend/internal/domain"
 )
 
 const defaultAnalysisConcurrency = 3
@@ -58,7 +56,7 @@ func extractRussianPhrases(transcript string) []string {
 
 func containsCyrillic(value string) bool               { return cyrillicPhrasePattern.MatchString(value) }
 func containsLatinLetter(value string) bool            { return latinLetterPattern.MatchString(value) }
-func recordingTranscriptForPrompt(value string) string { return domain.NormalizeTranscript(value) }
+func recordingTranscriptForPrompt(value string) string { return NormalizeTranscript(value) }
 func learningReferenceFor(ruleID string, category suggestionCategory) *LearningReference {
 	return ReferenceFor(ruleID, category)
 }

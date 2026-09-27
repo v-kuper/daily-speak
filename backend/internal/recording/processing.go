@@ -6,8 +6,6 @@ import (
 	"math"
 	"strings"
 	"time"
-
-	"daily-speaking-practice/backend/internal/domain"
 )
 
 const (
@@ -140,7 +138,7 @@ func (p *Processor) transcribe(ctx context.Context, job ProcessingJob, work Proc
 	if err != nil {
 		return err
 	}
-	transcript = domain.NormalizeTranscript(transcript)
+	transcript = NormalizeTranscript(transcript)
 	if transcript == "" {
 		return errors.New("Whisper returned an empty transcript. Try speaking louder or recording again.")
 	}

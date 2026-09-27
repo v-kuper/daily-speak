@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"daily-speaking-practice/backend/internal/ai"
-	"daily-speaking-practice/backend/internal/domain"
 	"daily-speaking-practice/backend/internal/logging"
+	"daily-speaking-practice/backend/internal/media"
 	"daily-speaking-practice/backend/internal/profile"
 	"daily-speaking-practice/backend/internal/recording"
 	"daily-speaking-practice/backend/internal/subscription"
@@ -194,21 +194,21 @@ func normalizeOptionalAudio(value *string, recordingOnly bool) *string {
 		return nil
 	}
 	if recordingOnly {
-		return domain.NormalizeStoredRecordingAudioSource(*value)
+		return media.NormalizeStoredRecordingAudioSource(*value)
 	}
-	return domain.NormalizeStoredGenericAudioSource(*value)
+	return media.NormalizeStoredGenericAudioSource(*value)
 }
 
 func normalizeOptionalPhoto(value *string) *string {
 	if value == nil {
 		return nil
 	}
-	return domain.NormalizePhotoDataURL(*value)
+	return media.NormalizePhotoDataURL(*value)
 }
 
 func normalizeOptionalPhotoObject(value *string) *string {
 	if value == nil {
 		return nil
 	}
-	return domain.NormalizePhotoObject(*value)
+	return media.NormalizePhotoObject(*value)
 }

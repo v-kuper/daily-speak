@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"daily-speaking-practice/backend/internal/domain"
+	"daily-speaking-practice/backend/internal/learner"
 )
 
 func (s *Service) TopicGuidance(ctx context.Context, input TopicGuidanceInput) (TopicGuidanceResult, error) {
@@ -16,17 +16,17 @@ func (s *Service) TopicGuidance(ctx context.Context, input TopicGuidanceInput) (
 	if len([]rune(topic)) > 300 {
 		return TopicGuidanceResult{}, ErrTopicTooLong
 	}
-	level := domain.NormalizeEnglishLevel(input.EnglishLevel)
-	interests := domain.NormalizeInterests(input.Interests, 10)
+	level := learner.NormalizeEnglishLevel(input.EnglishLevel)
+	interests := learner.NormalizeInterests(input.Interests, 10)
 	avoidQuestionsRaw := normalizeQuestions(input.AvoidQuestions, 0)
 	avoidWordsRaw := normalizeWords(input.AvoidWords)
 	avoidQuestions := lowerSet(avoidQuestionsRaw)
 	avoidWords := lowerSet(avoidWordsRaw)
 	topicQuestion := lowerSet(normalizeQuestions([]string{topic}, 0))
 	seed := absMod(
-		domain.HashString(strings.ToLower(topic))*131+
-			domain.HashString(strings.ToLower(strings.Join(interests, "|")))*17+
-			domain.HashString(level)*19+domain.HashString(input.RefreshToken),
+		hashString(strings.ToLower(topic))*131+
+			hashString(strings.ToLower(strings.Join(interests, "|")))*17+
+			hashString(level)*19+hashString(input.RefreshToken),
 		maxSeed,
 	)
 

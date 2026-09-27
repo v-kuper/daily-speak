@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"daily-speaking-practice/backend/internal/db"
-	"daily-speaking-practice/backend/internal/domain"
+	"daily-speaking-practice/backend/internal/learner"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -113,7 +113,7 @@ func RegisterUser(ctx context.Context, database *db.DB, email string, password s
 		}
 		return User{}, err
 	}
-	return User{ID: id, Email: email, IsSubscriber: false, EnglishLevel: domain.DefaultEnglishLevel}, nil
+	return User{ID: id, Email: email, IsSubscriber: false, EnglishLevel: learner.DefaultEnglishLevel}, nil
 }
 
 func LoginUser(ctx context.Context, database *db.DB, email string, password string) (User, error) {
@@ -140,9 +140,9 @@ func LoginUser(ctx context.Context, database *db.DB, email string, password stri
 	if !VerifyPassword(password, row.PasswordHash) {
 		return User{}, HTTPError{Message: "Invalid email or password.", Status: 401}
 	}
-	level := domain.DefaultEnglishLevel
+	level := learner.DefaultEnglishLevel
 	if row.EnglishLevel != nil {
-		level = domain.NormalizeEnglishLevel(*row.EnglishLevel)
+		level = learner.NormalizeEnglishLevel(*row.EnglishLevel)
 	}
 	return User{ID: row.ID, Email: row.Email, IsSubscriber: row.IsSubscriber, EnglishLevel: level}, nil
 }

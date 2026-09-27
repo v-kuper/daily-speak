@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"daily-speaking-practice/backend/internal/domain"
 	"daily-speaking-practice/backend/internal/quota"
 	"github.com/google/uuid"
 )
@@ -225,7 +224,7 @@ func (e *QuotaViolation) Error() string {
 
 func ValidateQuota(current quota.RecordingQuota, duration int) *QuotaViolation {
 	if current.IsSubscriber {
-		if duration > domain.SubscriberMaxSessionSeconds {
+		if duration > quota.SubscriberMaxSessionSeconds {
 			return &QuotaViolation{SubscriberLimit: true}
 		}
 		return nil
@@ -242,10 +241,10 @@ func ValidateQuota(current quota.RecordingQuota, duration int) *QuotaViolation {
 
 func QuotaAfterCreate(before quota.RecordingQuota, duration int) quota.RecordingQuota {
 	after := before
-	savedSeconds := domain.ToNonNegativeInt(duration)
-	after.WeeklyUsedSeconds = domain.ToNonNegativeInt(before.WeeklyUsedSeconds) + savedSeconds
+	savedSeconds := NormalizeDurationSeconds(duration)
+	after.WeeklyUsedSeconds = NormalizeDurationSeconds(before.WeeklyUsedSeconds) + savedSeconds
 	if before.WeeklyRemainingSeconds != nil {
-		remaining := domain.ToNonNegativeInt(*before.WeeklyRemainingSeconds) - savedSeconds
+		remaining := NormalizeDurationSeconds(*before.WeeklyRemainingSeconds) - savedSeconds
 		if remaining < 0 {
 			remaining = 0
 		}

@@ -4,8 +4,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-
-	"daily-speaking-practice/backend/internal/domain"
 )
 
 type SavedFile struct {
@@ -21,9 +19,9 @@ func (s *LocalSaver) Save(userID, recordingID, attemptID string, audio []byte) (
 	if len(audio) == 0 || len(audio) > MaxAudioBytes {
 		return SavedFile{}, errors.New("shadowing audio payload is invalid")
 	}
-	userSegment := domain.SanitizePathSegment(userID)
-	recordingSegment := domain.SanitizePathSegment(recordingID)
-	attemptSegment := domain.SanitizePathSegment(attemptID)
+	userSegment := sanitizePathSegment(userID)
+	recordingSegment := sanitizePathSegment(recordingID)
+	attemptSegment := sanitizePathSegment(attemptID)
 	directory := filepath.Join(s.root, "shadowing", userSegment)
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		return SavedFile{}, err

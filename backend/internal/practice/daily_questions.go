@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"daily-speaking-practice/backend/internal/domain"
+	"daily-speaking-practice/backend/internal/learner"
 )
 
 var (
@@ -19,8 +19,8 @@ func (s *Service) DailyQuestions(ctx context.Context, input DailyQuestionsInput)
 	if !dateKeyPattern.MatchString(input.DateKey) {
 		return DailyQuestionsResult{}, ErrInvalidDateKey
 	}
-	level := domain.NormalizeEnglishLevel(input.EnglishLevel)
-	interests := domain.NormalizeInterests(input.Interests, 10)
+	level := learner.NormalizeEnglishLevel(input.EnglishLevel)
+	interests := learner.NormalizeInterests(input.Interests, 10)
 	avoidQuestions := normalizeQuestions(input.AvoidQuestions, dailyQuestionsCount)
 	avoidLower := lowerSet(avoidQuestions)
 
@@ -34,8 +34,8 @@ func (s *Service) DailyQuestions(ctx context.Context, input DailyQuestionsInput)
 		}
 	}
 	seed := absMod(
-		dateSeed*131+domain.HashString(strings.ToLower(strings.Join(interests, "|")))*17+
-			domain.HashString(level)*19+refreshSeed,
+		dateSeed*131+hashString(strings.ToLower(strings.Join(interests, "|")))*17+
+			hashString(level)*19+refreshSeed,
 		maxSeed,
 	)
 

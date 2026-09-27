@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"daily-speaking-practice/backend/internal/auth"
-	"daily-speaking-practice/backend/internal/domain"
+	"daily-speaking-practice/backend/internal/learner"
 	"daily-speaking-practice/backend/internal/recording"
 )
 
@@ -155,7 +155,7 @@ func validSuggestionSeverity(severity suggestionSeverity) bool {
 }
 
 func normalizeURLInterests(values url.Values) []string {
-	return domain.NormalizeInterests(domain.URLQueryAll(values, "interest"), 10)
+	return learner.NormalizeInterests(values["interest"], 10)
 }
 
 func errorMessage(err error, fallback string) string {

@@ -3,8 +3,16 @@ package feed
 import (
 	"net/mail"
 	"strings"
+	"time"
 	"unicode"
 )
+
+func parseTimestamp(value string) time.Time {
+	if parsed, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(value)); err == nil {
+		return parsed.UTC()
+	}
+	return time.Now().UTC()
+}
 
 func nonNegative(value int) int {
 	if value < 0 {

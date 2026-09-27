@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"daily-speaking-practice/backend/internal/db"
-	"daily-speaking-practice/backend/internal/domain"
+	"daily-speaking-practice/backend/internal/learner"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -103,7 +103,7 @@ func RegisterIdentityUser(ctx context.Context, database *db.DB, config TokenConf
 	if err != nil {
 		return TokenGrant{}, err
 	}
-	user := User{ID: uuid.NewString(), Email: credentials.Email, EnglishLevel: domain.DefaultEnglishLevel}
+	user := User{ID: uuid.NewString(), Email: credentials.Email, EnglishLevel: learner.DefaultEnglishLevel}
 	tx, err := database.Begin(ctx)
 	if err != nil {
 		return TokenGrant{}, err
@@ -244,9 +244,9 @@ func AuthenticateAccessToken(ctx context.Context, database *db.DB, config TokenC
 		if row.UserID == nil {
 			return nil, ErrInvalidAccessToken
 		}
-		level := domain.DefaultEnglishLevel
+		level := learner.DefaultEnglishLevel
 		if row.EnglishLevel != nil {
-			level = domain.NormalizeEnglishLevel(*row.EnglishLevel)
+			level = learner.NormalizeEnglishLevel(*row.EnglishLevel)
 		}
 		identity.User = &User{ID: *row.UserID, Email: row.Email, IsSubscriber: row.IsSubscriber, EnglishLevel: level}
 	}

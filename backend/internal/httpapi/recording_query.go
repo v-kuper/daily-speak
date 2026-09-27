@@ -7,7 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"daily-speaking-practice/backend/internal/domain"
+	"daily-speaking-practice/backend/internal/media"
+	"daily-speaking-practice/backend/internal/practice"
 	"daily-speaking-practice/backend/internal/recording"
 )
 
@@ -42,14 +43,14 @@ func recordingResponseFromRecord(record recording.Record) recordingResponse {
 	return recordingResponse{
 		ID:                  record.ID,
 		Topic:               record.Topic,
-		Duration:            domain.ToNonNegativeInt(record.Duration),
+		Duration:            recording.NormalizeDurationSeconds(record.Duration),
 		Timestamp:           record.Timestamp.UTC().Format(time.RFC3339Nano),
 		Status:              normalizeRecordingStatus(record.Status),
 		Transcript:          record.Transcript,
 		CorrectedTranscript: record.CorrectedTranscript,
 		Suggestions:         normalizeSuggestions(record.SuggestionsJSON, 0),
 		ProcessingStage:     normalizeRecordingProcessingStage(record.ProcessingStage),
-		PracticeType:        domain.NormalizePracticeType(record.PracticeType),
+		PracticeType:        practice.NormalizeType(record.PracticeType),
 		AudioDataURL:        normalizeOptionalAudio(record.AudioDataURL, true),
 		PhotoDataURL:        normalizeOptionalPhoto(record.PhotoDataURL),
 		PhotoObject:         normalizeOptionalPhotoObject(record.PhotoObject),
@@ -98,7 +99,7 @@ func normalizeOptionalShadowingAudio(value *string) *string {
 	if value == nil {
 		return nil
 	}
-	return domain.NormalizeStoredShadowingAudioSource(*value)
+	return media.NormalizeStoredShadowingAudioSource(*value)
 }
 
 func normalizeOptionalProcessingError(value *string) *string {

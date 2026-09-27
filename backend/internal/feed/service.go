@@ -5,7 +5,8 @@ import (
 	"errors"
 	"strings"
 
-	"daily-speaking-practice/backend/internal/domain"
+	"daily-speaking-practice/backend/internal/media"
+	"daily-speaking-practice/backend/internal/quota"
 )
 
 var (
@@ -30,7 +31,7 @@ type Repository interface {
 }
 
 type ReplyAudioStore interface {
-	Save(context.Context, string, string, *domain.ParsedAudioDataURL) (string, func(), error)
+	Save(context.Context, string, string, *media.ParsedAudioDataURL) (string, func(), error)
 }
 
 type ReactionTarget string
@@ -78,7 +79,7 @@ func (service *Service) CreateReply(ctx context.Context, input CreateReplyInput)
 	if input.Duration <= 0 {
 		return CreateReplyResult{}, ErrInvalidReply
 	}
-	audio := domain.ParseIncomingAudioDataURL(input.AudioDataURL)
+	audio := media.ParseIncomingAudioDataURL(input.AudioDataURL)
 	if audio == nil {
 		return CreateReplyResult{}, ErrVoiceReplyRequired
 	}
@@ -126,16 +127,16 @@ func (service *Service) available() bool {
 	return service != nil && service.repository != nil && service.newID != nil
 }
 
-func validateQuota(quota Quota, duration int) error {
-	if quota.IsSubscriber {
-		if duration > domain.SubscriberMaxSessionSeconds {
+func validateQuota(current Quota, duration int) error {
+	if current.IsSubscriber {
+		if duration > quota.SubscriberMaxSessionSeconds {
 			return ErrSubscriberTooLong
 		}
 		return nil
 	}
 	remaining := 0
-	if quota.WeeklyRemainingSeconds != nil {
-		remaining = *quota.WeeklyRemainingSeconds
+	if current.WeeklyRemainingSeconds != nil {
+		remaining = *current.WeeklyRemainingSeconds
 	}
 	if duration > remaining {
 		return ErrFreeQuotaExceeded

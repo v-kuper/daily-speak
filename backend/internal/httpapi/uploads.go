@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"strings"
 
-	"daily-speaking-practice/backend/internal/domain"
+	"daily-speaking-practice/backend/internal/media"
 )
 
 const uploadsURLPrefix = "/uploads/"
@@ -36,7 +36,7 @@ func (s *Server) handleShadowingUpload(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
 		return
 	}
-	publicURL := domain.NormalizeStoredShadowingAudioSource(r.URL.Path)
+	publicURL := media.NormalizeStoredShadowingAudioSource(r.URL.Path)
 	if publicURL == nil || *publicURL != r.URL.Path {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Not found"})
 		return

@@ -134,9 +134,11 @@ backend/internal/auth        unified web/mobile identity and token lifecycle
 backend/internal/db          PostgreSQL connection and migrations
 backend/internal/httpapi     HTTP transport, authorization gates, response mapping
 backend/internal/feed        retained Feed service, persistence, and reply-media adapter
+backend/internal/learner     shared learner level and interest vocabulary
 backend/internal/media       authorized media lifecycle
 backend/internal/practice    speaking-practice generation application service
 backend/internal/practice/ollamaadapter  Ollama adapter for the practice port
+backend/internal/quota       recording quota policy and formatting
 backend/internal/recording   recording creation, deletion, processing, analysis
 backend/internal/guestpreview     bounded anonymous preview lifecycle
 backend/internal/shadowing        pronunciation generation lifecycle
@@ -151,9 +153,12 @@ backend/docs                 generated OpenAPI and Swagger assets
 ```
 
 Production SQL and transaction management live in feature repositories rather
-than `backend/internal/httpapi`. Remaining composition and helper ownership work
-is tracked in [`TECH_DEBT.md`](TECH_DEBT.md); new business rules must not be
-added to the transport package.
+than `backend/internal/httpapi`. Cross-feature vocabulary has an explicit
+owner: learner data belongs to `learner`, quota rules to `quota`, media formats
+to `media`, practice normalization to `practice`, recording text to
+`recording`, and local shadowing paths to `shadowing`. There is no catch-all
+domain or utilities package. New business rules must not be added to the
+transport or composition packages.
 
 ## Retained Feed backend
 

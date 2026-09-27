@@ -2,12 +2,33 @@ package quota
 
 import (
 	"context"
+	"strconv"
 	"time"
 
 	"daily-speaking-practice/backend/internal/db"
-	"daily-speaking-practice/backend/internal/domain"
 	"github.com/jackc/pgx/v5"
 )
+
+const (
+	FreeWeeklyLimitSeconds      = 10 * 60
+	SubscriberMaxSessionSeconds = 10 * 60
+)
+
+func nonNegative(value int) int {
+	if value < 0 {
+		return 0
+	}
+	return value
+}
+
+func FormatSeconds(seconds int) string {
+	seconds = nonNegative(seconds)
+	minutes, rest := seconds/60, seconds%60
+	if rest < 10 {
+		return strconv.Itoa(minutes) + ":0" + strconv.Itoa(rest)
+	}
+	return strconv.Itoa(minutes) + ":" + strconv.Itoa(rest)
+}
 
 type RecordingQuota struct {
 	IsSubscriber           bool `json:"isSubscriber"`
@@ -38,11 +59,11 @@ func LockRecordingQuota(ctx context.Context, tx pgx.Tx, userID string, now time.
 		  AND created_at < date_trunc('week', $2::timestamptz) + INTERVAL '1 week'`, userID, now).Scan(&usedSeconds); err != nil {
 		return RecordingQuota{}, err
 	}
-	usedSeconds = domain.ToNonNegativeInt(usedSeconds)
+	usedSeconds = nonNegative(usedSeconds)
 	if isSubscriber {
-		return RecordingQuota{IsSubscriber: true, WeeklyUsedSeconds: usedSeconds, MaxSessionSeconds: domain.SubscriberMaxSessionSeconds}, nil
+		return RecordingQuota{IsSubscriber: true, WeeklyUsedSeconds: usedSeconds, MaxSessionSeconds: SubscriberMaxSessionSeconds}, nil
 	}
-	limit := domain.FreeWeeklyLimitSeconds
+	limit := FreeWeeklyLimitSeconds
 	remaining := limit - usedSeconds
 	if remaining < 0 {
 		remaining = 0
@@ -51,7 +72,7 @@ func LockRecordingQuota(ctx context.Context, tx pgx.Tx, userID string, now time.
 		WeeklyLimitSeconds:     &limit,
 		WeeklyUsedSeconds:      usedSeconds,
 		WeeklyRemainingSeconds: &remaining,
-		MaxSessionSeconds:      domain.SubscriberMaxSessionSeconds,
+		MaxSessionSeconds:      SubscriberMaxSessionSeconds,
 	}, nil
 }
 
@@ -83,22 +104,22 @@ func GetRecordingQuota(ctx context.Context, database *db.DB, userID string, know
 		return RecordingQuota{
 			IsSubscriber:           true,
 			WeeklyLimitSeconds:     nil,
-			WeeklyUsedSeconds:      domain.ToNonNegativeInt(usedSeconds),
+			WeeklyUsedSeconds:      nonNegative(usedSeconds),
 			WeeklyRemainingSeconds: nil,
-			MaxSessionSeconds:      domain.SubscriberMaxSessionSeconds,
+			MaxSessionSeconds:      SubscriberMaxSessionSeconds,
 		}, nil
 	}
 
-	limit := domain.FreeWeeklyLimitSeconds
-	remaining := limit - domain.ToNonNegativeInt(usedSeconds)
+	limit := FreeWeeklyLimitSeconds
+	remaining := limit - nonNegative(usedSeconds)
 	if remaining < 0 {
 		remaining = 0
 	}
 	return RecordingQuota{
 		IsSubscriber:           false,
 		WeeklyLimitSeconds:     &limit,
-		WeeklyUsedSeconds:      domain.ToNonNegativeInt(usedSeconds),
+		WeeklyUsedSeconds:      nonNegative(usedSeconds),
 		WeeklyRemainingSeconds: &remaining,
-		MaxSessionSeconds:      domain.SubscriberMaxSessionSeconds,
+		MaxSessionSeconds:      SubscriberMaxSessionSeconds,
 	}, nil
 }

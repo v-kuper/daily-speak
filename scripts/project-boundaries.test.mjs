@@ -266,14 +266,16 @@ test("HTTP transport contains no production SQL and Feed owns its persistence", 
   const feedHandler = readFileSync("backend/internal/httpapi/feed_handlers.go", "utf8");
   const feedService = readFileSync("backend/internal/feed/service.go", "utf8");
   const feedRepository = readFileSync("backend/internal/feed/repository.go", "utf8");
+  const feedReactionRepository = readFileSync("backend/internal/feed/reaction_repository.go", "utf8");
 
   assert.doesNotMatch(transport, /\bSELECT\b|\bINSERT INTO\b|\bUPDATE\b|\bDELETE FROM\b|s\.db\.(?:Query|QueryRow|Exec|Begin)\(/);
   assert.match(feedHandler, /feedService\.(?:ListPosts|PublishRecording|GetThread|CreateReply|SetReaction)/);
   assert.doesNotMatch(feedHandler, /pgx|internal\/db|os\.WriteFile|os\.Remove/);
   assert.match(feedService, /type Repository interface|type ReplyAudioStore interface/);
   assert.doesNotMatch(feedService, /net\/http|internal\/httpapi|SELECT |INSERT INTO|UPDATE |DELETE FROM|pgx/);
-  assert.match(feedRepository, /FROM feed_posts|INSERT INTO feed_replies|feed_post_reactions/);
-  assert.doesNotMatch(feedRepository, /net\/http|internal\/httpapi|writeJSON/);
+  assert.match(feedRepository, /FROM feed_posts|INSERT INTO feed_replies/);
+  assert.match(feedReactionRepository, /feed_post_reactions|feed_reply_reactions/);
+  assert.doesNotMatch(feedRepository + feedReactionRepository, /net\/http|internal\/httpapi|writeJSON/);
 });
 
 test("API dependency construction lives in the application composition root", () => {
@@ -292,13 +294,36 @@ test("API dependency construction lives in the application composition root", ()
 test("media ownership and guest policy stay in the media application service", () => {
   const transport = readFileSync("backend/internal/httpapi/media_v1.go", "utf8");
   const service = readFileSync("backend/internal/media/service.go", "utf8");
+  const uploadPolicy = readFileSync("backend/internal/media/upload_policy.go", "utf8");
   const model = readFileSync("backend/internal/media/media.go", "utf8");
 
   assert.match(transport, /media\.DownloadInput/);
   assert.doesNotMatch(transport, /requiredMediaUserV1|identity\.Kind\s*!=\s*"user"|PurposeGuestPreviewAudio/);
   assert.match(service, /input\.OwnerKind[\s\S]*ErrAccountRequired/);
-  assert.match(service, /input\.OwnerKind\s*==\s*"guest"[\s\S]*PurposeGuestPreviewAudio/);
+  assert.match(uploadPolicy, /input\.OwnerKind\s*==\s*"guest"[\s\S]*PurposeGuestPreviewAudio/);
   assert.match(model, /func \(asset Asset\) ClientPurpose\(\)/);
+});
+
+test("feature packages own shared vocabulary instead of a catch-all domain package", () => {
+  assert.equal(existsSync("backend/internal/domain/domain.go"), false);
+  for (const path of [
+    "backend/internal/learner/learner.go",
+    "backend/internal/media/format.go",
+    "backend/internal/media/upload_policy.go",
+    "backend/internal/practice/normalization_shared.go",
+    "backend/internal/quota/quota.go",
+    "backend/internal/recording/normalization.go",
+    "backend/internal/shadowing/path.go",
+    "backend/internal/feed/reaction_repository.go",
+  ]) {
+    assert.equal(existsSync(path), true, `missing feature-owned module ${path}`);
+  }
+
+  const productionGo = readdirSync("backend/internal", { recursive: true })
+    .filter((name) => name.endsWith(".go") && !name.endsWith("_test.go"))
+    .map((name) => readFileSync(`backend/internal/${name}`, "utf8"))
+    .join("\n");
+  assert.doesNotMatch(productionGo, /internal\/domain/);
 });
 
 test("guest preview separates transport, processing policy, and SQL storage", () => {

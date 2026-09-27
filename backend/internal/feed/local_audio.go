@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"daily-speaking-practice/backend/internal/domain"
+	"daily-speaking-practice/backend/internal/media"
 )
 
 type LocalReplyAudioStore struct {
@@ -17,7 +17,7 @@ func NewLocalReplyAudioStore(root string) *LocalReplyAudioStore {
 	return &LocalReplyAudioStore{root: filepath.Clean(root)}
 }
 
-func (store *LocalReplyAudioStore) Save(_ context.Context, ownerID string, replyID string, audio *domain.ParsedAudioDataURL) (string, func(), error) {
+func (store *LocalReplyAudioStore) Save(_ context.Context, ownerID string, replyID string, audio *media.ParsedAudioDataURL) (string, func(), error) {
 	if store == nil || store.root == "" || audio == nil {
 		return "", nil, ErrReplyStorage
 	}
@@ -25,8 +25,8 @@ func (store *LocalReplyAudioStore) Save(_ context.Context, ownerID string, reply
 	fileName := sanitizePathSegment(replyID) + "." + audio.Extension
 	directory := filepath.Join(store.root, "feed-replies", ownerDir)
 	absolutePath := filepath.Join(directory, fileName)
-	data, err := domain.DecodeBase64(audio.Base64)
-	if err != nil || len(data) <= 0 || len(data) > domain.MaxAudioUploadBytes {
+	data, err := media.DecodeBase64(audio.Base64)
+	if err != nil || len(data) <= 0 || len(data) > media.MaxAudioUploadBytes {
 		return "", nil, errors.New("audio payload is invalid")
 	}
 	if err := os.MkdirAll(directory, 0o755); err != nil {

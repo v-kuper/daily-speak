@@ -5,13 +5,14 @@ import (
 	"errors"
 	"testing"
 
-	"daily-speaking-practice/backend/internal/domain"
+	"daily-speaking-practice/backend/internal/media"
+	"daily-speaking-practice/backend/internal/quota"
 )
 
 func TestCreateReplyAppliesQuotaAndRollsBackStoredAudioOnPersistenceFailure(t *testing.T) {
 	remaining := 60
 	repository := &repositoryStub{
-		quota:          Quota{WeeklyRemainingSeconds: &remaining, MaxSessionSeconds: domain.SubscriberMaxSessionSeconds},
+		quota:          Quota{WeeklyRemainingSeconds: &remaining, MaxSessionSeconds: quota.SubscriberMaxSessionSeconds},
 		createReplyErr: errors.New("database unavailable"),
 	}
 	audio := &audioStoreStub{}
@@ -98,7 +99,7 @@ type audioStoreStub struct {
 	rolledBack bool
 }
 
-func (store *audioStoreStub) Save(context.Context, string, string, *domain.ParsedAudioDataURL) (string, func(), error) {
+func (store *audioStoreStub) Save(context.Context, string, string, *media.ParsedAudioDataURL) (string, func(), error) {
 	store.saved = true
 	return "/uploads/feed-replies/user-id/reply-id.webm", func() { store.rolledBack = true }, nil
 }

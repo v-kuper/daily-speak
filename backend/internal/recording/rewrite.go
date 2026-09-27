@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"daily-speaking-practice/backend/internal/aiparse"
-	"daily-speaking-practice/backend/internal/domain"
+	"daily-speaking-practice/backend/internal/learner"
 )
 
 var ErrRewrite = errors.New("The natural English version could not be generated. Please try again later.")
@@ -26,7 +26,7 @@ func (s *AnalysisService) Rewrite(ctx context.Context, input RewriteInput, logge
 	if strings.TrimSpace(input.Transcript) == "" {
 		return "", ErrRewrite
 	}
-	seed := absMod(domain.HashString(input.Transcript)*193+domain.HashString(input.EnglishLevel)*29, 2147483647)
+	seed := absMod(hashString(input.Transcript)*193+hashString(input.EnglishLevel)*29, 2147483647)
 	prompt := recordingNaturalVersionPrompt(input.Transcript, input.Suggestions, input.EnglishLevel)
 	for attempt := 0; attempt < 2; attempt++ {
 		strictJSON := attempt > 0
@@ -61,7 +61,7 @@ func parseNaturalTranscriptFromContent(content string) string {
 			}
 			var value string
 			if json.Unmarshal(raw, &value) == nil {
-				if normalized := domain.NormalizeTranscript(value); normalized != "" && !containsCyrillic(normalized) {
+				if normalized := NormalizeTranscript(value); normalized != "" && !containsCyrillic(normalized) {
 					return normalized
 				}
 			}
@@ -82,7 +82,7 @@ func recordingNaturalVersionPrompt(transcript string, suggestions []Suggestion, 
 	}
 	suggestionsJSON, _ := json.Marshal(corrections)
 	return strings.Join([]string{
-		"Learner level: " + domain.FormatEnglishLevel(englishLevel) + ".",
+		"Learner level: " + learner.FormatEnglishLevel(englishLevel) + ".",
 		recordingNaturalVersionLevelGuidance(englishLevel),
 		"Rewrite the transcript as natural conversational English while you preserve the speaker's meaning, intent, and factual details.",
 		"Replace every Russian word or phrase with its supplied English correction so the result is English-only.",
@@ -96,7 +96,7 @@ func recordingNaturalVersionPrompt(transcript string, suggestions []Suggestion, 
 }
 
 func recordingNaturalVersionLevelGuidance(englishLevel string) string {
-	switch domain.NormalizeEnglishLevel(englishLevel) {
+	switch learner.NormalizeEnglishLevel(englishLevel) {
 	case "a1":
 		return "Use very simple everyday vocabulary and short spoken sentences."
 	case "a2":

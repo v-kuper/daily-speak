@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"daily-speaking-practice/backend/internal/db"
-	"daily-speaking-practice/backend/internal/domain"
+	"daily-speaking-practice/backend/internal/learner"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
@@ -96,9 +96,9 @@ func RotateRefreshToken(ctx context.Context, database *db.DB, config TokenConfig
 		if row.UserID == nil {
 			return TokenGrant{}, ErrInvalidRefreshToken
 		}
-		level := domain.DefaultEnglishLevel
+		level := learner.DefaultEnglishLevel
 		if row.EnglishLevel != nil {
-			level = domain.NormalizeEnglishLevel(*row.EnglishLevel)
+			level = learner.NormalizeEnglishLevel(*row.EnglishLevel)
 		}
 		identity.User = &User{ID: *row.UserID, Email: row.Email, IsSubscriber: row.IsSubscriber, EnglishLevel: level}
 	}

@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"daily-speaking-practice/backend/internal/domain"
+	"daily-speaking-practice/backend/internal/learner"
 )
 
 var ErrInvalidEnglishLevel = errors.New("English level is invalid.")
@@ -28,13 +28,13 @@ func (s *Service) EnglishLevel(ctx context.Context, userID string) (string, erro
 		return "", err
 	}
 	if value == nil {
-		return domain.DefaultEnglishLevel, nil
+		return learner.DefaultEnglishLevel, nil
 	}
-	return domain.NormalizeEnglishLevel(*value), nil
+	return learner.NormalizeEnglishLevel(*value), nil
 }
 
 func (s *Service) SaveEnglishLevel(ctx context.Context, userID string, value string) (string, error) {
-	normalized, ok := domain.ParseEnglishLevel(value)
+	normalized, ok := learner.ParseEnglishLevel(value)
 	if !ok {
 		return "", ErrInvalidEnglishLevel
 	}
@@ -45,7 +45,7 @@ func (s *Service) SaveEnglishLevel(ctx context.Context, userID string, value str
 }
 
 func (s *Service) ReplaceInterests(ctx context.Context, userID string, values []string) ([]string, error) {
-	normalized := domain.NormalizeInterests(values, 10)
+	normalized := learner.NormalizeInterests(values, 10)
 	if err := s.repository.ReplaceInterests(ctx, userID, normalized); err != nil {
 		return nil, err
 	}

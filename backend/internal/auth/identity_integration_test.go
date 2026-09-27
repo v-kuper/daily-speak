@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"daily-speaking-practice/backend/internal/db"
-	"daily-speaking-practice/backend/internal/domain"
+	"daily-speaking-practice/backend/internal/quota"
 	"daily-speaking-practice/backend/internal/workqueue"
 	"github.com/google/uuid"
 )
@@ -314,7 +314,7 @@ func TestGuestPreviewPromotionReservesAccountQuota(t *testing.T) {
 	if _, err := database.Exec(ctx, `
 		INSERT INTO recordings (id, user_id, topic, duration, timestamp, transcript)
 		VALUES ($1, $2, 'Existing usage', $3, NOW(), '')`,
-		uuid.NewString(), account.Identity.PrincipalID, domain.FreeWeeklyLimitSeconds-5); err != nil {
+		uuid.NewString(), account.Identity.PrincipalID, quota.FreeWeeklyLimitSeconds-5); err != nil {
 		t.Fatalf("insert existing quota usage: %v", err)
 	}
 

@@ -42,7 +42,7 @@ OpenAPI contract and architecture documentation current:
    lifecycle transitions are application policy rather than HTTP policy.
 5. **Completed:** Isolate the retained Feed backend behind its own repository and service
    boundary while keeping it absent from the web and mobile clients.
-6. Replace the catch-all `internal/domain` helpers with feature-owned helpers,
+6. **Completed:** Replace the catch-all `internal/domain` helpers with feature-owned helpers,
    then split large files only where the split follows a real responsibility.
 
 Architecture completion criteria:
@@ -114,8 +114,9 @@ Worker composition lives outside HTTP; local/S3 and legacy
 session files are injected adapters. Their HTTP handlers validate transport
 data, call a service, and map its result.
 
-Production HTTP transport no longer owns SQL or transactions. Keep that
-boundary enforced while finishing composition and feature-owned helpers.
+Production HTTP transport no longer owns SQL, transactions, dependency
+construction, or cross-feature utility code. Keep those boundaries enforced as
+new features are added.
 
 Each extraction must preserve routes, OpenAPI, persisted data, authorization,
 idempotency, retry behavior, and integration coverage. Avoid a single large

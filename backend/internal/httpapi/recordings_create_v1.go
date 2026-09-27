@@ -6,7 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"daily-speaking-practice/backend/internal/domain"
+	"daily-speaking-practice/backend/internal/practice"
+	"daily-speaking-practice/backend/internal/quota"
 	"daily-speaking-practice/backend/internal/recording"
 )
 
@@ -62,8 +63,8 @@ func (s *Server) handleCreateRecordingV1(w http.ResponseWriter, r *http.Request)
 	case errors.As(err, &quotaViolation) && quotaViolation.SubscriberLimit:
 		writeV1Error(w, r, http.StatusBadRequest, "quota_exceeded", "Subscribers can save recordings up to 10:00 per session.")
 	case errors.As(err, &quotaViolation):
-		message := "Weekly free limit exceeded. You have " + domain.FormatSeconds(quotaViolation.Remaining) +
-			" left out of " + domain.FormatSeconds(domain.FreeWeeklyLimitSeconds) + " this week."
+		message := "Weekly free limit exceeded. You have " + quota.FormatSeconds(quotaViolation.Remaining) +
+			" left out of " + quota.FormatSeconds(quota.FreeWeeklyLimitSeconds) + " this week."
 		writeV1Error(w, r, http.StatusForbidden, "quota_exceeded", message)
 	case err != nil:
 		writeV1Error(w, r, http.StatusInternalServerError, "internal_error", "Failed to create recording")
@@ -91,12 +92,12 @@ func parseRecordingCreateV1(payload recordingCreateV1Request) (recording.CreateI
 func recordingResponseFromCreated(created recording.Created) recordingResponse {
 	audioAssetID := created.AudioAssetID
 	return recordingResponse{
-		ID: created.ID, Topic: created.Topic, Duration: domain.ToNonNegativeInt(created.Duration),
+		ID: created.ID, Topic: created.Topic, Duration: recording.NormalizeDurationSeconds(created.Duration),
 		Timestamp: created.Timestamp.UTC().Format(time.RFC3339Nano), Status: normalizeRecordingStatus(created.Status),
 		Transcript: created.Transcript, CorrectedTranscript: created.CorrectedTranscript,
 		Suggestions:        normalizeSuggestions(created.SuggestionsJSON, 0),
 		ProcessingStage:    normalizeRecordingProcessingStage(created.ProcessingStage),
-		PracticeType:       domain.NormalizePracticeType(created.PracticeType),
+		PracticeType:       practice.NormalizeType(created.PracticeType),
 		AudioDataURL:       normalizeOptionalAudio(created.AudioDataURL, true),
 		PhotoDataURL:       normalizeOptionalPhoto(created.PhotoDataURL),
 		PhotoObject:        normalizeOptionalPhotoObject(created.PhotoObject),

@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"daily-speaking-practice/backend/internal/domain"
+	"daily-speaking-practice/backend/internal/learner"
 )
 
 var ErrAnalysis = errors.New("AI suggestions could not be generated. Please try again later.")
@@ -79,7 +79,7 @@ func (s *AnalysisService) Analyze(ctx context.Context, request AnalysisInput, lo
 		Interests:    request.Interests,
 		PracticeType: request.PracticeType,
 		PhotoObject:  request.PhotoObject,
-		EnglishLevel: domain.FormatEnglishLevel(request.EnglishLevel),
+		EnglishLevel: learner.FormatEnglishLevel(request.EnglishLevel),
 		Russian:      extractRussianPhrases(transcript),
 	}
 	candidates, err := s.runDetectors(ctx, input, request.RecordingID, logger)
@@ -172,7 +172,7 @@ func (s *AnalysisService) requestDetector(ctx context.Context, pass analysisPass
 			SystemPrompt: chooseString(strictJSON, "Return strict valid JSON only. No markdown. No prose.", "You identify one specified category of genuine English learner errors and output JSON only."),
 			UserPrompt:   prompt,
 			Temperature:  chooseFloat(strictJSON, 0.05, 0.2),
-			Seed:         absMod(domain.HashString(input.Transcript)*17+domain.HashString(string(pass.Category))*31+attempt*97, 2147483647),
+			Seed:         absMod(hashString(input.Transcript)*17+hashString(string(pass.Category))*31+attempt*97, 2147483647),
 			StrictJSON:   strictJSON,
 		})
 		if err != nil {
@@ -201,7 +201,7 @@ func (s *AnalysisService) requestReview(ctx context.Context, transcript string, 
 			SystemPrompt: chooseString(strictJSON, "Return strict valid JSON only. No markdown. No prose.", "You adjudicate supplied learner-error candidates and output JSON only."),
 			UserPrompt:   prompt,
 			Temperature:  chooseFloat(strictJSON, 0.05, 0.2),
-			Seed:         absMod(domain.HashString(transcript)*193+attempt*97, 2147483647),
+			Seed:         absMod(hashString(transcript)*193+attempt*97, 2147483647),
 			StrictJSON:   strictJSON,
 		})
 		if err != nil {

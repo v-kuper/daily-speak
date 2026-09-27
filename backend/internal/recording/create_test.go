@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"daily-speaking-practice/backend/internal/domain"
 	"daily-speaking-practice/backend/internal/quota"
 )
 
@@ -95,7 +94,7 @@ func TestCreatorRejectsQuotaBeforeMediaOrPersistence(t *testing.T) {
 	tx = &createTransactionStub{quota: quota.RecordingQuota{IsSubscriber: true}}
 	creator = NewCreator(createUnitOfWorkStub{tx: tx})
 	_, _, err = creator.Create(context.Background(), "principal", "user", "long", CreateInput{
-		Topic: "Talk", Duration: domain.SubscriberMaxSessionSeconds + 1,
+		Topic: "Talk", Duration: quota.SubscriberMaxSessionSeconds + 1,
 		Timestamp: time.Now().UTC(), PracticeType: "free_talk", AudioAssetID: "audio",
 	})
 	if !errors.As(err, &violation) || !violation.SubscriberLimit {

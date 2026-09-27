@@ -11,7 +11,6 @@ import (
 	"strings"
 
 	"daily-speaking-practice/backend/internal/db"
-	"daily-speaking-practice/backend/internal/domain"
 	"daily-speaking-practice/backend/internal/storage"
 )
 
@@ -54,7 +53,7 @@ func (m *Materializer) Materialize(ctx context.Context, assetID string) (string,
 		return "", func() {}, err
 	}
 	defer body.Close()
-	extension := domain.ResolveAudioExtension(contentType)
+	extension := ResolveAudioExtension(contentType)
 	if extension == "" {
 		extension = "bin"
 	}
@@ -65,7 +64,7 @@ func (m *Materializer) Materialize(ctx context.Context, assetID string) (string,
 	path := temporary.Name()
 	cleanup := func() { _ = os.Remove(path) }
 	hash := sha256.New()
-	written, copyErr := io.Copy(io.MultiWriter(temporary, hash), io.LimitReader(body, domain.MaxAudioUploadBytes+1))
+	written, copyErr := io.Copy(io.MultiWriter(temporary, hash), io.LimitReader(body, MaxAudioUploadBytes+1))
 	closeErr := temporary.Close()
 	if copyErr != nil {
 		cleanup()
@@ -75,7 +74,7 @@ func (m *Materializer) Materialize(ctx context.Context, assetID string) (string,
 		cleanup()
 		return "", func() {}, closeErr
 	}
-	if written <= 0 || written > domain.MaxAudioUploadBytes {
+	if written <= 0 || written > MaxAudioUploadBytes {
 		cleanup()
 		return "", func() {}, errors.New("media asset size is outside recording limits")
 	}
