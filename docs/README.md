@@ -8,6 +8,8 @@ not remain here as competing architecture documentation.
 
 - [`ARCHITECTURE.md`](ARCHITECTURE.md): service boundaries, ownership, data and
   request flows, and scaling model.
+- [`BACKEND_DEVELOPMENT.md`](BACKEND_DEVELOPMENT.md): backend layering, Go style,
+  feature workflow, API rules, and completion criteria.
 - [`api-compatibility.md`](api-compatibility.md): stable `/api/v1` compatibility
   and deprecation rules for mobile clients.
 - [`BACKEND_OPERATIONS.md`](BACKEND_OPERATIONS.md): readiness, limits, metrics,

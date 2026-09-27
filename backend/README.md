@@ -5,6 +5,10 @@ migrations, recordings and uploads, AI/transcription integrations, Feed data,
 and the OpenAPI contract. It does not contain or proxy the Next.js application.
 Browser, mobile, and other HTTP clients can call the same API contract.
 
+Backend layering, code style, and the workflow for adding features are defined
+in [`../docs/BACKEND_DEVELOPMENT.md`](../docs/BACKEND_DEVELOPMENT.md). Coding
+agents also receive the same rules through the repository `AGENTS.md`.
+
 Paid recording work is executed by the independent `cmd/worker` process. API
 requests atomically persist recording state and a PostgreSQL job; workers use
 leased claims, heartbeats, bounded concurrency, and retry backoff. API replicas
