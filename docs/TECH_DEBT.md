@@ -38,7 +38,7 @@ OpenAPI contract and architecture documentation current:
 3. **Completed:** Move dependency construction and environment-driven adapter selection out
    of `internal/httpapi` into an application composition root shared by the API
    and worker entry points where appropriate.
-4. Finish the media application boundary so ownership, guest restrictions, and
+4. **Completed:** Finish the media application boundary so ownership, guest restrictions, and
    lifecycle transitions are application policy rather than HTTP policy.
 5. **Completed:** Isolate the retained Feed backend behind its own repository and service
    boundary while keeping it absent from the web and mobile clients.

@@ -195,11 +195,13 @@ func (s *Server) handleAbortMediaUploadV1(w http.ResponseWriter, r *http.Request
 }
 
 func (s *Server) handleMediaDownloadV1(w http.ResponseWriter, r *http.Request, assetID string) {
-	identity, ok := s.requiredMediaUserV1(w, r)
+	identity, ok := s.requiredMediaPrincipalV1(w, r)
 	if !ok || !s.mediaAvailable(w, r) {
 		return
 	}
-	download, err := s.mediaService.Download(r.Context(), identity.PrincipalID, assetID)
+	download, err := s.mediaService.Download(r.Context(), media.DownloadInput{
+		OwnerPrincipalID: identity.PrincipalID, OwnerKind: identity.Kind, AssetID: assetID,
+	})
 	if err != nil {
 		s.writeMediaError(w, r, err)
 		return
@@ -276,18 +278,6 @@ func (s *Server) routeMediaUploadEntry(w http.ResponseWriter, r *http.Request) {
 	s.routeV1(w, r)
 }
 
-func (s *Server) requiredMediaUserV1(w http.ResponseWriter, r *http.Request) (*auth.Identity, bool) {
-	identity, ok := s.requiredMediaPrincipalV1(w, r)
-	if !ok {
-		return nil, false
-	}
-	if identity.Kind != "user" || identity.User == nil {
-		writeV1Error(w, r, http.StatusForbidden, "account_required", "An account is required for media")
-		return nil, false
-	}
-	return identity, true
-}
-
 func (s *Server) requiredMediaPrincipalV1(w http.ResponseWriter, r *http.Request) (*auth.Identity, bool) {
 	return s.requiredIdentityV1(w, r)
 }
@@ -343,6 +333,8 @@ func (s *Server) writeMediaError(w http.ResponseWriter, r *http.Request, err err
 		writeV1Error(w, r, http.StatusUnprocessableEntity, "checksum_mismatch", "Media checksum does not match")
 	case errors.Is(err, media.ErrSizeMismatch):
 		writeV1Error(w, r, http.StatusUnprocessableEntity, "size_mismatch", "Media size does not match")
+	case errors.Is(err, media.ErrAccountRequired):
+		writeV1Error(w, r, http.StatusForbidden, "account_required", "An account is required for media")
 	default:
 		writeV1Error(w, r, http.StatusServiceUnavailable, "storage_unavailable", "Media storage is unavailable")
 	}
@@ -368,12 +360,8 @@ func mediaUploadResponse(resource media.UploadResource, parts []storage.PartInfo
 }
 
 func mediaAssetResponse(asset media.Asset) map[string]any {
-	purpose := asset.Purpose
-	if purpose == media.PurposeGuestPreviewAudio {
-		purpose = media.PurposeRecordingAudio
-	}
 	return map[string]any{
-		"id": asset.ID, "state": asset.State, "purpose": purpose,
+		"id": asset.ID, "state": asset.State, "purpose": asset.ClientPurpose(),
 		"contentType": asset.ContentType, "sizeBytes": asset.ExpectedSizeBytes,
 		"checksum": map[string]string{"algorithm": "sha256", "value": asset.ExpectedChecksumSHA256},
 	}

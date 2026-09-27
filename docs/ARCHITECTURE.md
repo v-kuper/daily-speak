@@ -100,8 +100,10 @@ processing concurrency.
 PostgreSQL stores media identity, ownership, state, object location, size, and
 checksum; it does not store media bytes. The storage interface supports local
 disk and private S3-compatible storage. Upload creation, completion, download,
-and deletion all authorize the owning principal. Multipart uploads and signed
-requests are bounded and expire.
+and deletion all authorize the owning principal inside the media application
+service. Guest purpose restrictions and account-only downloads are application
+policy rather than HTTP rules. Multipart uploads and signed requests are
+bounded and expire.
 
 The current Windows test host mounts one persistent local directory into API
 and worker. A multi-host deployment must switch to shared object storage before

@@ -33,12 +33,31 @@ func TestLocalPresignedPlansReceiveBoundedFutureExpiry(t *testing.T) {
 	if parts[0].Request.Headers.Get("Content-Type") != resource.Asset.ContentType {
 		t.Fatalf("content type header = %q", parts[0].Request.Headers.Get("Content-Type"))
 	}
-	download, err := service.Download(context.Background(), resource.Asset.OwnerPrincipalID, resource.Asset.ID)
+	download, err := service.Download(context.Background(), DownloadInput{
+		OwnerPrincipalID: resource.Asset.OwnerPrincipalID, OwnerKind: "user", AssetID: resource.Asset.ID,
+	})
 	if err != nil {
 		t.Fatalf("presign local download: %v", err)
 	}
 	if !download.Local || download.Request.Method != http.MethodGet || !download.Request.ExpiresAt.Equal(now.Add(10*time.Minute)) {
 		t.Fatalf("unexpected local download plan: %+v", download)
+	}
+}
+
+func TestDownloadPolicyRequiresAnAccountBeforeRepositoryAccess(t *testing.T) {
+	service := NewService(&stubRepository{}, stubLocalStore{}, Config{})
+	_, err := service.Download(context.Background(), DownloadInput{
+		OwnerPrincipalID: "guest-id", OwnerKind: "guest", AssetID: "asset-id",
+	})
+	if !errors.Is(err, ErrAccountRequired) {
+		t.Fatalf("download error = %v, want account required", err)
+	}
+}
+
+func TestGuestPreviewPurposeIsInternalOnly(t *testing.T) {
+	asset := Asset{Purpose: PurposeGuestPreviewAudio}
+	if got := asset.ClientPurpose(); got != PurposeRecordingAudio {
+		t.Fatalf("client purpose = %q", got)
 	}
 }
 

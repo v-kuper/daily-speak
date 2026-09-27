@@ -289,6 +289,18 @@ test("API dependency construction lives in the application composition root", ()
   assert.match(apiMain, /app\.NewAPI\(app\.APIConfig/);
 });
 
+test("media ownership and guest policy stay in the media application service", () => {
+  const transport = readFileSync("backend/internal/httpapi/media_v1.go", "utf8");
+  const service = readFileSync("backend/internal/media/service.go", "utf8");
+  const model = readFileSync("backend/internal/media/media.go", "utf8");
+
+  assert.match(transport, /media\.DownloadInput/);
+  assert.doesNotMatch(transport, /requiredMediaUserV1|identity\.Kind\s*!=\s*"user"|PurposeGuestPreviewAudio/);
+  assert.match(service, /input\.OwnerKind[\s\S]*ErrAccountRequired/);
+  assert.match(service, /input\.OwnerKind\s*==\s*"guest"[\s\S]*PurposeGuestPreviewAudio/);
+  assert.match(model, /func \(asset Asset\) ClientPurpose\(\)/);
+});
+
 test("guest preview separates transport, processing policy, and SQL storage", () => {
   const model = readFileSync("backend/internal/guestpreview/model.go", "utf8");
   const processor = readFileSync("backend/internal/guestpreview/processor.go", "utf8");

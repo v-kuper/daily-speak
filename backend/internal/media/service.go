@@ -315,8 +315,11 @@ func (service *Service) abortUpload(ctx context.Context, ownerPrincipalID string
 	return service.repository.MarkAborted(ctx, uploadID, service.config.Now().UTC())
 }
 
-func (service *Service) Download(ctx context.Context, ownerPrincipalID string, assetID string) (Download, error) {
-	asset, err := service.repository.GetReadyAsset(ctx, strings.TrimSpace(ownerPrincipalID), strings.TrimSpace(assetID))
+func (service *Service) Download(ctx context.Context, input DownloadInput) (Download, error) {
+	if strings.ToLower(strings.TrimSpace(input.OwnerKind)) != "user" {
+		return Download{}, ErrAccountRequired
+	}
+	asset, err := service.repository.GetReadyAsset(ctx, strings.TrimSpace(input.OwnerPrincipalID), strings.TrimSpace(input.AssetID))
 	if err != nil {
 		return Download{}, err
 	}

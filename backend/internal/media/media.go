@@ -20,6 +20,7 @@ var (
 	ErrPayloadTooLarge  = errors.New("media payload is too large")
 	ErrChecksumMismatch = errors.New("media checksum does not match")
 	ErrSizeMismatch     = errors.New("media size does not match")
+	ErrAccountRequired  = errors.New("media operation requires an account")
 )
 
 const (
@@ -118,6 +119,19 @@ type Download struct {
 	Asset   Asset
 	Request storage.PresignedRequest
 	Local   bool
+}
+
+type DownloadInput struct {
+	OwnerPrincipalID string
+	OwnerKind        string
+	AssetID          string
+}
+
+func (asset Asset) ClientPurpose() string {
+	if asset.Purpose == PurposeGuestPreviewAudio {
+		return PurposeRecordingAudio
+	}
+	return asset.Purpose
 }
 
 type Content struct {
