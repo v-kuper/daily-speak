@@ -149,7 +149,7 @@ test("guest save retains the recording and cancel clears both auth drafts and re
 
 test("authenticated save immediately opens the local recording and replaces it after v1 media-backed creation", async (t) => {
   const run = flow("saveAndNavigate"), store = storeFor({ isAuthenticated: true }), router = routerFor();
-  const save = deferred();
+  const save = deferred(), recordingStarted = deferred();
   let saves = 0;
   server(t, async (url) => {
     if (url.endsWith("/api/v1/media/uploads")) {
@@ -157,14 +157,17 @@ test("authenticated save immediately opens the local recording and replaces it a
     }
     assert.equal(url, "https://api.example.test/api/v1/recordings");
     saves++;
+    recordingStarted.resolve("started");
     return save.promise;
   });
   const attempt = run(store, router, draft, router.currentPath);
   assert.deepEqual(router.visits, [["push", "/history/local-123"]]);
   assert.equal(store.getState().app.recordings[0].id, "local-123");
-  for (let index = 0; index < 10 && saves === 0; index += 1) {
-    await new Promise((resolve) => setImmediate(resolve));
-  }
+  const firstOutcome = await Promise.race([
+    recordingStarted.promise,
+    attempt.then(() => "completed"),
+  ]);
+  assert.equal(firstOutcome, "started", "save flow completed before creating the recording");
   assert.equal(saves, 1);
   assert.equal(router.visits.length, 1);
   save.resolve(response({ recording: saved }));
