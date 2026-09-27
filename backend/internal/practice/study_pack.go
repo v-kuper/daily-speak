@@ -5,18 +5,18 @@ import (
 	"fmt"
 	"strings"
 
-	"daily-speaking-practice/backend/internal/domain"
+	"daily-speaking-practice/backend/internal/learner"
 )
 
 func (s *Service) StudyPack(ctx context.Context, input StudyPackInput) (StudyPackResult, error) {
-	level := domain.NormalizeEnglishLevel(input.EnglishLevel)
-	interests := domain.NormalizeInterests(input.Interests, 10)
+	level := learner.NormalizeEnglishLevel(input.EnglishLevel)
+	interests := learner.NormalizeInterests(input.Interests, 10)
 	avoidWords := normalizeAvoidWords(input.AvoidWords)
 	seed := absMod(
-		domain.HashString(level)*131+
-			domain.HashString(strings.ToLower(strings.Join(interests, "|")))*17+
-			domain.HashString(strings.ToLower(strings.Join(avoidWords, "|")))*19+
-			domain.HashString(input.RefreshToken),
+		hashString(level)*131+
+			hashString(strings.ToLower(strings.Join(interests, "|")))*17+
+			hashString(strings.ToLower(strings.Join(avoidWords, "|")))*19+
+			hashString(input.RefreshToken),
 		maxSeed,
 	)
 

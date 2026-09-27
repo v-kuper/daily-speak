@@ -31,7 +31,6 @@ const routeSource = [
   readFileSync("internal/httpapi/media_v1.go", "utf8"),
   readFileSync("internal/httpapi/guest_preview.go", "utf8"),
   readFileSync("internal/httpapi/recordings_create_v1.go", "utf8"),
-  readFileSync("internal/httpapi/recording_sessions_handlers.go", "utf8"),
   readFileSync("internal/httpapi/feed_handlers.go", "utf8"),
 ].join("\n");
 
@@ -46,28 +45,23 @@ const documentedAPIRoutes = [
   "/api/v1/media/uploads/{uploadId}/parts", "/api/v1/media/uploads/{uploadId}/complete",
   "/api/v1/media/{assetId}/download", "/api/v1/media/uploads/{uploadId}/parts/{partNumber}",
   "/api/v1/media/local/assets/{assetId}/content",
-  "/api/auth/register", "/api/auth/login", "/api/auth/session", "/api/auth/logout",
   "/api/daily-questions", "/api/topic-guidance", "/api/study-words", "/api/user/data",
   "/api/user/interests", "/api/user/ollama-model", "/api/user/subscription", "/api/user/english-level",
-  "/api/user/recordings", "/api/recordings/{recordingId}", "/api/recordings/{recordingId}/retry",
-  "/api/recordings/{recordingId}/shadowing", "/api/recording-sessions",
-  "/api/recording-sessions/{sessionId}/chunks", "/api/recording-sessions/{sessionId}/audio",
-  "/api/recording-sessions/{sessionId}/finish", "/api/feed/posts", "/api/feed/posts/{postId}",
+  "/api/recordings/{recordingId}", "/api/recordings/{recordingId}/retry",
+  "/api/recordings/{recordingId}/shadowing", "/api/feed/posts", "/api/feed/posts/{postId}",
   "/api/feed/posts/{postId}/replies", "/api/feed/posts/{postId}/reactions",
   "/api/feed/replies/{replyId}/reactions", "/uploads/shadowing/{userId}/{fileName}", "/uploads/{path}",
 ];
 
 const protectedOperations = [
   ["/api/v1/recordings", "get"], ["/api/v1/recordings/{recordingId}", "get"],
-  ["/api/auth/session", "get"], ["/api/auth/logout", "post"], ["/api/user/data", "get"],
+  ["/api/user/data", "get"],
   ["/api/user/interests", "put"], ["/api/user/ollama-model", "get"], ["/api/user/subscription", "get"],
   ["/api/user/subscription", "post"], ["/api/user/subscription", "delete"],
   ["/api/user/english-level", "get"], ["/api/user/english-level", "put"],
-  ["/api/user/recordings", "post"], ["/api/recordings/{recordingId}", "get"],
+  ["/api/recordings/{recordingId}", "get"],
   ["/api/recordings/{recordingId}", "delete"], ["/api/recordings/{recordingId}/retry", "post"],
-  ["/api/recordings/{recordingId}/shadowing", "post"], ["/api/recording-sessions", "post"],
-  ["/api/recording-sessions/{sessionId}/chunks", "post"], ["/api/recording-sessions/{sessionId}/audio", "post"],
-  ["/api/recording-sessions/{sessionId}/finish", "post"], ["/api/feed/posts", "get"],
+  ["/api/recordings/{recordingId}/shadowing", "post"], ["/api/feed/posts", "get"],
   ["/api/feed/posts", "post"], ["/api/feed/posts/{postId}", "get"],
   ["/api/feed/posts/{postId}/replies", "post"], ["/api/feed/posts/{postId}/reactions", "post"],
   ["/api/feed/replies/{replyId}/reactions", "post"], ["/uploads/shadowing/{userId}/{fileName}", "get"],
@@ -82,12 +76,7 @@ const mutationBodies = [
   ["/api/v1/media/uploads/{uploadId}/parts", "post", "application/json"],
   ["/api/v1/media/uploads/{uploadId}/complete", "post", "application/json"],
   ["/api/v1/media/uploads/{uploadId}/parts/{partNumber}", "put", "application/octet-stream"],
-  ["/api/auth/register", "post", "application/json"], ["/api/auth/login", "post", "application/json"],
   ["/api/user/interests", "put", "application/json"], ["/api/user/english-level", "put", "application/json"],
-  ["/api/user/recordings", "post", "application/json"], ["/api/recording-sessions", "post", "application/json"],
-  ["/api/recording-sessions/{sessionId}/chunks", "post", "multipart/form-data"],
-  ["/api/recording-sessions/{sessionId}/audio", "post", "multipart/form-data"],
-  ["/api/recording-sessions/{sessionId}/finish", "post", "application/json"],
   ["/api/feed/posts", "post", "application/json"], ["/api/feed/posts/{postId}/replies", "post", "application/json"],
   ["/api/feed/posts/{postId}/reactions", "post", "application/json"],
   ["/api/feed/replies/{replyId}/reactions", "post", "application/json"],
@@ -130,10 +119,6 @@ function operationParameters(path, operation) {
   return [...(openapi.paths[path].parameters ?? []), ...(operation.parameters ?? [])].map(resolveParameter);
 }
 
-function usesCookieAuth(operation) {
-  return (operation.security ?? openapi.security ?? []).some((requirement) => Object.hasOwn(requirement, "cookieAuth"));
-}
-
 function usesBearerAuth(operation) {
   return (operation.security ?? openapi.security ?? []).some((requirement) => Object.hasOwn(requirement, "bearerAuth"));
 }
@@ -142,7 +127,6 @@ test("OpenAPI identifies the API origin and Swagger fetches its served artifact"
   assert.equal(openapi.openapi, "3.1.0");
   assert.equal(openapi.info.title, "DailySpeak API");
   assert.deepEqual(openapi.servers[0], { url: "/", description: "Current API origin" });
-  assert.ok(openapi.components.securitySchemes.cookieAuth);
   assert.ok(openapi.components.securitySchemes.bearerAuth);
   assert.match(swaggerHTML, /url:\s*"\/openapi\.json"/);
   assert.match(swaggerHTML, /swagger-ui-bundle\.js/);
@@ -177,16 +161,13 @@ test("OpenAPI inventories every API and upload route, including retained Feed en
     ["/api/v1/media/{assetId}/download", /strings\.HasSuffix\(path, "\/download"\)/],
     ["/api/v1/media/uploads/{uploadId}/parts/{partNumber}", /mux\.HandleFunc\("\/api\/v1\/media\/uploads\/"/],
     ["/api/v1/media/local/assets/{assetId}/content", /mux\.HandleFunc\("\/api\/v1\/media\/local\/"/],
-    ["/api/recording-sessions/{sessionId}/chunks", /action == "chunks"/],
-    ["/api/recording-sessions/{sessionId}/audio", /action == "audio"/],
-    ["/api/recording-sessions/{sessionId}/finish", /action == "finish"/],
     ["/api/feed/posts", /path == "\/api\/feed\/posts"/],
     ["/api/feed/posts/{postId}", /strings\.HasPrefix\(path, "\/api\/feed\/posts\/"\)/],
     ["/api/feed/posts/{postId}/replies", /parts\[1\] == "replies"/],
     ["/api/feed/posts/{postId}/reactions", /parts\[1\] == "reactions"/],
     ["/api/feed/replies/{replyId}/reactions", /strings\.HasPrefix\(path, "\/api\/feed\/replies\/"\)/],
     ["/uploads/shadowing/{userId}/{fileName}", /mux\.HandleFunc\("\/uploads\/shadowing\/"/],
-    ["/uploads/{path}", /mux\.Handle\(uploadsURLPrefix, uploadsHandler\(\)\)/],
+    ["/uploads/{path}", /mux\.Handle\(uploadsURLPrefix, http\.HandlerFunc\(s\.handleLegacyUpload\)\)/],
   ];
   for (const [path, pattern] of sourceChecks) assert.match(routeSource, pattern, `server route not found for ${path}`);
 });
@@ -201,13 +182,13 @@ test("every documented operation has a summary, success response, and applicable
   }
 });
 
-test("protected operations declare cookie authentication", () => {
+test("all protected operations declare Bearer authentication", () => {
   for (const [path, method] of protectedOperations) {
-    assert.ok(usesCookieAuth(openapi.paths[path][method]), `${method.toUpperCase()} ${path} needs cookieAuth`);
+    assert.ok(usesBearerAuth(openapi.paths[path][method]), `${method.toUpperCase()} ${path} needs bearerAuth`);
   }
 });
 
-test("mobile identity and v1 resources declare bearer authentication", () => {
+test("identity and v1 resources declare bearer authentication", () => {
   const bearerOperations = [
     ["/api/v1/auth/session", "get"], ["/api/v1/auth/logout", "post"],
     ["/api/v1/auth/logout-all", "post"], ["/api/v1/auth/sessions", "get"],
@@ -223,6 +204,11 @@ test("mobile identity and v1 resources declare bearer authentication", () => {
   }
   assert.deepEqual(openapi.paths["/api/v1/auth/anonymous"].post.security, []);
   assert.deepEqual(openapi.paths["/api/v1/auth/refresh"].post.security, []);
+  assert.equal(openapi.components.securitySchemes.cookieAuth, undefined);
+  assert.deepEqual(openapi.security, [{ bearerAuth: [] }]);
+  assert.equal(openapi.components.schemas.RefreshTokenInput.required, undefined);
+  assert.ok(!openapi.components.schemas.IdentityTokens.required.includes("refreshToken"));
+  assert.ok(openapi.components.responses.V1IdentityCreated.headers["Set-Cookie"]);
 });
 
 test("path and query parameters are declared for every operation that uses them", () => {

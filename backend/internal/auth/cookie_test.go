@@ -15,14 +15,14 @@ func TestCookieConfigFromEnv(t *testing.T) {
 		t.Fatal(err)
 	}
 	expires := time.Unix(2_000_000_000, 0)
-	cookie := NewSessionCookieWithConfig(config, "unchanged-session-token", expires)
-	if cookie.Name != "daily_speaking_session" || cookie.Value != "unchanged-session-token" || !cookie.Expires.Equal(expires) {
-		t.Fatalf("session identity or expiry changed: %#v", cookie)
+	cookie := NewRefreshCookieWithConfig(config, "unchanged-refresh-token", expires)
+	if cookie.Name != RefreshCookieName || cookie.Value != "unchanged-refresh-token" || !cookie.Expires.Equal(expires) {
+		t.Fatalf("refresh identity or expiry changed: %#v", cookie)
 	}
-	if !cookie.HttpOnly || !cookie.Secure || cookie.SameSite != http.SameSiteNoneMode || cookie.Domain != ".example.com" || cookie.Path != "/" {
+	if !cookie.HttpOnly || !cookie.Secure || cookie.SameSite != http.SameSiteNoneMode || cookie.Domain != ".example.com" || cookie.Path != "/api/v1/auth" {
 		t.Fatalf("unexpected cookie: %#v", cookie)
 	}
-	cleared := ClearSessionCookieWithConfig(config)
+	cleared := ClearRefreshCookieWithConfig(config)
 	if cleared.Name != cookie.Name || cleared.Value != "" || cleared.MaxAge != -1 || cleared.Path != cookie.Path || cleared.Domain != cookie.Domain || cleared.Secure != cookie.Secure || cleared.SameSite != cookie.SameSite || !cleared.HttpOnly {
 		t.Fatalf("clearing cookie must expire the same scope: %#v", cleared)
 	}
@@ -49,11 +49,27 @@ func TestCookieConfigDefaultsAndExplicitSettings(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			cookie := NewSessionCookieWithConfig(config, "token", time.Unix(2_000_000_000, 0))
+			cookie := NewRefreshCookieWithConfig(config, "token", time.Unix(2_000_000_000, 0))
 			if cookie.Secure != tc.wantSecure || cookie.SameSite != tc.wantSameSite || cookie.Domain != tc.wantDomain {
 				t.Fatalf("unexpected cookie: %#v", cookie)
 			}
 		})
+	}
+}
+
+func TestBrowserRefreshCookieIsHttpOnlyAndNarrowlyScoped(t *testing.T) {
+	config := CookieConfig{Secure: true, SameSite: http.SameSiteLaxMode, Domain: ".example.com"}
+	expires := time.Now().UTC().Add(time.Hour)
+	cookie := NewRefreshCookieWithConfig(config, "rotating-refresh-token", expires)
+	if cookie.Name != RefreshCookieName || cookie.Value != "rotating-refresh-token" {
+		t.Fatalf("unexpected refresh identity: %#v", cookie)
+	}
+	if !cookie.HttpOnly || !cookie.Secure || cookie.Path != "/api/v1/auth" || cookie.Domain != config.Domain || cookie.SameSite != config.SameSite {
+		t.Fatalf("refresh cookie is not safely scoped: %#v", cookie)
+	}
+	cleared := ClearRefreshCookieWithConfig(config)
+	if cleared.Name != cookie.Name || cleared.Path != cookie.Path || cleared.Domain != cookie.Domain || cleared.MaxAge != -1 || !cleared.HttpOnly {
+		t.Fatalf("refresh cookie cleanup changed scope: %#v", cleared)
 	}
 }
 
@@ -79,19 +95,6 @@ func TestCookieConfigRejectsInvalidSettings(t *testing.T) {
 			t.Setenv("SESSION_COOKIE_DOMAIN", tc.domain)
 			if _, err := CookieConfigFromEnv(); err == nil {
 				t.Fatal("expected invalid setting to fail")
-			}
-		})
-	}
-}
-
-func TestCookieCompatibilityHelpersUseExplicitLaxDefaults(t *testing.T) {
-	for _, env := range []string{"", "development", "production"} {
-		t.Run(env, func(t *testing.T) {
-			t.Setenv("NODE_ENV", env)
-			for _, cookie := range []*http.Cookie{NewSessionCookie("token", time.Unix(2_000_000_000, 0)), ClearSessionCookie()} {
-				if cookie.Name != "daily_speaking_session" || cookie.Secure || cookie.SameSite != http.SameSiteLaxMode || cookie.Domain != "" || cookie.Path != "/" || !cookie.HttpOnly {
-					t.Fatalf("compatibility behavior changed: %#v", cookie)
-				}
 			}
 		})
 	}

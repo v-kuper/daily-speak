@@ -7,7 +7,7 @@ import {
   extractCookieHeader,
   resolveApiUploadURL,
   selectStackURLs,
-  verifyMobileIdentityConfiguration,
+  verifyIdentityConfiguration,
 } from "./smoke-stack.mjs";
 
 const listen = (server) => new Promise((resolve, reject) => {
@@ -100,22 +100,22 @@ test("stack smoke resolves backend-owned upload URLs against the API origin", ()
 test("stack smoke extracts request cookies without retaining Set-Cookie attributes", () => {
   const headers = {
     getSetCookie: () => [
-      "daily_speaking_session=secret; Path=/; HttpOnly; SameSite=Lax",
+      "daily_speaking_refresh=secret; Path=/api/v1/auth; HttpOnly; SameSite=Lax",
       "preference=compact; Path=/; Max-Age=3600",
     ],
   };
 
   assert.equal(
     extractCookieHeader(headers),
-    "daily_speaking_session=secret; preference=compact",
+    "daily_speaking_refresh=secret; preference=compact",
   );
   assert.equal(extractCookieHeader({ get: () => null }), "");
 });
 
-test("mobile identity smoke proves token validation is configured without creating data", async () => {
+test("identity smoke proves token validation is configured without creating data", async () => {
   let capturedURL;
   let capturedOptions;
-  await verifyMobileIdentityConfiguration(
+  await verifyIdentityConfiguration(
     {
       apiBaseURL: "https://api.example.test:3444",
       webOrigin: "https://web.example.test:3443",
@@ -132,9 +132,9 @@ test("mobile identity smoke proves token validation is configured without creati
   assert.equal(capturedOptions.headers.get("Authorization"), "Bearer stack-smoke-invalid-token");
 });
 
-test("mobile identity smoke fails on the deployed identity_unavailable response", async () => {
+test("identity smoke fails on the deployed identity_unavailable response", async () => {
   await assert.rejects(
-    verifyMobileIdentityConfiguration(
+    verifyIdentityConfiguration(
       {
         apiBaseURL: "https://api.example.test:3444",
         webOrigin: "https://web.example.test:3443",

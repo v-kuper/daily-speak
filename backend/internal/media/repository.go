@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"daily-speaking-practice/backend/internal/db"
-	"daily-speaking-practice/backend/internal/storage"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )
@@ -158,7 +157,7 @@ func (repository *SQLRepository) ClaimAborting(ctx context.Context, uploadID str
 	return nil
 }
 
-func (repository *SQLRepository) MarkCompleted(ctx context.Context, uploadID string, info storage.ObjectInfo, now time.Time) (UploadResource, error) {
+func (repository *SQLRepository) MarkCompleted(ctx context.Context, uploadID string, info VerifiedObject, now time.Time) (UploadResource, error) {
 	tx, err := repository.database.Begin(ctx)
 	if err != nil {
 		return UploadResource{}, err
@@ -182,7 +181,7 @@ func (repository *SQLRepository) MarkCompleted(ctx context.Context, uploadID str
 		FROM media_uploads u
 		WHERE u.id = $1 AND a.id = u.asset_id
 		  AND a.state IN ('pending', 'uploading', 'uploaded', 'verifying', 'ready')`,
-		uploadID, info.Size, info.SHA256, info.ETag, now)
+		uploadID, info.SizeBytes, info.ChecksumSHA256, info.ETag, now)
 	if err != nil {
 		return UploadResource{}, err
 	}

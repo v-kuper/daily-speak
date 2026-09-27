@@ -1,22 +1,18 @@
 package httpapi
 
 import (
-	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
-
-	"daily-speaking-practice/backend/internal/ai"
 )
 
 func TestMediaUploadCollectionRouteDoesNotRedirect(t *testing.T) {
 	response := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/media/uploads", strings.NewReader(`{}`))
 
-	NewServer(Config{}).Handler().ServeHTTP(response, request)
+	newTestServer(Config{}).Handler().ServeHTTP(response, request)
 
 	if response.Code != http.StatusUnauthorized {
 		t.Fatalf("media upload collection status = %d, body=%s", response.Code, response.Body.String())
@@ -58,35 +54,6 @@ func TestGuestPreviewRequestValidationAndIdempotencyDigest(t *testing.T) {
 	}
 }
 
-func TestParseGuestPreviewCorrectionsKeepsOnlyTwoHighConfidenceMaterialErrors(t *testing.T) {
-	transcript := "Yesterday I go to work and she have a meeting. It was nice."
-	input := `{"corrections":[
-		{"wrong":"Yesterday I go","right":"Yesterday I went","explanation":"Use past tense.","category":"verb_grammar","severity":"major","confidence":0.99},
-		{"wrong":"she have","right":"she has","explanation":"Match the subject.","category":"verb_grammar","severity":"medium","confidence":0.95},
-		{"wrong":"It was nice","right":"It was pleasant","explanation":"A style alternative.","category":"naturalness","severity":"minor","confidence":0.99},
-		{"wrong":"work","right":"the office","explanation":"Uncertain preference.","category":"vocabulary","severity":"major","confidence":0.70}
-	]}`
-	got := parseGuestPreviewCorrections(input, transcript)
-	if len(got) != 2 || got[0].Wrong != "Yesterday I go" || got[1].Wrong != "she have" {
-		t.Fatalf("unexpected preview corrections: %#v", got)
-	}
-}
-
-func TestGenerateGuestPreviewCorrectionsUsesOneAIRequest(t *testing.T) {
-	client := &countingGuestPreviewAI{response: `{"corrections":[]}`}
-	server := NewServer(Config{AIClient: client})
-	got, err := server.generateGuestPreviewCorrections(context.Background(), "I went home.")
-	if err != nil {
-		t.Fatalf("generate preview corrections: %v", err)
-	}
-	if client.calls != 1 || len(got) != 0 {
-		t.Fatalf("calls=%d corrections=%#v", client.calls, got)
-	}
-	if !strings.Contains(client.body, "at most two") {
-		t.Fatalf("preview prompt did not contain the bounded contract: %s", client.body)
-	}
-}
-
 func TestGuestPreviewQueueCapacityUsesSafeBounds(t *testing.T) {
 	t.Setenv("GUEST_PREVIEW_QUEUE_CAPACITY", "37")
 	if got := guestPreviewQueueCapacity(); got != 37 {
@@ -96,21 +63,4 @@ func TestGuestPreviewQueueCapacityUsesSafeBounds(t *testing.T) {
 	if got := guestPreviewQueueCapacity(); got != defaultGuestPreviewQueueCap {
 		t.Fatalf("invalid queue capacity = %d", got)
 	}
-}
-
-type countingGuestPreviewAI struct {
-	calls    int
-	response string
-	body     string
-}
-
-func (client *countingGuestPreviewAI) PostChat(_ context.Context, body any) (ai.ChatResponse, error) {
-	client.calls++
-	client.body = strings.ReplaceAll(strings.TrimSpace(toJSON(body)), "\\u003c", "<")
-	return ai.ChatResponse{Response: client.response}, nil
-}
-
-func toJSON(value any) string {
-	encoded, _ := json.Marshal(value)
-	return string(encoded)
 }

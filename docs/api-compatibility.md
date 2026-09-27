@@ -13,18 +13,24 @@ Every response carries `X-Request-ID`. Clients should include it in support and
 diagnostic reports. A caller may supply a safe `X-Request-ID`; otherwise the
 server creates one.
 
-The unversioned `/api/*` routes are the legacy web contract. They remain in
-place while the web sandbox migrates, but new mobile clients must use
-`/api/v1/*`. Mobile authentication uses short-lived Bearer access tokens and
-single-use opaque refresh tokens. A successful refresh replaces the submitted
-refresh token; submitting an already used token revokes that device session.
-Protected recording routes also accept the existing cookie during the web
-migration. Cookies are not part of the mobile contract.
+The unversioned `/api/*` routes are the remaining legacy web sandbox contract.
+All protected routes use the same short-lived Bearer access token as
+`/api/v1/*`, but new mobile clients must use `/api/v1/*` exclusively. Missing
+mobile feature operations are added to v1 when the mobile product needs them;
+legacy routes are not promoted into the native contract.
 
-Clients must keep the access token in memory and the refresh token in secure
-device storage. They must serialize refresh attempts per device and replace the
-stored refresh token atomically after every successful refresh. Tokens, bearer
-headers, and passwords must never be logged.
+A successful refresh replaces the single-use opaque refresh token; submitting
+an already used token revokes that device session. Native clients submit the
+token in the refresh request body. Browsers submit an empty JSON object and the
+backend reads and rotates a scoped HttpOnly refresh cookie. The cookie is a
+browser transport detail, not authorization for protected resources and not
+part of the native contract.
+
+Clients must keep the access token in memory. Native clients keep the refresh
+token in secure device storage and replace it atomically after every successful
+refresh. Browser clients rely on the backend's cookie rotation and must not
+copy tokens into web storage. Every client must serialize refresh attempts per
+device. Tokens, bearer headers, cookies, and passwords must never be logged.
 
 If a v1 operation must be retired, it will first return standards-based
 `Deprecation` and `Sunset` headers for at least 90 days. An incompatible change

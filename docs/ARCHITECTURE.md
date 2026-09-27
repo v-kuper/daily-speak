@@ -24,8 +24,10 @@ Go worker ----------+
 
 - `web/` is a Next.js sandbox client. It owns browser routes and UI state, but
   no backend business logic or server credentials.
-- `backend/cmd/api` owns the HTTP API, authentication, authorization,
-  validation, persistence transactions, admission control, and API contract.
+- `backend/internal/app` is the composition root for both process roles. It
+  selects providers and storage adapters and wires repositories and services.
+- `backend/cmd/api` parses process configuration, opens shared infrastructure,
+  and starts the already-composed HTTP API.
 - `backend/cmd/worker` owns paid or slow transcription, analysis, TTS, and
   cleanup work. It uses the same backend image but is a separate process.
 - PostgreSQL is the source of truth for identities, sessions, recordings,
@@ -40,10 +42,11 @@ dependency. A native client can therefore call the same API directly.
 
 ## Public contracts
 
-- `/api/v1/*` is the stable mobile contract. New mobile development uses this
-  surface exclusively.
-- `/api/*` is the legacy web contract retained while the sandbox still uses
-  cookie authentication.
+- `/api/v1/*` is the stable client contract shared by mobile and web identity,
+  media, guest preview, and new recording development.
+- `/api/*` is the remaining legacy web resource surface for profile, practice,
+  recording detail/actions, and the retained Feed. Recording creation uses the
+  same v1 media-backed contract in web and mobile.
 - `/openapi.json` and `/docs` expose the backend-owned OpenAPI contract and
   Swagger UI.
 - `/healthz` is process liveness; `/readyz` checks PostgreSQL and queue
@@ -56,12 +59,13 @@ Compatibility and deprecation rules live in
 
 ## Identity flow
 
-The web sandbox currently uses PostgreSQL-backed HttpOnly sessions. Mobile uses
-backend-issued Bearer credentials:
+Web and mobile use one backend-issued identity model:
 
 1. A new installation calls `POST /api/v1/auth/anonymous` and receives a guest
    principal, device session, short-lived access token, and rotating opaque
-   refresh token.
+   refresh token. Native clients receive both tokens in JSON. Browser clients
+   receive the access token in JSON and the refresh token only in a scoped,
+   Secure HttpOnly cookie.
 2. Access tokens are HS256 JWTs scoped by issuer, audience, principal, device
    session, identity kind, and expiry. The signing secret remains server-only.
 3. Refresh tokens are random, single-use, and stored only as SHA-256 hashes.
@@ -70,8 +74,9 @@ backend-issued Bearer credentials:
    preview into the user account. Logout, logout-all, and device revocation are
    server-side operations.
 
-Clients keep access tokens in memory and refresh tokens in OS-protected secure
-storage. They never receive signing secrets.
+All clients keep access tokens in memory. Native apps keep refresh tokens in
+OS-protected secure storage; browser JavaScript cannot read its refresh cookie.
+Clients never receive signing secrets.
 
 ## Recording and guest flow
 
@@ -95,8 +100,11 @@ processing concurrency.
 PostgreSQL stores media identity, ownership, state, object location, size, and
 checksum; it does not store media bytes. The storage interface supports local
 disk and private S3-compatible storage. Upload creation, completion, download,
-and deletion all authorize the owning principal. Multipart uploads and signed
-requests are bounded and expire.
+and deletion all authorize the owning principal inside the media application
+service. Guest purpose restrictions and account-only downloads are application
+policy rather than HTTP rules. Storage responses are mapped to media-owned
+application types before they reach HTTP. Multipart uploads and signed requests
+are bounded and expire.
 
 The current Windows test host mounts one persistent local directory into API
 and worker. A multi-host deployment must switch to shared object storage before
@@ -119,15 +127,24 @@ procedures live in [`BACKEND_OPERATIONS.md`](BACKEND_OPERATIONS.md).
 
 ```text
 web/                         standalone Next.js application
-backend/cmd/api              API process composition
-backend/cmd/worker           durable worker process composition
+backend/cmd/api              API process entrypoint and lifecycle
+backend/cmd/worker           durable worker entrypoint and lifecycle
+backend/internal/app         API and worker dependency composition root
 backend/internal/aiparse     provider-neutral model-output normalization
-backend/internal/auth        cookie and mobile identity
+backend/internal/auth        unified web/mobile identity and token lifecycle
 backend/internal/db          PostgreSQL connection and migrations
-backend/internal/httpapi     current HTTP transport and orchestration
+backend/internal/httpapi     HTTP transport, authorization gates, response mapping
+backend/internal/feed        retained Feed service, persistence, and reply-media adapter
+backend/internal/learner     shared learner level and interest vocabulary
 backend/internal/media       authorized media lifecycle
 backend/internal/practice    speaking-practice generation application service
 backend/internal/practice/ollamaadapter  Ollama adapter for the practice port
+backend/internal/quota       recording quota policy and formatting
+backend/internal/recording   recording creation, deletion, processing, analysis
+backend/internal/guestpreview     bounded anonymous preview lifecycle
+backend/internal/shadowing        pronunciation generation lifecycle
+backend/internal/profile          profile application service and repository
+backend/internal/subscription     subscription application service and repository
 backend/internal/storage     local and S3 storage adapters
 backend/internal/worker      worker configuration and pool lifecycle
 backend/internal/workqueue   durable PostgreSQL queue
@@ -136,9 +153,13 @@ backend/migrations           immutable ordered schema migrations
 backend/docs                 generated OpenAPI and Swagger assets
 ```
 
-`backend/internal/httpapi` is intentionally listed as a current boundary, not
-the desired final modular shape. Its incremental feature-oriented split is
-tracked in [`TECH_DEBT.md`](TECH_DEBT.md).
+Production SQL and transaction management live in feature repositories rather
+than `backend/internal/httpapi`. Cross-feature vocabulary has an explicit
+owner: learner data belongs to `learner`, quota rules to `quota`, media formats
+to `media`, practice normalization to `practice`, recording text to
+`recording`, and local shadowing paths to `shadowing`. There is no catch-all
+domain or utilities package. New business rules must not be added to the
+transport or composition packages.
 
 ## Retained Feed backend
 

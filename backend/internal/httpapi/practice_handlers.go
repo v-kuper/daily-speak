@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"daily-speaking-practice/backend/internal/ai"
-	"daily-speaking-practice/backend/internal/domain"
+	"daily-speaking-practice/backend/internal/learner"
 	"daily-speaking-practice/backend/internal/logging"
 	"daily-speaking-practice/backend/internal/practice"
 )
@@ -125,7 +125,7 @@ func (s *Server) practiceEnglishLevel(w http.ResponseWriter, r *http.Request, re
 	if user != nil {
 		return user.EnglishLevel, true
 	}
-	return domain.NormalizeEnglishLevel(requested), true
+	return learner.NormalizeEnglishLevel(requested), true
 }
 
 func writePracticeGenerationError(w http.ResponseWriter, err error, exhausted error, exhaustedMessage string) {

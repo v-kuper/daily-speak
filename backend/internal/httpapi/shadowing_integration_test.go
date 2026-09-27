@@ -69,12 +69,13 @@ func (f *fakeSynthesizer) callCount() int {
 }
 
 type shadowingFixture struct {
-	database    *db.DB
-	owner       auth.User
-	ownerCookie *http.Cookie
-	recordingID string
-	uploadsDir  string
-	server      *Server
+	database         *db.DB
+	owner            auth.User
+	ownerAccessToken string
+	tokenConfig      auth.TokenConfig
+	recordingID      string
+	uploadsDir       string
+	server           *Server
 }
 
 func newShadowingFixture(t *testing.T, synthesizer *fakeSynthesizer, correctedTranscript string, shadowingStatus string, updatedAt time.Time) shadowingFixture {
@@ -97,9 +98,10 @@ func newShadowingFixture(t *testing.T, synthesizer *fakeSynthesizer, correctedTr
 		t.Fatalf("register owner: %v", err)
 	}
 	t.Cleanup(func() { _, _ = database.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, owner.ID) })
-	session, err := auth.CreateSession(context.Background(), database, owner.ID)
+	tokenConfig := auth.TokenConfig{SigningKey: []byte(strings.Repeat("shadowing-integration-secret-", 2))}
+	grant, err := auth.LoginIdentityUser(context.Background(), database, tokenConfig, auth.Credentials{Email: owner.Email, Password: "password123"}, nil, auth.DeviceInfo{Name: "Shadowing test", Platform: "test"})
 	if err != nil {
-		t.Fatalf("create owner session: %v", err)
+		t.Fatalf("create owner identity: %v", err)
 	}
 	recordingID := uuid.NewString()
 	if _, err := database.Exec(context.Background(), `
@@ -113,36 +115,37 @@ func newShadowingFixture(t *testing.T, synthesizer *fakeSynthesizer, correctedTr
 	uploadsDir := t.TempDir()
 	t.Setenv("UPLOADS_DIR", uploadsDir)
 	return shadowingFixture{
-		database:    database,
-		owner:       owner,
-		ownerCookie: auth.NewSessionCookie(session.Token, session.ExpiresAt),
-		recordingID: recordingID,
-		uploadsDir:  uploadsDir,
-		server:      NewServer(Config{DB: database, Synthesizer: synthesizer}),
+		database:         database,
+		owner:            owner,
+		ownerAccessToken: grant.AccessToken,
+		tokenConfig:      tokenConfig,
+		recordingID:      recordingID,
+		uploadsDir:       uploadsDir,
+		server:           newTestServer(Config{DB: database, Synthesizer: synthesizer, IdentityTokens: tokenConfig}),
 	}
 }
 
-func (f shadowingFixture) getAudio(t *testing.T, cookie *http.Cookie, publicURL string) *httptest.ResponseRecorder {
+func (f shadowingFixture) getAudio(t *testing.T, accessToken string, publicURL string) *httptest.ResponseRecorder {
 	t.Helper()
 	request := httptest.NewRequest(http.MethodGet, publicURL, nil)
-	if cookie != nil {
-		request.AddCookie(cookie)
+	if accessToken != "" {
+		request.Header.Set("Authorization", "Bearer "+accessToken)
 	}
 	response := httptest.NewRecorder()
 	f.server.Handler().ServeHTTP(response, request)
 	return response
 }
 
-func (f shadowingFixture) post(t *testing.T, cookie *http.Cookie) *httptest.ResponseRecorder {
+func (f shadowingFixture) post(t *testing.T, accessToken string) *httptest.ResponseRecorder {
 	t.Helper()
-	return f.postToServer(t, f.server, cookie)
+	return f.postToServer(t, f.server, accessToken)
 }
 
-func (f shadowingFixture) postToServer(t *testing.T, server *Server, cookie *http.Cookie) *httptest.ResponseRecorder {
+func (f shadowingFixture) postToServer(t *testing.T, server *Server, accessToken string) *httptest.ResponseRecorder {
 	t.Helper()
 	request := httptest.NewRequest(http.MethodPost, "/api/recordings/"+f.recordingID+"/shadowing", nil)
-	if cookie != nil {
-		request.AddCookie(cookie)
+	if accessToken != "" {
+		request.Header.Set("Authorization", "Bearer "+accessToken)
 	}
 	response := httptest.NewRecorder()
 	server.Handler().ServeHTTP(response, request)
@@ -192,11 +195,11 @@ func TestShadowingRetryRequiresOwner(t *testing.T) {
 	t.Cleanup(func() {
 		_, _ = fixture.database.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, other.ID)
 	})
-	otherSession, err := auth.CreateSession(context.Background(), fixture.database, other.ID)
+	otherGrant, err := auth.LoginIdentityUser(context.Background(), fixture.database, fixture.tokenConfig, auth.Credentials{Email: other.Email, Password: "password123"}, nil, auth.DeviceInfo{Name: "Other shadowing test", Platform: "test"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	response := fixture.post(t, auth.NewSessionCookie(otherSession.Token, otherSession.ExpiresAt))
+	response := fixture.post(t, otherGrant.AccessToken)
 	if response.Code != http.StatusNotFound {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
@@ -227,16 +230,16 @@ func TestShadowingAudioPlaybackRequiresRecordingOwner(t *testing.T) {
 	t.Cleanup(func() {
 		_, _ = fixture.database.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, other.ID)
 	})
-	otherSession, err := auth.CreateSession(context.Background(), fixture.database, other.ID)
+	otherGrant, err := auth.LoginIdentityUser(context.Background(), fixture.database, fixture.tokenConfig, auth.Credentials{Email: other.Email, Password: "password123"}, nil, auth.DeviceInfo{Name: "Other media test", Platform: "test"})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	nonOwnerResponse := fixture.getAudio(t, auth.NewSessionCookie(otherSession.Token, otherSession.ExpiresAt), publicURL)
+	nonOwnerResponse := fixture.getAudio(t, otherGrant.AccessToken, publicURL)
 	if nonOwnerResponse.Code != http.StatusNotFound {
 		t.Fatalf("non-owner status=%d body=%q", nonOwnerResponse.Code, nonOwnerResponse.Body.String())
 	}
-	ownerResponse := fixture.getAudio(t, fixture.ownerCookie, publicURL)
+	ownerResponse := fixture.getAudio(t, fixture.ownerAccessToken, publicURL)
 	if ownerResponse.Code != http.StatusOK || ownerResponse.Body.String() != "ID3-owner-audio" {
 		t.Fatalf("owner status=%d body=%q", ownerResponse.Code, ownerResponse.Body.String())
 	}
@@ -245,7 +248,7 @@ func TestShadowingAudioPlaybackRequiresRecordingOwner(t *testing.T) {
 func TestShadowingRetryRequiresCorrectedTranscript(t *testing.T) {
 	synthesizer := &fakeSynthesizer{audio: []byte("ID3")}
 	fixture := newShadowingFixture(t, synthesizer, "", "pending", time.Now().UTC())
-	response := fixture.post(t, fixture.ownerCookie)
+	response := fixture.post(t, fixture.ownerAccessToken)
 	if response.Code != http.StatusConflict {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
@@ -264,7 +267,7 @@ func TestShadowingConcurrentRequestsClaimOnce(t *testing.T) {
 	for range 2 {
 		go func() {
 			defer wait.Done()
-			statuses <- fixture.post(t, fixture.ownerCookie).Code
+			statuses <- fixture.post(t, fixture.ownerAccessToken).Code
 		}()
 	}
 	wait.Wait()
@@ -283,7 +286,7 @@ func TestShadowingConcurrentRequestsClaimOnce(t *testing.T) {
 func TestShadowingRecentProcessingIsNotDuplicated(t *testing.T) {
 	synthesizer := &fakeSynthesizer{audio: []byte("ID3")}
 	fixture := newShadowingFixture(t, synthesizer, "I went yesterday.", "processing", time.Now().UTC())
-	response := fixture.post(t, fixture.ownerCookie)
+	response := fixture.post(t, fixture.ownerAccessToken)
 	if response.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
@@ -296,7 +299,7 @@ func TestShadowingStaleProcessingCanBeReclaimed(t *testing.T) {
 	synthesizer := &fakeSynthesizer{audio: []byte("ID3")}
 	fixture := newShadowingFixture(t, synthesizer, "I went yesterday.", "processing", time.Now().UTC().Add(-6*time.Minute))
 	startTestWorkers(t, fixture.server)
-	response := fixture.post(t, fixture.ownerCookie)
+	response := fixture.post(t, fixture.ownerAccessToken)
 	if response.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
@@ -309,9 +312,9 @@ func TestShadowingStaleProcessingCanBeReclaimed(t *testing.T) {
 func TestReclaimedShadowingIgnoresOlderWorkerFailure(t *testing.T) {
 	oldSynthesizer := newControlledSynthesizer()
 	fixture := newShadowingFixture(t, &fakeSynthesizer{}, "I went yesterday.", "pending", time.Now().UTC())
-	oldServer := NewServer(Config{DB: fixture.database, Synthesizer: oldSynthesizer})
+	oldServer := newTestServer(Config{DB: fixture.database, Synthesizer: oldSynthesizer, IdentityTokens: fixture.tokenConfig})
 	startTestWorkers(t, oldServer)
-	if response := fixture.postToServer(t, oldServer, fixture.ownerCookie); response.Code != http.StatusOK {
+	if response := fixture.postToServer(t, oldServer, fixture.ownerAccessToken); response.Code != http.StatusOK {
 		t.Fatalf("old claim status=%d body=%q", response.Code, response.Body.String())
 	}
 	waitForControlledSynthesizer(t, oldSynthesizer)
@@ -323,7 +326,7 @@ func TestReclaimedShadowingIgnoresOlderWorkerFailure(t *testing.T) {
 	}
 
 	newSynthesizer := newControlledSynthesizer()
-	newServer := NewServer(Config{DB: fixture.database, Synthesizer: newSynthesizer})
+	newServer := newTestServer(Config{DB: fixture.database, Synthesizer: newSynthesizer, IdentityTokens: fixture.tokenConfig})
 	startTestWorkers(t, newServer)
 	waitForControlledSynthesizer(t, newSynthesizer)
 
@@ -334,7 +337,7 @@ func TestReclaimedShadowingIgnoresOlderWorkerFailure(t *testing.T) {
 	if recording.ShadowingAudioURL == nil {
 		t.Fatal("new attempt did not publish audio URL")
 	}
-	absolutePath, err := storedUploadPath(*recording.ShadowingAudioURL)
+	absolutePath, err := newServer.legacyUploads.Path(*recording.ShadowingAudioURL)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -348,7 +351,7 @@ func TestShadowingFailurePreservesReadyRecording(t *testing.T) {
 	synthesizer := &fakeSynthesizer{err: errors.New("provider body includes secret-internal-detail")}
 	fixture := newShadowingFixture(t, synthesizer, "I went yesterday.", "pending", time.Now().UTC())
 	startTestWorkers(t, fixture.server)
-	response := fixture.post(t, fixture.ownerCookie)
+	response := fixture.post(t, fixture.ownerAccessToken)
 	if response.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}

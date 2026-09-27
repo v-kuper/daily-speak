@@ -30,10 +30,12 @@ func TestLocalPresignedPlansReceiveBoundedFutureExpiry(t *testing.T) {
 	if len(parts) != 1 || !parts[0].Local || parts[0].Request.Method != http.MethodPut || !parts[0].Request.ExpiresAt.Equal(now.Add(10*time.Minute)) {
 		t.Fatalf("unexpected local part plan: %+v", parts)
 	}
-	if parts[0].Request.Headers.Get("Content-Type") != resource.Asset.ContentType {
-		t.Fatalf("content type header = %q", parts[0].Request.Headers.Get("Content-Type"))
+	if values := parts[0].Request.Headers["Content-Type"]; len(values) != 1 || values[0] != resource.Asset.ContentType {
+		t.Fatalf("content type header = %#v", values)
 	}
-	download, err := service.Download(context.Background(), resource.Asset.OwnerPrincipalID, resource.Asset.ID)
+	download, err := service.Download(context.Background(), DownloadInput{
+		OwnerPrincipalID: resource.Asset.OwnerPrincipalID, OwnerKind: "user", AssetID: resource.Asset.ID,
+	})
 	if err != nil {
 		t.Fatalf("presign local download: %v", err)
 	}
@@ -42,9 +44,46 @@ func TestLocalPresignedPlansReceiveBoundedFutureExpiry(t *testing.T) {
 	}
 }
 
+func TestDownloadPolicyRequiresAnAccountBeforeRepositoryAccess(t *testing.T) {
+	service := NewService(&stubRepository{}, stubLocalStore{}, Config{})
+	_, err := service.Download(context.Background(), DownloadInput{
+		OwnerPrincipalID: "guest-id", OwnerKind: "guest", AssetID: "asset-id",
+	})
+	if !errors.Is(err, ErrAccountRequired) {
+		t.Fatalf("download error = %v, want account required", err)
+	}
+}
+
+func TestGuestPreviewPurposeIsInternalOnly(t *testing.T) {
+	asset := Asset{Purpose: PurposeGuestPreviewAudio}
+	if got := asset.ClientPurpose(); got != PurposeRecordingAudio {
+		t.Fatalf("client purpose = %q", got)
+	}
+}
+
+func TestStorageResponsesAreMappedToMediaModels(t *testing.T) {
+	source := storage.PresignedRequest{
+		Method: http.MethodPut, URL: "https://storage.example/upload",
+		Headers: http.Header{"Content-Type": {"audio/webm"}},
+	}
+	request := signedRequestFromStorage(source)
+	if request.Method != http.MethodPut || request.URL != "https://storage.example/upload" {
+		t.Fatalf("signed request = %#v", request)
+	}
+	request.Headers["Content-Type"][0] = "changed"
+	if source.Headers.Get("Content-Type") != "audio/webm" {
+		t.Fatal("media mapping mutated the storage response")
+	}
+
+	part := uploadedPartFromStorage(storage.PartInfo{Number: 2, Size: 1024, ETag: "etag", SHA256: "checksum"})
+	if part.PartNumber != 2 || part.SizeBytes != 1024 || part.ChecksumSHA256 != "checksum" {
+		t.Fatalf("uploaded part = %#v", part)
+	}
+}
+
 func TestCreateInputValidationRejectsUnsupportedOrOversizedMedia(t *testing.T) {
 	base := CreateUploadInput{
-		OwnerPrincipalID: "principal-1", SessionID: "session-1",
+		OwnerPrincipalID: "principal-1", OwnerKind: "user", SessionID: "session-1",
 		IdempotencyKey: "request-1234", Purpose: PurposeRecordingAudio,
 		ContentType: "audio/webm", SizeBytes: 1024,
 		ChecksumSHA256: strings.Repeat("a", 64),
@@ -66,7 +105,7 @@ func TestCreateInputValidationRejectsUnsupportedOrOversizedMedia(t *testing.T) {
 
 func TestGuestPreviewUploadUsesTighterAudioLimit(t *testing.T) {
 	input := CreateUploadInput{
-		OwnerPrincipalID: "guest-1", SessionID: "session-1",
+		OwnerPrincipalID: "guest-1", OwnerKind: "guest", SessionID: "session-1",
 		IdempotencyKey: "request-1234", Purpose: PurposeGuestPreviewAudio,
 		ContentType: "audio/webm", SizeBytes: 10 * 1024 * 1024,
 		ChecksumSHA256: strings.Repeat("a", 64),
@@ -77,6 +116,32 @@ func TestGuestPreviewUploadUsesTighterAudioLimit(t *testing.T) {
 	input.SizeBytes++
 	if _, err := validateCreateInput(input); !errors.Is(err, ErrPayloadTooLarge) {
 		t.Fatalf("guest upload above limit error = %v", err)
+	}
+}
+
+func TestCreateUploadPolicyMapsOnlyGuestAudioToPreviewPurpose(t *testing.T) {
+	guestAudio, err := applyCreateOwnerPolicy(normalizeCreateInput(CreateUploadInput{OwnerKind: " guest ", Purpose: PurposeRecordingAudio}))
+	if err != nil {
+		t.Fatalf("guest audio policy: %v", err)
+	}
+	if guestAudio.Purpose != PurposeGuestPreviewAudio {
+		t.Fatalf("guest audio purpose = %q", guestAudio.Purpose)
+	}
+
+	if _, err := applyCreateOwnerPolicy(normalizeCreateInput(CreateUploadInput{OwnerKind: "guest", Purpose: PurposeRecordingPhoto})); !errors.Is(err, ErrGuestRestricted) {
+		t.Fatalf("guest photo policy error = %v", err)
+	}
+
+	userAudio, err := applyCreateOwnerPolicy(normalizeCreateInput(CreateUploadInput{OwnerKind: "user", Purpose: PurposeRecordingAudio}))
+	if err != nil {
+		t.Fatalf("user audio policy: %v", err)
+	}
+	if userAudio.Purpose != PurposeRecordingAudio {
+		t.Fatalf("user audio purpose = %q", userAudio.Purpose)
+	}
+
+	if _, err := applyCreateOwnerPolicy(normalizeCreateInput(CreateUploadInput{OwnerKind: "user", Purpose: PurposeGuestPreviewAudio})); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("public internal purpose error = %v", err)
 	}
 }
 
@@ -160,7 +225,7 @@ func (repository *stubRepository) ClaimCompleting(context.Context, string) error
 func (repository *stubRepository) ClaimAborting(context.Context, string, *time.Time) error {
 	return nil
 }
-func (repository *stubRepository) MarkCompleted(context.Context, string, storage.ObjectInfo, time.Time) (UploadResource, error) {
+func (repository *stubRepository) MarkCompleted(context.Context, string, VerifiedObject, time.Time) (UploadResource, error) {
 	return repository.upload, nil
 }
 func (repository *stubRepository) MarkAborted(context.Context, string, time.Time) (UploadResource, error) {
@@ -246,7 +311,7 @@ func (repository *statefulRepository) ClaimAborting(_ context.Context, _ string,
 	repository.upload.Upload.State = "aborting"
 	return nil
 }
-func (repository *statefulRepository) MarkCompleted(_ context.Context, _ string, info storage.ObjectInfo, now time.Time) (UploadResource, error) {
+func (repository *statefulRepository) MarkCompleted(_ context.Context, _ string, info VerifiedObject, now time.Time) (UploadResource, error) {
 	repository.mu.Lock()
 	defer repository.mu.Unlock()
 	if repository.upload.Upload.State != "completing" {
@@ -254,8 +319,8 @@ func (repository *statefulRepository) MarkCompleted(_ context.Context, _ string,
 	}
 	repository.upload.Upload.State = "completed"
 	repository.upload.Asset.State = "ready"
-	repository.upload.Asset.VerifiedSizeBytes = &info.Size
-	repository.upload.Asset.VerifiedChecksumSHA256 = &info.SHA256
+	repository.upload.Asset.VerifiedSizeBytes = &info.SizeBytes
+	repository.upload.Asset.VerifiedChecksumSHA256 = &info.ChecksumSHA256
 	repository.upload.Upload.CompletedAt = &now
 	return repository.upload, nil
 }

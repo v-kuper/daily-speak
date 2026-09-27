@@ -4,14 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
-	"regexp"
 	"sort"
 	"strings"
 	"time"
 
-	"daily-speaking-practice/backend/internal/domain"
 	"daily-speaking-practice/backend/internal/storage"
 	"github.com/google/uuid"
 )
@@ -21,11 +18,6 @@ const (
 	defaultSignedRequestTTL   = 15 * time.Minute
 	defaultPartSizeBytes      = 8 * 1024 * 1024
 	defaultMaxPartDescriptors = 100
-)
-
-var (
-	checksumPattern    = regexp.MustCompile(`^[0-9a-f]{64}$`)
-	idempotencyPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$`)
 )
 
 func NewService(repository Repository, store storage.Store, config Config) *Service {
@@ -53,6 +45,10 @@ func (service *Service) Available() bool {
 
 func (service *Service) CreateUpload(ctx context.Context, input CreateUploadInput) (UploadResource, error) {
 	input = normalizeCreateInput(input)
+	input, err := applyCreateOwnerPolicy(input)
+	if err != nil {
+		return UploadResource{}, err
+	}
 	extension, err := validateCreateInput(input)
 	if err != nil || !service.Available() {
 		if !service.Available() {
@@ -128,19 +124,19 @@ func (service *Service) CreateUpload(ctx context.Context, input CreateUploadInpu
 	return resource, nil
 }
 
-func (service *Service) GetUpload(ctx context.Context, ownerPrincipalID string, uploadID string) (UploadResource, []storage.PartInfo, error) {
+func (service *Service) GetUpload(ctx context.Context, ownerPrincipalID string, uploadID string) (UploadResource, []UploadedPart, error) {
 	resource, err := service.repository.GetUpload(ctx, strings.TrimSpace(ownerPrincipalID), strings.TrimSpace(uploadID))
 	if err != nil {
 		return UploadResource{}, nil, err
 	}
 	parts, err := service.store.ListParts(ctx, multipartUpload(resource))
 	if errors.Is(err, storage.ErrNotFound) && (resource.Upload.State == "completed" || resource.Upload.State == "aborted") {
-		return resource, []storage.PartInfo{}, nil
+		return resource, []UploadedPart{}, nil
 	}
 	if err != nil {
 		return UploadResource{}, nil, mapStorageError(err)
 	}
-	return resource, parts, nil
+	return resource, uploadedPartsFromStorage(parts), nil
 }
 
 func (service *Service) PresignParts(ctx context.Context, ownerPrincipalID string, uploadID string, descriptors []PartDescriptor) ([]SignedPart, error) {
@@ -168,9 +164,9 @@ func (service *Service) PresignParts(ctx context.Context, ownerPrincipalID strin
 		if errors.Is(signErr, storage.ErrUnsupported) && service.store.Backend() == storage.BackendLocal {
 			result = append(result, SignedPart{
 				Descriptor: descriptor,
-				Request: storage.PresignedRequest{
+				Request: SignedRequest{
 					Method:    http.MethodPut,
-					Headers:   http.Header{"Content-Type": []string{resource.Asset.ContentType}},
+					Headers:   map[string][]string{"Content-Type": {resource.Asset.ContentType}},
 					ExpiresAt: service.config.Now().Add(service.signedTTL(resource.Upload.ExpiresAt)).UTC(),
 				},
 				Local: true,
@@ -180,41 +176,9 @@ func (service *Service) PresignParts(ctx context.Context, ownerPrincipalID strin
 		if signErr != nil {
 			return nil, mapStorageError(signErr)
 		}
-		result = append(result, SignedPart{Descriptor: descriptor, Request: presigned})
+		result = append(result, SignedPart{Descriptor: descriptor, Request: signedRequestFromStorage(presigned)})
 	}
 	return result, nil
-}
-
-func (service *Service) PutLocalPart(ctx context.Context, uploadID string, descriptor PartDescriptor, bodySize int64, body io.Reader) (storage.PartInfo, error) {
-	if service.store == nil || service.store.Backend() != storage.BackendLocal || body == nil || bodySize != descriptor.SizeBytes {
-		return storage.PartInfo{}, ErrInvalidRequest
-	}
-	resource, err := service.repository.GetUploadByID(ctx, strings.TrimSpace(uploadID))
-	if err != nil {
-		return storage.PartInfo{}, err
-	}
-	if err := service.validateActiveUpload(resource); err != nil || !service.validPartDescriptor(resource, descriptor) {
-		if err != nil {
-			return storage.PartInfo{}, err
-		}
-		return storage.PartInfo{}, ErrInvalidRequest
-	}
-	part, err := service.store.PutPart(ctx, multipartUpload(resource), storage.PartRequest{
-		Number: int32(descriptor.PartNumber), Size: descriptor.SizeBytes,
-		SHA256: strings.ToLower(strings.TrimSpace(descriptor.ChecksumSHA256)),
-	}, body)
-	if err != nil {
-		return storage.PartInfo{}, mapStorageError(err)
-	}
-	now := service.config.Now().UTC()
-	if err := service.repository.UpsertPart(ctx, Part{
-		UploadID: uploadID, PartNumber: descriptor.PartNumber, SizeBytes: part.Size,
-		ETag: part.ETag, ChecksumSHA256: part.SHA256, VerifiedAt: &now,
-		CreatedAt: now, UpdatedAt: now,
-	}); err != nil {
-		return storage.PartInfo{}, err
-	}
-	return part, nil
 }
 
 func (service *Service) CompleteUpload(ctx context.Context, ownerPrincipalID string, uploadID string, completed []CompletedPart) (UploadResource, error) {
@@ -262,7 +226,7 @@ func (service *Service) CompleteUpload(ctx context.Context, ownerPrincipalID str
 	if info.Size != resource.Asset.ExpectedSizeBytes || !strings.EqualFold(info.SHA256, resource.Asset.ExpectedChecksumSHA256) {
 		return UploadResource{}, ErrInvalidRequest
 	}
-	completedResource, err := service.repository.MarkCompleted(ctx, uploadID, info, service.config.Now().UTC())
+	completedResource, err := service.repository.MarkCompleted(ctx, uploadID, verifiedObjectFromStorage(info), service.config.Now().UTC())
 	if err == nil {
 		return completedResource, nil
 	}
@@ -315,97 +279,25 @@ func (service *Service) abortUpload(ctx context.Context, ownerPrincipalID string
 	return service.repository.MarkAborted(ctx, uploadID, service.config.Now().UTC())
 }
 
-func (service *Service) Download(ctx context.Context, ownerPrincipalID string, assetID string) (Download, error) {
-	asset, err := service.repository.GetReadyAsset(ctx, strings.TrimSpace(ownerPrincipalID), strings.TrimSpace(assetID))
+func (service *Service) Download(ctx context.Context, input DownloadInput) (Download, error) {
+	if strings.ToLower(strings.TrimSpace(input.OwnerKind)) != "user" {
+		return Download{}, ErrAccountRequired
+	}
+	asset, err := service.repository.GetReadyAsset(ctx, strings.TrimSpace(input.OwnerPrincipalID), strings.TrimSpace(input.AssetID))
 	if err != nil {
 		return Download{}, err
 	}
 	presigned, signErr := service.store.PresignGet(ctx, asset.ObjectKey, service.config.SignedRequestTTL)
 	if errors.Is(signErr, storage.ErrUnsupported) && service.store.Backend() == storage.BackendLocal {
-		return Download{Asset: asset, Request: storage.PresignedRequest{
-			Method: http.MethodGet, Headers: http.Header{},
+		return Download{Asset: asset, Request: SignedRequest{
+			Method: http.MethodGet, Headers: map[string][]string{},
 			ExpiresAt: service.config.Now().Add(service.config.SignedRequestTTL).UTC(),
 		}, Local: true}, nil
 	}
 	if signErr != nil {
 		return Download{}, mapStorageError(signErr)
 	}
-	return Download{Asset: asset, Request: presigned}, nil
-}
-
-func (service *Service) OpenSignedContent(ctx context.Context, assetID string) (Content, error) {
-	asset, err := service.repository.GetReadyAssetByID(ctx, strings.TrimSpace(assetID))
-	if err != nil {
-		return Content{}, err
-	}
-	body, info, err := service.store.Open(ctx, asset.ObjectKey)
-	if err != nil {
-		return Content{}, mapStorageError(err)
-	}
-	if (asset.ExpectedSizeBytes > 0 && info.Size != asset.ExpectedSizeBytes) ||
-		(asset.ExpectedChecksumSHA256 != "" && !strings.EqualFold(info.SHA256, asset.ExpectedChecksumSHA256)) {
-		_ = body.Close()
-		return Content{}, ErrNotFound
-	}
-	return Content{Body: body, Info: info}, nil
-}
-
-func normalizeCreateInput(input CreateUploadInput) CreateUploadInput {
-	input.OwnerPrincipalID = strings.TrimSpace(input.OwnerPrincipalID)
-	input.SessionID = strings.TrimSpace(input.SessionID)
-	input.IdempotencyKey = strings.TrimSpace(input.IdempotencyKey)
-	input.Purpose = strings.ToLower(strings.TrimSpace(input.Purpose))
-	input.ContentType = strings.ToLower(strings.TrimSpace(strings.Split(input.ContentType, ";")[0]))
-	input.ChecksumSHA256 = strings.ToLower(strings.TrimSpace(input.ChecksumSHA256))
-	return input
-}
-
-func validateCreateInput(input CreateUploadInput) (string, error) {
-	if input.OwnerPrincipalID == "" || input.SessionID == "" || !idempotencyPattern.MatchString(input.IdempotencyKey) || input.SizeBytes <= 0 {
-		return "", ErrInvalidRequest
-	}
-	if !checksumPattern.MatchString(input.ChecksumSHA256) {
-		return "", ErrChecksumMismatch
-	}
-	switch input.Purpose {
-	case PurposeRecordingAudio, PurposeGuestPreviewAudio:
-		allowed := map[string]bool{
-			"audio/webm": true, "video/webm": true, "audio/mp4": true,
-			"audio/x-m4a": true, "video/mp4": true, "audio/ogg": true,
-			"video/ogg": true, "audio/wav": true, "audio/x-wav": true,
-			"audio/vnd.wave": true, "audio/mpeg": true,
-		}
-		if !allowed[input.ContentType] {
-			return "", ErrUnsupportedType
-		}
-		extension := domain.ResolveAudioExtension(input.ContentType)
-		maxBytes := int64(domain.MaxAudioUploadBytes)
-		if input.Purpose == PurposeGuestPreviewAudio {
-			maxBytes = 10 * 1024 * 1024
-		}
-		if input.SizeBytes > maxBytes {
-			return "", ErrPayloadTooLarge
-		}
-		return extension, nil
-	case PurposeRecordingPhoto:
-		extensions := map[string]string{"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif"}
-		extension := extensions[input.ContentType]
-		if extension == "" {
-			return "", ErrUnsupportedType
-		}
-		if input.SizeBytes > domain.MaxPhotoUploadBytes {
-			return "", ErrPayloadTooLarge
-		}
-		return extension, nil
-	default:
-		return "", ErrInvalidRequest
-	}
-}
-
-func sameUploadRequest(asset Asset, input CreateUploadInput) bool {
-	return asset.OwnerPrincipalID == input.OwnerPrincipalID && asset.Purpose == input.Purpose &&
-		asset.ContentType == input.ContentType && asset.ExpectedSizeBytes == input.SizeBytes &&
-		strings.EqualFold(asset.ExpectedChecksumSHA256, input.ChecksumSHA256)
+	return Download{Asset: asset, Request: signedRequestFromStorage(presigned)}, nil
 }
 
 func multipartUpload(resource UploadResource) storage.MultipartUpload {
@@ -415,36 +307,6 @@ func multipartUpload(resource UploadResource) storage.MultipartUpload {
 		SHA256:   resource.Asset.ExpectedChecksumSHA256,
 		Metadata: map[string]string{"asset-id": resource.Asset.ID, "owner-principal-id": resource.Asset.OwnerPrincipalID, "purpose": resource.Asset.Purpose},
 	}
-}
-
-func (service *Service) validateActiveUpload(resource UploadResource) error {
-	if resource.Upload.State != "pending" && resource.Upload.State != "uploading" {
-		return ErrConflict
-	}
-	if !resource.Upload.ExpiresAt.After(service.config.Now()) {
-		return ErrExpired
-	}
-	return nil
-}
-
-func (service *Service) validPartDescriptor(resource UploadResource, descriptor PartDescriptor) bool {
-	checksum := strings.ToLower(strings.TrimSpace(descriptor.ChecksumSHA256))
-	if descriptor.PartNumber < 1 || descriptor.PartNumber > resource.Upload.PartCount || !checksumPattern.MatchString(checksum) {
-		return false
-	}
-	expectedSize := resource.Upload.PartSizeBytes
-	if descriptor.PartNumber == resource.Upload.PartCount {
-		expectedSize = resource.Asset.ExpectedSizeBytes - int64(resource.Upload.PartCount-1)*resource.Upload.PartSizeBytes
-	}
-	return descriptor.SizeBytes == expectedSize
-}
-
-func (service *Service) signedTTL(uploadExpiresAt time.Time) time.Duration {
-	ttl := service.config.SignedRequestTTL
-	if remaining := uploadExpiresAt.Sub(service.config.Now()); remaining < ttl {
-		ttl = remaining
-	}
-	return ttl
 }
 
 func mapStorageError(err error) error {

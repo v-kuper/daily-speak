@@ -3,7 +3,6 @@ package auth
 import (
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
 	"errors"
@@ -16,7 +15,7 @@ import (
 	"time"
 
 	"daily-speaking-practice/backend/internal/db"
-	"daily-speaking-practice/backend/internal/domain"
+	"daily-speaking-practice/backend/internal/learner"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -24,8 +23,7 @@ import (
 )
 
 const (
-	SessionCookieName = "daily_speaking_session"
-	sessionTTL        = 30 * 24 * time.Hour
+	RefreshCookieName = "daily_speaking_refresh"
 	passwordMinLength = 8
 	scryptN           = 16384
 	scryptR           = 8
@@ -43,11 +41,6 @@ type User struct {
 	Email        string `json:"email"`
 	IsSubscriber bool   `json:"isSubscriber"`
 	EnglishLevel string `json:"englishLevel"`
-}
-
-type Session struct {
-	Token     string
-	ExpiresAt time.Time
 }
 
 type HTTPError struct {
@@ -120,7 +113,7 @@ func RegisterUser(ctx context.Context, database *db.DB, email string, password s
 		}
 		return User{}, err
 	}
-	return User{ID: id, Email: email, IsSubscriber: false, EnglishLevel: domain.DefaultEnglishLevel}, nil
+	return User{ID: id, Email: email, IsSubscriber: false, EnglishLevel: learner.DefaultEnglishLevel}, nil
 }
 
 func LoginUser(ctx context.Context, database *db.DB, email string, password string) (User, error) {
@@ -147,69 +140,11 @@ func LoginUser(ctx context.Context, database *db.DB, email string, password stri
 	if !VerifyPassword(password, row.PasswordHash) {
 		return User{}, HTTPError{Message: "Invalid email or password.", Status: 401}
 	}
-	level := domain.DefaultEnglishLevel
+	level := learner.DefaultEnglishLevel
 	if row.EnglishLevel != nil {
-		level = domain.NormalizeEnglishLevel(*row.EnglishLevel)
+		level = learner.NormalizeEnglishLevel(*row.EnglishLevel)
 	}
 	return User{ID: row.ID, Email: row.Email, IsSubscriber: row.IsSubscriber, EnglishLevel: level}, nil
-}
-
-func CreateSession(ctx context.Context, database *db.DB, userID string) (Session, error) {
-	tokenBytes := make([]byte, 32)
-	if _, err := rand.Read(tokenBytes); err != nil {
-		return Session{}, err
-	}
-	token := hex.EncodeToString(tokenBytes)
-	expiresAt := time.Now().UTC().Add(sessionTTL)
-	_, err := database.Exec(ctx, `
-		INSERT INTO user_sessions (id, user_id, token_hash, expires_at)
-		VALUES ($1, $2, $3, $4)`, uuid.NewString(), userID, hashSessionToken(token), expiresAt)
-	if err != nil {
-		return Session{}, err
-	}
-	_, _ = database.Exec(ctx, `DELETE FROM user_sessions WHERE expires_at <= NOW()`)
-	return Session{Token: token, ExpiresAt: expiresAt}, nil
-}
-
-func GetUserBySessionToken(ctx context.Context, database *db.DB, token string) (*User, error) {
-	if strings.TrimSpace(token) == "" {
-		return nil, nil
-	}
-	var row struct {
-		UserID       string
-		Email        string
-		IsSubscriber bool
-		EnglishLevel *string
-	}
-	err := database.QueryRow(ctx, `
-		SELECT s.user_id,
-		       u.email,
-		       (u.is_subscriber AND (u.subscription_expires_at IS NULL OR u.subscription_expires_at > NOW())) AS is_subscriber,
-		       u.english_level
-		FROM user_sessions s
-		JOIN users u ON u.id = s.user_id
-		WHERE s.token_hash = $1
-		  AND s.expires_at > NOW()
-		LIMIT 1`, hashSessionToken(token)).Scan(&row.UserID, &row.Email, &row.IsSubscriber, &row.EnglishLevel)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	level := domain.DefaultEnglishLevel
-	if row.EnglishLevel != nil {
-		level = domain.NormalizeEnglishLevel(*row.EnglishLevel)
-	}
-	return &User{ID: row.UserID, Email: row.Email, IsSubscriber: row.IsSubscriber, EnglishLevel: level}, nil
-}
-
-func DeleteSessionByToken(ctx context.Context, database *db.DB, token string) error {
-	if strings.TrimSpace(token) == "" {
-		return nil
-	}
-	_, err := database.Exec(ctx, `DELETE FROM user_sessions WHERE token_hash = $1`, hashSessionToken(token))
-	return err
 }
 
 type CookieConfig struct {
@@ -242,41 +177,39 @@ func CookieConfigFromEnv() (CookieConfig, error) {
 	if config.SameSite == http.SameSiteNoneMode && !config.Secure {
 		return CookieConfig{}, fmt.Errorf("SESSION_COOKIE_SAME_SITE=none requires SESSION_COOKIE_SECURE=true")
 	}
-	if err := NewSessionCookieWithConfig(config, "", time.Time{}).Valid(); err != nil {
+	if err := NewRefreshCookieWithConfig(config, "", time.Now().Add(time.Hour)).Valid(); err != nil {
 		return CookieConfig{}, fmt.Errorf("SESSION_COOKIE_DOMAIN must be a valid cookie domain")
 	}
 	return config, nil
 }
 
-// NewSessionCookie supplies explicit defaults for existing callers.
-func NewSessionCookie(token string, expiresAt time.Time) *http.Cookie {
-	return NewSessionCookieWithConfig(CookieConfig{SameSite: http.SameSiteLaxMode}, token, expiresAt)
-}
-
-func NewSessionCookieWithConfig(config CookieConfig, token string, expiresAt time.Time) *http.Cookie {
+// NewRefreshCookieWithConfig keeps browser refresh credentials out of
+// JavaScript. Native clients receive the same rotating credential in the JSON
+// identity response and store it in OS-protected storage instead.
+func NewRefreshCookieWithConfig(config CookieConfig, token string, expiresAt time.Time) *http.Cookie {
 	return &http.Cookie{
-		Name:     SessionCookieName,
+		Name:     RefreshCookieName,
 		Value:    token,
-		Path:     "/",
-		HttpOnly: true,
-		SameSite: config.SameSite,
-		Secure:   config.Secure,
+		Path:     "/api/v1/auth",
 		Domain:   config.Domain,
-		Expires:  expiresAt,
+		Expires:  expiresAt.UTC(),
+		MaxAge:   int(time.Until(expiresAt).Seconds()),
+		HttpOnly: true,
+		Secure:   config.Secure,
+		SameSite: config.SameSite,
 	}
 }
 
-func ClearSessionCookie() *http.Cookie {
-	return ClearSessionCookieWithConfig(CookieConfig{SameSite: http.SameSiteLaxMode})
-}
-
-func ClearSessionCookieWithConfig(config CookieConfig) *http.Cookie {
-	cookie := NewSessionCookieWithConfig(config, "", time.Time{})
-	cookie.MaxAge = -1
-	return cookie
-}
-
-func hashSessionToken(token string) string {
-	sum := sha256.Sum256([]byte(token))
-	return hex.EncodeToString(sum[:])
+func ClearRefreshCookieWithConfig(config CookieConfig) *http.Cookie {
+	return &http.Cookie{
+		Name:     RefreshCookieName,
+		Value:    "",
+		Path:     "/api/v1/auth",
+		Domain:   config.Domain,
+		Expires:  time.Unix(1, 0).UTC(),
+		MaxAge:   -1,
+		HttpOnly: true,
+		Secure:   config.Secure,
+		SameSite: config.SameSite,
+	}
 }

@@ -110,6 +110,40 @@ func TestGuestPreviewMigrationAddsBoundedDurableState(t *testing.T) {
 	}
 }
 
+func TestUnifiedIdentityMigrationRemovesLegacySessions(t *testing.T) {
+	catalog, err := migrations.All()
+	if err != nil {
+		t.Fatalf("load migrations: %v", err)
+	}
+	var sql string
+	for _, migration := range catalog {
+		if migration.Name == "0007_unified_identity.sql" {
+			sql = migration.SQL
+			break
+		}
+	}
+	if !strings.Contains(sql, "DROP TABLE IF EXISTS user_sessions") {
+		t.Fatal("unified identity migration must remove the legacy session store")
+	}
+}
+
+func TestRecordingContractMigrationRemovesLegacyUploadSessions(t *testing.T) {
+	catalog, err := migrations.All()
+	if err != nil {
+		t.Fatalf("load migrations: %v", err)
+	}
+	var sql string
+	for _, migration := range catalog {
+		if migration.Name == "0008_drop_legacy_recording_sessions.sql" {
+			sql = migration.SQL
+			break
+		}
+	}
+	if !strings.Contains(sql, "DROP TABLE IF EXISTS recording_upload_sessions") {
+		t.Fatal("recording contract migration must remove the legacy upload-session store")
+	}
+}
+
 func TestMigrateConcurrentAndAdoptsLegacySchema(t *testing.T) {
 	databaseURL := strings.TrimSpace(os.Getenv("TEST_DATABASE_URL"))
 	if databaseURL == "" {

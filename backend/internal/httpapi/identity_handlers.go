@@ -60,8 +60,8 @@ type identityTokensResponse struct {
 	TokenType             string `json:"tokenType"`
 	AccessToken           string `json:"accessToken"`
 	AccessTokenExpiresAt  string `json:"accessTokenExpiresAt"`
-	RefreshToken          string `json:"refreshToken"`
-	RefreshTokenExpiresAt string `json:"refreshTokenExpiresAt"`
+	RefreshToken          string `json:"refreshToken,omitempty"`
+	RefreshTokenExpiresAt string `json:"refreshTokenExpiresAt,omitempty"`
 }
 
 func (s *Server) handleAnonymousIdentityV1(w http.ResponseWriter, r *http.Request) {
@@ -69,12 +69,12 @@ func (s *Server) handleAnonymousIdentityV1(w http.ResponseWriter, r *http.Reques
 	if r.Body != nil && r.ContentLength != 0 && !decodeIdentityJSON(w, r, &payload) {
 		return
 	}
-	grant, err := auth.CreateAnonymousIdentity(r.Context(), s.db, s.identityTokens, auth.DeviceInfo{Name: payload.DeviceName, Platform: payload.Platform})
+	grant, err := s.identityService.CreateAnonymous(r.Context(), auth.DeviceInfo{Name: payload.DeviceName, Platform: payload.Platform})
 	if err != nil {
 		s.writeIdentityError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, identityGrantResponse(grant))
+	s.writeIdentityGrant(w, http.StatusCreated, grant, isBrowserIdentityRequest(r, payload.Platform))
 }
 
 func (s *Server) handleRegisterIdentityV1(w http.ResponseWriter, r *http.Request) {
@@ -91,12 +91,12 @@ func (s *Server) handleRegisterIdentityV1(w http.ResponseWriter, r *http.Request
 	if !ok {
 		return
 	}
-	grant, err := auth.RegisterMobileUser(r.Context(), s.db, s.identityTokens, credentials, guest, auth.DeviceInfo{Name: payload.DeviceName, Platform: payload.Platform})
+	grant, err := s.identityService.Register(r.Context(), credentials, guest, auth.DeviceInfo{Name: payload.DeviceName, Platform: payload.Platform})
 	if err != nil {
 		s.writeIdentityError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, identityGrantResponse(grant))
+	s.writeIdentityGrant(w, http.StatusCreated, grant, isBrowserIdentityRequest(r, payload.Platform))
 }
 
 func (s *Server) handleLoginIdentityV1(w http.ResponseWriter, r *http.Request) {
@@ -113,12 +113,12 @@ func (s *Server) handleLoginIdentityV1(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	grant, err := auth.LoginMobileUser(r.Context(), s.db, s.identityTokens, credentials, guest, auth.DeviceInfo{Name: payload.DeviceName, Platform: payload.Platform})
+	grant, err := s.identityService.Login(r.Context(), credentials, guest, auth.DeviceInfo{Name: payload.DeviceName, Platform: payload.Platform})
 	if err != nil {
 		s.writeIdentityError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, identityGrantResponse(grant))
+	s.writeIdentityGrant(w, http.StatusOK, grant, isBrowserIdentityRequest(r, payload.Platform))
 }
 
 func (s *Server) handleRefreshIdentityV1(w http.ResponseWriter, r *http.Request) {
@@ -128,16 +128,27 @@ func (s *Server) handleRefreshIdentityV1(w http.ResponseWriter, r *http.Request)
 	if !decodeIdentityJSON(w, r, &payload) {
 		return
 	}
-	if strings.TrimSpace(payload.RefreshToken) == "" {
-		writeV1Error(w, r, http.StatusBadRequest, "invalid_request", "refreshToken is required")
+	refreshToken := strings.TrimSpace(payload.RefreshToken)
+	webCookie := isBrowserIdentityRequest(r, "")
+	if refreshToken == "" {
+		if cookie, err := r.Cookie(auth.RefreshCookieName); err == nil {
+			refreshToken = strings.TrimSpace(cookie.Value)
+			webCookie = webCookie || refreshToken != ""
+		}
+	}
+	if refreshToken == "" {
+		writeV1Error(w, r, http.StatusUnauthorized, "invalid_refresh_token", "Refresh token is required")
 		return
 	}
-	grant, err := auth.RotateRefreshToken(r.Context(), s.db, s.identityTokens, payload.RefreshToken)
+	grant, err := s.identityService.Refresh(r.Context(), refreshToken)
 	if err != nil {
+		if webCookie {
+			http.SetCookie(w, auth.ClearRefreshCookieWithConfig(s.browserCookie))
+		}
 		s.writeIdentityError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, identityGrantResponse(grant))
+	s.writeIdentityGrant(w, http.StatusOK, grant, webCookie)
 }
 
 func (s *Server) handleIdentitySessionV1(w http.ResponseWriter, r *http.Request) {
@@ -145,7 +156,7 @@ func (s *Server) handleIdentitySessionV1(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
-	sessions, err := auth.ListDeviceSessions(r.Context(), s.db, identity.PrincipalID)
+	sessions, err := s.identityService.ListSessions(r.Context(), identity.PrincipalID)
 	if err != nil {
 		s.writeIdentityError(w, r, err)
 		return
@@ -164,10 +175,11 @@ func (s *Server) handleLogoutIdentityV1(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
-	if _, err := auth.RevokeDeviceSession(r.Context(), s.db, identity.PrincipalID, identity.SessionID, "logout"); err != nil {
+	if _, err := s.identityService.RevokeSession(r.Context(), identity.PrincipalID, identity.SessionID, "logout"); err != nil {
 		s.writeIdentityError(w, r, err)
 		return
 	}
+	http.SetCookie(w, auth.ClearRefreshCookieWithConfig(s.browserCookie))
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
@@ -176,10 +188,11 @@ func (s *Server) handleLogoutAllIdentityV1(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
-	if err := auth.RevokeAllDeviceSessions(r.Context(), s.db, identity.PrincipalID, "logout_all"); err != nil {
+	if err := s.identityService.RevokeAllSessions(r.Context(), identity.PrincipalID, "logout_all"); err != nil {
 		s.writeIdentityError(w, r, err)
 		return
 	}
+	http.SetCookie(w, auth.ClearRefreshCookieWithConfig(s.browserCookie))
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
@@ -188,7 +201,7 @@ func (s *Server) handleListIdentitySessionsV1(w http.ResponseWriter, r *http.Req
 	if !ok {
 		return
 	}
-	sessions, err := auth.ListDeviceSessions(r.Context(), s.db, identity.PrincipalID)
+	sessions, err := s.identityService.ListSessions(r.Context(), identity.PrincipalID)
 	if err != nil {
 		s.writeIdentityError(w, r, err)
 		return
@@ -210,7 +223,7 @@ func (s *Server) handleRevokeIdentitySessionV1(w http.ResponseWriter, r *http.Re
 		writeV1Error(w, r, http.StatusBadRequest, "invalid_request", "Session ID is required")
 		return
 	}
-	revoked, err := auth.RevokeDeviceSession(r.Context(), s.db, identity.PrincipalID, sessionID, "device_revoked")
+	revoked, err := s.identityService.RevokeSession(r.Context(), identity.PrincipalID, sessionID, "device_revoked")
 	if err != nil {
 		s.writeIdentityError(w, r, err)
 		return
@@ -231,7 +244,7 @@ func (s *Server) optionalGuestIdentityV1(w http.ResponseWriter, r *http.Request)
 		writeV1Error(w, r, http.StatusUnauthorized, "invalid_access_token", "Bearer access token is invalid")
 		return nil, false
 	}
-	identity, err := auth.AuthenticateAccessToken(r.Context(), s.db, s.identityTokens, token)
+	identity, err := s.identityService.Authenticate(r.Context(), token)
 	if err != nil {
 		s.writeIdentityError(w, r, err)
 		return nil, false
@@ -249,7 +262,7 @@ func (s *Server) requiredIdentityV1(w http.ResponseWriter, r *http.Request) (*au
 		writeV1Error(w, r, http.StatusUnauthorized, "invalid_access_token", "Bearer access token is required")
 		return nil, false
 	}
-	identity, err := auth.AuthenticateAccessToken(r.Context(), s.db, s.identityTokens, token)
+	identity, err := s.identityService.Authenticate(r.Context(), token)
 	if err != nil {
 		s.writeIdentityError(w, r, err)
 		return nil, false
@@ -286,7 +299,7 @@ func (s *Server) writeIdentityError(w http.ResponseWriter, r *http.Request, err 
 	switch {
 	case errors.Is(err, auth.ErrIdentityUnavailable):
 		logging.ForRequest("api.v1.identity", r).Warn("identity.unavailable", map[string]any{"status": http.StatusServiceUnavailable})
-		writeV1Error(w, r, http.StatusServiceUnavailable, "identity_unavailable", "Mobile identity is not configured")
+		writeV1Error(w, r, http.StatusServiceUnavailable, "identity_unavailable", "Identity service is not configured")
 	case errors.Is(err, auth.ErrAccessTokenExpired):
 		writeV1Error(w, r, http.StatusUnauthorized, "access_token_expired", "Access token has expired")
 	case errors.Is(err, auth.ErrInvalidAccessToken):
@@ -314,11 +327,21 @@ func (s *Server) writeIdentityError(w http.ResponseWriter, r *http.Request, err 
 	}
 }
 
-func identityGrantResponse(grant auth.TokenGrant) identityResponse {
+func (s *Server) writeIdentityGrant(w http.ResponseWriter, status int, grant auth.TokenGrant, webCookie bool) {
+	if webCookie {
+		http.SetCookie(w, auth.NewRefreshCookieWithConfig(s.browserCookie, grant.RefreshToken, grant.RefreshTokenExpiresAt))
+	}
+	writeJSON(w, status, identityGrantResponse(grant, !webCookie))
+}
+
+func identityGrantResponse(grant auth.TokenGrant, includeRefreshToken bool) identityResponse {
 	response := identityResponseFrom(&grant.Identity, grant.Session, true)
 	response.Tokens = &identityTokensResponse{
 		TokenType: "Bearer", AccessToken: grant.AccessToken, AccessTokenExpiresAt: formatIdentityTime(grant.AccessTokenExpiresAt),
-		RefreshToken: grant.RefreshToken, RefreshTokenExpiresAt: formatIdentityTime(grant.RefreshTokenExpiresAt),
+	}
+	if includeRefreshToken {
+		response.Tokens.RefreshToken = grant.RefreshToken
+		response.Tokens.RefreshTokenExpiresAt = formatIdentityTime(grant.RefreshTokenExpiresAt)
 	}
 	if grant.GuestPreviewPromotion != nil {
 		response.GuestPreviewPromotion = &identityGuestPreviewPromotionResponse{
@@ -327,6 +350,10 @@ func identityGrantResponse(grant auth.TokenGrant) identityResponse {
 		}
 	}
 	return response
+}
+
+func isBrowserIdentityRequest(r *http.Request, platform string) bool {
+	return strings.TrimSpace(r.Header.Get("Origin")) != "" || strings.EqualFold(strings.TrimSpace(platform), "web")
 }
 
 func identityResponseFrom(identity *auth.Identity, session auth.DeviceSession, current bool) identityResponse {

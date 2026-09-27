@@ -12,7 +12,6 @@ import (
 
 	"daily-speaking-practice/backend/internal/auth"
 	"daily-speaking-practice/backend/internal/media"
-	"daily-speaking-practice/backend/internal/storage"
 )
 
 const maxMediaRequestBytes = 128 << 10
@@ -96,20 +95,9 @@ func (s *Server) handleCreateMediaUploadV1(w http.ResponseWriter, r *http.Reques
 		writeV1Error(w, r, http.StatusBadRequest, "invalid_checksum", "checksum.algorithm must be sha256")
 		return
 	}
-	purpose := strings.ToLower(strings.TrimSpace(payload.Purpose))
-	if identity.Kind == "guest" {
-		if purpose != media.PurposeRecordingAudio {
-			writeV1Error(w, r, http.StatusForbidden, "guest_media_restricted", "Guests may upload one preview recording only")
-			return
-		}
-		purpose = media.PurposeGuestPreviewAudio
-	} else if purpose == media.PurposeGuestPreviewAudio {
-		writeV1Error(w, r, http.StatusBadRequest, "invalid_request", "Media purpose is invalid")
-		return
-	}
 	resource, err := s.mediaService.CreateUpload(r.Context(), media.CreateUploadInput{
-		OwnerPrincipalID: identity.PrincipalID, SessionID: identity.SessionID,
-		IdempotencyKey: r.Header.Get("Idempotency-Key"), Purpose: purpose,
+		OwnerPrincipalID: identity.PrincipalID, OwnerKind: identity.Kind, SessionID: identity.SessionID,
+		IdempotencyKey: r.Header.Get("Idempotency-Key"), Purpose: payload.Purpose,
 		ContentType: payload.ContentType, SizeBytes: payload.SizeBytes,
 		ChecksumSHA256: payload.Checksum.Value,
 	})
@@ -206,11 +194,13 @@ func (s *Server) handleAbortMediaUploadV1(w http.ResponseWriter, r *http.Request
 }
 
 func (s *Server) handleMediaDownloadV1(w http.ResponseWriter, r *http.Request, assetID string) {
-	identity, ok := s.requiredMediaUserV1(w, r)
+	identity, ok := s.requiredMediaPrincipalV1(w, r)
 	if !ok || !s.mediaAvailable(w, r) {
 		return
 	}
-	download, err := s.mediaService.Download(r.Context(), identity.PrincipalID, assetID)
+	download, err := s.mediaService.Download(r.Context(), media.DownloadInput{
+		OwnerPrincipalID: identity.PrincipalID, OwnerKind: identity.Kind, AssetID: assetID,
+	})
 	if err != nil {
 		s.writeMediaError(w, r, err)
 		return
@@ -254,7 +244,7 @@ func (s *Server) routeSignedLocalMedia(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.Header().Set("ETag", part.ETag)
-		w.Header().Set("X-Checksum-SHA256", part.SHA256)
+		w.Header().Set("X-Checksum-SHA256", part.ChecksumSHA256)
 		w.WriteHeader(http.StatusOK)
 		return
 	}
@@ -266,7 +256,7 @@ func (s *Server) routeSignedLocalMedia(w http.ResponseWriter, r *http.Request) {
 		}
 		defer content.Body.Close()
 		w.Header().Set("Content-Type", content.Info.ContentType)
-		w.Header().Set("Content-Length", strconv.FormatInt(content.Info.Size, 10))
+		w.Header().Set("Content-Length", strconv.FormatInt(content.Info.SizeBytes, 10))
 		w.Header().Set("ETag", content.Info.ETag)
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		if seeker, ok := content.Body.(io.ReadSeeker); ok {
@@ -285,18 +275,6 @@ func (s *Server) routeMediaUploadEntry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.routeV1(w, r)
-}
-
-func (s *Server) requiredMediaUserV1(w http.ResponseWriter, r *http.Request) (*auth.Identity, bool) {
-	identity, ok := s.requiredMediaPrincipalV1(w, r)
-	if !ok {
-		return nil, false
-	}
-	if identity.Kind != "user" || identity.User == nil {
-		writeV1Error(w, r, http.StatusForbidden, "account_required", "An account is required for media")
-		return nil, false
-	}
-	return identity, true
 }
 
 func (s *Server) requiredMediaPrincipalV1(w http.ResponseWriter, r *http.Request) (*auth.Identity, bool) {
@@ -354,17 +332,21 @@ func (s *Server) writeMediaError(w http.ResponseWriter, r *http.Request, err err
 		writeV1Error(w, r, http.StatusUnprocessableEntity, "checksum_mismatch", "Media checksum does not match")
 	case errors.Is(err, media.ErrSizeMismatch):
 		writeV1Error(w, r, http.StatusUnprocessableEntity, "size_mismatch", "Media size does not match")
+	case errors.Is(err, media.ErrAccountRequired):
+		writeV1Error(w, r, http.StatusForbidden, "account_required", "An account is required for media")
+	case errors.Is(err, media.ErrGuestRestricted):
+		writeV1Error(w, r, http.StatusForbidden, "guest_media_restricted", "Guest media is restricted to recording previews")
 	default:
 		writeV1Error(w, r, http.StatusServiceUnavailable, "storage_unavailable", "Media storage is unavailable")
 	}
 }
 
-func mediaUploadResponse(resource media.UploadResource, parts []storage.PartInfo) map[string]any {
+func mediaUploadResponse(resource media.UploadResource, parts []media.UploadedPart) map[string]any {
 	uploaded := make([]map[string]any, 0, len(parts))
 	for _, part := range parts {
 		uploaded = append(uploaded, map[string]any{
-			"partNumber": part.Number, "sizeBytes": part.Size,
-			"etag": part.ETag, "checksumSha256": part.SHA256,
+			"partNumber": part.PartNumber, "sizeBytes": part.SizeBytes,
+			"etag": part.ETag, "checksumSha256": part.ChecksumSHA256,
 		})
 	}
 	return map[string]any{
@@ -379,18 +361,14 @@ func mediaUploadResponse(resource media.UploadResource, parts []storage.PartInfo
 }
 
 func mediaAssetResponse(asset media.Asset) map[string]any {
-	purpose := asset.Purpose
-	if purpose == media.PurposeGuestPreviewAudio {
-		purpose = media.PurposeRecordingAudio
-	}
 	return map[string]any{
-		"id": asset.ID, "state": asset.State, "purpose": purpose,
+		"id": asset.ID, "state": asset.State, "purpose": asset.ClientPurpose(),
 		"contentType": asset.ContentType, "sizeBytes": asset.ExpectedSizeBytes,
 		"checksum": map[string]string{"algorithm": "sha256", "value": asset.ExpectedChecksumSHA256},
 	}
 }
 
-func mediaRequestResponse(request storage.PresignedRequest) map[string]any {
+func mediaRequestResponse(request media.SignedRequest) map[string]any {
 	headers := make(map[string]string, len(request.Headers))
 	for name, values := range request.Headers {
 		if len(values) > 0 {

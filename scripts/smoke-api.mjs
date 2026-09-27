@@ -11,20 +11,20 @@ const expectedChecks = [
   {
     name: "auth/session unauthorized",
     method: "GET",
-    path: "/api/auth/session",
+    path: "/api/v1/auth/session",
     expectedStatus: 401
   },
   {
     name: "auth/register validation",
     method: "POST",
-    path: "/api/auth/register",
+    path: "/api/v1/auth/register",
     body: { email: "bad-email", password: "123" },
     expectedStatus: 400
   },
   {
     name: "auth/login validation",
     method: "POST",
-    path: "/api/auth/login",
+    path: "/api/v1/auth/login",
     body: { email: "bad-email", password: "123" },
     expectedStatus: 400
   },
@@ -47,10 +47,10 @@ const expectedChecks = [
     expectedStatus: 401
   },
   {
-    name: "user/recordings unauthorized",
+    name: "v1 recordings unauthorized",
     method: "POST",
-    path: "/api/user/recordings",
-    body: { recording: {} },
+    path: "/api/v1/recordings",
+    body: {},
     expectedStatus: 401
   },
   {
@@ -115,26 +115,13 @@ const pushLog = (source, chunk) => {
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-const buildCookieHeader = (response) => {
-  const setCookie = response.headers.get("set-cookie");
-  if (!setCookie) {
-    return "";
-  }
-
-  return setCookie
-    .split(/,\s*(?=[^=;,]+=[^;,]+)/)
-    .map((cookie) => cookie.split(";")[0])
-    .filter(Boolean)
-    .join("; ");
-};
-
 const waitForServer = async () => {
   const startedAt = Date.now();
 
   while (Date.now() - startedAt < startupTimeoutMs) {
     try {
-      const response = await fetch(`${apiBaseURL}/api/auth/session`, { method: "GET" });
-      if (response.status === 401 || response.status === 200) {
+      const response = await fetch(`${apiBaseURL}/readyz`, { method: "GET" });
+      if (response.ok) {
         return;
       }
     } catch {
@@ -168,10 +155,10 @@ const runChecks = async () => {
 
 const runHiddenModelSettingsCheck = async () => {
   const email = `smoke-model-${Date.now()}@example.com`;
-  const registerResponse = await fetch(`${apiBaseURL}/api/auth/register`, {
+  const registerResponse = await fetch(`${apiBaseURL}/api/v1/auth/register`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password: "SmokeTest123!" })
+    body: JSON.stringify({ email, password: "SmokeTest123!", deviceName: "API smoke", platform: "ci" })
   });
 
   if (registerResponse.status !== 201) {
@@ -179,15 +166,16 @@ const runHiddenModelSettingsCheck = async () => {
     throw new Error(`auth/register model settings setup failed: expected 201, got ${registerResponse.status}. Body: ${responseBody.slice(0, 300)}`);
   }
 
-  const cookieHeader = buildCookieHeader(registerResponse);
-  if (!cookieHeader) {
-    throw new Error("auth/register model settings setup failed: missing session cookie.");
+  const registerPayload = await registerResponse.json().catch(() => null);
+  const accessToken = registerPayload?.tokens?.accessToken;
+  if (typeof accessToken !== "string" || accessToken === "") {
+    throw new Error("auth/register model settings setup failed: missing access token.");
   }
 
   const initialResponse = await fetch(`${apiBaseURL}/api/user/ollama-model`, {
     method: "GET",
     headers: {
-      Cookie: cookieHeader
+      Authorization: `Bearer ${accessToken}`
     }
   });
   const initialPayload = await initialResponse.json().catch(() => null);

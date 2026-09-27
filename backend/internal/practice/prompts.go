@@ -4,14 +4,14 @@ import (
 	"fmt"
 	"strings"
 
-	"daily-speaking-practice/backend/internal/domain"
+	"daily-speaking-practice/backend/internal/learner"
 )
 
 func dailyQuestionsPrompt(dateKey string, refreshToken string, englishLevel string, interests []string, avoidQuestions []string) string {
 	parts := []string{
 		fmt.Sprintf("Generate exactly %d daily English speaking practice questions for %s.", dailyQuestionsCount, dateKey),
-		"Audience: English learner level " + domain.FormatEnglishLevel(englishLevel) + ".",
-		"Language difficulty: " + domain.EnglishLevelPromptGuidance(englishLevel),
+		"Audience: English learner level " + learner.FormatEnglishLevel(englishLevel) + ".",
+		"Language difficulty: " + learner.EnglishLevelPromptGuidance(englishLevel),
 		"Questions must be short, practical, and suitable for a 1-3 minute spoken answer.",
 		"Each question must be clearly tied to a concrete theme, not a generic life question.",
 		"The theme should be explicit in the wording of each question.",
@@ -38,8 +38,8 @@ func dailyQuestionsPrompt(dateKey string, refreshToken string, englishLevel stri
 func topicGuidancePrompt(topic string, refreshToken string, englishLevel string, interests []string, avoidQuestions []string, avoidWords []string) string {
 	parts := []string{
 		`Topic: "` + topic + `".`,
-		"Generate guidance for an English speaking practice session for level " + domain.FormatEnglishLevel(englishLevel) + ".",
-		"Language difficulty: " + domain.EnglishLevelPromptGuidance(englishLevel),
+		"Generate guidance for an English speaking practice session for level " + learner.FormatEnglishLevel(englishLevel) + ".",
+		"Language difficulty: " + learner.EnglishLevelPromptGuidance(englishLevel),
 		fmt.Sprintf("Return exactly %d follow-up questions that form one coherent interview after the topic question.", topicGuidanceQuestionsCnt),
 		fmt.Sprintf("Return exactly %d useful words or short phrases connected to this topic.", topicGuidanceWordsCnt),
 		"Useful words must match the learner level and stay understandable for that level.",
@@ -70,8 +70,8 @@ func topicGuidancePrompt(topic string, refreshToken string, englishLevel string,
 func studyWordsPrompt(englishLevel string, interests []string, refreshToken string, avoidWords []string) string {
 	parts := []string{
 		"Generate vocabulary for English speaking/reading study.",
-		"Learner level: " + domain.FormatEnglishLevel(englishLevel) + ".",
-		"Language difficulty: " + domain.EnglishLevelPromptGuidance(englishLevel),
+		"Learner level: " + learner.FormatEnglishLevel(englishLevel) + ".",
+		"Language difficulty: " + learner.EnglishLevelPromptGuidance(englishLevel),
 		"Return exactly 10 useful English words (single words or short 2-word terms).",
 		"Then write one cohesive text (120-180 words) that naturally uses these words in context.",
 		"The text must be clear and practical so learner understands usage context.",

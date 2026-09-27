@@ -1,0 +1,67 @@
+package recording
+
+import (
+	"context"
+	"errors"
+
+	"daily-speaking-practice/backend/internal/db"
+	"daily-speaking-practice/backend/internal/workqueue"
+	"github.com/jackc/pgx/v5"
+)
+
+type SQLRetryUnitOfWork struct{ db *db.DB }
+
+func NewSQLRetryUnitOfWork(database *db.DB) *SQLRetryUnitOfWork {
+	return &SQLRetryUnitOfWork{db: database}
+}
+
+func (unit *SQLRetryUnitOfWork) Execute(ctx context.Context, operation func(RetryTransaction) error) error {
+	if unit == nil || unit.db == nil {
+		return errors.New("recording database is not configured")
+	}
+	tx, err := unit.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if err := operation(&sqlRetryTransaction{tx: tx}); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+type sqlRetryTransaction struct{ tx pgx.Tx }
+
+func (transaction *sqlRetryTransaction) Claim(ctx context.Context, userID string, recordingID string, jobID string) (bool, error) {
+	result, err := transaction.tx.Exec(ctx, `
+		UPDATE recordings
+		SET status = 'processing',
+		    processing_error = NULL,
+		    processing_job_id = $3,
+		    transcript = CASE WHEN processing_stage = 'transcribing' THEN '' ELSE transcript END,
+		    suggestions = CASE WHEN processing_stage IN ('transcribing', 'suggestions') THEN '[]'::jsonb ELSE suggestions END,
+		    corrected_transcript = '',
+		    shadowing_status = 'pending',
+		    shadowing_audio_url = NULL,
+		    shadowing_error = NULL,
+		    shadowing_updated_at = NOW(),
+		    shadowing_attempt_id = NULL
+		WHERE id = $1 AND user_id = $2 AND status = 'failed'`, recordingID, userID, jobID)
+	if err != nil {
+		return false, err
+	}
+	return result.RowsAffected() == 1, nil
+}
+
+func (transaction *sqlRetryTransaction) Find(ctx context.Context, userID string, recordingID string) (Record, bool, error) {
+	return findRecord(ctx, transaction.tx, userID, recordingID)
+}
+
+func (transaction *sqlRetryTransaction) Enqueue(ctx context.Context, jobID string, recordingID string) error {
+	return workqueue.Enqueue(ctx, transaction.tx, workqueue.NewJob{
+		ID: jobID, Kind: workqueue.KindRecordingProcess, ResourceID: recordingID,
+		IdempotencyKey: "recording:" + jobID, MaxAttempts: 3,
+	})
+}
+
+var _ RetryUnitOfWork = (*SQLRetryUnitOfWork)(nil)

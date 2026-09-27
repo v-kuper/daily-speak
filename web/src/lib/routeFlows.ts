@@ -72,21 +72,19 @@ export function startGuestSave(store: AppStore, router: RouteNavigator) {
 }
 
 export async function saveAndNavigate(
-  store: AppStore, router: RouteNavigator, draft: RecordingSaveDraft, finalUpload: Promise<void> | null,
-  currentPath: () => string,
+  store: AppStore, router: RouteNavigator, draft: RecordingSaveDraft, currentPath: () => string,
 ) {
   if (!draft.localRecordingId || store.getState().app.recordingSaveStatus === "loading") return;
   const localPath = recordingPath(draft.localRecordingId);
   store.dispatch(showBackgroundRecordingSave(draft));
   router.push(localPath);
   try {
-    if (finalUpload) await finalUpload;
     await store.dispatch(saveRecording(draft)).unwrap();
   } catch {
     // A 401 invalidates the session and preserves the draft. The route guard owns re-authentication.
     if (!store.getState().app.isAuthenticated) return;
     try {
-      await store.dispatch(saveRecording({ ...draft, recordingUploadSessionId: null })).unwrap();
+      await store.dispatch(saveRecording(draft)).unwrap();
     } catch {
       if (!store.getState().app.isAuthenticated) return;
       store.dispatch(finishFailedRecordingSave(draft.localRecordingId));

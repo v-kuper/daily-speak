@@ -23,7 +23,7 @@ func (f *practiceChatClient) PostChat(_ context.Context, _ any) (ai.ChatResponse
 
 func TestDailyQuestionsUsesServerAIClient(t *testing.T) {
 	client := &practiceChatClient{}
-	handler := NewServer(Config{AIClient: client}).Handler()
+	handler := newTestServer(Config{AIClient: client}).Handler()
 	response := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, "/api/daily-questions?date=2026-09-27&level=b1", nil)
 

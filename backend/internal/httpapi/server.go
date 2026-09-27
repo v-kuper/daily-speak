@@ -3,136 +3,98 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
 	apidocs "daily-speaking-practice/backend/docs"
-	"daily-speaking-practice/backend/internal/ai"
 	"daily-speaking-practice/backend/internal/auth"
-	"daily-speaking-practice/backend/internal/db"
+	"daily-speaking-practice/backend/internal/feed"
+	"daily-speaking-practice/backend/internal/guestpreview"
 	"daily-speaking-practice/backend/internal/logging"
 	"daily-speaking-practice/backend/internal/media"
 	"daily-speaking-practice/backend/internal/operations"
 	"daily-speaking-practice/backend/internal/practice"
-	"daily-speaking-practice/backend/internal/practice/ollamaadapter"
+	"daily-speaking-practice/backend/internal/profile"
+	"daily-speaking-practice/backend/internal/recording"
+	"daily-speaking-practice/backend/internal/shadowing"
 	"daily-speaking-practice/backend/internal/storage"
-	"daily-speaking-practice/backend/internal/transcription"
-	"daily-speaking-practice/backend/internal/tts"
-	"daily-speaking-practice/backend/internal/workqueue"
+	"daily-speaking-practice/backend/internal/subscription"
 )
 
-type Config struct {
-	DB                 *db.DB
-	Synthesizer        tts.Synthesizer
-	AIClient           ai.ChatClient
-	PracticeGenerator  practice.Generator
-	SessionCookie      auth.CookieConfig
-	IdentityTokens     auth.TokenConfig
-	CORS               CORSConfig
-	MediaStore         storage.Store
-	MediaBucket        string
-	MediaSigningSecret []byte
-	MediaPartSize      int64
-	MediaPresignTTL    time.Duration
-	TranscribeAudio    func(context.Context, string) (string, error)
-	ProbeAudioDuration func(context.Context, string) (time.Duration, error)
-	Operations         operations.Config
+type Dependencies struct {
+	OperationsMonitor     *operations.Monitor
+	LegacyUploads         storage.LegacyUploadStore
+	PracticeGenerator     practice.Generator
+	FeedService           *feed.Service
+	ProfileService        *profile.Service
+	SubscriptionService   *subscription.Service
+	RecordingAnalyzer     recording.Analyzer
+	RecordingRewriter     recording.Rewriter
+	RecordingCreator      *recording.Creator
+	RecordingDeleter      *recording.Deleter
+	RecordingReader       *recording.Reader
+	RecordingRetryService *recording.RetryService
+	GuestPreviewStore     *guestpreview.Store
+	ShadowingStore        *shadowing.Store
+	BrowserCookie         auth.CookieConfig
+	IdentityTokens        auth.TokenConfig
+	IdentityService       *auth.IdentityService
+	CORS                  CORSConfig
+	MediaService          *media.Service
+	MediaSigner           *media.URLSigner
+	Operations            operations.Config
+	Limiter               requestLimiter
+	Network               operations.Network
+	Metrics               *operations.Metrics
 }
 
 type Server struct {
-	db                  *db.DB
-	jobStore            *workqueue.Store
-	removeStoredUploads func([]string) error
-	synthesizer         tts.Synthesizer
-	aiClient            ai.ChatClient
-	practiceGenerator   practice.Generator
-	sessionCookie       auth.CookieConfig
-	identityTokens      auth.TokenConfig
-	cors                CORSConfig
-	mediaService        *media.Service
-	mediaSigner         *media.URLSigner
-	mediaStore          storage.Store
-	transcribeAudio     func(context.Context, string) (string, error)
-	probeAudioDuration  func(context.Context, string) (time.Duration, error)
-	operations          operations.Config
-	limiter             requestLimiter
-	network             operations.Network
-	metrics             *operations.Metrics
+	operationsMonitor     *operations.Monitor
+	legacyUploads         storage.LegacyUploadStore
+	practiceGenerator     practice.Generator
+	feedService           *feed.Service
+	profileService        *profile.Service
+	subscriptionService   *subscription.Service
+	recordingAnalyzer     recording.Analyzer
+	recordingRewriter     recording.Rewriter
+	recordingCreator      *recording.Creator
+	recordingDeleter      *recording.Deleter
+	recordingReader       *recording.Reader
+	recordingRetryService *recording.RetryService
+	guestPreviewStore     *guestpreview.Store
+	shadowingStore        *shadowing.Store
+	browserCookie         auth.CookieConfig
+	identityTokens        auth.TokenConfig
+	identityService       *auth.IdentityService
+	cors                  CORSConfig
+	mediaService          *media.Service
+	mediaSigner           *media.URLSigner
+	operations            operations.Config
+	limiter               requestLimiter
+	network               operations.Network
+	metrics               *operations.Metrics
 }
 
 type requestLimiter interface {
 	Allow(context.Context, string, string, operations.Limit) (operations.Decision, error)
 }
 
-func NewServer(config Config) *Server {
-	if config.SessionCookie.SameSite == 0 {
-		config.SessionCookie.SameSite = http.SameSiteLaxMode
-	}
-	synthesizer := config.Synthesizer
-	if synthesizer == nil {
-		synthesizer = tts.NewCartesia(tts.ConfigFromEnv())
-	}
-	aiClient := config.AIClient
-	if aiClient == nil {
-		aiClient = ai.OllamaClient{}
-	}
-	practiceGenerator := config.PracticeGenerator
-	if practiceGenerator == nil {
-		practiceGenerator = practice.NewService(ollamaadapter.New(aiClient))
-	}
-	mediaStore := config.MediaStore
-	if mediaStore == nil && config.DB != nil {
-		mediaStore, _ = storage.NewLocal(resolveUploadsDir())
-	}
-	var mediaService *media.Service
-	if config.DB != nil && mediaStore != nil {
-		bucket := strings.TrimSpace(config.MediaBucket)
-		if bucket == "" && mediaStore.Backend() == storage.BackendS3 {
-			bucket = strings.TrimSpace(os.Getenv("MEDIA_S3_BUCKET"))
-		}
-		mediaService = media.NewService(media.NewSQLRepository(config.DB), mediaStore, media.Config{
-			Bucket: bucket, PartSizeBytes: config.MediaPartSize,
-			SignedRequestTTL: config.MediaPresignTTL,
-		})
-	}
-	signingSecret := config.MediaSigningSecret
-	if len(signingSecret) == 0 {
-		signingSecret = []byte(strings.TrimSpace(os.Getenv("MEDIA_URL_SIGNING_SECRET")))
-	}
-	if len(signingSecret) == 0 {
-		signingSecret = []byte(strings.TrimSpace(os.Getenv("AUTH_ACCESS_TOKEN_SECRET")))
-	}
-	mediaSigner, _ := media.NewURLSigner(signingSecret)
-	transcribeAudio := config.TranscribeAudio
-	if transcribeAudio == nil {
-		transcribeAudio = transcription.TranscribeAudioWithLocalWhisper
-	}
-	probeAudioDuration := config.ProbeAudioDuration
-	if probeAudioDuration == nil {
-		probeAudioDuration = probeAudioDurationWithFFprobe
-	}
+func NewServer(dependencies Dependencies) *Server {
 	return &Server{
-		db:                  config.DB,
-		jobStore:            workqueue.NewStore(config.DB),
-		removeStoredUploads: removeStoredUploadFiles,
-		synthesizer:         synthesizer,
-		aiClient:            aiClient,
-		practiceGenerator:   practiceGenerator,
-		sessionCookie:       config.SessionCookie,
-		identityTokens:      config.IdentityTokens,
-		cors:                config.CORS,
-		mediaService:        mediaService,
-		mediaSigner:         mediaSigner,
-		mediaStore:          mediaStore,
-		transcribeAudio:     transcribeAudio,
-		probeAudioDuration:  probeAudioDuration,
-		operations:          config.Operations,
-		limiter:             operations.NewLimiter(config.DB),
-		network:             operations.NewNetwork(config.Operations.TrustedProxies),
-		metrics:             operations.NewMetrics(),
+		operationsMonitor: dependencies.OperationsMonitor,
+		legacyUploads:     dependencies.LegacyUploads,
+		practiceGenerator: dependencies.PracticeGenerator, feedService: dependencies.FeedService,
+		profileService: dependencies.ProfileService, subscriptionService: dependencies.SubscriptionService,
+		recordingAnalyzer: dependencies.RecordingAnalyzer, recordingRewriter: dependencies.RecordingRewriter,
+		recordingCreator: dependencies.RecordingCreator, recordingDeleter: dependencies.RecordingDeleter,
+		recordingReader: dependencies.RecordingReader, recordingRetryService: dependencies.RecordingRetryService,
+		guestPreviewStore: dependencies.GuestPreviewStore, shadowingStore: dependencies.ShadowingStore,
+		browserCookie: dependencies.BrowserCookie, identityTokens: dependencies.IdentityTokens,
+		identityService: dependencies.IdentityService, cors: dependencies.CORS,
+		mediaService: dependencies.MediaService, mediaSigner: dependencies.MediaSigner,
+		operations: dependencies.Operations, limiter: dependencies.Limiter,
+		network: dependencies.Network, metrics: dependencies.Metrics,
 	}
 }
 
@@ -165,7 +127,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/", s.routeAPI)
 	mux.HandleFunc("/uploads/shadowing", s.handleShadowingUpload)
 	mux.HandleFunc("/uploads/shadowing/", s.handleShadowingUpload)
-	mux.Handle(uploadsURLPrefix, uploadsHandler())
+	mux.Handle(uploadsURLPrefix, http.HandlerFunc(s.handleLegacyUpload))
 	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Not found"})
 	})
@@ -187,14 +149,6 @@ func (s *Server) healthz(w http.ResponseWriter, r *http.Request) {
 func (s *Server) routeAPI(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimSuffix(r.URL.Path, "/")
 	switch {
-	case path == "/api/auth/register" && r.Method == http.MethodPost:
-		s.handleRegister(w, r)
-	case path == "/api/auth/login" && r.Method == http.MethodPost:
-		s.handleLogin(w, r)
-	case path == "/api/auth/session" && r.Method == http.MethodGet:
-		s.handleSession(w, r)
-	case path == "/api/auth/logout" && r.Method == http.MethodPost:
-		s.handleLogout(w, r)
 	case path == "/api/daily-questions" && r.Method == http.MethodGet:
 		s.handleDailyQuestions(w, r)
 	case path == "/api/topic-guidance" && r.Method == http.MethodGet:
@@ -217,8 +171,6 @@ func (s *Server) routeAPI(w http.ResponseWriter, r *http.Request) {
 		s.handleGetEnglishLevel(w, r)
 	case path == "/api/user/english-level" && r.Method == http.MethodPut:
 		s.handlePutEnglishLevel(w, r)
-	case path == "/api/user/recordings" && r.Method == http.MethodPost:
-		s.handleCreateRecording(w, r)
 	case strings.HasPrefix(path, "/api/recordings/") && strings.HasSuffix(path, "/retry") && r.Method == http.MethodPost:
 		s.routeRecordingRetryPath(w, r, strings.TrimPrefix(path, "/api/recordings/"))
 	case strings.HasPrefix(path, "/api/recordings/") && strings.HasSuffix(path, "/shadowing") && r.Method == http.MethodPost:
@@ -227,10 +179,6 @@ func (s *Server) routeAPI(w http.ResponseWriter, r *http.Request) {
 		s.handleGetRecording(w, r, strings.TrimPrefix(path, "/api/recordings/"))
 	case strings.HasPrefix(path, "/api/recordings/") && r.Method == http.MethodDelete:
 		s.handleDeleteRecording(w, r, strings.TrimPrefix(path, "/api/recordings/"))
-	case path == "/api/recording-sessions" && r.Method == http.MethodPost:
-		s.handleCreateRecordingSession(w, r)
-	case strings.HasPrefix(path, "/api/recording-sessions/"):
-		s.routeRecordingSessionPath(w, r, strings.TrimPrefix(path, "/api/recording-sessions/"))
 	case path == "/api/feed/posts" && r.Method == http.MethodGet:
 		s.handleFeedPosts(w, r)
 	case path == "/api/feed/posts" && r.Method == http.MethodPost:
@@ -244,98 +192,18 @@ func (s *Server) routeAPI(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
-	started := time.Now()
-	logger := logging.ForRequest("api.auth.register", r)
-	var payload struct {
-		Email    string `json:"email"`
-		Password string `json:"password"`
-	}
-	_ = json.NewDecoder(r.Body).Decode(&payload)
-	creds, err := auth.ValidateCredentials(payload.Email, payload.Password)
-	if err != nil {
-		writeHTTPError(w, err, http.StatusBadRequest)
-		return
-	}
-	user, err := auth.RegisterUser(r.Context(), s.db, creds.Email, creds.Password)
-	if err != nil {
-		writeHTTPError(w, err, http.StatusInternalServerError)
-		return
-	}
-	session, err := auth.CreateSession(r.Context(), s.db, user.ID)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to register user."})
-		return
-	}
-	http.SetCookie(w, auth.NewSessionCookieWithConfig(s.sessionCookie, session.Token, session.ExpiresAt))
-	logger.Info("request.success", map[string]any{"status": 201, "durationMs": logging.ElapsedMs(started), "userId": user.ID})
-	writeJSON(w, http.StatusCreated, map[string]any{"user": user})
-}
-
-func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
-	started := time.Now()
-	logger := logging.ForRequest("api.auth.login", r)
-	var payload struct {
-		Email    string `json:"email"`
-		Password string `json:"password"`
-	}
-	_ = json.NewDecoder(r.Body).Decode(&payload)
-	creds, err := auth.ValidateCredentials(payload.Email, payload.Password)
-	if err != nil {
-		writeHTTPError(w, err, http.StatusBadRequest)
-		return
-	}
-	user, err := auth.LoginUser(r.Context(), s.db, creds.Email, creds.Password)
-	if err != nil {
-		writeHTTPError(w, err, http.StatusInternalServerError)
-		return
-	}
-	session, err := auth.CreateSession(r.Context(), s.db, user.ID)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to sign in."})
-		return
-	}
-	http.SetCookie(w, auth.NewSessionCookieWithConfig(s.sessionCookie, session.Token, session.ExpiresAt))
-	logger.Info("request.success", map[string]any{"status": 200, "durationMs": logging.ElapsedMs(started), "userId": user.ID})
-	writeJSON(w, http.StatusOK, map[string]any{"user": user})
-}
-
-func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
-	started := time.Now()
-	logger := logging.ForRequest("api.auth.session", r)
-	user, ok := s.authorize(w, r, "api.auth.session", true)
-	if !ok {
-		return
-	}
-	logger.Info("request.success", map[string]any{"status": 200, "durationMs": logging.ElapsedMs(started), "userId": user.ID})
-	writeJSON(w, http.StatusOK, map[string]any{"user": user})
-}
-
-func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
-	token := sessionToken(r)
-	if err := auth.DeleteSessionByToken(r.Context(), s.db, token); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to sign out."})
-		return
-	}
-	http.SetCookie(w, auth.ClearSessionCookieWithConfig(s.sessionCookie))
-	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
-}
-
 func (s *Server) authorizedUser(w http.ResponseWriter, r *http.Request, scope string) (*auth.User, bool) {
-	return s.authorize(w, r, scope, false)
+	return s.authorize(w, r, scope)
 }
 
-func (s *Server) authorize(w http.ResponseWriter, r *http.Request, scope string, clearInvalidSession bool) (*auth.User, bool) {
+func (s *Server) authorize(w http.ResponseWriter, r *http.Request, scope string) (*auth.User, bool) {
 	started := time.Now()
 	logger := logging.ForRequest(scope, r)
 	writeError := func(status int, message string) {
-		if clearInvalidSession && status == http.StatusUnauthorized {
-			http.SetCookie(w, auth.ClearSessionCookieWithConfig(s.sessionCookie))
-		}
 		writeJSON(w, status, map[string]string{"error": message})
 	}
-	if bearer, present := bearerToken(r); present && strings.HasPrefix(r.URL.Path, "/api/v1/") {
-		identity, err := auth.AuthenticateAccessToken(r.Context(), s.db, s.identityTokens, bearer)
+	if bearer, present := bearerToken(r); present {
+		identity, err := s.identityService.Authenticate(r.Context(), bearer)
 		if err != nil {
 			logger.Info("request.unauthorized", map[string]any{"status": 401, "durationMs": logging.ElapsedMs(started)})
 			writeError(http.StatusUnauthorized, "Unauthorized")
@@ -348,24 +216,9 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request, scope string,
 		}
 		return identity.User, true
 	}
-	token := sessionToken(r)
-	if token == "" {
-		logger.Info("request.unauthorized", map[string]any{"status": 401, "durationMs": logging.ElapsedMs(started)})
-		writeError(http.StatusUnauthorized, "Unauthorized")
-		return nil, false
-	}
-	user, err := auth.GetUserBySessionToken(r.Context(), s.db, token)
-	if err != nil {
-		logger.Error("request.failed", logging.ErrorMeta(err))
-		writeError(http.StatusInternalServerError, "Failed to load session.")
-		return nil, false
-	}
-	if user == nil {
-		logger.Info("request.unauthorized", map[string]any{"status": 401, "durationMs": logging.ElapsedMs(started)})
-		writeError(http.StatusUnauthorized, "Unauthorized")
-		return nil, false
-	}
-	return user, true
+	logger.Info("request.unauthorized", map[string]any{"status": 401, "durationMs": logging.ElapsedMs(started)})
+	writeError(http.StatusUnauthorized, "Unauthorized")
+	return nil, false
 }
 
 func bearerToken(r *http.Request) (string, bool) {
@@ -378,23 +231,6 @@ func bearerToken(r *http.Request) (string, bool) {
 		return "", true
 	}
 	return parts[1], true
-}
-
-func sessionToken(r *http.Request) string {
-	cookie, err := r.Cookie(auth.SessionCookieName)
-	if err != nil {
-		return ""
-	}
-	return cookie.Value
-}
-
-func writeHTTPError(w http.ResponseWriter, err error, fallbackStatus int) {
-	var httpErr auth.HTTPError
-	if errors.As(err, &httpErr) {
-		writeJSON(w, httpErr.Status, map[string]string{"error": httpErr.Message})
-		return
-	}
-	writeJSON(w, fallbackStatus, map[string]string{"error": err.Error()})
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {

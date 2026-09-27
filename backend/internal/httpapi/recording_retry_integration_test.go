@@ -70,12 +70,13 @@ func retryPromptFromBody(body any) string {
 }
 
 type recordingRetryFixture struct {
-	database    *db.DB
-	owner       auth.User
-	ownerCookie *http.Cookie
-	recordingID string
-	client      *retryAIClient
-	server      *Server
+	database         *db.DB
+	owner            auth.User
+	ownerAccessToken string
+	tokenConfig      auth.TokenConfig
+	recordingID      string
+	client           *retryAIClient
+	server           *Server
 }
 
 func newRecordingRetryFixture(t *testing.T, stage string, client *retryAIClient) recordingRetryFixture {
@@ -98,9 +99,10 @@ func newRecordingRetryFixture(t *testing.T, stage string, client *retryAIClient)
 		t.Fatalf("register owner: %v", err)
 	}
 	t.Cleanup(func() { _, _ = database.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, owner.ID) })
-	session, err := auth.CreateSession(context.Background(), database, owner.ID)
+	tokenConfig := auth.TokenConfig{SigningKey: []byte(strings.Repeat("recording-retry-secret-", 2))}
+	grant, err := auth.LoginIdentityUser(context.Background(), database, tokenConfig, auth.Credentials{Email: owner.Email, Password: "password123"}, nil, auth.DeviceInfo{Name: "Retry test", Platform: "test"})
 	if err != nil {
-		t.Fatalf("create owner session: %v", err)
+		t.Fatalf("create owner identity: %v", err)
 	}
 
 	recordingID := uuid.NewString()
@@ -120,22 +122,23 @@ func newRecordingRetryFixture(t *testing.T, stage string, client *retryAIClient)
 
 	t.Setenv("UPLOADS_DIR", t.TempDir())
 	fixture := recordingRetryFixture{
-		database:    database,
-		owner:       owner,
-		ownerCookie: auth.NewSessionCookie(session.Token, session.ExpiresAt),
-		recordingID: recordingID,
-		client:      client,
-		server:      NewServer(Config{DB: database, AIClient: client, Synthesizer: &fakeSynthesizer{audio: []byte("ID3")}}),
+		database:         database,
+		owner:            owner,
+		ownerAccessToken: grant.AccessToken,
+		tokenConfig:      tokenConfig,
+		recordingID:      recordingID,
+		client:           client,
+		server:           newTestServer(Config{DB: database, AIClient: client, Synthesizer: &fakeSynthesizer{audio: []byte("ID3")}, IdentityTokens: tokenConfig}),
 	}
 	startTestWorkers(t, fixture.server)
 	return fixture
 }
 
-func (fixture recordingRetryFixture) post(t *testing.T, cookie *http.Cookie) *httptest.ResponseRecorder {
+func (fixture recordingRetryFixture) post(t *testing.T, accessToken string) *httptest.ResponseRecorder {
 	t.Helper()
 	request := httptest.NewRequest(http.MethodPost, "/api/recordings/"+fixture.recordingID+"/retry", nil)
-	if cookie != nil {
-		request.AddCookie(cookie)
+	if accessToken != "" {
+		request.Header.Set("Authorization", "Bearer "+accessToken)
 	}
 	response := httptest.NewRecorder()
 	fixture.server.Handler().ServeHTTP(response, request)
@@ -176,7 +179,7 @@ func TestRecordingRetryAnalysisClaimsOnceAndContinuesToReady(t *testing.T) {
 	client := &retryAIClient{blockFirst: true, started: make(chan struct{}), release: make(chan struct{})}
 	fixture := newRecordingRetryFixture(t, "suggestions", client)
 
-	first := fixture.post(t, fixture.ownerCookie)
+	first := fixture.post(t, fixture.ownerAccessToken)
 	if first.Code != http.StatusOK {
 		t.Fatalf("first status=%d body=%s", first.Code, first.Body.String())
 	}
@@ -189,7 +192,7 @@ func TestRecordingRetryAnalysisClaimsOnceAndContinuesToReady(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("analysis retry did not start")
 	}
-	second := fixture.post(t, fixture.ownerCookie)
+	second := fixture.post(t, fixture.ownerAccessToken)
 	if second.Code != http.StatusOK {
 		t.Fatalf("second status=%d body=%s", second.Code, second.Body.String())
 	}
@@ -205,7 +208,7 @@ func TestRecordingRetryRewriteSkipsDetectorsAndReviewer(t *testing.T) {
 	client := &retryAIClient{}
 	fixture := newRecordingRetryFixture(t, "rewriting", client)
 
-	response := fixture.post(t, fixture.ownerCookie)
+	response := fixture.post(t, fixture.ownerAccessToken)
 	if response.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
@@ -226,12 +229,12 @@ func TestRecordingRetryRequiresOwner(t *testing.T) {
 	t.Cleanup(func() {
 		_, _ = fixture.database.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, other.ID)
 	})
-	session, err := auth.CreateSession(context.Background(), fixture.database, other.ID)
+	grant, err := auth.LoginIdentityUser(context.Background(), fixture.database, fixture.tokenConfig, auth.Credentials{Email: other.Email, Password: "password123"}, nil, auth.DeviceInfo{Name: "Other retry test", Platform: "test"})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	response := fixture.post(t, auth.NewSessionCookie(session.Token, session.ExpiresAt))
+	response := fixture.post(t, grant.AccessToken)
 	if response.Code != http.StatusNotFound || client.callCount() != 0 {
 		t.Fatalf("status=%d body=%s calls=%d", response.Code, response.Body.String(), client.callCount())
 	}

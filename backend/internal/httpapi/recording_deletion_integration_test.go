@@ -14,6 +14,7 @@ import (
 
 	"daily-speaking-practice/backend/internal/auth"
 	"daily-speaking-practice/backend/internal/db"
+	"daily-speaking-practice/backend/internal/storage"
 	"daily-speaking-practice/backend/internal/workqueue"
 	"github.com/google/uuid"
 )
@@ -41,7 +42,6 @@ func TestDeleteRecordingCascadesDataAndRetriesQueuedFilesAfterRestart(t *testing
 	recordingID := uuid.NewString()
 	postID := uuid.NewString()
 	replyID := uuid.NewString()
-	uploadSessionID := uuid.NewString()
 	recordingURL := fmt.Sprintf("/uploads/recordings/%s/%s.webm", user.ID, recordingID)
 	shadowingURL := fmt.Sprintf("/uploads/shadowing/%s/%s.mp3", user.ID, recordingID)
 	replyURL := fmt.Sprintf("/uploads/feed-replies/%s/%s.webm", user.ID, replyID)
@@ -53,9 +53,10 @@ func TestDeleteRecordingCascadesDataAndRetriesQueuedFilesAfterRestart(t *testing
 		_, _ = database.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, user.ID)
 	})
 
-	session, err := auth.CreateSession(ctx, database, user.ID)
+	tokenConfig := auth.TokenConfig{SigningKey: []byte(strings.Repeat("recording-deletion-secret-", 2))}
+	grant, err := auth.LoginIdentityUser(ctx, database, tokenConfig, auth.Credentials{Email: user.Email, Password: "password123"}, nil, auth.DeviceInfo{Name: "Deletion test", Platform: "test"})
 	if err != nil {
-		t.Fatalf("create test session: %v", err)
+		t.Fatalf("create test identity: %v", err)
 	}
 	now := time.Now().UTC()
 	if _, err := database.Exec(ctx, `
@@ -63,12 +64,6 @@ func TestDeleteRecordingCascadesDataAndRetriesQueuedFilesAfterRestart(t *testing
 		VALUES ($1, $2, 'Deletion test', 30, $3, 'Test transcript', $4, 'ready', 'ready', $5)`,
 		recordingID, user.ID, now, recordingURL, shadowingURL); err != nil {
 		t.Fatalf("insert recording: %v", err)
-	}
-	if _, err := database.Exec(ctx, `
-		INSERT INTO recording_upload_sessions (id, user_id, topic, duration, timestamp, status, recording_id)
-		VALUES ($1, $2, 'Deletion test', 30, $3, 'complete', $4)`,
-		uploadSessionID, user.ID, now, recordingID); err != nil {
-		t.Fatalf("insert upload session: %v", err)
 	}
 	if _, err := database.Exec(ctx, `
 		INSERT INTO feed_posts
@@ -97,15 +92,14 @@ func TestDeleteRecordingCascadesDataAndRetriesQueuedFilesAfterRestart(t *testing
 	writeTestUpload(t, uploadsDir, replyURL)
 
 	request := httptest.NewRequest(http.MethodDelete, "/api/recordings/"+recordingID, nil)
-	request.AddCookie(auth.NewSessionCookie(session.Token, session.ExpiresAt))
+	request.Header.Set("Authorization", "Bearer "+grant.AccessToken)
 	response := httptest.NewRecorder()
-	NewServer(Config{DB: database}).Handler().ServeHTTP(response, request)
+	newTestServer(Config{DB: database, IdentityTokens: tokenConfig}).Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
 		t.Fatalf("expected delete status 200, got %d: %s", response.Code, response.Body.String())
 	}
 
 	assertTableRowCount(t, database, "recordings", "id", recordingID, 0)
-	assertTableRowCount(t, database, "recording_upload_sessions", "id", uploadSessionID, 0)
 	assertTableRowCount(t, database, "feed_posts", "id", postID, 0)
 	assertTableRowCount(t, database, "feed_replies", "id", replyID, 0)
 	assertTableRowCount(t, database, "feed_post_reactions", "post_id", postID, 0)
@@ -127,10 +121,14 @@ func TestDeleteRecordingCascadesDataAndRetriesQueuedFilesAfterRestart(t *testing
 		t.Fatalf("prioritize deletion test jobs: %v", err)
 	}
 
-	restartedServer := NewServer(Config{DB: database})
-	restartedServer.removeStoredUploads = func([]string) error {
-		return errors.New("simulated Windows sharing violation")
-	}
+	legacyUploads := storage.NewLegacyUploads(uploadsDir)
+	restartedServer := newTestServer(Config{
+		DB: database,
+		LegacyUploads: failingLegacyUploadStore{
+			LegacyUploadStore: legacyUploads,
+			err:               errors.New("simulated Windows sharing violation"),
+		},
+	})
 	processDeletionJobsOnce(t, restartedServer, 3, true)
 	assertDeletionJob(t, database, recordingURL, "retry_wait", 1)
 	assertDeletionJob(t, database, shadowingURL, "retry_wait", 1)
@@ -141,7 +139,7 @@ func TestDeleteRecordingCascadesDataAndRetriesQueuedFilesAfterRestart(t *testing
 		t.Fatal(err)
 	}
 
-	secondRestart := NewServer(Config{DB: database})
+	secondRestart := newTestServer(Config{DB: database, LegacyUploads: legacyUploads})
 	processDeletionJobsOnce(t, secondRestart, 3, false)
 	assertTableRowCount(t, database, "pending_file_deletions", "public_url", recordingURL, 0)
 	assertTableRowCount(t, database, "pending_file_deletions", "public_url", shadowingURL, 0)
@@ -151,19 +149,28 @@ func TestDeleteRecordingCascadesDataAndRetriesQueuedFilesAfterRestart(t *testing
 	assertUploadMissing(t, uploadsDir, replyURL)
 }
 
+type failingLegacyUploadStore struct {
+	storage.LegacyUploadStore
+	err error
+}
+
+func (store failingLegacyUploadStore) Remove([]string) error { return store.err }
+
 func processDeletionJobsOnce(t *testing.T, server *Server, count int, wantError bool) {
 	t.Helper()
+	runtime := testBackgroundRuntime(t, server)
+	jobStore := testJobStore(t, server)
 	for range count {
-		job, found, err := server.jobStore.Claim(context.Background(), "deletion-test", []string{workqueue.KindMediaDelete}, time.Minute)
+		job, found, err := jobStore.Claim(context.Background(), "deletion-test", []string{workqueue.KindMediaDelete}, time.Minute)
 		if err != nil || !found {
 			t.Fatalf("claim deletion job: found=%t err=%v", found, err)
 		}
-		handleErr := server.handleDurableJob(context.Background(), job)
+		handleErr := runtime.Handle(context.Background(), job)
 		if wantError {
 			if handleErr == nil {
 				t.Fatal("expected simulated deletion failure")
 			}
-			if _, err := server.jobStore.Fail(context.Background(), job, handleErr, time.Hour, server.finalizeDurableFailure); err != nil {
+			if _, err := jobStore.Fail(context.Background(), job, handleErr, time.Hour, runtime.FinalizeFailure); err != nil {
 				t.Fatalf("schedule deletion retry: %v", err)
 			}
 			continue
@@ -171,7 +178,7 @@ func processDeletionJobsOnce(t *testing.T, server *Server, count int, wantError 
 		if handleErr != nil {
 			t.Fatalf("delete stored upload: %v", handleErr)
 		}
-		if err := server.jobStore.Complete(context.Background(), job); err != nil {
+		if err := jobStore.Complete(context.Background(), job); err != nil {
 			t.Fatalf("complete deletion job: %v", err)
 		}
 	}
@@ -199,13 +206,12 @@ func assertUploadMissing(t *testing.T, uploadsDir string, publicURL string) {
 func assertTableRowCount(t *testing.T, database *db.DB, table string, column string, value string, expected int) {
 	t.Helper()
 	allowed := map[string]map[string]bool{
-		"recordings":                {"id": true},
-		"recording_upload_sessions": {"id": true},
-		"feed_posts":                {"id": true},
-		"feed_replies":              {"id": true},
-		"feed_post_reactions":       {"post_id": true},
-		"feed_reply_reactions":      {"reply_id": true},
-		"pending_file_deletions":    {"public_url": true},
+		"recordings":             {"id": true},
+		"feed_posts":             {"id": true},
+		"feed_replies":           {"id": true},
+		"feed_post_reactions":    {"post_id": true},
+		"feed_reply_reactions":   {"reply_id": true},
+		"pending_file_deletions": {"public_url": true},
 	}
 	if !allowed[table][column] {
 		t.Fatalf("unsafe test count target %s.%s", table, column)

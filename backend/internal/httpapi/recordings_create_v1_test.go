@@ -10,34 +10,11 @@ import (
 	"os"
 	"strings"
 	"testing"
-	"time"
 
 	"daily-speaking-practice/backend/internal/auth"
 	"daily-speaking-practice/backend/internal/db"
 	"github.com/google/uuid"
 )
-
-func TestNormalizeRecordingCreateV1RequiresPhotoForPhotoPractice(t *testing.T) {
-	_, err := normalizeRecordingCreateV1(recordingCreateV1Request{
-		Topic: "Describe it", Duration: 30, Timestamp: time.Now().UTC().Format(time.RFC3339Nano),
-		PracticeType: "photo_description", AudioAssetID: "audio-1",
-	})
-	if err == nil || !strings.Contains(err.Error(), "Photo asset") {
-		t.Fatalf("expected photo validation error, got %v", err)
-	}
-}
-
-func TestDeterministicRecordingCreateV1Identity(t *testing.T) {
-	firstID, firstDigest := deterministicRecordingCreateV1Identity("principal-1", "retry-key", "recording")
-	secondID, secondDigest := deterministicRecordingCreateV1Identity("principal-1", "retry-key", "recording")
-	otherID, _ := deterministicRecordingCreateV1Identity("principal-1", "other-key", "recording")
-	if firstID != secondID || firstDigest != secondDigest {
-		t.Fatal("same principal and idempotency key must produce the same identity")
-	}
-	if firstID == otherID || len(firstDigest) != 64 {
-		t.Fatalf("unexpected deterministic identity %q / %q", firstID, firstDigest)
-	}
-}
 
 func TestRecordingMediaExposesStableBackendPaths(t *testing.T) {
 	audioID := "audio asset"
@@ -144,7 +121,7 @@ func newRecordingCreateV1Fixture(t *testing.T) recordingCreateV1Fixture {
 	})
 	return recordingCreateV1Fixture{
 		database: database,
-		server:   NewServer(Config{DB: database, IdentityTokens: tokenConfig}),
+		server:   newTestServer(Config{DB: database, IdentityTokens: tokenConfig}),
 		owner:    owner,
 		other:    other,
 		guest:    guest,
@@ -159,7 +136,7 @@ func registerRecordingCreateV1User(t *testing.T, database *db.DB, tokenConfig au
 		t.Fatalf("register %s user: %v", label, err)
 	}
 	t.Cleanup(func() { _, _ = database.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, user.ID) })
-	grant, err := auth.LoginMobileUser(context.Background(), database, tokenConfig, auth.Credentials{Email: email, Password: "password123"}, nil, auth.DeviceInfo{Name: label, Platform: "ios"})
+	grant, err := auth.LoginIdentityUser(context.Background(), database, tokenConfig, auth.Credentials{Email: email, Password: "password123"}, nil, auth.DeviceInfo{Name: label, Platform: "ios"})
 	if err != nil {
 		t.Fatalf("login %s user: %v", label, err)
 	}
@@ -169,13 +146,17 @@ func registerRecordingCreateV1User(t *testing.T, database *db.DB, tokenConfig au
 func (f recordingCreateV1Fixture) insertAsset(t *testing.T, principalID string, purpose string) string {
 	t.Helper()
 	id := uuid.NewString()
+	contentType := "audio/webm"
+	if purpose == "recording_photo" {
+		contentType = "image/jpeg"
+	}
 	_, err := f.database.Exec(context.Background(), `
 		INSERT INTO media_assets
 		  (id, owner_principal_id, purpose, state, storage_driver, object_key, content_type,
 		   verified_size_bytes, verified_checksum_sha256, verified_at)
 		VALUES
 		  ($1, $2, $3, 'ready', 'local', $4, $5, 4, $6, NOW())`,
-		id, principalID, purpose, "test/"+id, chooseString(purpose == "recording_photo", "image/jpeg", "audio/webm"), strings.Repeat("a", 64))
+		id, principalID, purpose, "test/"+id, contentType, strings.Repeat("a", 64))
 	if err != nil {
 		t.Fatalf("insert %s asset: %v", purpose, err)
 	}

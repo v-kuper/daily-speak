@@ -9,7 +9,7 @@ import (
 )
 
 func TestHealthz(t *testing.T) {
-	handler := NewServer(Config{}).Handler()
+	handler := newTestServer(Config{}).Handler()
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 
@@ -24,7 +24,7 @@ func TestHealthz(t *testing.T) {
 }
 
 func TestEveryResponseHasRequestID(t *testing.T) {
-	handler := NewServer(Config{}).Handler()
+	handler := newTestServer(Config{}).Handler()
 	cases := []struct {
 		name       string
 		requestID  string
@@ -55,7 +55,7 @@ func TestEveryResponseHasRequestID(t *testing.T) {
 }
 
 func TestV1MetadataAndStableErrors(t *testing.T) {
-	handler := NewServer(Config{}).Handler()
+	handler := newTestServer(Config{}).Handler()
 
 	metadata := httptest.NewRecorder()
 	handler.ServeHTTP(metadata, httptest.NewRequest(http.MethodGet, "/api/v1", nil))
@@ -87,7 +87,7 @@ func TestV1MetadataAndStableErrors(t *testing.T) {
 }
 
 func TestLegacyErrorsRemainCompatible(t *testing.T) {
-	handler := NewServer(Config{}).Handler()
+	handler := newTestServer(Config{}).Handler()
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/recordings/demo", nil))
 	if strings.TrimSpace(recorder.Body.String()) != `{"error":"Unauthorized"}` {
@@ -118,7 +118,7 @@ func TestV1ErrorCodesAreStableByStatus(t *testing.T) {
 }
 
 func TestBackendDoesNotServeOrProxyWebRoutes(t *testing.T) {
-	handler := NewServer(Config{}).Handler()
+	handler := newTestServer(Config{}).Handler()
 
 	for _, path := range []string{"/", "/speak", "/history/demo"} {
 		recorder := httptest.NewRecorder()
@@ -134,24 +134,18 @@ func TestBackendDoesNotServeOrProxyWebRoutes(t *testing.T) {
 	}
 }
 
-func TestUnauthorizedAPIContractWithoutCookie(t *testing.T) {
-	handler := NewServer(Config{}).Handler()
+func TestUnauthorizedAPIContractWithoutBearer(t *testing.T) {
+	handler := newTestServer(Config{}).Handler()
 	cases := []struct {
 		method string
 		path   string
 		body   string
 	}{
-		{http.MethodGet, "/api/auth/session", ""},
 		{http.MethodGet, "/api/user/data", ""},
-		{http.MethodPost, "/api/user/recordings", `{"recording":{}}`},
 		{http.MethodGet, "/api/recordings/demo-recording", ""},
 		{http.MethodDelete, "/api/recordings/demo-recording", ""},
 		{http.MethodPost, "/api/recordings/demo-recording/retry", ""},
 		{http.MethodPost, "/api/recordings/demo-recording/shadowing", ""},
-		{http.MethodPost, "/api/recording-sessions", `{"topic":"Free talk"}`},
-		{http.MethodPost, "/api/recording-sessions/demo-session/chunks", ""},
-		{http.MethodPost, "/api/recording-sessions/demo-session/audio", ""},
-		{http.MethodPost, "/api/recording-sessions/demo-session/finish", "{}"},
 		{http.MethodGet, "/api/feed/posts", ""},
 		{http.MethodPost, "/api/feed/posts", `{"recordingId":"demo"}`},
 		{http.MethodGet, "/api/feed/posts/demo-post", ""},
@@ -181,13 +175,13 @@ func TestUnauthorizedAPIContractWithoutCookie(t *testing.T) {
 }
 
 func TestAuthValidationContract(t *testing.T) {
-	handler := NewServer(Config{}).Handler()
+	handler := newTestServer(Config{}).Handler()
 	cases := []struct {
 		path string
 		body string
 	}{
-		{"/api/auth/register", `{"email":"bad-email","password":"123"}`},
-		{"/api/auth/login", `{"email":"bad-email","password":"123"}`},
+		{"/api/v1/auth/register", `{"email":"bad-email","password":"123"}`},
+		{"/api/v1/auth/login", `{"email":"bad-email","password":"123"}`},
 	}
 
 	for _, tc := range cases {

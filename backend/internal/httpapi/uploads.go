@@ -1,50 +1,33 @@
 package httpapi
 
 import (
-	"errors"
-	"fmt"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
-	"unicode"
 
-	"daily-speaking-practice/backend/internal/domain"
+	"daily-speaking-practice/backend/internal/media"
 )
 
 const uploadsURLPrefix = "/uploads/"
 
-func resolveUploadsDir() string {
-	value := strings.TrimSpace(os.Getenv("UPLOADS_DIR"))
-	if value != "" {
-		return value
+func (s *Server) handleLegacyUpload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
+		return
 	}
-	return filepath.Join("public", "uploads")
-}
-
-func uploadsHandler() http.Handler {
-	legacyFiles := http.StripPrefix(uploadsURLPrefix, http.FileServer(http.Dir(resolveUploadsDir())))
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet && r.Method != http.MethodHead {
-			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
-			return
-		}
-		// Only the two historical public URL shapes remain available here.
-		// New v1 objects, multipart state and metadata share the mounted local
-		// root but must only be reachable through owner-checked signed routes.
-		segments := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.Path, uploadsURLPrefix), "/"), "/")
-		if len(segments) != 3 || (segments[0] != "recordings" && segments[0] != "feed-replies") {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Not found"})
-			return
-		}
-		for _, segment := range segments {
-			if !isSafeStoredUploadSegment(segment) {
-				writeJSON(w, http.StatusNotFound, map[string]string{"error": "Not found"})
-				return
-			}
-		}
-		legacyFiles.ServeHTTP(w, r)
-	})
+	// Only the two historical public URL shapes remain available here.
+	// New v1 objects, multipart state and metadata share the mounted local
+	// root but must only be reachable through owner-checked signed routes.
+	segments := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.Path, uploadsURLPrefix), "/"), "/")
+	if len(segments) != 3 || (segments[0] != "recordings" && segments[0] != "feed-replies") {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Not found"})
+		return
+	}
+	absolutePath, err := s.legacyUploads.Path(r.URL.Path)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Not found"})
+		return
+	}
+	http.ServeFile(w, r, absolutePath)
 }
 
 func (s *Server) handleShadowingUpload(w http.ResponseWriter, r *http.Request) {
@@ -53,7 +36,7 @@ func (s *Server) handleShadowingUpload(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
 		return
 	}
-	publicURL := domain.NormalizeStoredShadowingAudioSource(r.URL.Path)
+	publicURL := media.NormalizeStoredShadowingAudioSource(r.URL.Path)
 	if publicURL == nil || *publicURL != r.URL.Path {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Not found"})
 		return
@@ -63,12 +46,8 @@ func (s *Server) handleShadowingUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var owned bool
-	if err := s.db.QueryRow(r.Context(), `
-		SELECT EXISTS (
-			SELECT 1 FROM recordings
-			WHERE user_id = $1 AND shadowing_audio_url = $2
-		)`, user.ID, *publicURL).Scan(&owned); err != nil {
+	owned, err := s.recordingReader.OwnsLegacyShadowing(r.Context(), user.ID, *publicURL)
+	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to load pronunciation audio."})
 		return
 	}
@@ -76,68 +55,11 @@ func (s *Server) handleShadowingUpload(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Not found"})
 		return
 	}
-	absolutePath, err := storedUploadPath(*publicURL)
+	absolutePath, err := s.legacyUploads.Path(*publicURL)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Not found"})
 		return
 	}
 	w.Header().Set("Cache-Control", "private, no-store")
 	http.ServeFile(w, r, absolutePath)
-}
-
-func storedUploadPath(publicURL string) (string, error) {
-	normalized := strings.TrimSpace(publicURL)
-	if !strings.HasPrefix(normalized, uploadsURLPrefix) {
-		return "", errors.New("stored upload URL is invalid")
-	}
-	segments := strings.Split(strings.TrimPrefix(normalized, uploadsURLPrefix), "/")
-	if len(segments) != 3 || (segments[0] != "recordings" && segments[0] != "feed-replies" && segments[0] != "shadowing") {
-		return "", errors.New("stored upload URL is outside removable directories")
-	}
-	for _, segment := range segments {
-		if !isSafeStoredUploadSegment(segment) {
-			return "", errors.New("stored upload URL contains an unsafe path segment")
-		}
-	}
-
-	root := filepath.Clean(resolveUploadsDir())
-	target := filepath.Join(root, filepath.FromSlash(strings.Join(segments, "/")))
-	relative, err := filepath.Rel(root, target)
-	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) || filepath.IsAbs(relative) {
-		return "", errors.New("stored upload URL escapes the uploads directory")
-	}
-	return target, nil
-}
-
-func isSafeStoredUploadSegment(value string) bool {
-	if value == "" || value == "." || value == ".." {
-		return false
-	}
-	for _, char := range value {
-		if unicode.IsLetter(char) || unicode.IsDigit(char) || char == '-' || char == '_' || char == '.' {
-			continue
-		}
-		return false
-	}
-	return true
-}
-
-func removeStoredUploadFiles(publicURLs []string) error {
-	seen := map[string]struct{}{}
-	errorsFound := []error{}
-	for _, publicURL := range publicURLs {
-		path, err := storedUploadPath(publicURL)
-		if err != nil {
-			errorsFound = append(errorsFound, fmt.Errorf("%q: %w", publicURL, err))
-			continue
-		}
-		if _, exists := seen[path]; exists {
-			continue
-		}
-		seen[path] = struct{}{}
-		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-			errorsFound = append(errorsFound, fmt.Errorf("%q: %w", publicURL, err))
-		}
-	}
-	return errors.Join(errorsFound...)
 }

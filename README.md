@@ -94,19 +94,20 @@ between API and worker through `UPLOADS_HOST_DIR`.
 
 - Web: `PUBLIC_API_BASE_URL` is the public absolute HTTP(S) API origin.
   `PUBLIC_WEB_BASE_URL` is an optional canonical web origin used by HTTPS
-  deployments to redirect direct HTTP access before cookie authentication.
+  deployments to redirect direct HTTP access before authentication.
   Both are read at runtime. Do not put server secrets in `web/.env.local`.
-- Backend: database, CORS, session-cookie, uploads, Ollama, Whisper, Cartesia,
+- Backend: database, CORS, browser refresh-cookie, uploads, Ollama, Whisper, Cartesia,
   logging, and listen-address variables. See `backend/.env.example`.
 - Root Compose: host ports, persistent host paths, and values passed to either
   container. See `.env.example`.
 
 For credentialed browser requests, every web origin must appear exactly in
 `CORS_ALLOWED_ORIGINS`. Add each API origin that serves Swagger too, because
-Swagger `Try it out` sends mutations from that API origin. The current
-web authentication remains a PostgreSQL-backed, HttpOnly session cookie. Mobile
-clients use short-lived Bearer access tokens and rotating opaque refresh tokens
-under `/api/v1/auth/*`. On HTTPS set `SESSION_COOKIE_SECURE=true`. Use
+Swagger `Try it out` sends mutations from that API origin. The web and mobile
+clients share `/api/v1/auth/*`: both use short-lived Bearer access tokens and
+rotating opaque refresh tokens. Mobile stores refresh tokens in OS-protected
+storage; web keeps its access token in memory and receives the refresh token
+only as a scoped HttpOnly cookie. On HTTPS set `SESSION_COOKIE_SECURE=true`. Use
 `SESSION_COOKIE_SAME_SITE=none` only for genuinely cross-site web/API origins;
 it requires a secure cookie.
 
@@ -152,14 +153,15 @@ API_BASE_URL=http://localhost:3219 \
 node scripts/smoke-stack.mjs
 ```
 
-The smoke creates a unique temporary user and recording, verifies direct
-credentialed CORS and upload serving, and cleans up the recording/session.
+The smoke creates a unique temporary user and recording, verifies the unified
+Bearer/browser-refresh flow, direct credentialed CORS, and upload serving, then
+cleans up the recording/session.
 
 ## LAN and Windows deployment
 
 `npm run docker:lan` starts the HTTP services and prints one canonical LAN
 hostname pair for web and API; do not mix that IP with `localhost` or
-`127.0.0.1` while using cookie authentication. Browser microphone recording
+`127.0.0.1` while using the browser refresh cookie. Browser microphone recording
 from another device requires HTTPS. The
 Windows self-hosted deployment generates two Caddy sites:
 
