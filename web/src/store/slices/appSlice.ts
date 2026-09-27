@@ -4,6 +4,8 @@ import {
   parseRecordingMediaURL,
   type PracticeType,
   type Recording,
+  type RecordingMedia,
+  type RecordingMediaAsset,
   type RecordingStatus
 } from "../../lib/data";
 import {
@@ -629,6 +631,32 @@ const normalizePhotoObject = (value: unknown): string | null => {
   return normalized || null;
 };
 
+const parseRecordingMediaAsset = (value: unknown): RecordingMediaAsset | null => {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const candidate = value as Record<string, unknown>;
+  const assetId = typeof candidate.assetId === "string" ? candidate.assetId.trim() : "";
+  const downloadPath = typeof candidate.downloadPath === "string" ? candidate.downloadPath.trim() : "";
+  if (!assetId || downloadPath !== `/api/v1/media/${encodeURIComponent(assetId)}/download`) {
+    return null;
+  }
+  return { assetId, downloadPath };
+};
+
+const parseRecordingMedia = (value: unknown): RecordingMedia | null => {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const candidate = value as Record<string, unknown>;
+  const media: RecordingMedia = {
+    audio: parseRecordingMediaAsset(candidate.audio),
+    photo: parseRecordingMediaAsset(candidate.photo),
+    shadowing: parseRecordingMediaAsset(candidate.shadowing),
+  };
+  return media.audio || media.photo || media.shadowing ? media : null;
+};
+
 const parseRecording = (value: unknown): Recording | null => {
   if (typeof value !== "object" || value === null) {
     return null;
@@ -653,6 +681,7 @@ const parseRecording = (value: unknown): Recording | null => {
   const shadowingAudioUrl = parseRecordingMediaURL(candidate.shadowingAudioUrl);
   const shadowingError =
     typeof candidate.shadowingError === "string" ? candidate.shadowingError.trim() || null : null;
+  const media = parseRecordingMedia(candidate.media);
   const practiceType = parsePracticeType(candidate.practiceType, topic, Boolean(photoDataUrl));
 
   if (!id || !topic || Number.isNaN(timestamp.getTime()) || !Number.isFinite(duration) || duration < 0) {
@@ -684,7 +713,8 @@ const parseRecording = (value: unknown): Recording | null => {
     shadowingStatus,
     shadowingAudioUrl,
     shadowingError,
-    shadowingUpdatedAt
+    shadowingUpdatedAt,
+    media
   };
 };
 
@@ -1944,7 +1974,8 @@ const appSlice = createSlice({
         shadowingStatus: "pending",
         shadowingAudioUrl: null,
         shadowingError: null,
-        shadowingUpdatedAt: timestamp
+        shadowingUpdatedAt: timestamp,
+        media: null
       };
 
       state.recordings = [

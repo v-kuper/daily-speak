@@ -101,7 +101,9 @@ PostgreSQL stores media identity, ownership, state, object location, size, and
 checksum; it does not store media bytes. The storage interface supports local
 disk and private S3-compatible storage. Upload creation, completion, download,
 and deletion all authorize the owning principal inside the media application
-service. Guest purpose restrictions and account-only downloads are application
+service. Clients exchange the stable, owner-protected media download path for a
+short-lived signed request; UI media elements never receive a permanent object
+URL. Guest purpose restrictions and account-only downloads are application
 policy rather than HTTP rules. Storage responses are mapped to media-owned
 application types before they reach HTTP. Multipart uploads and signed requests
 are bounded and expire.

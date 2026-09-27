@@ -42,6 +42,15 @@ export type Suggestion = {
 export type PracticeType = "free_talk" | "topic" | "photo_description";
 export type RecordingStatus = "processing" | "ready" | "failed";
 export type RecordingProcessingStage = "transcribing" | "suggestions" | "rewriting";
+export type RecordingMediaAsset = {
+  assetId: string;
+  downloadPath: string;
+};
+export type RecordingMedia = {
+  audio: RecordingMediaAsset | null;
+  photo: RecordingMediaAsset | null;
+  shadowing: RecordingMediaAsset | null;
+};
 export type Recording = {
   id: string;
   topic: string;
@@ -61,6 +70,7 @@ export type Recording = {
   shadowingAudioUrl: string | null;
   shadowingError: string | null;
   shadowingUpdatedAt: string;
+  media: RecordingMedia | null;
 };
 
 const TOPIC_DATABASE: Record<string, TopicData> = {

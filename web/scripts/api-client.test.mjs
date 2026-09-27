@@ -26,6 +26,7 @@ function importTypeScriptModule(file) {
 
 const apiConfig = importTypeScriptModule("src/lib/apiConfig.ts");
 const apiClient = importTypeScriptModule("src/lib/apiClient.ts");
+const mediaDownload = importTypeScriptModule("src/lib/mediaDownload.ts");
 const webMiddleware = importTypeScriptModule("middleware.ts");
 
 test("production requires an absolute HTTP API URL", () => {
@@ -193,6 +194,87 @@ test("the shared client requires initialization and uses the configured runtime 
   assert.equal(apiClient.resolveApiAssetURL("/uploads/photo.png"), "https://runtime.example/uploads/photo.png");
 });
 
+test("protected media playback exchanges an owned reference for a short-lived URL", async () => {
+  apiClient.configureApiClient("https://api.example.com");
+  const calls = [];
+  const ticket = await mediaDownload.requestMediaPlaybackTicket({
+    downloadPath: "/api/v1/media/asset-1/download",
+    now: () => Date.parse("2026-09-27T10:00:00Z"),
+    request: async (path, init) => {
+      calls.push({ path, init });
+      return Response.json({
+        asset: { id: "asset-1", state: "ready" },
+        request: {
+          method: "GET",
+          url: "/api/v1/media/local/assets/asset-1/content?expires=123&signature=secret",
+          headers: {},
+          expiresAt: "2026-09-27T10:15:00Z",
+        },
+      });
+    },
+  });
+
+  assert.deepEqual(calls, [{
+    path: "/api/v1/media/asset-1/download",
+    init: { method: "GET", cache: "no-store", signal: undefined },
+  }]);
+  assert.equal(
+    ticket.url,
+    "https://api.example.com/api/v1/media/local/assets/asset-1/content?expires=123&signature=secret",
+  );
+  assert.equal(ticket.expiresAt, "2026-09-27T10:15:00.000Z");
+});
+
+test("protected media playback rejects mismatched, expired, and header-bound tickets", async () => {
+  apiClient.configureApiClient("https://api.example.com");
+  const downloadPath = "/api/v1/media/asset-1/download";
+  const response = (overrides = {}) => Response.json({
+    asset: { id: "asset-1", state: "ready" },
+    request: {
+      method: "GET",
+      url: "https://storage.example/audio.mp3?signature=secret",
+      headers: {},
+      expiresAt: "2026-09-27T10:15:00Z",
+    },
+    ...overrides,
+  });
+  const now = () => Date.parse("2026-09-27T10:00:00Z");
+
+  await assert.rejects(
+    () => mediaDownload.requestMediaPlaybackTicket({
+      downloadPath,
+      now,
+      request: async () => response({ asset: { id: "asset-2", state: "ready" } }),
+    }),
+    /invalid download request/i,
+  );
+  await assert.rejects(
+    () => mediaDownload.requestMediaPlaybackTicket({
+      downloadPath,
+      now,
+      request: async () => response({
+        request: { method: "GET", url: "https://storage.example/audio.mp3", headers: {}, expiresAt: "2026-09-27T10:00:00Z" },
+      }),
+    }),
+    /already expired/i,
+  );
+  await assert.rejects(
+    () => mediaDownload.requestMediaPlaybackTicket({
+      downloadPath,
+      now,
+      request: async () => response({
+        request: {
+          method: "GET",
+          url: "https://storage.example/audio.mp3",
+          headers: { Authorization: "secret" },
+          expiresAt: "2026-09-27T10:15:00Z",
+        },
+      }),
+    }),
+    /cannot be played by the browser/i,
+  );
+});
+
 test("recording requests resolve all server media and retain HTTP validation messages", async (t) => {
   const slice = importTypeScriptModule("src/store/slices/appSlice.ts");
   const { configureStore } = require("@reduxjs/toolkit");
@@ -205,6 +287,10 @@ test("recording requests resolve all server media and retain HTTP validation mes
     audioDataUrl: "/uploads/recordings/u/r.webm", photoDataUrl: "/uploads/photos/u/p.png",
     shadowingStatus: "ready", shadowingAudioUrl: "/uploads/shadowing/u/r.mp3",
     shadowingError: null, shadowingUpdatedAt: "2026-09-21T10:00:00Z",
+    media: {
+      audio: { assetId: "audio-1", downloadPath: "/api/v1/media/audio-1/download" },
+      shadowing: { assetId: "shadowing-1", downloadPath: "/api/v1/media/shadowing-1/download" },
+    },
   };
   let response = () => Response.json({ recording });
   t.mock.method(globalThis, "fetch", async (url, init) => {
@@ -218,6 +304,11 @@ test("recording requests resolve all server media and retain HTTP validation mes
   assert.equal(parsed.audioDataUrl, "https://api.example.com/uploads/recordings/u/r.webm");
   assert.equal(parsed.photoDataUrl, "https://api.example.com/uploads/photos/u/p.png");
   assert.equal(parsed.shadowingAudioUrl, "https://api.example.com/uploads/shadowing/u/r.mp3");
+  assert.deepEqual(parsed.media, {
+    audio: { assetId: "audio-1", downloadPath: "/api/v1/media/audio-1/download" },
+    photo: null,
+    shadowing: { assetId: "shadowing-1", downloadPath: "/api/v1/media/shadowing-1/download" },
+  });
   recording.audioDataUrl = "https://cdn.example/audio.webm";
   recording.photoDataUrl = "data:image/png;base64,AAAA";
   recording.shadowingAudioUrl = "https://cdn.example/pronunciation.mp3";
