@@ -239,3 +239,14 @@ test("shadowing separates transport, media processing, and persistence", () => {
   assert.doesNotMatch(transport, /SELECT |UPDATE |INSERT INTO|Synthesize\(|media_assets/);
   assert.match(transport, /shadowingProcessor\.Process|shadowingStore\.Schedule/);
 });
+
+test("mobile identity exposes an application service to HTTP transport", () => {
+  const service = readFileSync("backend/internal/auth/service.go", "utf8");
+  const transport = readFileSync("backend/internal/httpapi/identity_handlers.go", "utf8");
+
+  assert.match(service, /type MobileService struct/);
+  assert.match(service, /CreateAnonymous|Register|Login|Refresh|Authenticate/);
+  assert.match(transport, /s\.identityService/);
+  assert.doesNotMatch(transport, /s\.db/);
+  assert.doesNotMatch(transport, /auth\.(CreateAnonymousIdentity|RegisterMobileUser|LoginMobileUser|RotateRefreshToken|AuthenticateAccessToken)/);
+});

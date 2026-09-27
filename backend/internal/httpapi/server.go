@@ -70,6 +70,7 @@ type Server struct {
 	backgroundRuntime        *background.Runtime
 	sessionCookie            auth.CookieConfig
 	identityTokens           auth.TokenConfig
+	identityService          *auth.MobileService
 	cors                     CORSConfig
 	mediaService             *media.Service
 	mediaSigner              *media.URLSigner
@@ -178,6 +179,7 @@ func NewServer(config Config) *Server {
 		shadowingStore:           shadowingStore,
 		sessionCookie:            config.SessionCookie,
 		identityTokens:           config.IdentityTokens,
+		identityService:          auth.NewMobileService(config.DB, config.IdentityTokens),
 		cors:                     config.CORS,
 		mediaService:             mediaService,
 		mediaSigner:              mediaSigner,
@@ -419,7 +421,7 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request, scope string,
 		writeJSON(w, status, map[string]string{"error": message})
 	}
 	if bearer, present := bearerToken(r); present && strings.HasPrefix(r.URL.Path, "/api/v1/") {
-		identity, err := auth.AuthenticateAccessToken(r.Context(), s.db, s.identityTokens, bearer)
+		identity, err := s.identityService.Authenticate(r.Context(), bearer)
 		if err != nil {
 			logger.Info("request.unauthorized", map[string]any{"status": 401, "durationMs": logging.ElapsedMs(started)})
 			writeError(http.StatusUnauthorized, "Unauthorized")

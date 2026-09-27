@@ -69,7 +69,7 @@ func (s *Server) handleAnonymousIdentityV1(w http.ResponseWriter, r *http.Reques
 	if r.Body != nil && r.ContentLength != 0 && !decodeIdentityJSON(w, r, &payload) {
 		return
 	}
-	grant, err := auth.CreateAnonymousIdentity(r.Context(), s.db, s.identityTokens, auth.DeviceInfo{Name: payload.DeviceName, Platform: payload.Platform})
+	grant, err := s.identityService.CreateAnonymous(r.Context(), auth.DeviceInfo{Name: payload.DeviceName, Platform: payload.Platform})
 	if err != nil {
 		s.writeIdentityError(w, r, err)
 		return
@@ -91,7 +91,7 @@ func (s *Server) handleRegisterIdentityV1(w http.ResponseWriter, r *http.Request
 	if !ok {
 		return
 	}
-	grant, err := auth.RegisterMobileUser(r.Context(), s.db, s.identityTokens, credentials, guest, auth.DeviceInfo{Name: payload.DeviceName, Platform: payload.Platform})
+	grant, err := s.identityService.Register(r.Context(), credentials, guest, auth.DeviceInfo{Name: payload.DeviceName, Platform: payload.Platform})
 	if err != nil {
 		s.writeIdentityError(w, r, err)
 		return
@@ -113,7 +113,7 @@ func (s *Server) handleLoginIdentityV1(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	grant, err := auth.LoginMobileUser(r.Context(), s.db, s.identityTokens, credentials, guest, auth.DeviceInfo{Name: payload.DeviceName, Platform: payload.Platform})
+	grant, err := s.identityService.Login(r.Context(), credentials, guest, auth.DeviceInfo{Name: payload.DeviceName, Platform: payload.Platform})
 	if err != nil {
 		s.writeIdentityError(w, r, err)
 		return
@@ -132,7 +132,7 @@ func (s *Server) handleRefreshIdentityV1(w http.ResponseWriter, r *http.Request)
 		writeV1Error(w, r, http.StatusBadRequest, "invalid_request", "refreshToken is required")
 		return
 	}
-	grant, err := auth.RotateRefreshToken(r.Context(), s.db, s.identityTokens, payload.RefreshToken)
+	grant, err := s.identityService.Refresh(r.Context(), payload.RefreshToken)
 	if err != nil {
 		s.writeIdentityError(w, r, err)
 		return
@@ -145,7 +145,7 @@ func (s *Server) handleIdentitySessionV1(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
-	sessions, err := auth.ListDeviceSessions(r.Context(), s.db, identity.PrincipalID)
+	sessions, err := s.identityService.ListSessions(r.Context(), identity.PrincipalID)
 	if err != nil {
 		s.writeIdentityError(w, r, err)
 		return
@@ -164,7 +164,7 @@ func (s *Server) handleLogoutIdentityV1(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
-	if _, err := auth.RevokeDeviceSession(r.Context(), s.db, identity.PrincipalID, identity.SessionID, "logout"); err != nil {
+	if _, err := s.identityService.RevokeSession(r.Context(), identity.PrincipalID, identity.SessionID, "logout"); err != nil {
 		s.writeIdentityError(w, r, err)
 		return
 	}
@@ -176,7 +176,7 @@ func (s *Server) handleLogoutAllIdentityV1(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
-	if err := auth.RevokeAllDeviceSessions(r.Context(), s.db, identity.PrincipalID, "logout_all"); err != nil {
+	if err := s.identityService.RevokeAllSessions(r.Context(), identity.PrincipalID, "logout_all"); err != nil {
 		s.writeIdentityError(w, r, err)
 		return
 	}
@@ -188,7 +188,7 @@ func (s *Server) handleListIdentitySessionsV1(w http.ResponseWriter, r *http.Req
 	if !ok {
 		return
 	}
-	sessions, err := auth.ListDeviceSessions(r.Context(), s.db, identity.PrincipalID)
+	sessions, err := s.identityService.ListSessions(r.Context(), identity.PrincipalID)
 	if err != nil {
 		s.writeIdentityError(w, r, err)
 		return
@@ -210,7 +210,7 @@ func (s *Server) handleRevokeIdentitySessionV1(w http.ResponseWriter, r *http.Re
 		writeV1Error(w, r, http.StatusBadRequest, "invalid_request", "Session ID is required")
 		return
 	}
-	revoked, err := auth.RevokeDeviceSession(r.Context(), s.db, identity.PrincipalID, sessionID, "device_revoked")
+	revoked, err := s.identityService.RevokeSession(r.Context(), identity.PrincipalID, sessionID, "device_revoked")
 	if err != nil {
 		s.writeIdentityError(w, r, err)
 		return
@@ -231,7 +231,7 @@ func (s *Server) optionalGuestIdentityV1(w http.ResponseWriter, r *http.Request)
 		writeV1Error(w, r, http.StatusUnauthorized, "invalid_access_token", "Bearer access token is invalid")
 		return nil, false
 	}
-	identity, err := auth.AuthenticateAccessToken(r.Context(), s.db, s.identityTokens, token)
+	identity, err := s.identityService.Authenticate(r.Context(), token)
 	if err != nil {
 		s.writeIdentityError(w, r, err)
 		return nil, false
@@ -249,7 +249,7 @@ func (s *Server) requiredIdentityV1(w http.ResponseWriter, r *http.Request) (*au
 		writeV1Error(w, r, http.StatusUnauthorized, "invalid_access_token", "Bearer access token is required")
 		return nil, false
 	}
-	identity, err := auth.AuthenticateAccessToken(r.Context(), s.db, s.identityTokens, token)
+	identity, err := s.identityService.Authenticate(r.Context(), token)
 	if err != nil {
 		s.writeIdentityError(w, r, err)
 		return nil, false
