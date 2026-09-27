@@ -12,6 +12,7 @@ import (
 	apidocs "daily-speaking-practice/backend/docs"
 	"daily-speaking-practice/backend/internal/ai"
 	"daily-speaking-practice/backend/internal/auth"
+	"daily-speaking-practice/backend/internal/background"
 	"daily-speaking-practice/backend/internal/db"
 	"daily-speaking-practice/backend/internal/guestpreview"
 	"daily-speaking-practice/backend/internal/logging"
@@ -66,6 +67,7 @@ type Server struct {
 	guestPreviewProcessor    *guestpreview.Processor
 	shadowingStore           *shadowing.Store
 	shadowingProcessor       *shadowing.Processor
+	backgroundRuntime        *background.Runtime
 	sessionCookie            auth.CookieConfig
 	identityTokens           auth.TokenConfig
 	cors                     CORSConfig
@@ -207,6 +209,13 @@ func NewServer(config Config) *Server {
 		Store: shadowingStore, Synthesizer: synthesizer, MediaStore: mediaStore,
 		MediaBucket: mediaBucket, LocalSaver: shadowing.NewLocalSaver(resolveUploadsDir()),
 		NewID: uuid.NewString,
+	})
+	server.backgroundRuntime = background.NewRuntime(background.Dependencies{
+		DB: config.DB, JobStore: server.jobStore,
+		RecordingProcessor: server.recordingProcessor, RecordingRepository: recordingRepository,
+		GuestPreviewProcessor: server.guestPreviewProcessor, GuestPreviewStore: guestPreviewStore,
+		ShadowingProcessor: server.shadowingProcessor, ShadowingStore: shadowingStore,
+		MediaCleanup: media.NewCleanup(config.DB, mediaService, mediaStore, server.removeStoredUploads),
 	})
 	return server
 }

@@ -10,7 +10,10 @@ import (
 	"daily-speaking-practice/backend/internal/domain"
 )
 
-const guestPreviewMaxDuration = 60 * time.Second
+const (
+	ProcessingTimeout       = 30 * time.Minute
+	guestPreviewMaxDuration = 60 * time.Second
+)
 
 type ProcessingJob struct {
 	ID         string

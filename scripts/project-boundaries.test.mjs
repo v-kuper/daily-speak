@@ -108,20 +108,24 @@ test("API and durable worker have separate process entrypoints", () => {
   const runtime = readFileSync("backend/internal/worker/runtime.go", "utf8");
   const legacyWorkers = readFileSync("backend/internal/httpapi/durable_workers.go", "utf8");
   const mediaCleanup = readFileSync("backend/internal/media/cleanup.go", "utf8");
-	const mediaMaterializer = readFileSync("backend/internal/media/materializer.go", "utf8");
+  const mediaMaterializer = readFileSync("backend/internal/media/materializer.go", "utf8");
+  const backgroundRuntime = readFileSync("backend/internal/background/runtime.go", "utf8");
 
   assert.doesNotMatch(apiMain, /RunWorkers|StartBackgroundWorkers/);
-  assert.match(workerMain, /RunWorkers/);
+  assert.match(workerMain, /background\.New/);
+  assert.match(workerMain, /runtime\.Run/);
+  assert.doesNotMatch(workerMain, /internal\/httpapi|httpapi\./);
   assert.match(workerMain, /worker\.ConfigFromEnv/);
   assert.match(runtime, /workqueue\.Run/);
   assert.doesNotMatch(legacyWorkers, /WorkerConfigFromEnv|workqueue\.Run/);
+  assert.match(backgroundRuntime, /RecordingProcessor|GuestPreviewProcessor|ShadowingProcessor/);
   assert.match(mediaCleanup, /AbortExpiredUploads|EnqueueExpiredAssets|FinalizeFailure/);
   assert.doesNotMatch(legacyWorkers, /storage_driver|pending_file_deletions/);
-	assert.match(mediaMaterializer, /verified_checksum_sha256|io\.LimitReader/);
+  assert.match(mediaMaterializer, /verified_checksum_sha256|io\.LimitReader/);
   assert.equal(existsSync("backend/internal/httpapi/media_workers.go"), false);
-	assert.equal(existsSync("backend/internal/httpapi/guest_preview_probe.go"), false);
-	assert.match(readFileSync("backend/internal/media/probe.go", "utf8"), /func ProbeAudioDuration/);
-	assert.match(readFileSync("backend/internal/storage/legacy.go", "utf8"), /type LegacyUploads/);
+  assert.equal(existsSync("backend/internal/httpapi/guest_preview_probe.go"), false);
+  assert.match(readFileSync("backend/internal/media/probe.go", "utf8"), /func ProbeAudioDuration/);
+  assert.match(readFileSync("backend/internal/storage/legacy.go", "utf8"), /type LegacyUploads/);
 });
 
 test("practice generation is an application service outside HTTP transport", () => {
