@@ -120,19 +120,19 @@ func (service *Service) CreateUpload(ctx context.Context, input CreateUploadInpu
 	return resource, nil
 }
 
-func (service *Service) GetUpload(ctx context.Context, ownerPrincipalID string, uploadID string) (UploadResource, []storage.PartInfo, error) {
+func (service *Service) GetUpload(ctx context.Context, ownerPrincipalID string, uploadID string) (UploadResource, []UploadedPart, error) {
 	resource, err := service.repository.GetUpload(ctx, strings.TrimSpace(ownerPrincipalID), strings.TrimSpace(uploadID))
 	if err != nil {
 		return UploadResource{}, nil, err
 	}
 	parts, err := service.store.ListParts(ctx, multipartUpload(resource))
 	if errors.Is(err, storage.ErrNotFound) && (resource.Upload.State == "completed" || resource.Upload.State == "aborted") {
-		return resource, []storage.PartInfo{}, nil
+		return resource, []UploadedPart{}, nil
 	}
 	if err != nil {
 		return UploadResource{}, nil, mapStorageError(err)
 	}
-	return resource, parts, nil
+	return resource, uploadedPartsFromStorage(parts), nil
 }
 
 func (service *Service) PresignParts(ctx context.Context, ownerPrincipalID string, uploadID string, descriptors []PartDescriptor) ([]SignedPart, error) {
@@ -160,9 +160,9 @@ func (service *Service) PresignParts(ctx context.Context, ownerPrincipalID strin
 		if errors.Is(signErr, storage.ErrUnsupported) && service.store.Backend() == storage.BackendLocal {
 			result = append(result, SignedPart{
 				Descriptor: descriptor,
-				Request: storage.PresignedRequest{
+				Request: SignedRequest{
 					Method:    http.MethodPut,
-					Headers:   http.Header{"Content-Type": []string{resource.Asset.ContentType}},
+					Headers:   map[string][]string{"Content-Type": {resource.Asset.ContentType}},
 					ExpiresAt: service.config.Now().Add(service.signedTTL(resource.Upload.ExpiresAt)).UTC(),
 				},
 				Local: true,
@@ -172,7 +172,7 @@ func (service *Service) PresignParts(ctx context.Context, ownerPrincipalID strin
 		if signErr != nil {
 			return nil, mapStorageError(signErr)
 		}
-		result = append(result, SignedPart{Descriptor: descriptor, Request: presigned})
+		result = append(result, SignedPart{Descriptor: descriptor, Request: signedRequestFromStorage(presigned)})
 	}
 	return result, nil
 }
@@ -222,7 +222,7 @@ func (service *Service) CompleteUpload(ctx context.Context, ownerPrincipalID str
 	if info.Size != resource.Asset.ExpectedSizeBytes || !strings.EqualFold(info.SHA256, resource.Asset.ExpectedChecksumSHA256) {
 		return UploadResource{}, ErrInvalidRequest
 	}
-	completedResource, err := service.repository.MarkCompleted(ctx, uploadID, info, service.config.Now().UTC())
+	completedResource, err := service.repository.MarkCompleted(ctx, uploadID, verifiedObjectFromStorage(info), service.config.Now().UTC())
 	if err == nil {
 		return completedResource, nil
 	}
@@ -285,15 +285,15 @@ func (service *Service) Download(ctx context.Context, input DownloadInput) (Down
 	}
 	presigned, signErr := service.store.PresignGet(ctx, asset.ObjectKey, service.config.SignedRequestTTL)
 	if errors.Is(signErr, storage.ErrUnsupported) && service.store.Backend() == storage.BackendLocal {
-		return Download{Asset: asset, Request: storage.PresignedRequest{
-			Method: http.MethodGet, Headers: http.Header{},
+		return Download{Asset: asset, Request: SignedRequest{
+			Method: http.MethodGet, Headers: map[string][]string{},
 			ExpiresAt: service.config.Now().Add(service.config.SignedRequestTTL).UTC(),
 		}, Local: true}, nil
 	}
 	if signErr != nil {
 		return Download{}, mapStorageError(signErr)
 	}
-	return Download{Asset: asset, Request: presigned}, nil
+	return Download{Asset: asset, Request: signedRequestFromStorage(presigned)}, nil
 }
 
 func multipartUpload(resource UploadResource) storage.MultipartUpload {

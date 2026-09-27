@@ -11,7 +11,10 @@ const (
 	FailureMessage = "Pronunciation audio could not be generated. Check the Cartesia configuration or try again."
 )
 
-var ErrTranscriptUnavailable = errors.New("corrected transcript is unavailable")
+var (
+	ErrNotFound              = errors.New("shadowing recording not found")
+	ErrTranscriptUnavailable = errors.New("corrected transcript is unavailable")
+)
 
 type Job struct {
 	ID         string

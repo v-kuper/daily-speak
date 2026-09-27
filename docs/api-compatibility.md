@@ -13,10 +13,11 @@ Every response carries `X-Request-ID`. Clients should include it in support and
 diagnostic reports. A caller may supply a safe `X-Request-ID`; otherwise the
 server creates one.
 
-The unversioned `/api/*` routes are the legacy web resource contract. They
-remain while the sandbox migrates its recording/media calls, but all protected
-routes now use the same short-lived Bearer access token as `/api/v1/*`. New
-mobile clients must use `/api/v1/*` exclusively.
+The unversioned `/api/*` routes are the remaining legacy web sandbox contract.
+All protected routes use the same short-lived Bearer access token as
+`/api/v1/*`, but new mobile clients must use `/api/v1/*` exclusively. Missing
+mobile feature operations are added to v1 when the mobile product needs them;
+legacy routes are not promoted into the native contract.
 
 A successful refresh replaces the single-use opaque refresh token; submitting
 an already used token revokes that device session. Native clients submit the

@@ -269,6 +269,7 @@ test("HTTP transport contains no production SQL and Feed owns its persistence", 
   const feedReactionRepository = readFileSync("backend/internal/feed/reaction_repository.go", "utf8");
 
   assert.doesNotMatch(transport, /\bSELECT\b|\bINSERT INTO\b|\bUPDATE\b|\bDELETE FROM\b|s\.db\.(?:Query|QueryRow|Exec|Begin)\(/);
+  assert.doesNotMatch(transport, /internal\/db|github\.com\/jackc\/pgx/);
   assert.match(feedHandler, /feedService\.(?:ListPosts|PublishRecording|GetThread|CreateReply|SetReaction)/);
   assert.doesNotMatch(feedHandler, /pgx|internal\/db|os\.WriteFile|os\.Remove/);
   assert.match(feedService, /type Repository interface|type ReplyAudioStore interface/);
@@ -298,6 +299,7 @@ test("media ownership and guest policy stay in the media application service", (
   const model = readFileSync("backend/internal/media/media.go", "utf8");
 
   assert.match(transport, /media\.DownloadInput/);
+  assert.doesNotMatch(transport, /internal\/storage|storage\./);
   assert.doesNotMatch(transport, /requiredMediaUserV1|identity\.Kind\s*!=\s*"user"|PurposeGuestPreviewAudio/);
   assert.match(service, /input\.OwnerKind[\s\S]*ErrAccountRequired/);
   assert.match(uploadPolicy, /input\.OwnerKind\s*==\s*"guest"[\s\S]*PurposeGuestPreviewAudio/);
@@ -352,6 +354,7 @@ test("shadowing separates transport, media processing, and persistence", () => {
   assert.match(core, /ProcessingStore|MediaStore|LocalSaver/);
   assert.match(store, /shadowing_attempt_id|media_assets|processing_jobs/);
   assert.doesNotMatch(transport, /SELECT |UPDATE |INSERT INTO|Synthesize\(|media_assets/);
+  assert.doesNotMatch(transport, /pgx|internal\/db/);
   assert.match(transport, /shadowingProcessor\.Process|shadowingStore\.Schedule/);
 });
 

@@ -12,7 +12,6 @@ import (
 
 	"daily-speaking-practice/backend/internal/auth"
 	"daily-speaking-practice/backend/internal/media"
-	"daily-speaking-practice/backend/internal/storage"
 )
 
 const maxMediaRequestBytes = 128 << 10
@@ -245,7 +244,7 @@ func (s *Server) routeSignedLocalMedia(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.Header().Set("ETag", part.ETag)
-		w.Header().Set("X-Checksum-SHA256", part.SHA256)
+		w.Header().Set("X-Checksum-SHA256", part.ChecksumSHA256)
 		w.WriteHeader(http.StatusOK)
 		return
 	}
@@ -257,7 +256,7 @@ func (s *Server) routeSignedLocalMedia(w http.ResponseWriter, r *http.Request) {
 		}
 		defer content.Body.Close()
 		w.Header().Set("Content-Type", content.Info.ContentType)
-		w.Header().Set("Content-Length", strconv.FormatInt(content.Info.Size, 10))
+		w.Header().Set("Content-Length", strconv.FormatInt(content.Info.SizeBytes, 10))
 		w.Header().Set("ETag", content.Info.ETag)
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		if seeker, ok := content.Body.(io.ReadSeeker); ok {
@@ -340,12 +339,12 @@ func (s *Server) writeMediaError(w http.ResponseWriter, r *http.Request, err err
 	}
 }
 
-func mediaUploadResponse(resource media.UploadResource, parts []storage.PartInfo) map[string]any {
+func mediaUploadResponse(resource media.UploadResource, parts []media.UploadedPart) map[string]any {
 	uploaded := make([]map[string]any, 0, len(parts))
 	for _, part := range parts {
 		uploaded = append(uploaded, map[string]any{
-			"partNumber": part.Number, "sizeBytes": part.Size,
-			"etag": part.ETag, "checksumSha256": part.SHA256,
+			"partNumber": part.PartNumber, "sizeBytes": part.SizeBytes,
+			"etag": part.ETag, "checksumSha256": part.ChecksumSHA256,
 		})
 	}
 	return map[string]any{
@@ -367,7 +366,7 @@ func mediaAssetResponse(asset media.Asset) map[string]any {
 	}
 }
 
-func mediaRequestResponse(request storage.PresignedRequest) map[string]any {
+func mediaRequestResponse(request media.SignedRequest) map[string]any {
 	headers := make(map[string]string, len(request.Headers))
 	for name, values := range request.Headers {
 		if len(values) > 0 {

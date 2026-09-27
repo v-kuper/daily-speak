@@ -105,8 +105,23 @@ type PartDescriptor struct {
 
 type SignedPart struct {
 	Descriptor PartDescriptor
-	Request    storage.PresignedRequest
+	Request    SignedRequest
 	Local      bool
+}
+
+type SignedRequest struct {
+	Method    string
+	URL       string
+	Headers   map[string][]string
+	ExpiresAt time.Time
+}
+
+type UploadedPart struct {
+	PartNumber     int
+	SizeBytes      int64
+	ETag           string
+	ChecksumSHA256 string
+	LastModified   time.Time
 }
 
 type CompletedPart struct {
@@ -117,7 +132,7 @@ type CompletedPart struct {
 
 type Download struct {
 	Asset   Asset
-	Request storage.PresignedRequest
+	Request SignedRequest
 	Local   bool
 }
 
@@ -136,7 +151,20 @@ func (asset Asset) ClientPurpose() string {
 
 type Content struct {
 	Body io.ReadCloser
-	Info storage.ObjectInfo
+	Info ContentInfo
+}
+
+type ContentInfo struct {
+	ContentType  string
+	SizeBytes    int64
+	ETag         string
+	LastModified time.Time
+}
+
+type VerifiedObject struct {
+	SizeBytes      int64
+	ChecksumSHA256 string
+	ETag           string
 }
 
 type Repository interface {
@@ -147,7 +175,7 @@ type Repository interface {
 	UpsertPart(context.Context, Part) error
 	ClaimCompleting(context.Context, string) error
 	ClaimAborting(context.Context, string, *time.Time) error
-	MarkCompleted(context.Context, string, storage.ObjectInfo, time.Time) (UploadResource, error)
+	MarkCompleted(context.Context, string, VerifiedObject, time.Time) (UploadResource, error)
 	MarkAborted(context.Context, string, time.Time) (UploadResource, error)
 	GetReadyAsset(context.Context, string, string) (Asset, error)
 	GetReadyAssetByID(context.Context, string) (Asset, error)

@@ -37,6 +37,9 @@ func (s *Store) Schedule(ctx context.Context, userID, recordingID string) (bool,
 		RETURNING corrected_transcript`, recordingID, userID, attemptID).Scan(&correctedTranscript)
 	if errors.Is(err, pgx.ErrNoRows) {
 		if err := s.db.QueryRow(ctx, `SELECT corrected_transcript FROM recordings WHERE id = $1 AND user_id = $2`, recordingID, userID).Scan(&correctedTranscript); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return false, ErrNotFound
+			}
 			return false, err
 		}
 		if strings.TrimSpace(correctedTranscript) == "" {

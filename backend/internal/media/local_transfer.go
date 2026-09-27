@@ -8,26 +8,26 @@ import (
 	"daily-speaking-practice/backend/internal/storage"
 )
 
-func (service *Service) PutLocalPart(ctx context.Context, uploadID string, descriptor PartDescriptor, bodySize int64, body io.Reader) (storage.PartInfo, error) {
+func (service *Service) PutLocalPart(ctx context.Context, uploadID string, descriptor PartDescriptor, bodySize int64, body io.Reader) (UploadedPart, error) {
 	if service.store == nil || service.store.Backend() != storage.BackendLocal || body == nil || bodySize != descriptor.SizeBytes {
-		return storage.PartInfo{}, ErrInvalidRequest
+		return UploadedPart{}, ErrInvalidRequest
 	}
 	resource, err := service.repository.GetUploadByID(ctx, strings.TrimSpace(uploadID))
 	if err != nil {
-		return storage.PartInfo{}, err
+		return UploadedPart{}, err
 	}
 	if err := service.validateActiveUpload(resource); err != nil || !service.validPartDescriptor(resource, descriptor) {
 		if err != nil {
-			return storage.PartInfo{}, err
+			return UploadedPart{}, err
 		}
-		return storage.PartInfo{}, ErrInvalidRequest
+		return UploadedPart{}, ErrInvalidRequest
 	}
 	part, err := service.store.PutPart(ctx, multipartUpload(resource), storage.PartRequest{
 		Number: int32(descriptor.PartNumber), Size: descriptor.SizeBytes,
 		SHA256: strings.ToLower(strings.TrimSpace(descriptor.ChecksumSHA256)),
 	}, body)
 	if err != nil {
-		return storage.PartInfo{}, mapStorageError(err)
+		return UploadedPart{}, mapStorageError(err)
 	}
 	now := service.config.Now().UTC()
 	if err := service.repository.UpsertPart(ctx, Part{
@@ -35,9 +35,9 @@ func (service *Service) PutLocalPart(ctx context.Context, uploadID string, descr
 		ETag: part.ETag, ChecksumSHA256: part.SHA256, VerifiedAt: &now,
 		CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
-		return storage.PartInfo{}, err
+		return UploadedPart{}, err
 	}
-	return part, nil
+	return uploadedPartFromStorage(part), nil
 }
 
 func (service *Service) OpenSignedContent(ctx context.Context, assetID string) (Content, error) {
@@ -54,5 +54,5 @@ func (service *Service) OpenSignedContent(ctx context.Context, assetID string) (
 		_ = body.Close()
 		return Content{}, ErrNotFound
 	}
-	return Content{Body: body, Info: info}, nil
+	return Content{Body: body, Info: contentInfoFromStorage(info)}, nil
 }

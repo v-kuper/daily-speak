@@ -10,10 +10,7 @@ import (
 	"daily-speaking-practice/backend/internal/logging"
 	"daily-speaking-practice/backend/internal/recording"
 	"daily-speaking-practice/backend/internal/shadowing"
-	"github.com/jackc/pgx/v5"
 )
-
-var errShadowingTranscriptUnavailable = shadowing.ErrTranscriptUnavailable
 
 func (s *Server) routeShadowingPath(w http.ResponseWriter, r *http.Request, relativePath string) {
 	parts := strings.Split(strings.Trim(relativePath, "/"), "/")
@@ -37,11 +34,11 @@ func (s *Server) handleGenerateShadowing(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	record, scheduled, err := s.scheduleShadowing(r.Context(), user.ID, recordingID)
-	if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, recording.ErrNotFound) {
+	if errors.Is(err, shadowing.ErrNotFound) || errors.Is(err, recording.ErrNotFound) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Recording not found."})
 		return
 	}
-	if errors.Is(err, errShadowingTranscriptUnavailable) {
+	if errors.Is(err, shadowing.ErrTranscriptUnavailable) {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "The natural transcript is not ready yet."})
 		return
 	}
