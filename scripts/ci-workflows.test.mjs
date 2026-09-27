@@ -14,6 +14,7 @@ const dockerCompose = readFileSync("docker-compose.yml", "utf8");
 const compose = parseYaml(dockerCompose);
 const rootEnvExample = readFileSync(".env.example", "utf8");
 const backendEnvExample = readFileSync("backend/.env.example", "utf8");
+const apiSmoke = readFileSync("scripts/smoke-api.mjs", "utf8");
 const rootPackage = JSON.parse(readFileSync("package.json", "utf8"));
 const instructions = (source) => source.replace(/\\\r?\n\s*/g, " ").split(/\r?\n/)
   .map((line) => line.trim()).filter((line) => line && !line.startsWith("#"));
@@ -66,6 +67,9 @@ test("quality workflow provisions Go and PostgreSQL for smoke API checks", () =>
     qualityWorkflow,
     /DATABASE_URL:\s+postgres:\/\/postgres:postgres@127\.0\.0\.1:5432\/daily_speaking/,
   );
+  assert.match(apiSmoke, /SMOKE_AUTH_ACCESS_TOKEN_SECRET/);
+  assert.match(apiSmoke, /AUTH_ACCESS_TOKEN_SECRET:\s*localIdentitySecret/);
+  assert.doesNotMatch(qualityWorkflow, /AUTH_ACCESS_TOKEN_SECRET/);
 });
 
 test("local deploy workflow targets the dedicated Windows self-hosted runner", () => {

@@ -29,6 +29,7 @@ test("repository keeps one canonical documentation set and ignores local tooling
   for (const path of [
     "docs/README.md",
     "docs/ARCHITECTURE.md",
+    "docs/BACKEND_DEVELOPMENT.md",
     "docs/api-compatibility.md",
     "docs/BACKEND_OPERATIONS.md",
     "docs/LOCAL_WINDOWS_CICD.md",
@@ -47,7 +48,10 @@ test("repository keeps one canonical documentation set and ignores local tooling
   }
 
   const documentationIndex = readFileSync("docs/README.md", "utf8");
+  const agentInstructions = readFileSync("AGENTS.md", "utf8");
   assert.match(documentationIndex, /ARCHITECTURE\.md/);
+  assert.match(documentationIndex, /BACKEND_DEVELOPMENT\.md/);
+  assert.match(agentInstructions, /docs\/BACKEND_DEVELOPMENT\.md/);
   assert.match(documentationIndex, /Temporary implementation[\s\S]*do not belong/);
   for (const path of [".idea/workspace.xml", ".ai/mcp/mcp.json"]) {
     const result = spawnSync("git", ["check-ignore", "--quiet", "--no-index", path]);

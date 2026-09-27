@@ -5,6 +5,8 @@ import { spawn } from "node:child_process";
 const port = Number.parseInt(process.env.SMOKE_PORT ?? "3217", 10);
 const externalApiBaseURL = process.env.SMOKE_BASE_URL?.trim();
 const apiBaseURL = externalApiBaseURL || `http://127.0.0.1:${port}`;
+const localIdentitySecret = process.env.SMOKE_AUTH_ACCESS_TOKEN_SECRET?.trim()
+  || "daily-speaking-smoke-only-identity-secret-not-for-deployment";
 const startupTimeoutMs = 120_000;
 const pollIntervalMs = 1_500;
 const expectedChecks = [
@@ -239,7 +241,8 @@ const main = async () => {
         detached: process.platform !== "win32",
         env: {
           ...process.env,
-          APP_ADDR: `:${port}`
+          APP_ADDR: `:${port}`,
+          AUTH_ACCESS_TOKEN_SECRET: localIdentitySecret
         }
       });
 
