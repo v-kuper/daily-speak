@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"daily-speaking-practice/backend/internal/app"
 	"daily-speaking-practice/backend/internal/auth"
 	"daily-speaking-practice/backend/internal/db"
 	"daily-speaking-practice/backend/internal/httpapi"
@@ -63,7 +64,7 @@ func main() {
 	}
 
 	addr := envDefault("APP_ADDR", ":3000")
-	apiServer := httpapi.NewServer(httpapi.Config{
+	apiServer := app.NewAPI(app.APIConfig{
 		DB: database, CORS: cors, BrowserCookie: browserCookie, IdentityTokens: identityTokens,
 		MediaStore: mediaStore, MediaBucket: mediaConfig.S3Bucket,
 		MediaPartSize: mediaConfig.MultipartPartSize, MediaPresignTTL: mediaConfig.PresignTTL,

@@ -12,7 +12,7 @@ import (
 )
 
 func TestMobileIdentityIsSafeWhenSigningSecretIsMissing(t *testing.T) {
-	handler := NewServer(Config{}).Handler()
+	handler := newTestServer(Config{}).Handler()
 	response := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/auth/anonymous", strings.NewReader(`{"deviceName":"iPhone","platform":"ios"}`))
 	handler.ServeHTTP(response, request)
@@ -29,7 +29,7 @@ func TestMobileIdentityIsSafeWhenSigningSecretIsMissing(t *testing.T) {
 }
 
 func TestMobileIdentityRejectsInvalidPayloadBeforeDatabase(t *testing.T) {
-	handler := NewServer(Config{}).Handler()
+	handler := newTestServer(Config{}).Handler()
 	for _, tc := range []struct {
 		path string
 		body string
@@ -46,7 +46,7 @@ func TestMobileIdentityRejectsInvalidPayloadBeforeDatabase(t *testing.T) {
 }
 
 func TestBrowserRefreshWithoutCookieIsUnauthorized(t *testing.T) {
-	handler := NewServer(Config{}).Handler()
+	handler := newTestServer(Config{}).Handler()
 	response := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/auth/refresh", strings.NewReader(`{}`))
 	handler.ServeHTTP(response, request)
@@ -93,7 +93,7 @@ func TestBrowserIdentityTransportCannotBeDowngradedByPlatform(t *testing.T) {
 }
 
 func TestMobileIdentityRejectsOversizedPayload(t *testing.T) {
-	handler := NewServer(Config{}).Handler()
+	handler := newTestServer(Config{}).Handler()
 	response := httptest.NewRecorder()
 	body := `{"deviceName":"` + strings.Repeat("x", maxIdentityRequestBytes) + `"}`
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/v1/auth/anonymous", strings.NewReader(body)))

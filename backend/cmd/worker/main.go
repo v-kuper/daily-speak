@@ -9,7 +9,7 @@ import (
 	"strings"
 	"syscall"
 
-	"daily-speaking-practice/backend/internal/background"
+	"daily-speaking-practice/backend/internal/app"
 	"daily-speaking-practice/backend/internal/db"
 	"daily-speaking-practice/backend/internal/storage"
 	"daily-speaking-practice/backend/internal/worker"
@@ -44,7 +44,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("worker configuration failed: %v", err)
 	}
-	runtime := background.New(background.Config{
+	runtime := app.NewWorker(app.WorkerConfig{
 		DB: database, MediaStore: mediaStore, MediaBucket: mediaConfig.S3Bucket,
 		MediaPartSize: mediaConfig.MultipartPartSize, MediaPresignTTL: mediaConfig.PresignTTL,
 		UploadsDir: strings.TrimSpace(os.Getenv("UPLOADS_DIR")),

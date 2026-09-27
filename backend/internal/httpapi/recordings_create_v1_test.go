@@ -121,7 +121,7 @@ func newRecordingCreateV1Fixture(t *testing.T) recordingCreateV1Fixture {
 	})
 	return recordingCreateV1Fixture{
 		database: database,
-		server:   NewServer(Config{DB: database, IdentityTokens: tokenConfig}),
+		server:   newTestServer(Config{DB: database, IdentityTokens: tokenConfig}),
 		owner:    owner,
 		other:    other,
 		guest:    guest,
@@ -146,13 +146,17 @@ func registerRecordingCreateV1User(t *testing.T, database *db.DB, tokenConfig au
 func (f recordingCreateV1Fixture) insertAsset(t *testing.T, principalID string, purpose string) string {
 	t.Helper()
 	id := uuid.NewString()
+	contentType := "audio/webm"
+	if purpose == "recording_photo" {
+		contentType = "image/jpeg"
+	}
 	_, err := f.database.Exec(context.Background(), `
 		INSERT INTO media_assets
 		  (id, owner_principal_id, purpose, state, storage_driver, object_key, content_type,
 		   verified_size_bytes, verified_checksum_sha256, verified_at)
 		VALUES
 		  ($1, $2, $3, 'ready', 'local', $4, $5, 4, $6, NOW())`,
-		id, principalID, purpose, "test/"+id, chooseString(purpose == "recording_photo", "image/jpeg", "audio/webm"), strings.Repeat("a", 64))
+		id, principalID, purpose, "test/"+id, contentType, strings.Repeat("a", 64))
 	if err != nil {
 		t.Fatalf("insert %s asset: %v", purpose, err)
 	}

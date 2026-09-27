@@ -121,7 +121,7 @@ func newShadowingFixture(t *testing.T, synthesizer *fakeSynthesizer, correctedTr
 		tokenConfig:      tokenConfig,
 		recordingID:      recordingID,
 		uploadsDir:       uploadsDir,
-		server:           NewServer(Config{DB: database, Synthesizer: synthesizer, IdentityTokens: tokenConfig}),
+		server:           newTestServer(Config{DB: database, Synthesizer: synthesizer, IdentityTokens: tokenConfig}),
 	}
 }
 
@@ -312,7 +312,7 @@ func TestShadowingStaleProcessingCanBeReclaimed(t *testing.T) {
 func TestReclaimedShadowingIgnoresOlderWorkerFailure(t *testing.T) {
 	oldSynthesizer := newControlledSynthesizer()
 	fixture := newShadowingFixture(t, &fakeSynthesizer{}, "I went yesterday.", "pending", time.Now().UTC())
-	oldServer := NewServer(Config{DB: fixture.database, Synthesizer: oldSynthesizer, IdentityTokens: fixture.tokenConfig})
+	oldServer := newTestServer(Config{DB: fixture.database, Synthesizer: oldSynthesizer, IdentityTokens: fixture.tokenConfig})
 	startTestWorkers(t, oldServer)
 	if response := fixture.postToServer(t, oldServer, fixture.ownerAccessToken); response.Code != http.StatusOK {
 		t.Fatalf("old claim status=%d body=%q", response.Code, response.Body.String())
@@ -326,7 +326,7 @@ func TestReclaimedShadowingIgnoresOlderWorkerFailure(t *testing.T) {
 	}
 
 	newSynthesizer := newControlledSynthesizer()
-	newServer := NewServer(Config{DB: fixture.database, Synthesizer: newSynthesizer, IdentityTokens: fixture.tokenConfig})
+	newServer := newTestServer(Config{DB: fixture.database, Synthesizer: newSynthesizer, IdentityTokens: fixture.tokenConfig})
 	startTestWorkers(t, newServer)
 	waitForControlledSynthesizer(t, newSynthesizer)
 

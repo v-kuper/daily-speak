@@ -128,7 +128,7 @@ func newRecordingRetryFixture(t *testing.T, stage string, client *retryAIClient)
 		tokenConfig:      tokenConfig,
 		recordingID:      recordingID,
 		client:           client,
-		server:           NewServer(Config{DB: database, AIClient: client, Synthesizer: &fakeSynthesizer{audio: []byte("ID3")}, IdentityTokens: tokenConfig}),
+		server:           newTestServer(Config{DB: database, AIClient: client, Synthesizer: &fakeSynthesizer{audio: []byte("ID3")}, IdentityTokens: tokenConfig}),
 	}
 	startTestWorkers(t, fixture.server)
 	return fixture

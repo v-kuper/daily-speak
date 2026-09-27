@@ -101,7 +101,7 @@ func TestDeleteRecordingCascadesDataAndRetriesQueuedFilesAfterRestart(t *testing
 	request := httptest.NewRequest(http.MethodDelete, "/api/recordings/"+recordingID, nil)
 	request.Header.Set("Authorization", "Bearer "+grant.AccessToken)
 	response := httptest.NewRecorder()
-	NewServer(Config{DB: database, IdentityTokens: tokenConfig}).Handler().ServeHTTP(response, request)
+	newTestServer(Config{DB: database, IdentityTokens: tokenConfig}).Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
 		t.Fatalf("expected delete status 200, got %d: %s", response.Code, response.Body.String())
 	}
@@ -130,7 +130,7 @@ func TestDeleteRecordingCascadesDataAndRetriesQueuedFilesAfterRestart(t *testing
 	}
 
 	legacyUploads := storage.NewLegacyUploads(uploadsDir)
-	restartedServer := NewServer(Config{
+	restartedServer := newTestServer(Config{
 		DB: database,
 		LegacyUploads: failingLegacyUploadStore{
 			LegacyUploadStore: legacyUploads,
@@ -147,7 +147,7 @@ func TestDeleteRecordingCascadesDataAndRetriesQueuedFilesAfterRestart(t *testing
 		t.Fatal(err)
 	}
 
-	secondRestart := NewServer(Config{DB: database, LegacyUploads: legacyUploads})
+	secondRestart := newTestServer(Config{DB: database, LegacyUploads: legacyUploads})
 	processDeletionJobsOnce(t, secondRestart, 3, false)
 	assertTableRowCount(t, database, "pending_file_deletions", "public_url", recordingURL, 0)
 	assertTableRowCount(t, database, "pending_file_deletions", "public_url", shadowingURL, 0)
@@ -166,17 +166,19 @@ func (store failingLegacyUploadStore) Remove([]string) error { return store.err 
 
 func processDeletionJobsOnce(t *testing.T, server *Server, count int, wantError bool) {
 	t.Helper()
+	runtime := testBackgroundRuntime(t, server)
+	jobStore := testJobStore(t, server)
 	for range count {
-		job, found, err := server.jobStore.Claim(context.Background(), "deletion-test", []string{workqueue.KindMediaDelete}, time.Minute)
+		job, found, err := jobStore.Claim(context.Background(), "deletion-test", []string{workqueue.KindMediaDelete}, time.Minute)
 		if err != nil || !found {
 			t.Fatalf("claim deletion job: found=%t err=%v", found, err)
 		}
-		handleErr := server.handleDurableJob(context.Background(), job)
+		handleErr := runtime.Handle(context.Background(), job)
 		if wantError {
 			if handleErr == nil {
 				t.Fatal("expected simulated deletion failure")
 			}
-			if _, err := server.jobStore.Fail(context.Background(), job, handleErr, time.Hour, server.finalizeDurableFailure); err != nil {
+			if _, err := jobStore.Fail(context.Background(), job, handleErr, time.Hour, runtime.FinalizeFailure); err != nil {
 				t.Fatalf("schedule deletion retry: %v", err)
 			}
 			continue
@@ -184,7 +186,7 @@ func processDeletionJobsOnce(t *testing.T, server *Server, count int, wantError 
 		if handleErr != nil {
 			t.Fatalf("delete stored upload: %v", handleErr)
 		}
-		if err := server.jobStore.Complete(context.Background(), job); err != nil {
+		if err := jobStore.Complete(context.Background(), job); err != nil {
 			t.Fatalf("complete deletion job: %v", err)
 		}
 	}

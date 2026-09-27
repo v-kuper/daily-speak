@@ -69,7 +69,7 @@ func TestGuestPreviewJourneyIsBoundedIdempotentAndExpiresDurably(t *testing.T) {
 		t.Fatalf("insert media asset: %v", err)
 	}
 	client := &countingGuestPreviewAI{response: `{"corrections":[{"wrong":"Yesterday I go","right":"Yesterday I went","explanation":"Use past tense.","category":"verb_grammar","severity":"major","confidence":0.99}]}`}
-	server := NewServer(Config{
+	server := newTestServer(Config{
 		DB: database, IdentityTokens: tokenConfig, MediaStore: store, AIClient: client,
 		TranscribeAudio:    func(context.Context, string) (string, error) { return "Yesterday I go to work.", nil },
 		ProbeAudioDuration: func(context.Context, string) (time.Duration, error) { return 31 * time.Second, nil },
@@ -111,7 +111,7 @@ func TestGuestPreviewJourneyIsBoundedIdempotentAndExpiresDurably(t *testing.T) {
 		WHERE id = $1`, jobID, leaseToken); err != nil {
 		t.Fatalf("claim preview job: %v", err)
 	}
-	if err := server.handleDurableJob(ctx, workqueue.Job{ID: jobID, Kind: workqueue.KindGuestPreview, ResourceID: previewID, LeaseToken: leaseToken}); err != nil {
+	if err := testBackgroundRuntime(t, server).Handle(ctx, workqueue.Job{ID: jobID, Kind: workqueue.KindGuestPreview, ResourceID: previewID, LeaseToken: leaseToken}); err != nil {
 		t.Fatalf("run preview job: %v", err)
 	}
 	ready := getGuestPreview(t, server, guest.AccessToken, previewID)
@@ -134,7 +134,7 @@ func TestGuestPreviewJourneyIsBoundedIdempotentAndExpiresDurably(t *testing.T) {
 		WHERE id = $1`, previewID); err != nil {
 		t.Fatalf("expire preview: %v", err)
 	}
-	if err := server.expireGuestPreviews(ctx); err != nil {
+	if err := server.guestPreviewStore.Expire(ctx); err != nil {
 		t.Fatalf("expire guest previews: %v", err)
 	}
 	expired := getGuestPreview(t, server, guest.AccessToken, previewID)
@@ -175,7 +175,7 @@ func TestGuestMediaUploadAllowsOneBoundedRecordingOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("local store: %v", err)
 	}
-	server := NewServer(Config{DB: database, IdentityTokens: tokenConfig, MediaStore: store})
+	server := newTestServer(Config{DB: database, IdentityTokens: tokenConfig, MediaStore: store})
 	payload := map[string]any{
 		"purpose": "recording_audio", "contentType": "audio/webm", "sizeBytes": 1024,
 		"checksum": map[string]string{"algorithm": "sha256", "value": strings.Repeat("a", 64)},

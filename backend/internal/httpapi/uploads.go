@@ -2,22 +2,12 @@ package httpapi
 
 import (
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"daily-speaking-practice/backend/internal/domain"
 )
 
 const uploadsURLPrefix = "/uploads/"
-
-func resolveUploadsDir() string {
-	value := strings.TrimSpace(os.Getenv("UPLOADS_DIR"))
-	if value != "" {
-		return value
-	}
-	return filepath.Join("public", "uploads")
-}
 
 func (s *Server) handleLegacyUpload(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {

@@ -1,13 +1,12 @@
-package background
+package app
 
 import (
 	"context"
 	"errors"
-	"path/filepath"
-	"strings"
 	"time"
 
 	"daily-speaking-practice/backend/internal/ai"
+	"daily-speaking-practice/backend/internal/background"
 	"daily-speaking-practice/backend/internal/db"
 	"daily-speaking-practice/backend/internal/guestpreview"
 	"daily-speaking-practice/backend/internal/media"
@@ -21,7 +20,7 @@ import (
 	"github.com/google/uuid"
 )
 
-type Config struct {
+type WorkerConfig struct {
 	DB                 *db.DB
 	MediaStore         storage.Store
 	MediaBucket        string
@@ -34,11 +33,8 @@ type Config struct {
 	ProbeAudioDuration func(context.Context, string) (time.Duration, error)
 }
 
-func New(config Config) *Runtime {
-	uploadsDir := strings.TrimSpace(config.UploadsDir)
-	if uploadsDir == "" {
-		uploadsDir = filepath.Join("public", "uploads")
-	}
+func NewWorker(config WorkerConfig) *background.Runtime {
+	uploadsDir := resolveUploadsDir(config.UploadsDir)
 	aiClient := config.AIClient
 	if aiClient == nil {
 		aiClient = ai.OllamaClient{}
@@ -88,7 +84,7 @@ func New(config Config) *Runtime {
 		MediaBucket: config.MediaBucket, LocalSaver: shadowing.NewLocalSaver(uploadsDir), NewID: uuid.NewString,
 	})
 	cleanup := media.NewCleanup(config.DB, mediaService, config.MediaStore, legacyUploads)
-	return NewRuntime(Dependencies{
+	return background.NewRuntime(background.Dependencies{
 		DB: config.DB, JobStore: workqueue.NewStore(config.DB),
 		RecordingProcessor: recordingProcessor, RecordingRepository: recordingRepository,
 		GuestPreviewProcessor: guestProcessor, GuestPreviewStore: guestStore,

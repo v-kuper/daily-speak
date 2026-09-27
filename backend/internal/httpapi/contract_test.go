@@ -9,7 +9,7 @@ import (
 )
 
 func TestHealthz(t *testing.T) {
-	handler := NewServer(Config{}).Handler()
+	handler := newTestServer(Config{}).Handler()
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 
@@ -24,7 +24,7 @@ func TestHealthz(t *testing.T) {
 }
 
 func TestEveryResponseHasRequestID(t *testing.T) {
-	handler := NewServer(Config{}).Handler()
+	handler := newTestServer(Config{}).Handler()
 	cases := []struct {
 		name       string
 		requestID  string
@@ -55,7 +55,7 @@ func TestEveryResponseHasRequestID(t *testing.T) {
 }
 
 func TestV1MetadataAndStableErrors(t *testing.T) {
-	handler := NewServer(Config{}).Handler()
+	handler := newTestServer(Config{}).Handler()
 
 	metadata := httptest.NewRecorder()
 	handler.ServeHTTP(metadata, httptest.NewRequest(http.MethodGet, "/api/v1", nil))
@@ -87,7 +87,7 @@ func TestV1MetadataAndStableErrors(t *testing.T) {
 }
 
 func TestLegacyErrorsRemainCompatible(t *testing.T) {
-	handler := NewServer(Config{}).Handler()
+	handler := newTestServer(Config{}).Handler()
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/recordings/demo", nil))
 	if strings.TrimSpace(recorder.Body.String()) != `{"error":"Unauthorized"}` {
@@ -118,7 +118,7 @@ func TestV1ErrorCodesAreStableByStatus(t *testing.T) {
 }
 
 func TestBackendDoesNotServeOrProxyWebRoutes(t *testing.T) {
-	handler := NewServer(Config{}).Handler()
+	handler := newTestServer(Config{}).Handler()
 
 	for _, path := range []string{"/", "/speak", "/history/demo"} {
 		recorder := httptest.NewRecorder()
@@ -135,7 +135,7 @@ func TestBackendDoesNotServeOrProxyWebRoutes(t *testing.T) {
 }
 
 func TestUnauthorizedAPIContractWithoutBearer(t *testing.T) {
-	handler := NewServer(Config{}).Handler()
+	handler := newTestServer(Config{}).Handler()
 	cases := []struct {
 		method string
 		path   string
@@ -175,7 +175,7 @@ func TestUnauthorizedAPIContractWithoutBearer(t *testing.T) {
 }
 
 func TestAuthValidationContract(t *testing.T) {
-	handler := NewServer(Config{}).Handler()
+	handler := newTestServer(Config{}).Handler()
 	cases := []struct {
 		path string
 		body string

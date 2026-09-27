@@ -10,10 +10,11 @@ import (
 
 func startTestWorkers(t *testing.T, server *Server) {
 	t.Helper()
+	runtime := testBackgroundRuntime(t, server)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	go func() {
-		_ = server.RunWorkers(ctx, worker.Config{
+		_ = runtime.Run(ctx, worker.Config{
 			RecordingConcurrency: 1,
 			ShadowingConcurrency: 1,
 			CleanupConcurrency:   1,

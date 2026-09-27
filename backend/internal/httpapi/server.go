@@ -3,250 +3,99 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
 	apidocs "daily-speaking-practice/backend/docs"
-	"daily-speaking-practice/backend/internal/ai"
 	"daily-speaking-practice/backend/internal/auth"
-	"daily-speaking-practice/backend/internal/background"
-	"daily-speaking-practice/backend/internal/db"
 	"daily-speaking-practice/backend/internal/feed"
 	"daily-speaking-practice/backend/internal/guestpreview"
 	"daily-speaking-practice/backend/internal/logging"
 	"daily-speaking-practice/backend/internal/media"
 	"daily-speaking-practice/backend/internal/operations"
 	"daily-speaking-practice/backend/internal/practice"
-	practiceollama "daily-speaking-practice/backend/internal/practice/ollamaadapter"
 	"daily-speaking-practice/backend/internal/profile"
 	"daily-speaking-practice/backend/internal/recording"
-	recordingollama "daily-speaking-practice/backend/internal/recording/ollamaadapter"
 	"daily-speaking-practice/backend/internal/shadowing"
 	"daily-speaking-practice/backend/internal/storage"
 	"daily-speaking-practice/backend/internal/subscription"
-	"daily-speaking-practice/backend/internal/transcription"
-	"daily-speaking-practice/backend/internal/tts"
-	"daily-speaking-practice/backend/internal/workqueue"
-	"github.com/google/uuid"
 )
 
-type Config struct {
-	DB                       *db.DB
-	Synthesizer              tts.Synthesizer
-	AIClient                 ai.ChatClient
-	PracticeGenerator        practice.Generator
-	RecordingAnalyzer        recording.Analyzer
-	RecordingRewriter        recording.Rewriter
-	RecordingPreviewAnalyzer recording.PreviewAnalyzer
-	BrowserCookie            auth.CookieConfig
-	IdentityTokens           auth.TokenConfig
-	CORS                     CORSConfig
-	MediaStore               storage.Store
-	MediaBucket              string
-	MediaSigningSecret       []byte
-	MediaPartSize            int64
-	MediaPresignTTL          time.Duration
-	LegacyUploads            storage.LegacyUploadStore
-	TranscribeAudio          func(context.Context, string) (string, error)
-	ProbeAudioDuration       func(context.Context, string) (time.Duration, error)
-	Operations               operations.Config
+type Dependencies struct {
+	OperationsMonitor     *operations.Monitor
+	LegacyUploads         storage.LegacyUploadStore
+	PracticeGenerator     practice.Generator
+	FeedService           *feed.Service
+	ProfileService        *profile.Service
+	SubscriptionService   *subscription.Service
+	RecordingAnalyzer     recording.Analyzer
+	RecordingRewriter     recording.Rewriter
+	RecordingCreator      *recording.Creator
+	RecordingDeleter      *recording.Deleter
+	RecordingReader       *recording.Reader
+	RecordingRetryService *recording.RetryService
+	GuestPreviewStore     *guestpreview.Store
+	ShadowingStore        *shadowing.Store
+	BrowserCookie         auth.CookieConfig
+	IdentityTokens        auth.TokenConfig
+	IdentityService       *auth.IdentityService
+	CORS                  CORSConfig
+	MediaService          *media.Service
+	MediaSigner           *media.URLSigner
+	Operations            operations.Config
+	Limiter               requestLimiter
+	Network               operations.Network
+	Metrics               *operations.Metrics
 }
 
 type Server struct {
-	db                       *db.DB
-	jobStore                 *workqueue.Store
-	legacyUploads            storage.LegacyUploadStore
-	synthesizer              tts.Synthesizer
-	aiClient                 ai.ChatClient
-	practiceGenerator        practice.Generator
-	feedService              *feed.Service
-	profileService           *profile.Service
-	subscriptionService      *subscription.Service
-	recordingAnalyzer        recording.Analyzer
-	recordingRewriter        recording.Rewriter
-	recordingPreviewAnalyzer recording.PreviewAnalyzer
-	recordingCreator         *recording.Creator
-	recordingDeleter         *recording.Deleter
-	recordingReader          *recording.Reader
-	recordingRetryService    *recording.RetryService
-	recordingRepository      *recording.SQLProcessingRepository
-	recordingProcessor       *recording.Processor
-	guestPreviewStore        *guestpreview.Store
-	guestPreviewProcessor    *guestpreview.Processor
-	shadowingStore           *shadowing.Store
-	shadowingProcessor       *shadowing.Processor
-	backgroundRuntime        *background.Runtime
-	browserCookie            auth.CookieConfig
-	identityTokens           auth.TokenConfig
-	identityService          *auth.IdentityService
-	cors                     CORSConfig
-	mediaService             *media.Service
-	mediaSigner              *media.URLSigner
-	mediaStore               storage.Store
-	mediaMaterializer        *media.Materializer
-	transcribeAudio          func(context.Context, string) (string, error)
-	probeAudioDuration       func(context.Context, string) (time.Duration, error)
-	operations               operations.Config
-	limiter                  requestLimiter
-	network                  operations.Network
-	metrics                  *operations.Metrics
+	operationsMonitor     *operations.Monitor
+	legacyUploads         storage.LegacyUploadStore
+	practiceGenerator     practice.Generator
+	feedService           *feed.Service
+	profileService        *profile.Service
+	subscriptionService   *subscription.Service
+	recordingAnalyzer     recording.Analyzer
+	recordingRewriter     recording.Rewriter
+	recordingCreator      *recording.Creator
+	recordingDeleter      *recording.Deleter
+	recordingReader       *recording.Reader
+	recordingRetryService *recording.RetryService
+	guestPreviewStore     *guestpreview.Store
+	shadowingStore        *shadowing.Store
+	browserCookie         auth.CookieConfig
+	identityTokens        auth.TokenConfig
+	identityService       *auth.IdentityService
+	cors                  CORSConfig
+	mediaService          *media.Service
+	mediaSigner           *media.URLSigner
+	operations            operations.Config
+	limiter               requestLimiter
+	network               operations.Network
+	metrics               *operations.Metrics
 }
 
 type requestLimiter interface {
 	Allow(context.Context, string, string, operations.Limit) (operations.Decision, error)
 }
 
-func NewServer(config Config) *Server {
-	if config.BrowserCookie.SameSite == 0 {
-		config.BrowserCookie.SameSite = http.SameSiteLaxMode
+func NewServer(dependencies Dependencies) *Server {
+	return &Server{
+		operationsMonitor: dependencies.OperationsMonitor,
+		legacyUploads:     dependencies.LegacyUploads,
+		practiceGenerator: dependencies.PracticeGenerator, feedService: dependencies.FeedService,
+		profileService: dependencies.ProfileService, subscriptionService: dependencies.SubscriptionService,
+		recordingAnalyzer: dependencies.RecordingAnalyzer, recordingRewriter: dependencies.RecordingRewriter,
+		recordingCreator: dependencies.RecordingCreator, recordingDeleter: dependencies.RecordingDeleter,
+		recordingReader: dependencies.RecordingReader, recordingRetryService: dependencies.RecordingRetryService,
+		guestPreviewStore: dependencies.GuestPreviewStore, shadowingStore: dependencies.ShadowingStore,
+		browserCookie: dependencies.BrowserCookie, identityTokens: dependencies.IdentityTokens,
+		identityService: dependencies.IdentityService, cors: dependencies.CORS,
+		mediaService: dependencies.MediaService, mediaSigner: dependencies.MediaSigner,
+		operations: dependencies.Operations, limiter: dependencies.Limiter,
+		network: dependencies.Network, metrics: dependencies.Metrics,
 	}
-	synthesizer := config.Synthesizer
-	if synthesizer == nil {
-		synthesizer = tts.NewCartesia(tts.ConfigFromEnv())
-	}
-	aiClient := config.AIClient
-	if aiClient == nil {
-		aiClient = ai.OllamaClient{}
-	}
-	practiceGenerator := config.PracticeGenerator
-	if practiceGenerator == nil {
-		practiceGenerator = practice.NewService(practiceollama.New(aiClient))
-	}
-	recordingService := recording.NewAnalysisService(
-		recordingollama.New(aiClient),
-		recording.AnalysisConfigFromEnv(),
-	)
-	recordingAnalyzer := config.RecordingAnalyzer
-	if recordingAnalyzer == nil {
-		recordingAnalyzer = recordingService
-	}
-	recordingRewriter := config.RecordingRewriter
-	if recordingRewriter == nil {
-		recordingRewriter = recordingService
-	}
-	recordingPreviewAnalyzer := config.RecordingPreviewAnalyzer
-	if recordingPreviewAnalyzer == nil {
-		recordingPreviewAnalyzer = recordingService
-	}
-	mediaStore := config.MediaStore
-	if mediaStore == nil && config.DB != nil {
-		mediaStore, _ = storage.NewLocal(resolveUploadsDir())
-	}
-	mediaBucket := strings.TrimSpace(config.MediaBucket)
-	if mediaBucket == "" && mediaStore != nil && mediaStore.Backend() == storage.BackendS3 {
-		mediaBucket = strings.TrimSpace(os.Getenv("MEDIA_S3_BUCKET"))
-	}
-	var mediaService *media.Service
-	if config.DB != nil && mediaStore != nil {
-		mediaService = media.NewService(media.NewSQLRepository(config.DB), mediaStore, media.Config{
-			Bucket: mediaBucket, PartSizeBytes: config.MediaPartSize,
-			SignedRequestTTL: config.MediaPresignTTL,
-		})
-	}
-	signingSecret := config.MediaSigningSecret
-	if len(signingSecret) == 0 {
-		signingSecret = []byte(strings.TrimSpace(os.Getenv("MEDIA_URL_SIGNING_SECRET")))
-	}
-	if len(signingSecret) == 0 {
-		signingSecret = []byte(strings.TrimSpace(os.Getenv("AUTH_ACCESS_TOKEN_SECRET")))
-	}
-	legacyUploads := config.LegacyUploads
-	if legacyUploads == nil {
-		legacyUploads = storage.NewLegacyUploads(resolveUploadsDir())
-	}
-	recordingRecords := recording.NewSQLQueryRepository(config.DB)
-	mediaSigner, _ := media.NewURLSigner(signingSecret)
-	transcribeAudio := config.TranscribeAudio
-	if transcribeAudio == nil {
-		transcribeAudio = transcription.TranscribeAudioWithLocalWhisper
-	}
-	probeAudioDuration := config.ProbeAudioDuration
-	if probeAudioDuration == nil {
-		probeAudioDuration = media.ProbeAudioDuration
-	}
-	transcribeForProcessing := func(ctx context.Context, path string) (string, error) {
-		transcript, err := transcribeAudio(ctx, path)
-		if err != nil {
-			var typed transcription.Error
-			if errors.As(err, &typed) {
-				return "", errors.New(typed.Message)
-			}
-		}
-		return transcript, err
-	}
-	recordingRepository := recording.NewSQLProcessingRepository(config.DB)
-	guestPreviewStore := guestpreview.NewStore(config.DB, guestpreview.QueueCapacityFromEnv())
-	shadowingStore := shadowing.NewStore(config.DB)
-	recordingDeletion := recording.NewSQLDeletionRepository(config.DB)
-	server := &Server{
-		db:                       config.DB,
-		jobStore:                 workqueue.NewStore(config.DB),
-		legacyUploads:            legacyUploads,
-		synthesizer:              synthesizer,
-		aiClient:                 aiClient,
-		practiceGenerator:        practiceGenerator,
-		feedService:              feed.NewService(feed.NewSQLRepository(config.DB), feed.NewLocalReplyAudioStore(resolveUploadsDir()), uuid.NewString),
-		profileService:           profile.NewService(profile.NewSQLRepository(config.DB)),
-		subscriptionService:      subscription.NewService(subscription.NewSQLRepository(config.DB)),
-		recordingAnalyzer:        recordingAnalyzer,
-		recordingRewriter:        recordingRewriter,
-		recordingPreviewAnalyzer: recordingPreviewAnalyzer,
-		recordingCreator:         recording.NewCreator(recording.NewSQLCreateUnitOfWork(config.DB)),
-		recordingDeleter: recording.NewDeleter(
-			recordingDeletion, legacyUploads,
-			recordingDeletion, uuid.NewString,
-		),
-		recordingReader:       recording.NewReader(recordingRecords),
-		recordingRetryService: recording.NewRetryService(recordingRecords, recording.NewSQLRetryUnitOfWork(config.DB), legacyUploads, uuid.NewString),
-		recordingRepository:   recordingRepository,
-		guestPreviewStore:     guestPreviewStore,
-		shadowingStore:        shadowingStore,
-		browserCookie:         config.BrowserCookie,
-		identityTokens:        config.IdentityTokens,
-		identityService:       auth.NewIdentityService(config.DB, config.IdentityTokens),
-		cors:                  config.CORS,
-		mediaService:          mediaService,
-		mediaSigner:           mediaSigner,
-		mediaStore:            mediaStore,
-		mediaMaterializer:     media.NewMaterializer(config.DB, mediaStore),
-		transcribeAudio:       transcribeAudio,
-		probeAudioDuration:    probeAudioDuration,
-		operations:            config.Operations,
-		limiter:               operations.NewLimiter(config.DB),
-		network:               operations.NewNetwork(config.Operations.TrustedProxies),
-		metrics:               operations.NewMetrics(),
-	}
-	server.recordingProcessor = recording.NewProcessor(recording.ProcessingDependencies{
-		Repository:         recordingRepository,
-		Materializer:       server.mediaMaterializer,
-		ResolveLegacyAudio: legacyUploads.Path,
-		ProbeAudioDuration: probeAudioDuration,
-		Transcribe:         transcribeForProcessing,
-		Analyzer:           recordingAnalyzer,
-		Rewriter:           recordingRewriter,
-		NewID:              uuid.NewString,
-	})
-	server.guestPreviewProcessor = guestpreview.NewProcessor(guestpreview.ProcessorDependencies{
-		Store: guestPreviewStore, Materializer: server.mediaMaterializer,
-		ProbeAudioDuration: probeAudioDuration, Transcribe: transcribeForProcessing,
-		Analyzer: recordingPreviewAnalyzer,
-	})
-	server.shadowingProcessor = shadowing.NewProcessor(shadowing.ProcessorDependencies{
-		Store: shadowingStore, Synthesizer: synthesizer, MediaStore: mediaStore,
-		MediaBucket: mediaBucket, LocalSaver: shadowing.NewLocalSaver(resolveUploadsDir()),
-		NewID: uuid.NewString,
-	})
-	server.backgroundRuntime = background.NewRuntime(background.Dependencies{
-		DB: config.DB, JobStore: server.jobStore,
-		RecordingProcessor: server.recordingProcessor, RecordingRepository: recordingRepository,
-		GuestPreviewProcessor: server.guestPreviewProcessor, GuestPreviewStore: guestPreviewStore,
-		ShadowingProcessor: server.shadowingProcessor, ShadowingStore: shadowingStore,
-		MediaCleanup: media.NewCleanup(config.DB, mediaService, mediaStore, legacyUploads),
-	})
-	return server
 }
 
 func (s *Server) Handler() http.Handler {

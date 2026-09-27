@@ -8,7 +8,7 @@ import (
 )
 
 func TestOpenAPIAndSwaggerAreServedByBackend(t *testing.T) {
-	handler := NewServer(Config{}).Handler()
+	handler := newTestServer(Config{}).Handler()
 	cases := []struct {
 		path        string
 		contentType string
@@ -39,7 +39,7 @@ func TestOpenAPIAndSwaggerRejectNonGETRequestsBeforeCORS(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := NewServer(Config{CORS: cors}).Handler()
+	handler := newTestServer(Config{CORS: cors}).Handler()
 	cases := []struct {
 		method string
 		path   string

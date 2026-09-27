@@ -65,9 +65,6 @@ type Dependencies struct {
 type Runtime struct{ dependencies Dependencies }
 
 func NewRuntime(dependencies Dependencies) *Runtime {
-	if dependencies.JobStore == nil && dependencies.DB != nil {
-		dependencies.JobStore = workqueue.NewStore(dependencies.DB)
-	}
 	return &Runtime{dependencies: dependencies}
 }
 

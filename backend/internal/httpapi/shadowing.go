@@ -10,14 +10,7 @@ import (
 	"daily-speaking-practice/backend/internal/logging"
 	"daily-speaking-practice/backend/internal/recording"
 	"daily-speaking-practice/backend/internal/shadowing"
-	"daily-speaking-practice/backend/internal/workqueue"
 	"github.com/jackc/pgx/v5"
-)
-
-const (
-	shadowingJobTimeout     = shadowing.JobTimeout
-	maxShadowingAudioBytes  = shadowing.MaxAudioBytes
-	shadowingFailureMessage = shadowing.FailureMessage
 )
 
 var errShadowingTranscriptUnavailable = shadowing.ErrTranscriptUnavailable
@@ -68,13 +61,4 @@ func (s *Server) scheduleShadowing(ctx context.Context, userID, recordingID stri
 	}
 	recording, err := s.recordingForUser(ctx, userID, recordingID)
 	return recording, scheduled, err
-}
-
-func (s *Server) runShadowingJob(ctx context.Context, job workqueue.Job) error {
-	return s.shadowingProcessor.Process(ctx, shadowing.Job{ID: job.ID, ResourceID: job.ResourceID, LeaseToken: job.LeaseToken}, logging.ForBackground("worker.recordings.shadowing"))
-}
-
-func saveShadowingAudio(userID, recordingID, attemptID string, audio []byte) (savedAudioFile, error) {
-	saved, err := shadowing.NewLocalSaver(resolveUploadsDir()).Save(userID, recordingID, attemptID, audio)
-	return savedAudioFile{publicURL: saved.PublicURL, absolutePath: saved.AbsolutePath}, err
 }

@@ -24,8 +24,10 @@ Go worker ----------+
 
 - `web/` is a Next.js sandbox client. It owns browser routes and UI state, but
   no backend business logic or server credentials.
-- `backend/cmd/api` composes the HTTP API, application services, repositories,
-  storage adapters, admission control, and the published API contract.
+- `backend/internal/app` is the composition root for both process roles. It
+  selects providers and storage adapters and wires repositories and services.
+- `backend/cmd/api` parses process configuration, opens shared infrastructure,
+  and starts the already-composed HTTP API.
 - `backend/cmd/worker` owns paid or slow transcription, analysis, TTS, and
   cleanup work. It uses the same backend image but is a separate process.
 - PostgreSQL is the source of truth for identities, sessions, recordings,
@@ -122,8 +124,9 @@ procedures live in [`BACKEND_OPERATIONS.md`](BACKEND_OPERATIONS.md).
 
 ```text
 web/                         standalone Next.js application
-backend/cmd/api              API process composition
-backend/cmd/worker           durable worker process composition
+backend/cmd/api              API process entrypoint and lifecycle
+backend/cmd/worker           durable worker entrypoint and lifecycle
+backend/internal/app         API and worker dependency composition root
 backend/internal/aiparse     provider-neutral model-output normalization
 backend/internal/auth        unified web/mobile identity and token lifecycle
 backend/internal/db          PostgreSQL connection and migrations

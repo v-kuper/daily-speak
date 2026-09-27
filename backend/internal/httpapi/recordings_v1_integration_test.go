@@ -67,7 +67,7 @@ func TestV1RecordingsCursorPagination(t *testing.T) {
 		expectedFirst, expectedSecond = expectedSecond, expectedFirst
 	}
 
-	handler := NewServer(Config{DB: database, IdentityTokens: tokenConfig}).Handler()
+	handler := newTestServer(Config{DB: database, IdentityTokens: tokenConfig}).Handler()
 	first := requestRecordingPage(t, handler, mobileGrant.AccessToken, "/api/v1/recordings?limit=2")
 	if len(first.Items) != 2 || first.Items[0].ID != expectedFirst || first.Items[1].ID != expectedSecond {
 		t.Fatalf("unexpected first page: %+v", first.Items)
@@ -84,7 +84,7 @@ func TestV1RecordingsCursorPagination(t *testing.T) {
 		t.Fatalf("last page has next cursor %q", *second.Page.NextCursor)
 	}
 
-	bearerHandler := NewServer(Config{DB: database, IdentityTokens: tokenConfig}).Handler()
+	bearerHandler := newTestServer(Config{DB: database, IdentityTokens: tokenConfig}).Handler()
 	bearerRequest := httptest.NewRequest(http.MethodGet, "/api/v1/recordings?limit=1", nil)
 	bearerRequest.Header.Set("Authorization", "Bearer "+mobileGrant.AccessToken)
 	bearerResponse := httptest.NewRecorder()

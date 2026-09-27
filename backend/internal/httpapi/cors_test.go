@@ -164,7 +164,7 @@ func TestCORSIsAppliedToServerRoutes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := NewServer(Config{CORS: config}).Handler()
+	handler := newTestServer(Config{CORS: config}).Handler()
 	for _, path := range []string{"/healthz", "/api/v1/auth/session", "/uploads/example.webm", "/unknown"} {
 		request := httptest.NewRequest(http.MethodOptions, path, nil)
 		request.Header.Set("Origin", "https://app.example.com")

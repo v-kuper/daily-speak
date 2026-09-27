@@ -26,7 +26,7 @@ func (f *fakeRequestLimiter) Allow(_ context.Context, scope string, subject stri
 }
 
 func TestLivenessDoesNotDependOnReadiness(t *testing.T) {
-	handler := NewServer(Config{Operations: operations.Config{ReadinessTimeout: time.Second}}).Handler()
+	handler := newTestServer(Config{Operations: operations.Config{ReadinessTimeout: time.Second}}).Handler()
 	health := httptest.NewRecorder()
 	handler.ServeHTTP(health, httptest.NewRequest(http.MethodGet, "/healthz", nil))
 	if health.Code != http.StatusOK {
@@ -41,7 +41,7 @@ func TestLivenessDoesNotDependOnReadiness(t *testing.T) {
 
 func TestTraceContextAndSecurityHeaders(t *testing.T) {
 	config := operations.Config{TrustedProxies: []netip.Prefix{netip.MustParsePrefix("172.16.0.0/12")}}
-	handler := NewServer(Config{Operations: config}).Handler()
+	handler := newTestServer(Config{Operations: config}).Handler()
 	request := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	request.RemoteAddr = "172.18.0.3:1000"
 	request.Header.Set("X-Forwarded-Proto", "https")
@@ -63,7 +63,7 @@ func TestTraceContextAndSecurityHeaders(t *testing.T) {
 }
 
 func TestInvalidTraceparentIsReplacedAndMetricsAreHiddenByDefault(t *testing.T) {
-	handler := NewServer(Config{}).Handler()
+	handler := newTestServer(Config{}).Handler()
 	healthRequest := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	healthRequest.Header.Set("Traceparent", "00-not-valid")
 	health := httptest.NewRecorder()
@@ -79,7 +79,7 @@ func TestInvalidTraceparentIsReplacedAndMetricsAreHiddenByDefault(t *testing.T) 
 }
 
 func TestRateLimitReturnsStableV1ErrorAndRetryMetadata(t *testing.T) {
-	server := NewServer(Config{Operations: operations.Config{
+	server := newTestServer(Config{Operations: operations.Config{
 		RateLimitsEnabled: true,
 		AuthLimit:         operations.Limit{Requests: 2, Window: time.Minute},
 	}})
@@ -104,7 +104,7 @@ func TestRateLimitReturnsStableV1ErrorAndRetryMetadata(t *testing.T) {
 }
 
 func TestRateLimitFailsClosedWhenSharedStoreIsUnavailable(t *testing.T) {
-	server := NewServer(Config{Operations: operations.Config{
+	server := newTestServer(Config{Operations: operations.Config{
 		RateLimitsEnabled: true,
 		WriteLimit:        operations.Limit{Requests: 10, Window: time.Minute},
 	}})

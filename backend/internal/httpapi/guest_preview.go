@@ -13,16 +13,14 @@ import (
 	"daily-speaking-practice/backend/internal/guestpreview"
 	"daily-speaking-practice/backend/internal/logging"
 	"daily-speaking-practice/backend/internal/media"
-	"daily-speaking-practice/backend/internal/workqueue"
 )
 
 const (
-	guestPreviewMaxDuration       = guestpreview.MaxDuration
-	guestPreviewMaxAudioBytes     = guestpreview.MaxAudioBytes
-	guestPreviewRetention         = guestpreview.Retention
-	guestPreviewProcessingTimeout = guestpreview.ProcessingTimeout
-	defaultGuestPreviewQueueCap   = guestpreview.DefaultQueueCapacity
-	guestPreviewRetryAfter        = guestpreview.RetryAfterSeconds
+	guestPreviewMaxDuration     = guestpreview.MaxDuration
+	guestPreviewMaxAudioBytes   = guestpreview.MaxAudioBytes
+	guestPreviewRetention       = guestpreview.Retention
+	defaultGuestPreviewQueueCap = guestpreview.DefaultQueueCapacity
+	guestPreviewRetryAfter      = guestpreview.RetryAfterSeconds
 )
 
 var guestPreviewIdempotencyPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$`)
@@ -170,16 +168,4 @@ func (s *Server) writeGuestPreviewError(w http.ResponseWriter, r *http.Request, 
 		logging.ForRequest("api.v1.guest.preview", r).Error("guest_preview.failed", logging.ErrorMeta(err))
 		writeV1Error(w, r, http.StatusInternalServerError, "internal_error", "Guest preview request failed")
 	}
-}
-
-func (s *Server) runGuestPreviewJob(ctx context.Context, job workqueue.Job) error {
-	return s.guestPreviewProcessor.Process(ctx, guestpreview.Job{ID: job.ID, ResourceID: job.ResourceID, LeaseToken: job.LeaseToken})
-}
-
-func (s *Server) generateGuestPreviewCorrections(ctx context.Context, transcript string) ([]suggestion, error) {
-	return s.recordingPreviewAnalyzer.PreviewCorrections(ctx, transcript)
-}
-
-func (s *Server) expireGuestPreviews(ctx context.Context) error {
-	return s.guestPreviewStore.Expire(ctx)
 }

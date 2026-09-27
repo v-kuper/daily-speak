@@ -35,7 +35,7 @@ OpenAPI contract and architecture documentation current:
 2. **Completed:** Remove direct SQL and transaction management from `internal/httpapi`; HTTP
    handlers may validate transport data, call an application service, and map
    its result only.
-3. Move dependency construction and environment-driven adapter selection out
+3. **Completed:** Move dependency construction and environment-driven adapter selection out
    of `internal/httpapi` into an application composition root shared by the API
    and worker entry points where appropriate.
 4. Finish the media application boundary so ownership, guest restrictions, and

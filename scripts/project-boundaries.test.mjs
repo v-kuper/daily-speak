@@ -106,21 +106,20 @@ test("API and durable worker have separate process entrypoints", () => {
   const apiMain = readFileSync("backend/cmd/api/main.go", "utf8");
   const workerMain = readFileSync("backend/cmd/worker/main.go", "utf8");
   const runtime = readFileSync("backend/internal/worker/runtime.go", "utf8");
-  const legacyWorkers = readFileSync("backend/internal/httpapi/durable_workers.go", "utf8");
   const mediaCleanup = readFileSync("backend/internal/media/cleanup.go", "utf8");
   const mediaMaterializer = readFileSync("backend/internal/media/materializer.go", "utf8");
   const backgroundRuntime = readFileSync("backend/internal/background/runtime.go", "utf8");
 
   assert.doesNotMatch(apiMain, /RunWorkers|StartBackgroundWorkers/);
-  assert.match(workerMain, /background\.New/);
+  assert.match(workerMain, /app\.NewWorker\(app\.WorkerConfig/);
   assert.match(workerMain, /runtime\.Run/);
   assert.doesNotMatch(workerMain, /internal\/httpapi|httpapi\./);
   assert.match(workerMain, /worker\.ConfigFromEnv/);
   assert.match(runtime, /workqueue\.Run/);
-  assert.doesNotMatch(legacyWorkers, /WorkerConfigFromEnv|workqueue\.Run/);
   assert.match(backgroundRuntime, /RecordingProcessor|GuestPreviewProcessor|ShadowingProcessor/);
   assert.match(mediaCleanup, /AbortExpiredUploads|EnqueueExpiredAssets|FinalizeFailure/);
-  assert.doesNotMatch(legacyWorkers, /storage_driver|pending_file_deletions/);
+  assert.equal(existsSync("backend/internal/httpapi/durable_workers.go"), false);
+  assert.equal(existsSync("backend/internal/httpapi/recording_processing.go"), false);
   assert.match(mediaMaterializer, /verified_checksum_sha256|io\.LimitReader/);
   assert.equal(existsSync("backend/internal/httpapi/media_workers.go"), false);
   assert.equal(existsSync("backend/internal/httpapi/guest_preview_probe.go"), false);
@@ -196,11 +195,9 @@ test("recording analysis owns its policy outside HTTP and provider adapters", ()
   assert.doesNotMatch(transport, /PostChat|error detector|adjudicator/);
 	assert.match(rewriteTransport, /recording\.RewriteInput/);
 	assert.doesNotMatch(rewriteTransport, /PostChat|natural conversational English/);
-	const processingTransport = readFileSync("backend/internal/httpapi/recording_processing.go", "utf8");
-	const processingRepository = readFileSync("backend/internal/recording/processing_repository.go", "utf8");
-	assert.match(processingTransport, /recording\.ProcessingJob/);
-	assert.doesNotMatch(processingTransport, /SELECT |UPDATE |INSERT INTO|processing_stage/);
-	assert.match(processingRepository, /LoadProcessingWork|SaveTranscript|CompleteRecording/);
+  const processingRepository = readFileSync("backend/internal/recording/processing_repository.go", "utf8");
+  assert.equal(existsSync("backend/internal/httpapi/recording_processing.go"), false);
+  assert.match(processingRepository, /LoadProcessingWork|SaveTranscript|CompleteRecording/);
   for (const name of [
     "recording_analysis_coordinator.go",
     "recording_analysis_prompts.go",
@@ -277,6 +274,19 @@ test("HTTP transport contains no production SQL and Feed owns its persistence", 
   assert.doesNotMatch(feedService, /net\/http|internal\/httpapi|SELECT |INSERT INTO|UPDATE |DELETE FROM|pgx/);
   assert.match(feedRepository, /FROM feed_posts|INSERT INTO feed_replies|feed_post_reactions/);
   assert.doesNotMatch(feedRepository, /net\/http|internal\/httpapi|writeJSON/);
+});
+
+test("API dependency construction lives in the application composition root", () => {
+  const server = readFileSync("backend/internal/httpapi/server.go", "utf8");
+  const composition = readFileSync("backend/internal/app/api.go", "utf8");
+  const apiMain = readFileSync("backend/cmd/api/main.go", "utf8");
+
+  assert.match(server, /func NewServer\(dependencies Dependencies\)/);
+  assert.doesNotMatch(server, /os\.Getenv|ConfigFromEnv|NewSQL|NewLocal|NewLimiter|NewIdentityService|NewRuntime/);
+  assert.doesNotMatch(server, /internal\/(?:db|background|worker|transcription|tts|workqueue)/);
+  assert.match(composition, /recording\.NewCreator|feed\.NewService|auth\.NewIdentityService|operations\.NewMonitor/);
+  assert.match(composition, /storage\.NewLocal|media\.NewService|recording\.NewSQLQueryRepository/);
+  assert.match(apiMain, /app\.NewAPI\(app\.APIConfig/);
 });
 
 test("guest preview separates transport, processing policy, and SQL storage", () => {
