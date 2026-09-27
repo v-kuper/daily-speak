@@ -184,12 +184,12 @@ export async function verifyWebRoute(
   return "web speak route";
 }
 
-export async function verifyMobileIdentityConfiguration(
+export async function verifyIdentityConfiguration(
   { apiBaseURL, webOrigin },
   fetchImpl,
 ) {
   const payload = await expectJSON(
-    "mobile identity configuration",
+    "identity configuration",
     await request(fetchImpl, endpoint(apiBaseURL, "/api/v1/auth/session"), {
       origin: webOrigin,
       headers: { Authorization: "Bearer stack-smoke-invalid-token" },
@@ -198,7 +198,7 @@ export async function verifyMobileIdentityConfiguration(
   );
   if (payload?.error?.code !== "invalid_access_token") {
     throw new Error(
-      `mobile identity configuration failed: expected invalid_access_token, got ${JSON.stringify(payload?.error?.code)}.`,
+      `identity configuration failed: expected invalid_access_token, got ${JSON.stringify(payload?.error?.code)}.`,
     );
   }
 }
@@ -262,14 +262,14 @@ async function request(fetchImpl, url, { origin, cookie, json, ...options } = {}
   });
 }
 
-async function cleanupSession({ fetchImpl, apiBaseURL, webOrigin, cookie, recordingID }) {
+async function cleanupSession({ fetchImpl, apiBaseURL, webOrigin, accessToken, cookie, recordingID }) {
   const errors = [];
   if (recordingID) {
     try {
       const response = await request(
         fetchImpl,
         endpoint(apiBaseURL, `/api/recordings/${encodeURIComponent(recordingID)}`),
-        { method: "DELETE", origin: webOrigin, cookie },
+        { method: "DELETE", origin: webOrigin, cookie, headers: { Authorization: `Bearer ${accessToken}` } },
       );
       if (response.status !== 200 && response.status !== 404) {
         errors.push(`recording cleanup returned ${response.status}: ${safeExcerpt(await response.text())}`);
@@ -278,12 +278,13 @@ async function cleanupSession({ fetchImpl, apiBaseURL, webOrigin, cookie, record
       errors.push(`recording cleanup failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
-  if (cookie) {
+  if (accessToken) {
     try {
-      const response = await request(fetchImpl, endpoint(apiBaseURL, "/api/auth/logout"), {
+      const response = await request(fetchImpl, endpoint(apiBaseURL, "/api/v1/auth/logout"), {
         method: "POST",
         origin: webOrigin,
         cookie,
+        headers: { Authorization: `Bearer ${accessToken}` },
       });
       if (response.status !== 200) {
         errors.push(`logout cleanup returned ${response.status}: ${safeExcerpt(await response.text())}`);
@@ -306,6 +307,7 @@ export async function runStackSmoke({ env = process.env, fetchImpl = fetch } = {
   await waitForServices(urls, fetchImpl);
 
   let cookie = "";
+  let accessToken = "";
   let recordingID = "";
   let primaryError;
 
@@ -356,7 +358,7 @@ export async function runStackSmoke({ env = process.env, fetchImpl = fetch } = {
 
     const preflightResponse = await request(
       fetchImpl,
-      endpoint(apiBaseURL, "/api/auth/session"),
+      endpoint(apiBaseURL, "/api/v1/auth/session"),
       {
         method: "OPTIONS",
         origin: webOrigin,
@@ -374,23 +376,39 @@ export async function runStackSmoke({ env = process.env, fetchImpl = fetch } = {
       throw new Error("credentialed CORS preflight failed: expected exact origin and allow-credentials=true.");
     }
 
-    await verifyMobileIdentityConfiguration({ apiBaseURL, webOrigin }, fetchImpl);
+    await verifyIdentityConfiguration({ apiBaseURL, webOrigin }, fetchImpl);
 
     const email = `stack-smoke-${Date.now()}-${randomUUID()}@example.com`;
-    const registerResponse = await request(fetchImpl, endpoint(apiBaseURL, "/api/auth/register"), {
+    const registerResponse = await request(fetchImpl, endpoint(apiBaseURL, "/api/v1/auth/register"), {
       method: "POST",
       origin: webOrigin,
-      json: { email, password: "StackSmoke123!" },
+      json: { email, password: "StackSmoke123!", deviceName: "Web stack smoke", platform: "web" },
     });
     await expectStatus("auth register", registerResponse, 201);
+    const registerPayload = await registerResponse.json().catch(() => null);
+    accessToken = registerPayload?.tokens?.accessToken ?? "";
+    if (!accessToken) throw new Error("auth register failed: response did not include an access token.");
     cookie = extractCookieHeader(registerResponse);
-    if (!cookie) throw new Error("auth register failed: response did not include a session cookie.");
+    if (!cookie) throw new Error("auth register failed: response did not include an HttpOnly refresh cookie.");
+
+    const refreshResponse = await request(fetchImpl, endpoint(apiBaseURL, "/api/v1/auth/refresh"), {
+      method: "POST",
+      origin: webOrigin,
+      cookie,
+      json: {},
+    });
+    await expectStatus("browser refresh rotation", refreshResponse, 200);
+    const refreshPayload = await refreshResponse.json().catch(() => null);
+    accessToken = refreshPayload?.tokens?.accessToken ?? "";
+    if (!accessToken) throw new Error("browser refresh rotation failed: response did not include an access token.");
+    cookie = extractCookieHeader(refreshResponse);
+    if (!cookie) throw new Error("browser refresh rotation failed: response did not rotate the HttpOnly refresh cookie.");
 
     await expectStatus(
       "authenticated session",
-      await request(fetchImpl, endpoint(apiBaseURL, "/api/auth/session"), {
+      await request(fetchImpl, endpoint(apiBaseURL, "/api/v1/auth/session"), {
         origin: webOrigin,
-        cookie,
+        headers: { Authorization: `Bearer ${accessToken}` },
       }),
       200,
     );
@@ -398,7 +416,7 @@ export async function runStackSmoke({ env = process.env, fetchImpl = fetch } = {
       "authenticated user data",
       await request(fetchImpl, endpoint(apiBaseURL, "/api/user/data"), {
         origin: webOrigin,
-        cookie,
+        headers: { Authorization: `Bearer ${accessToken}` },
       }),
       200,
     );
@@ -408,7 +426,7 @@ export async function runStackSmoke({ env = process.env, fetchImpl = fetch } = {
       await request(fetchImpl, endpoint(apiBaseURL, "/api/user/recordings"), {
         method: "POST",
         origin: webOrigin,
-        cookie,
+        headers: { Authorization: `Bearer ${accessToken}` },
         json: {
           recording: {
             topic: "Stack smoke",
@@ -427,7 +445,7 @@ export async function runStackSmoke({ env = process.env, fetchImpl = fetch } = {
     }
 
     const uploadURL = resolveApiUploadURL(recordingPayload?.recording?.audioDataUrl, apiBaseURL);
-    const uploadResponse = await request(fetchImpl, uploadURL, { origin: webOrigin, cookie });
+    const uploadResponse = await request(fetchImpl, uploadURL, { origin: webOrigin, headers: { Authorization: `Bearer ${accessToken}` } });
     await expectStatus("serve disposable recording audio", uploadResponse, 200);
     if ((await uploadResponse.arrayBuffer()).byteLength === 0) {
       throw new Error("serve disposable recording audio failed: response was empty.");
@@ -438,7 +456,7 @@ export async function runStackSmoke({ env = process.env, fetchImpl = fetch } = {
       await request(
         fetchImpl,
         endpoint(apiBaseURL, `/api/recordings/${encodeURIComponent(recordingID)}`),
-        { method: "DELETE", origin: webOrigin, cookie },
+        { method: "DELETE", origin: webOrigin, headers: { Authorization: `Bearer ${accessToken}` } },
       ),
       200,
     );
@@ -446,13 +464,15 @@ export async function runStackSmoke({ env = process.env, fetchImpl = fetch } = {
 
     await expectStatus(
       "auth logout",
-      await request(fetchImpl, endpoint(apiBaseURL, "/api/auth/logout"), {
+      await request(fetchImpl, endpoint(apiBaseURL, "/api/v1/auth/logout"), {
         method: "POST",
         origin: webOrigin,
         cookie,
+        headers: { Authorization: `Bearer ${accessToken}` },
       }),
       200,
     );
+    accessToken = "";
     cookie = "";
   } catch (error) {
     primaryError = error instanceof Error ? error : new Error(String(error));
@@ -462,6 +482,7 @@ export async function runStackSmoke({ env = process.env, fetchImpl = fetch } = {
     fetchImpl,
     apiBaseURL,
     webOrigin,
+    accessToken,
     cookie,
     recordingID,
   });

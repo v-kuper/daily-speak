@@ -26,7 +26,7 @@ const (
 )
 
 var (
-	ErrIdentityUnavailable = errors.New("mobile identity is not configured")
+	ErrIdentityUnavailable = errors.New("identity service is not configured")
 	ErrInvalidAccessToken  = errors.New("access token is invalid")
 	ErrAccessTokenExpired  = errors.New("access token has expired")
 	ErrInvalidRefreshToken = errors.New("refresh token is invalid")

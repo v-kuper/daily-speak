@@ -11,6 +11,7 @@ import { createTypeScriptLoader } from "./helpers/load-typescript.mjs";
 const load = createTypeScriptLoader();
 const app = load("src/store/slices/appSlice.ts");
 const api = load("src/lib/apiClient.ts");
+const identityClient = load("src/lib/identity.ts");
 // Keep missing behavior an assertion failure during RED, rather than a module-load error.
 const flows = existsSync("src/lib/routeFlows.ts") ? load("src/lib/routeFlows.ts") : {};
 const initial = () => app.default(undefined, { type: "test/init" });
@@ -49,8 +50,20 @@ const deferred = () => {
   return { promise, resolve, reject };
 };
 const response = (body, status = 200) => new Response(JSON.stringify(body), { status });
+const identityResponse = (promotion) => ({
+  principal: { id: "user-principal", type: "user" },
+  user: { email: "person@example.test", isSubscriber: false, englishLevel: "B1" },
+  session: { id: "web-session", platform: "web" },
+  tokens: {
+    tokenType: "Bearer", accessToken: "user-access",
+    accessTokenExpiresAt: "2099-01-01T00:15:00Z",
+  },
+  ...(promotion ? { guestPreviewPromotion: promotion } : {}),
+});
 function server(t, handler) {
   // Only the network is replaced: real API encoding, thunks, reducers, and route flow run.
+  identityClient.forgetBrowserIdentity();
+  t.after(() => identityClient.forgetBrowserIdentity());
   t.mock.method(globalThis, "fetch", handler);
   api.configureApiClient("https://api.example.test");
 }
@@ -75,7 +88,7 @@ for (const mode of ["signIn", "signUp"]) {
     const attempt = run(store, router, mode, "/profile");
     await run(store, router, mode, "/profile");
     assert.deepEqual(router.visits, []);
-    pending.resolve(response({ user: { email: "person@example.test", isSubscriber: false, englishLevel: "B1" } }));
+    pending.resolve(response(identityResponse()));
     await attempt;
     assert.equal(requests.length, 2);
     assert.deepEqual(router.visits, [["replace", "/history/permanent-123"]]);
@@ -86,7 +99,7 @@ for (const mode of ["signIn", "signUp"]) {
 
 test("auth returnTo is validated and rejected sign-in stays with a visible Redux error", async (t) => {
   const run = flow("authenticateAndNavigate");
-  server(t, async () => response({ user: { email: "person@example.test", isSubscriber: false, englishLevel: "B1" } }));
+  server(t, async () => response(identityResponse()));
   for (const [returnTo, expected] of [["/profile/english-level", "/profile/english-level"], ["//evil.example", "/speak"]]) {
     const store = storeFor({ ...guest, pendingSaveAfterAuth: false }), router = routerFor();
     await run(store, router, "signIn", returnTo);
@@ -103,7 +116,7 @@ test("rejected post-auth save remains on auth with a visible error and a retryab
   const store = storeFor(guest), router = routerFor();
   let saveCalls = 0;
   server(t, async (url) => url.endsWith("/login")
-    ? response({ user: { email: "person@example.test", isSubscriber: false, englishLevel: "B1" } })
+    ? response(identityResponse())
     : (++saveCalls, response({ error: "Storage unavailable" }, 503)));
   await run(store, router, "signIn", "/profile");
   assert.deepEqual(router.visits, []);
@@ -300,7 +313,10 @@ test("post-auth save 401 invalidates the session, preserves guest audio, and all
   server(t, async (url, init) => {
     if (url.endsWith("/login")) {
       logins++;
-      return response({ user: { email: "person@example.test", isSubscriber: false, englishLevel: "B1" } });
+      return response(identityResponse());
+    }
+    if (url.endsWith("/api/v1/auth/refresh")) {
+      return response({ error: { code: "invalid_refresh_token", message: "Refresh token is invalid" } }, 401);
     }
     saves++;
     assert.equal(JSON.parse(init.body).recording.audioDataUrl, draft.audioDataUrl);
@@ -329,7 +345,10 @@ test("background save 401 preserves both its retry draft and a newer speaking dr
   server(t, async (url, init) => {
     requests.push(url);
     if (url.endsWith("/finish")) return primary.promise;
-    if (url.endsWith("/login")) return response({ user: { email: "person@example.test", isSubscriber: false, englishLevel: "B1" } });
+    if (url.endsWith("/login")) return response(identityResponse());
+    if (url.endsWith("/api/v1/auth/refresh")) {
+      return response({ error: { code: "invalid_refresh_token", message: "Refresh token is invalid" } }, 401);
+    }
     assert.equal(JSON.parse(init.body).recording.audioDataUrl, draft.audioDataUrl);
     return response({ recording: saved });
   });
@@ -351,7 +370,7 @@ test("background save 401 preserves both its retry draft and a newer speaking dr
   store.dispatch(app.setAuthPasswordDraft("password123"));
   await flow("authenticateAndNavigate")(store, router, "signIn", "/speak");
   assert.deepEqual(requests.map((url) => new URL(url).pathname), [
-    "/api/recording-sessions/upload-123/finish", "/api/auth/login", "/api/user/recordings",
+    "/api/recording-sessions/upload-123/finish", "/api/v1/auth/login", "/api/user/recordings",
   ]);
   assert.equal(store.getState().app.pendingAuthSaveDraft, null);
   assert.equal(store.getState().app.pendingRecordingAudioDataUrl, secondAudio);
@@ -405,7 +424,7 @@ for (const outcome of ["success", "failure"]) {
 test("detail session expiry preserves an unsent speaking draft through re-authentication", async (t) => {
   const store = storeFor({ ...guest, isAuthenticated: true, pendingSaveAfterAuth: false }), router = routerFor();
   server(t, async (url) => url.endsWith("/login")
-    ? response({ user: { email: "person@example.test", isSubscriber: false, englishLevel: "B1" } })
+    ? response(identityResponse())
     : response({ error: "Unauthorized" }, 401));
   await store.dispatch(app.fetchRecording("other-recording"));
   assert.equal(store.getState().app.pendingRecordingAudioDataUrl, draft.audioDataUrl);

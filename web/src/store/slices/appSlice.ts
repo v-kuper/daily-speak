@@ -20,9 +20,14 @@ import {
   completeGuestPromotion,
   GuestPreviewError,
   MAX_GUEST_PREVIEW_SECONDS,
-  promoteGuestIdentity,
   type GuestPreviewPromotion,
 } from "../../lib/guestPreview";
+import {
+  authenticateBrowserIdentity,
+  IdentityError,
+  logoutBrowserIdentity,
+  restoreBrowserIdentity,
+} from "../../lib/identity";
 
 export type SpeakMode = "idle" | "readyToRecord" | "recording" | "recorded";
 export type AuthStatus = "idle" | "loading";
@@ -312,17 +317,6 @@ type StudyWordsResponse = {
   error?: string;
 };
 
-type AuthUserPayload = {
-  email?: unknown;
-  isSubscriber?: unknown;
-  englishLevel?: unknown;
-};
-
-type AuthResponse = {
-  user?: AuthUserPayload;
-  error?: string;
-};
-
 type AuthResult = {
   email: string;
   isSubscriber: boolean;
@@ -406,24 +400,6 @@ const DEFAULT_SUBSCRIPTION_STATE: SubscriptionState = {
   isSubscriber: false,
   subscriptionExpiresAt: null,
   subscriptionCancelled: false
-};
-
-const parseAuthUser = (payload: AuthResponse | null): { email: string; isSubscriber: boolean; englishLevel: EnglishLevel } | null => {
-  const email = payload?.user?.email;
-  if (typeof email !== "string") {
-    return null;
-  }
-
-  const normalized = email.trim().toLowerCase();
-  if (!EMAIL_PATTERN.test(normalized)) {
-    return null;
-  }
-
-  return {
-    email: normalized,
-    isSubscriber: Boolean(payload?.user?.isSubscriber),
-    englishLevel: normalizeEnglishLevel(payload?.user?.englishLevel, DEFAULT_ENGLISH_LEVEL)
-  };
 };
 
 const parseRecordingQuota = (value: unknown): RecordingQuota | null => {
@@ -951,26 +927,21 @@ export const restoreSession = createAsyncThunk<
   { rejectValue: string }
 >("app/restoreSession", async (_, { rejectWithValue }) => {
   try {
-    const response = await apiFetch("/api/auth/session", {
-      cache: "no-store"
-    });
-    const payload = (await readApiJSON(response)) as AuthResponse | null;
-
-    if (response.status === 401) {
+    const identity = await restoreBrowserIdentity();
+    if (identity.kind !== "user" || !identity.user) {
       return { email: null, isSubscriber: false, englishLevel: DEFAULT_ENGLISH_LEVEL };
     }
-
-    if (!response.ok) {
-      return rejectWithValue(payload?.error ?? "Failed to restore session.");
+    return {
+      email: identity.user.email,
+      isSubscriber: identity.user.isSubscriber,
+      englishLevel: normalizeEnglishLevel(identity.user.englishLevel),
+    };
+  } catch (error) {
+    if (error instanceof IdentityError && new Set([
+      "invalid_refresh_token", "refresh_token_expired", "refresh_token_reused",
+    ]).has(error.code)) {
+      return { email: null, isSubscriber: false, englishLevel: DEFAULT_ENGLISH_LEVEL };
     }
-
-    const user = parseAuthUser(payload);
-    if (!user) {
-      return rejectWithValue("Invalid session payload.");
-    }
-
-    return user;
-  } catch {
     return rejectWithValue("Cannot connect to authentication service.");
   }
 });
@@ -995,27 +966,17 @@ export const signIn = createAsyncThunk<
     }
 
     try {
-      const guestPreviewPromotion = options?.promoteGuest
-        ? await promoteGuestIdentity("signIn", email, password)
-        : undefined;
-      const response = await apiFetch("/api/auth/login", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({ email, password })
-      });
-      const payload = (await readApiJSON(response)) as AuthResponse | null;
-      const user = parseAuthUser(payload);
-
-      if (!response.ok || !user) {
-        return rejectWithValue(payload?.error ?? "Failed to sign in.");
-      }
-
-      if (guestPreviewPromotion) await completeGuestPromotion();
-      return { ...user, guestPreviewPromotion };
+      const identity = await authenticateBrowserIdentity("signIn", email, password, options?.promoteGuest === true);
+      if (!identity.user) return rejectWithValue("Invalid identity payload.");
+      if (options?.promoteGuest) await completeGuestPromotion();
+      return {
+        email: identity.user.email,
+        isSubscriber: identity.user.isSubscriber,
+        englishLevel: normalizeEnglishLevel(identity.user.englishLevel),
+        guestPreviewPromotion: identity.guestPreviewPromotion,
+      };
     } catch (error) {
-      if (error instanceof GuestPreviewError) return rejectWithValue(error.message);
+      if (error instanceof IdentityError || error instanceof GuestPreviewError) return rejectWithValue(error.message);
       return rejectWithValue("Cannot connect to authentication service.");
     }
   }
@@ -1041,27 +1002,17 @@ export const signUp = createAsyncThunk<
     }
 
     try {
-      const guestPreviewPromotion = options?.promoteGuest
-        ? await promoteGuestIdentity("signUp", email, password)
-        : undefined;
-      const response = await apiFetch(options?.promoteGuest ? "/api/auth/login" : "/api/auth/register", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({ email, password })
-      });
-      const payload = (await readApiJSON(response)) as AuthResponse | null;
-      const user = parseAuthUser(payload);
-
-      if (!response.ok || !user) {
-        return rejectWithValue(payload?.error ?? "Failed to create account.");
-      }
-
-      if (guestPreviewPromotion) await completeGuestPromotion();
-      return { ...user, guestPreviewPromotion };
+      const identity = await authenticateBrowserIdentity("signUp", email, password, options?.promoteGuest === true);
+      if (!identity.user) return rejectWithValue("Invalid identity payload.");
+      if (options?.promoteGuest) await completeGuestPromotion();
+      return {
+        email: identity.user.email,
+        isSubscriber: identity.user.isSubscriber,
+        englishLevel: normalizeEnglishLevel(identity.user.englishLevel),
+        guestPreviewPromotion: identity.guestPreviewPromotion,
+      };
     } catch (error) {
-      if (error instanceof GuestPreviewError) return rejectWithValue(error.message);
+      if (error instanceof IdentityError || error instanceof GuestPreviewError) return rejectWithValue(error.message);
       return rejectWithValue("Cannot connect to authentication service.");
     }
   }
@@ -1069,9 +1020,7 @@ export const signUp = createAsyncThunk<
 
 export const logout = createAsyncThunk("app/logout", async () => {
   try {
-    await apiFetch("/api/auth/logout", {
-      method: "POST"
-    });
+    await logoutBrowserIdentity();
   } catch {
     // Network failures should not block local logout.
   }

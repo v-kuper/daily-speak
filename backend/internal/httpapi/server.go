@@ -41,7 +41,7 @@ type Config struct {
 	RecordingAnalyzer        recording.Analyzer
 	RecordingRewriter        recording.Rewriter
 	RecordingPreviewAnalyzer recording.PreviewAnalyzer
-	SessionCookie            auth.CookieConfig
+	BrowserCookie            auth.CookieConfig
 	IdentityTokens           auth.TokenConfig
 	CORS                     CORSConfig
 	MediaStore               storage.Store
@@ -80,9 +80,9 @@ type Server struct {
 	shadowingStore           *shadowing.Store
 	shadowingProcessor       *shadowing.Processor
 	backgroundRuntime        *background.Runtime
-	sessionCookie            auth.CookieConfig
+	browserCookie            auth.CookieConfig
 	identityTokens           auth.TokenConfig
-	identityService          *auth.MobileService
+	identityService          *auth.IdentityService
 	cors                     CORSConfig
 	mediaService             *media.Service
 	mediaSigner              *media.URLSigner
@@ -101,8 +101,8 @@ type requestLimiter interface {
 }
 
 func NewServer(config Config) *Server {
-	if config.SessionCookie.SameSite == 0 {
-		config.SessionCookie.SameSite = http.SameSiteLaxMode
+	if config.BrowserCookie.SameSite == 0 {
+		config.BrowserCookie.SameSite = http.SameSiteLaxMode
 	}
 	synthesizer := config.Synthesizer
 	if synthesizer == nil {
@@ -212,9 +212,9 @@ func NewServer(config Config) *Server {
 		recordingRepository:   recordingRepository,
 		guestPreviewStore:     guestPreviewStore,
 		shadowingStore:        shadowingStore,
-		sessionCookie:         config.SessionCookie,
+		browserCookie:         config.BrowserCookie,
 		identityTokens:        config.IdentityTokens,
-		identityService:       auth.NewMobileService(config.DB, config.IdentityTokens),
+		identityService:       auth.NewIdentityService(config.DB, config.IdentityTokens),
 		cors:                  config.CORS,
 		mediaService:          mediaService,
 		mediaSigner:           mediaSigner,
@@ -308,14 +308,6 @@ func (s *Server) healthz(w http.ResponseWriter, r *http.Request) {
 func (s *Server) routeAPI(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimSuffix(r.URL.Path, "/")
 	switch {
-	case path == "/api/auth/register" && r.Method == http.MethodPost:
-		s.handleRegister(w, r)
-	case path == "/api/auth/login" && r.Method == http.MethodPost:
-		s.handleLogin(w, r)
-	case path == "/api/auth/session" && r.Method == http.MethodGet:
-		s.handleSession(w, r)
-	case path == "/api/auth/logout" && r.Method == http.MethodPost:
-		s.handleLogout(w, r)
 	case path == "/api/daily-questions" && r.Method == http.MethodGet:
 		s.handleDailyQuestions(w, r)
 	case path == "/api/topic-guidance" && r.Method == http.MethodGet:
@@ -365,97 +357,17 @@ func (s *Server) routeAPI(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
-	started := time.Now()
-	logger := logging.ForRequest("api.auth.register", r)
-	var payload struct {
-		Email    string `json:"email"`
-		Password string `json:"password"`
-	}
-	_ = json.NewDecoder(r.Body).Decode(&payload)
-	creds, err := auth.ValidateCredentials(payload.Email, payload.Password)
-	if err != nil {
-		writeHTTPError(w, err, http.StatusBadRequest)
-		return
-	}
-	user, err := auth.RegisterUser(r.Context(), s.db, creds.Email, creds.Password)
-	if err != nil {
-		writeHTTPError(w, err, http.StatusInternalServerError)
-		return
-	}
-	session, err := auth.CreateSession(r.Context(), s.db, user.ID)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to register user."})
-		return
-	}
-	http.SetCookie(w, auth.NewSessionCookieWithConfig(s.sessionCookie, session.Token, session.ExpiresAt))
-	logger.Info("request.success", map[string]any{"status": 201, "durationMs": logging.ElapsedMs(started), "userId": user.ID})
-	writeJSON(w, http.StatusCreated, map[string]any{"user": user})
-}
-
-func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
-	started := time.Now()
-	logger := logging.ForRequest("api.auth.login", r)
-	var payload struct {
-		Email    string `json:"email"`
-		Password string `json:"password"`
-	}
-	_ = json.NewDecoder(r.Body).Decode(&payload)
-	creds, err := auth.ValidateCredentials(payload.Email, payload.Password)
-	if err != nil {
-		writeHTTPError(w, err, http.StatusBadRequest)
-		return
-	}
-	user, err := auth.LoginUser(r.Context(), s.db, creds.Email, creds.Password)
-	if err != nil {
-		writeHTTPError(w, err, http.StatusInternalServerError)
-		return
-	}
-	session, err := auth.CreateSession(r.Context(), s.db, user.ID)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to sign in."})
-		return
-	}
-	http.SetCookie(w, auth.NewSessionCookieWithConfig(s.sessionCookie, session.Token, session.ExpiresAt))
-	logger.Info("request.success", map[string]any{"status": 200, "durationMs": logging.ElapsedMs(started), "userId": user.ID})
-	writeJSON(w, http.StatusOK, map[string]any{"user": user})
-}
-
-func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
-	started := time.Now()
-	logger := logging.ForRequest("api.auth.session", r)
-	user, ok := s.authorize(w, r, "api.auth.session", true)
-	if !ok {
-		return
-	}
-	logger.Info("request.success", map[string]any{"status": 200, "durationMs": logging.ElapsedMs(started), "userId": user.ID})
-	writeJSON(w, http.StatusOK, map[string]any{"user": user})
-}
-
-func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
-	token := sessionToken(r)
-	if err := auth.DeleteSessionByToken(r.Context(), s.db, token); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to sign out."})
-		return
-	}
-	http.SetCookie(w, auth.ClearSessionCookieWithConfig(s.sessionCookie))
-	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
-}
-
 func (s *Server) authorizedUser(w http.ResponseWriter, r *http.Request, scope string) (*auth.User, bool) {
-	return s.authorize(w, r, scope, false)
+	return s.authorize(w, r, scope)
 }
 
-func (s *Server) authorize(w http.ResponseWriter, r *http.Request, scope string, clearInvalidSession bool) (*auth.User, bool) {
+func (s *Server) authorize(w http.ResponseWriter, r *http.Request, scope string) (*auth.User, bool) {
 	started := time.Now()
 	logger := logging.ForRequest(scope, r)
 	writeError := func(status int, message string) {
-		if clearInvalidSession && status == http.StatusUnauthorized {
-			http.SetCookie(w, auth.ClearSessionCookieWithConfig(s.sessionCookie))
-		}
 		writeJSON(w, status, map[string]string{"error": message})
 	}
-	if bearer, present := bearerToken(r); present && strings.HasPrefix(r.URL.Path, "/api/v1/") {
+	if bearer, present := bearerToken(r); present {
 		identity, err := s.identityService.Authenticate(r.Context(), bearer)
 		if err != nil {
 			logger.Info("request.unauthorized", map[string]any{"status": 401, "durationMs": logging.ElapsedMs(started)})
@@ -469,24 +381,9 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request, scope string,
 		}
 		return identity.User, true
 	}
-	token := sessionToken(r)
-	if token == "" {
-		logger.Info("request.unauthorized", map[string]any{"status": 401, "durationMs": logging.ElapsedMs(started)})
-		writeError(http.StatusUnauthorized, "Unauthorized")
-		return nil, false
-	}
-	user, err := auth.GetUserBySessionToken(r.Context(), s.db, token)
-	if err != nil {
-		logger.Error("request.failed", logging.ErrorMeta(err))
-		writeError(http.StatusInternalServerError, "Failed to load session.")
-		return nil, false
-	}
-	if user == nil {
-		logger.Info("request.unauthorized", map[string]any{"status": 401, "durationMs": logging.ElapsedMs(started)})
-		writeError(http.StatusUnauthorized, "Unauthorized")
-		return nil, false
-	}
-	return user, true
+	logger.Info("request.unauthorized", map[string]any{"status": 401, "durationMs": logging.ElapsedMs(started)})
+	writeError(http.StatusUnauthorized, "Unauthorized")
+	return nil, false
 }
 
 func bearerToken(r *http.Request) (string, bool) {
@@ -499,23 +396,6 @@ func bearerToken(r *http.Request) (string, bool) {
 		return "", true
 	}
 	return parts[1], true
-}
-
-func sessionToken(r *http.Request) string {
-	cookie, err := r.Cookie(auth.SessionCookieName)
-	if err != nil {
-		return ""
-	}
-	return cookie.Value
-}
-
-func writeHTTPError(w http.ResponseWriter, err error, fallbackStatus int) {
-	var httpErr auth.HTTPError
-	if errors.As(err, &httpErr) {
-		writeJSON(w, httpErr.Status, map[string]string{"error": httpErr.Message})
-		return
-	}
-	writeJSON(w, fallbackStatus, map[string]string{"error": err.Error()})
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {

@@ -134,14 +134,13 @@ func TestBackendDoesNotServeOrProxyWebRoutes(t *testing.T) {
 	}
 }
 
-func TestUnauthorizedAPIContractWithoutCookie(t *testing.T) {
+func TestUnauthorizedAPIContractWithoutBearer(t *testing.T) {
 	handler := NewServer(Config{}).Handler()
 	cases := []struct {
 		method string
 		path   string
 		body   string
 	}{
-		{http.MethodGet, "/api/auth/session", ""},
 		{http.MethodGet, "/api/user/data", ""},
 		{http.MethodPost, "/api/user/recordings", `{"recording":{}}`},
 		{http.MethodGet, "/api/recordings/demo-recording", ""},
@@ -186,8 +185,8 @@ func TestAuthValidationContract(t *testing.T) {
 		path string
 		body string
 	}{
-		{"/api/auth/register", `{"email":"bad-email","password":"123"}`},
-		{"/api/auth/login", `{"email":"bad-email","password":"123"}`},
+		{"/api/v1/auth/register", `{"email":"bad-email","password":"123"}`},
+		{"/api/v1/auth/login", `{"email":"bad-email","password":"123"}`},
 	}
 
 	for _, tc := range cases {

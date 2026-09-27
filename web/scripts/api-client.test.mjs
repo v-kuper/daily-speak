@@ -156,7 +156,7 @@ test("network failures hide host details while abort errors keep their identity"
   await assert.rejects(() => cancelled.fetch("/api/topic-guidance"), (error) => error === abort);
 });
 
-test("cookie API requests reject absolute URLs while opaque storage URLs can be resolved separately", async () => {
+test("shared API requests reject absolute URLs while opaque storage URLs can be resolved separately", async () => {
   const client = apiClient.createApiClient("https://api.example.com", async () => new Response(null));
   await assert.rejects(() => client.fetch("https://storage.example/upload"), /relative path/i);
   assert.equal(client.url("/signed-part?token=one"), "https://api.example.com/signed-part?token=one");
@@ -180,15 +180,15 @@ test("only API-owned upload paths are resolved", () => {
 });
 
 test("the shared client requires initialization and uses the configured runtime origin", async (t) => {
-  assert.throws(() => apiClient.apiFetch("/api/auth/session"), /not configured/i);
+  assert.throws(() => apiClient.apiFetch("/api/v1/auth/session"), /not configured/i);
   const calls = [];
   t.mock.method(globalThis, "fetch", async (url, init) => {
     calls.push({ url, init });
     return new Response(null, { status: 204 });
   });
   apiClient.configureApiClient("https://runtime.example");
-  await apiClient.apiFetch("/api/auth/session");
-  assert.equal(calls[0].url, "https://runtime.example/api/auth/session");
+  await apiClient.apiFetch("/api/v1/auth/session");
+  assert.equal(calls[0].url, "https://runtime.example/api/v1/auth/session");
   assert.equal(calls[0].init.credentials, "include");
   assert.equal(apiClient.resolveApiAssetURL("/uploads/photo.png"), "https://runtime.example/uploads/photo.png");
 });

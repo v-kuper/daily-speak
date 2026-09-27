@@ -105,7 +105,7 @@ the source file is always retained. Repeat bounded apply runs until a dry-run
 reports both `planned=0` and `failed=0`. Back up PostgreSQL and the uploads directory before a
 production migration.
 
-The v1 surface includes mobile identity under `/api/v1/auth/*`, paginated
+The v1 surface includes unified web/mobile identity under `/api/v1/auth/*`, paginated
 `GET /api/v1/recordings`, and `GET /api/v1/recordings/{recordingId}`. Every
 response includes `X-Request-ID`; v1 errors include a stable machine-readable
 code. See `../docs/api-compatibility.md` for versioning and deprecation rules.
@@ -192,12 +192,12 @@ Durable worker controls:
   default `720h` (30 days). The maintenance worker prunes terminal rows in
   bounded batches; user recordings and media are not deleted by this setting.
 
-Mobile identity:
+Unified identity:
 
 - `AUTH_ACCESS_TOKEN_SECRET`: server-only signing secret with at least 32
   characters. Generate at least 48 random bytes and keep it in the deployment
-  secret store. When it is absent, existing web authentication continues to
-  work while `/api/v1/auth/*` safely returns `identity_unavailable`;
+  secret store. When it is absent, `/api/v1/auth/*` safely returns
+  `identity_unavailable` and no authenticated client can sign in;
 - `AUTH_ACCESS_TOKEN_ISSUER` and `AUTH_ACCESS_TOKEN_AUDIENCE`: stable token
   scope, defaulting to `daily-speaking-api` and `daily-speaking-mobile`;
 - `AUTH_ACCESS_TOKEN_TTL`: short access lifetime, default `15m`;
@@ -213,9 +213,11 @@ Access tokens are signed JWTs. Refresh tokens are opaque, single-use, and only
 their SHA-256 hashes are stored. Refresh replay revokes the complete device
 session. Registration or login with a guest Bearer token merges the guest
 principal into the user in one database transaction. Mobile clients should
-store refresh tokens in the OS secure storage and serialize refresh attempts.
+store refresh tokens in OS secure storage and serialize refresh attempts. Web
+keeps its access token only in memory and receives its refresh token only in a
+scoped HttpOnly cookie.
 
-Legacy web session authentication:
+Browser refresh cookie:
 
 - `SESSION_COOKIE_SECURE`: boolean; use `true` on HTTPS;
 - `SESSION_COOKIE_SAME_SITE`: `lax`, `strict`, or `none`;
@@ -223,9 +225,9 @@ Legacy web session authentication:
 
 `SameSite=None` is rejected unless `Secure=true`. Origins are compared exactly;
 wildcards, paths, credentials, queries, and fragments are invalid in
-`CORS_ALLOWED_ORIGINS`. The session cookie remains HttpOnly and its records are
-stored in PostgreSQL. Protected recording routes accept either the mobile
-Bearer token or the cookie during the web migration.
+`CORS_ALLOWED_ORIGINS`. The refresh cookie remains HttpOnly. It is used only to
+rotate credentials at `/api/v1/auth/refresh`; every protected resource route
+requires the same Bearer access token used by native clients.
 
 AI and media variables are grouped in the example file:
 

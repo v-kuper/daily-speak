@@ -6,6 +6,7 @@ import { createTypeScriptLoader } from "./helpers/load-typescript.mjs";
 const load = createTypeScriptLoader();
 const api = load("src/lib/apiClient.ts");
 const guest = load("src/lib/guestPreview.ts");
+const identityClient = load("src/lib/identity.ts");
 const app = load("src/store/slices/appSlice.ts");
 const flows = load("src/lib/routeFlows.ts");
 
@@ -62,10 +63,12 @@ const router = () => {
 };
 
 function browser(t, handler) {
+  identityClient.forgetBrowserIdentity();
   const sessionStorage = storage();
   const previousWindow = globalThis.window;
   globalThis.window = { sessionStorage };
   t.after(() => {
+    identityClient.forgetBrowserIdentity();
     if (previousWindow === undefined) delete globalThis.window;
     else globalThis.window = previousWindow;
   });
@@ -180,7 +183,7 @@ test("guest preview survives navigation, polls with its owner token, and limits 
   assert.equal(result.corrections.length, 2);
 });
 
-test("preview authentication promotes the stable ID, then creates the existing web cookie session", async (t) => {
+test("preview authentication promotes the stable ID through the unified browser identity", async (t) => {
   browser(t, async (url, init = {}) => {
     const path = new URL(String(url)).pathname;
     if (path === "/api/v1/auth/anonymous") return json(identity());
@@ -198,14 +201,6 @@ test("preview authentication promotes the stable ID, then creates the existing w
         user: { email: "person@example.test", isSubscriber: false, englishLevel: "b1" },
         guestPreviewPromotion: { status: "promoted", previewId: "preview-123", recordingId: "preview-123" },
       }, 201);
-    }
-    if (path === "/api/auth/login") {
-      assert.equal(JSON.parse(init.body).email, "person@example.test");
-      return json({ user: { email: "person@example.test", isSubscriber: false, englishLevel: "b1" } });
-    }
-    if (path === "/api/v1/auth/logout") {
-      assert.equal(init.headers.Authorization, "Bearer user-access");
-      return json({ ok: true });
     }
     throw new Error(`Unexpected request: ${url}`);
   });
@@ -263,7 +258,7 @@ test("a lost upload-create response retries with the same idempotency key", asyn
   assert.equal(uploadKeys[0], uploadKeys[1]);
 });
 
-test("a transient refresh failure preserves the guest credentials for retry", async (t) => {
+test("a transient refresh failure preserves only non-secret guest preview metadata", async (t) => {
   const sessionStorage = browser(t, async (url) => {
     if (new URL(String(url)).pathname === "/api/v1/auth/refresh") throw new Error("temporarily offline");
     throw new Error(`Unexpected request: ${url}`);
@@ -271,34 +266,28 @@ test("a transient refresh failure preserves the guest credentials for retry", as
   sessionStorage.setItem("daily-speaking.guest-preview.v1", JSON.stringify({
     principalId: "guest-principal",
     previewId: "preview-123",
-    tokens: {
-      ...tokens(),
-      accessTokenExpiresAt: "2020-01-01T00:00:00Z",
-    },
   }));
   await assert.rejects(() => guest.fetchGuestPreview("preview-123"));
-  assert.equal(guest.readGuestPreviewSession().tokens.refreshToken, "guest-refresh");
+  assert.deepEqual(guest.readGuestPreviewSession(), {
+    principalId: "guest-principal",
+    previewId: "preview-123",
+  });
+  assert.doesNotMatch(sessionStorage.getItem("daily-speaking.guest-preview.v1"), /refreshToken|accessToken/);
 });
 
 test("a declined promotion keeps the account active and explains why the preview was not saved", async (t) => {
   const sessionStorage = browser(t, async (url, init = {}) => {
     const path = new URL(String(url)).pathname;
+    if (path === "/api/v1/auth/refresh") return json(identity());
     if (path === "/api/v1/auth/login") return json({
       ...identity("user"),
       user: { email: "person@example.test", isSubscriber: false, englishLevel: "b1" },
       guestPreviewPromotion: { status: "not_promoted", previewId: "preview-123", reason: "quota_exceeded" },
     });
-    if (path === "/api/auth/login") return json({
-      user: { email: "person@example.test", isSubscriber: false, englishLevel: "b1" },
-    });
-    if (path === "/api/v1/auth/logout") {
-      assert.equal(init.headers.Authorization, "Bearer user-access");
-      return json({ ok: true });
-    }
     throw new Error(`Unexpected request: ${url}`);
   });
   sessionStorage.setItem("daily-speaking.guest-preview.v1", JSON.stringify({
-    principalId: "guest-principal", previewId: "preview-123", tokens: tokens(),
+    principalId: "guest-principal", previewId: "preview-123",
   }));
   const initial = app.default(undefined, { type: "test/init" });
   const store = configureStore({ reducer: { app: app.default }, preloadedState: { app: {

@@ -54,9 +54,10 @@ func TestDeleteRecordingCascadesDataAndRetriesQueuedFilesAfterRestart(t *testing
 		_, _ = database.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, user.ID)
 	})
 
-	session, err := auth.CreateSession(ctx, database, user.ID)
+	tokenConfig := auth.TokenConfig{SigningKey: []byte(strings.Repeat("recording-deletion-secret-", 2))}
+	grant, err := auth.LoginIdentityUser(ctx, database, tokenConfig, auth.Credentials{Email: user.Email, Password: "password123"}, nil, auth.DeviceInfo{Name: "Deletion test", Platform: "test"})
 	if err != nil {
-		t.Fatalf("create test session: %v", err)
+		t.Fatalf("create test identity: %v", err)
 	}
 	now := time.Now().UTC()
 	if _, err := database.Exec(ctx, `
@@ -98,9 +99,9 @@ func TestDeleteRecordingCascadesDataAndRetriesQueuedFilesAfterRestart(t *testing
 	writeTestUpload(t, uploadsDir, replyURL)
 
 	request := httptest.NewRequest(http.MethodDelete, "/api/recordings/"+recordingID, nil)
-	request.AddCookie(auth.NewSessionCookie(session.Token, session.ExpiresAt))
+	request.Header.Set("Authorization", "Bearer "+grant.AccessToken)
 	response := httptest.NewRecorder()
-	NewServer(Config{DB: database}).Handler().ServeHTTP(response, request)
+	NewServer(Config{DB: database, IdentityTokens: tokenConfig}).Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
 		t.Fatalf("expected delete status 200, got %d: %s", response.Code, response.Body.String())
 	}

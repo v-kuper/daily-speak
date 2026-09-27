@@ -11,7 +11,8 @@ in [`BACKEND_OPERATIONS.md`](BACKEND_OPERATIONS.md).
 The repository already has independently buildable web and backend projects,
 App Router navigation, a versioned `/api/v1` contract, OpenAPI/Swagger,
 anonymous-to-account identity, short access tokens, rotating single-use refresh
-tokens with replay revocation, device sessions, durable PostgreSQL jobs,
+tokens with replay revocation, one Bearer contract for web and mobile, device
+sessions, durable PostgreSQL jobs,
 independent workers, local/S3 media adapters, guest preview, distributed rate
 limits, readiness, protected metrics, trace correlation, and a Windows
 single-host deployment.
@@ -31,7 +32,7 @@ availability.
 - Add verified email ownership and password-reset/recovery flows without
   leaking whether an address is registered.
 - Apply account-aware login throttling in addition to source-IP limits.
-- Complete a threat model for token theft, XSS/CSRF at the legacy web boundary,
+- Complete a threat model for token theft, XSS/CSRF at the browser refresh boundary,
   device loss, key compromise, provider compromise, and sensitive log data.
 - Add complete HTTP server timeouts/header limits and uniform request-body
   bounds to legacy as well as v1 handlers.
@@ -73,7 +74,7 @@ queue remains the default until measured workload demonstrates a limitation.
 
 Most high-risk vertical slices now have explicit application boundaries:
 practice generation, recording creation/deletion/processing and analysis,
-recording upload sessions, guest preview, shadowing, mobile identity, profile,
+recording upload sessions, guest preview, shadowing, unified identity, profile,
 and subscription. Worker composition lives outside HTTP; local/S3 and legacy
 session files are injected adapters. Their HTTP handlers validate transport
 data, call a service, and map its result.
@@ -86,9 +87,7 @@ in this order so every merge stays deployable:
    and upload sessions already use recording-owned services and repositories.
 2. Finish the media HTTP/application boundary so authorization and completion
    policy are not split between handlers and `internal/media`.
-3. Move the remaining cookie-auth orchestration behind the identity service
-   without changing the mobile access/refresh-token contract.
-4. Keep Feed isolated until the retained-Feed product decision is made; do not
+3. Keep Feed isolated until the retained-Feed product decision is made; do not
    intermingle its SQL or media policy with recording modules.
 
 Each extraction must preserve routes, OpenAPI, persisted data, authorization,

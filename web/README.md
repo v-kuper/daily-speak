@@ -53,7 +53,8 @@ their normal availability errors.
 | `/profile/english-level` | authenticated | level settings |
 | `/profile/interests` | authenticated | interest selection |
 
-Authenticated routes restore the current cookie session before redirecting.
+Authenticated routes rotate the HttpOnly refresh credential, restore an access
+token into memory, and validate the current v1 identity before redirecting.
 Only validated internal `returnTo` values are accepted. The history date filter
 is stored in `?date=YYYY-MM-DD`, so direct visits and refreshes retain it.
 
@@ -81,8 +82,10 @@ credentials. The web-only health endpoint is `/web-healthz` and returns
 
 ## Authentication boundary
 
-The client currently sends `credentials: "include"` to the configured API
-origin. Authentication is a backend-owned, HttpOnly session cookie. Do not add
-token storage or server secrets to the web project. Native clients use the
-backend's `/api/v1/auth/*` access/refresh-token contract independently; moving
-the web sandbox to that contract would be a separate reviewed migration.
+Web and native clients use the same backend `/api/v1/auth/*` identity contract.
+Protected requests carry a short-lived Bearer access token. The web client keeps
+that access token only in module memory; it never writes access or refresh
+tokens to local/session storage. The rotating web refresh token is a
+backend-owned, scoped HttpOnly cookie sent through `credentials: "include"`.
+Native clients receive the refresh token in JSON and must keep it in
+Keychain/Keystore-class storage. Never add signing secrets to the web project.

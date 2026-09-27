@@ -40,10 +40,10 @@ dependency. A native client can therefore call the same API directly.
 
 ## Public contracts
 
-- `/api/v1/*` is the stable mobile contract. New mobile development uses this
-  surface exclusively.
-- `/api/*` is the legacy web contract retained while the sandbox still uses
-  cookie authentication.
+- `/api/v1/*` is the stable client contract shared by mobile and web identity,
+  media, guest preview, and new recording development.
+- `/api/*` is the remaining legacy web resource surface. It uses the same
+  Bearer identity but remains until the sandbox moves to v1 media/create APIs.
 - `/openapi.json` and `/docs` expose the backend-owned OpenAPI contract and
   Swagger UI.
 - `/healthz` is process liveness; `/readyz` checks PostgreSQL and queue
@@ -56,12 +56,13 @@ Compatibility and deprecation rules live in
 
 ## Identity flow
 
-The web sandbox currently uses PostgreSQL-backed HttpOnly sessions. Mobile uses
-backend-issued Bearer credentials:
+Web and mobile use one backend-issued identity model:
 
 1. A new installation calls `POST /api/v1/auth/anonymous` and receives a guest
    principal, device session, short-lived access token, and rotating opaque
-   refresh token.
+   refresh token. Native clients receive both tokens in JSON. Browser clients
+   receive the access token in JSON and the refresh token only in a scoped,
+   Secure HttpOnly cookie.
 2. Access tokens are HS256 JWTs scoped by issuer, audience, principal, device
    session, identity kind, and expiry. The signing secret remains server-only.
 3. Refresh tokens are random, single-use, and stored only as SHA-256 hashes.
@@ -70,8 +71,9 @@ backend-issued Bearer credentials:
    preview into the user account. Logout, logout-all, and device revocation are
    server-side operations.
 
-Clients keep access tokens in memory and refresh tokens in OS-protected secure
-storage. They never receive signing secrets.
+All clients keep access tokens in memory. Native apps keep refresh tokens in
+OS-protected secure storage; browser JavaScript cannot read its refresh cookie.
+Clients never receive signing secrets.
 
 ## Recording and guest flow
 
@@ -122,7 +124,7 @@ web/                         standalone Next.js application
 backend/cmd/api              API process composition
 backend/cmd/worker           durable worker process composition
 backend/internal/aiparse     provider-neutral model-output normalization
-backend/internal/auth        cookie and mobile identity
+backend/internal/auth        unified web/mobile identity and token lifecycle
 backend/internal/db          PostgreSQL connection and migrations
 backend/internal/httpapi     HTTP transport, authorization gates, response mapping
 backend/internal/media       authorized media lifecycle
@@ -142,7 +144,7 @@ backend/migrations           immutable ordered schema migrations
 backend/docs                 generated OpenAPI and Swagger assets
 ```
 
-Some legacy create, media, cookie-auth, and retained-Feed persistence still lives
+Some legacy create, media, and retained-Feed persistence still lives
 in `backend/internal/httpapi`. Its remaining feature-oriented split is
 tracked in [`TECH_DEBT.md`](TECH_DEBT.md); new business rules must not be added
 to the transport package.

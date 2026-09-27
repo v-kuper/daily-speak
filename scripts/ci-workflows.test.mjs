@@ -261,7 +261,7 @@ test("local deploy passes Cartesia credentials from the correct GitHub stores", 
   );
 });
 
-test("mobile signing secret stays server-side and reaches only the backend", () => {
+test("identity signing secret stays server-side and reaches only the backend", () => {
   assert.match(
     deployWorkflow,
     /AUTH_ACCESS_TOKEN_SECRET:\s+\$\{\{\s*secrets\.AUTH_ACCESS_TOKEN_SECRET\s*\}\}/,
@@ -276,8 +276,8 @@ test("mobile signing secret stays server-side and reaches only the backend", () 
   assert.equal(parsedDeployWorkflow.jobs.deploy.env.AUTH_ACCESS_TOKEN_SECRET, undefined);
 });
 
-test("local deploy rejects a missing or weak mobile signing secret before Docker starts", () => {
-  const validation = deployStep("Validate mobile identity configuration");
+test("local deploy rejects a missing or weak identity signing secret before Docker starts", () => {
+  const validation = deployStep("Validate identity configuration");
   assert.equal(
     validation?.env?.AUTH_ACCESS_TOKEN_SECRET,
     "${{ secrets.AUTH_ACCESS_TOKEN_SECRET }}",
@@ -295,12 +295,12 @@ test("local deploy rejects a missing or weak mobile signing secret before Docker
   assert.ok(validationIndex >= 0 && validationIndex < dockerIndex);
 });
 
-test("local deploy verifies mobile identity inside Docker before API smoke checks", () => {
-  const verification = deployStep("Verify Docker mobile identity configuration");
+test("local deploy verifies identity inside Docker before API smoke checks", () => {
+  const verification = deployStep("Verify Docker identity configuration");
   const run = verification?.run ?? "";
   assert.match(run, /docker compose exec -T backend sh -lc/);
   assert.match(run, /test "\$\{#AUTH_ACCESS_TOKEN_SECRET\}" -ge 32/);
-  assert.match(run, /echo mobile-identity-config-ok/);
+  assert.match(run, /echo identity-config-ok/);
   assert.doesNotMatch(run, /(?:echo|printf|env\s*\|)[^\r\n]*\$AUTH_ACCESS_TOKEN_SECRET/);
 
   const verificationIndex = parsedDeployWorkflow.jobs.deploy.steps.indexOf(verification);

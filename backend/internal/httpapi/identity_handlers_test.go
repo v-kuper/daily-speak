@@ -6,6 +6,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
+
+	"daily-speaking-practice/backend/internal/auth"
 )
 
 func TestMobileIdentityIsSafeWhenSigningSecretIsMissing(t *testing.T) {
@@ -33,13 +36,59 @@ func TestMobileIdentityRejectsInvalidPayloadBeforeDatabase(t *testing.T) {
 	}{
 		{path: "/api/v1/auth/register", body: `{"email":"bad","password":"123"}`},
 		{path: "/api/v1/auth/login", body: `{"email":"bad","password":"123"}`},
-		{path: "/api/v1/auth/refresh", body: `{}`},
 	} {
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, tc.path, strings.NewReader(tc.body)))
 		if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), `"code":"invalid_request"`) {
 			t.Fatalf("%s: %d %s", tc.path, response.Code, response.Body.String())
 		}
+	}
+}
+
+func TestBrowserRefreshWithoutCookieIsUnauthorized(t *testing.T) {
+	handler := NewServer(Config{}).Handler()
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/auth/refresh", strings.NewReader(`{}`))
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusUnauthorized || !strings.Contains(response.Body.String(), `"code":"invalid_refresh_token"`) {
+		t.Fatalf("unexpected response: %d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestBrowserIdentityGrantKeepsRefreshTokenOutOfJSON(t *testing.T) {
+	now := time.Now().UTC()
+	grant := auth.TokenGrant{
+		Identity: auth.Identity{PrincipalID: "user-id", Kind: "user", User: &auth.User{
+			Email: "person@example.test", EnglishLevel: "B1",
+		}},
+		Session:     auth.DeviceSession{ID: "session-id", Platform: "web", ExpiresAt: now.Add(time.Hour), LastSeenAt: now, CreatedAt: now},
+		AccessToken: "access-token", AccessTokenExpiresAt: now.Add(15 * time.Minute),
+		RefreshToken: "refresh-token", RefreshTokenExpiresAt: now.Add(time.Hour),
+	}
+	server := &Server{browserCookie: auth.CookieConfig{Secure: true, SameSite: http.SameSiteLaxMode}}
+	response := httptest.NewRecorder()
+	server.writeIdentityGrant(response, http.StatusOK, grant, true)
+	if strings.Contains(response.Body.String(), "refresh-token") || strings.Contains(response.Body.String(), "refreshTokenExpiresAt") {
+		t.Fatalf("browser response exposed refresh credential: %s", response.Body.String())
+	}
+	cookies := response.Result().Cookies()
+	if len(cookies) != 1 || cookies[0].Name != auth.RefreshCookieName || cookies[0].Value != grant.RefreshToken || !cookies[0].HttpOnly || !cookies[0].Secure {
+		t.Fatalf("unexpected browser refresh cookie: %#v", cookies)
+	}
+}
+
+func TestBrowserIdentityTransportCannotBeDowngradedByPlatform(t *testing.T) {
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", nil)
+	request.Header.Set("Origin", "https://web.example.test")
+	if !isBrowserIdentityRequest(request, "ios") {
+		t.Fatal("a browser Origin must force the HttpOnly refresh transport")
+	}
+	native := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", nil)
+	if isBrowserIdentityRequest(native, "ios") {
+		t.Fatal("an originless native request must receive the native token response")
+	}
+	if !isBrowserIdentityRequest(native, "web") {
+		t.Fatal("the explicit web platform must select the browser transport")
 	}
 }
 

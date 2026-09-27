@@ -40,7 +40,7 @@ func TestTokenConfigFromEnv(t *testing.T) {
 	t.Setenv("AUTH_ACCESS_TOKEN_SECRET", "")
 	config, err := TokenConfigFromEnv()
 	if err != nil || config.Enabled() {
-		t.Fatalf("empty secret should disable mobile identity without failing startup: enabled=%v err=%v", config.Enabled(), err)
+		t.Fatalf("empty secret should disable identity without failing startup: enabled=%v err=%v", config.Enabled(), err)
 	}
 
 	t.Setenv("AUTH_ACCESS_TOKEN_SECRET", "too-short")

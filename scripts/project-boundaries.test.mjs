@@ -305,15 +305,15 @@ test("shadowing separates transport, media processing, and persistence", () => {
   assert.match(transport, /shadowingProcessor\.Process|shadowingStore\.Schedule/);
 });
 
-test("mobile identity exposes an application service to HTTP transport", () => {
+test("unified identity exposes an application service to HTTP transport", () => {
   const service = readFileSync("backend/internal/auth/service.go", "utf8");
   const transport = readFileSync("backend/internal/httpapi/identity_handlers.go", "utf8");
 
-  assert.match(service, /type MobileService struct/);
+  assert.match(service, /type IdentityService struct/);
   assert.match(service, /CreateAnonymous|Register|Login|Refresh|Authenticate/);
   assert.match(transport, /s\.identityService/);
   assert.doesNotMatch(transport, /s\.db/);
-  assert.doesNotMatch(transport, /auth\.(CreateAnonymousIdentity|RegisterMobileUser|LoginMobileUser|RotateRefreshToken|AuthenticateAccessToken)/);
+  assert.doesNotMatch(transport, /auth\.(CreateAnonymousIdentity|RegisterIdentityUser|LoginIdentityUser|RotateRefreshToken|AuthenticateAccessToken)/);
 });
 
 test("profile and subscription rules stay behind application services", () => {

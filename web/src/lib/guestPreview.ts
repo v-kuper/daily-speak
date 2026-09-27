@@ -1,24 +1,21 @@
 import { apiFetch, readApiJSON, resolveApiURL } from "./apiClient";
 import type { PracticeType, Suggestion } from "./data";
+import {
+  browserIdentity,
+  createAnonymousIdentity,
+  forgetBrowserIdentity,
+  restoreBrowserIdentity,
+  type IdentityPromotion,
+} from "./identity";
 import { parseSuggestions } from "./suggestions";
 
 const GUEST_SESSION_KEY = "daily-speaking.guest-preview.v1";
-const GUEST_PROMOTION_KEY = "daily-speaking.guest-promotion.v1";
 const GUEST_OPERATION_KEY = "daily-speaking.guest-operation.v1";
 const MAX_GUEST_AUDIO_BYTES = 10 * 1024 * 1024;
 export const MAX_GUEST_PREVIEW_SECONDS = 60;
 
-type IdentityTokens = {
-  tokenType: "Bearer";
-  accessToken: string;
-  accessTokenExpiresAt: string;
-  refreshToken: string;
-  refreshTokenExpiresAt: string;
-};
-
 export type GuestPreviewSession = {
   principalId: string;
-  tokens: IdentityTokens;
   previewId: string | null;
 };
 
@@ -43,18 +40,7 @@ export type GuestPreviewDraft = {
   audioDataUrl: string;
 };
 
-export type GuestPreviewPromotion = {
-  status: "promoted" | "not_promoted" | "no_preview";
-  previewId?: string;
-  recordingId?: string;
-  reason?: "promotion_already_used" | "quota_exceeded";
-};
-
-type PendingPromotion = {
-  email: string;
-  promotion: GuestPreviewPromotion;
-  userAccessToken: string;
-};
+export type GuestPreviewPromotion = IdentityPromotion;
 
 type GuestPreviewOperation = {
   audioChecksum: string;
@@ -87,34 +73,14 @@ const storage = (): Storage | null => {
   }
 };
 
-const isFuture = (value: string, leewayMilliseconds = 0): boolean => {
-  const timestamp = Date.parse(value);
-  return Number.isFinite(timestamp) && timestamp > Date.now() + leewayMilliseconds;
-};
-
-const parseTokens = (value: unknown): IdentityTokens | null => {
-  if (!value || typeof value !== "object") return null;
-  const candidate = value as Record<string, unknown>;
-  if (
-    candidate.tokenType !== "Bearer" ||
-    typeof candidate.accessToken !== "string" || !candidate.accessToken ||
-    typeof candidate.accessTokenExpiresAt !== "string" ||
-    typeof candidate.refreshToken !== "string" || !candidate.refreshToken ||
-    typeof candidate.refreshTokenExpiresAt !== "string"
-  ) return null;
-  return candidate as IdentityTokens;
-};
-
 export const readGuestPreviewSession = (): GuestPreviewSession | null => {
   const value = storage()?.getItem(GUEST_SESSION_KEY);
   if (!value) return null;
   try {
     const candidate = JSON.parse(value) as Record<string, unknown>;
-    const tokens = parseTokens(candidate.tokens);
-    if (typeof candidate.principalId !== "string" || !candidate.principalId || !tokens) return null;
+    if (typeof candidate.principalId !== "string" || !candidate.principalId) return null;
     return {
       principalId: candidate.principalId,
-      tokens,
       previewId: typeof candidate.previewId === "string" && candidate.previewId ? candidate.previewId : null,
     };
   } catch {
@@ -148,37 +114,9 @@ const writeGuestOperation = (operation: GuestPreviewOperation | null): void => {
   else target.removeItem(GUEST_OPERATION_KEY);
 };
 
-const readPendingPromotion = (): PendingPromotion | null => {
-  const value = storage()?.getItem(GUEST_PROMOTION_KEY);
-  if (!value) return null;
-  try {
-    const candidate = JSON.parse(value) as PendingPromotion;
-    return candidate && typeof candidate.email === "string" && candidate.promotion ? candidate : null;
-  } catch {
-    return null;
-  }
-};
-
-const writePendingPromotion = (value: PendingPromotion | null): void => {
-  const target = storage();
-  if (!target) return;
-  if (value) target.setItem(GUEST_PROMOTION_KEY, JSON.stringify(value));
-  else target.removeItem(GUEST_PROMOTION_KEY);
-};
-
 export const completeGuestPromotion = async (): Promise<void> => {
-  const pending = readPendingPromotion();
-  if (pending?.userAccessToken) {
-    try {
-      await apiFetch("/api/v1/auth/logout", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${pending.userAccessToken}` },
-      });
-    } catch {
-      // The cookie session is already active; the short-lived device grant will expire if cleanup is unavailable.
-    }
-  }
-  writePendingPromotion(null);
+  writeGuestPreviewSession(null);
+  writeGuestOperation(null);
 };
 
 const responseError = async (response: Response, fallback: string): Promise<GuestPreviewError> => {
@@ -193,95 +131,41 @@ const responseError = async (response: Response, fallback: string): Promise<Gues
   return new GuestPreviewError(message, code);
 };
 
-const parseIdentity = (value: unknown): GuestPreviewSession | null => {
-  if (!value || typeof value !== "object") return null;
-  const candidate = value as Record<string, unknown>;
-  const principal = candidate.principal as Record<string, unknown> | undefined;
-  const tokens = parseTokens(candidate.tokens);
-  if (!principal || typeof principal.id !== "string" || !principal.id || !tokens) return null;
-  return { principalId: principal.id, tokens, previewId: null };
-};
-
 const createGuestIdentity = async (): Promise<GuestPreviewSession> => {
-  const response = await apiFetch("/api/v1/auth/anonymous", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ deviceName: "Daily Speaking Web", platform: "web" }),
-  });
-  if (!response.ok) throw await responseError(response, "Cannot start a guest session.");
-  const session = parseIdentity(await readApiJSON<unknown>(response));
-  if (!session) throw new GuestPreviewError("The guest session response is invalid.");
+  const identity = await createAnonymousIdentity();
+  if (identity.kind !== "guest") throw new GuestPreviewError("The guest session response is invalid.");
+  const session = { principalId: identity.principalId, previewId: null };
   writeGuestPreviewSession(session);
   return session;
 };
 
-const refreshGuestIdentity = async (session: GuestPreviewSession): Promise<GuestPreviewSession> => {
-  const response = await apiFetch("/api/v1/auth/refresh", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ refreshToken: session.tokens.refreshToken }),
-  });
-  if (!response.ok) throw await responseError(response, "The guest session has expired.");
-  const refreshed = parseIdentity(await readApiJSON<unknown>(response));
-  if (!refreshed) throw new GuestPreviewError("The refreshed guest session is invalid.");
-  refreshed.previewId = session.previewId;
-  writeGuestPreviewSession(refreshed);
-  return refreshed;
-};
-
-let guestRefreshPromise: Promise<GuestPreviewSession> | null = null;
-
-const isTerminalRefreshError = (error: unknown): boolean => error instanceof GuestPreviewError && new Set([
-  "invalid_refresh_token",
-  "refresh_token_expired",
-  "refresh_token_reused",
-]).has(error.code);
-
-const refreshGuestIdentityOnce = (session: GuestPreviewSession): Promise<GuestPreviewSession> => {
-  if (!guestRefreshPromise) {
-    guestRefreshPromise = refreshGuestIdentity(session).finally(() => {
-      guestRefreshPromise = null;
-    });
-  }
-  return guestRefreshPromise;
-};
-
 const activeGuestIdentity = async (createIfMissing: boolean): Promise<GuestPreviewSession> => {
-  const current = readGuestPreviewSession();
-  if (current && isFuture(current.tokens.accessTokenExpiresAt, 30_000)) return current;
-  if (current && isFuture(current.tokens.refreshTokenExpiresAt)) {
+  let identity = browserIdentity();
+  if (!identity) {
     try {
-      return await refreshGuestIdentityOnce(current);
-    } catch (error) {
-      if (isTerminalRefreshError(error)) {
-        writeGuestPreviewSession(null);
-        if (createIfMissing) return createGuestIdentity();
-      }
-      throw error;
+      identity = await restoreBrowserIdentity();
+    } catch {
+      if (createIfMissing) return createGuestIdentity();
+      throw new GuestPreviewError("This guest preview session has expired. Record a new sample to continue.", "guest_session_expired");
     }
   }
-  if (current) writeGuestPreviewSession(null);
-  if (createIfMissing) return createGuestIdentity();
-  throw new GuestPreviewError("This guest preview session has expired. Record a new sample to continue.", "guest_session_expired");
+  if (identity.kind !== "guest") {
+    writeGuestPreviewSession(null);
+    if (createIfMissing) return createGuestIdentity();
+    throw new GuestPreviewError("This guest preview session has expired. Record a new sample to continue.", "guest_session_expired");
+  }
+  const stored = readGuestPreviewSession();
+  const session = {
+    principalId: identity.principalId,
+    previewId: stored?.principalId === identity.principalId ? stored.previewId : null,
+  };
+  writeGuestPreviewSession(session);
+  return session;
 };
 
 const guestFetch = async (path: string, init: RequestInit, createIfMissing = false): Promise<Response> => {
-  let session = await activeGuestIdentity(createIfMissing);
-  const request = () => apiFetch(path, {
-    ...init,
-    headers: { ...init.headers, Authorization: `Bearer ${session.tokens.accessToken}` },
-  });
-  let response = await request();
-  if (response.status === 401 && isFuture(session.tokens.refreshTokenExpiresAt)) {
-    try {
-      session = await refreshGuestIdentityOnce(session);
-    } catch (error) {
-      if (isTerminalRefreshError(error)) writeGuestPreviewSession(null);
-      throw error;
-    }
-    response = await request();
-  }
-  return response;
+  await activeGuestIdentity(createIfMissing);
+  return apiFetch(path, init);
 };
 
 const dataURLToBlob = (value: string): Blob => {
@@ -480,60 +364,10 @@ export const fetchGuestPreview = async (previewId: string): Promise<GuestPreview
   return preview;
 };
 
-const parsePromotion = (value: unknown): GuestPreviewPromotion => {
-  if (!value || typeof value !== "object") return { status: "no_preview" };
-  const candidate = value as Record<string, unknown>;
-  if (candidate.status === "promoted" && typeof candidate.recordingId === "string" && candidate.recordingId) {
-    return {
-      status: "promoted",
-      previewId: typeof candidate.previewId === "string" ? candidate.previewId : undefined,
-      recordingId: candidate.recordingId,
-    };
-  }
-  if (candidate.status === "not_promoted") {
-    return {
-      status: "not_promoted",
-      previewId: typeof candidate.previewId === "string" ? candidate.previewId : undefined,
-      reason: candidate.reason === "quota_exceeded" ? "quota_exceeded" : "promotion_already_used",
-    };
-  }
-  return { status: "no_preview" };
-};
-
-export const promoteGuestIdentity = async (
-  mode: "signIn" | "signUp",
-  email: string,
-  password: string,
-): Promise<GuestPreviewPromotion> => {
-  const normalizedEmail = email.trim().toLowerCase();
-  const pending = readPendingPromotion();
-  if (pending?.email === normalizedEmail) return pending.promotion;
-  if (pending) writePendingPromotion(null);
-
-  const session = readGuestPreviewSession();
-  if (!session?.previewId) {
-    throw new GuestPreviewError("The guest preview session is missing or expired.", "guest_session_expired");
-  }
-  const response = await guestFetch(`/api/v1/auth/${mode === "signUp" ? "register" : "login"}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email: normalizedEmail, password, deviceName: "Daily Speaking Web", platform: "web" }),
-  });
-  if (!response.ok) throw await responseError(response, mode === "signUp" ? "Failed to create account." : "Failed to sign in.");
-  const payload = await readApiJSON<{ guestPreviewPromotion?: unknown; tokens?: unknown }>(response);
-  const promotion = parsePromotion(payload?.guestPreviewPromotion);
-  const userTokens = parseTokens(payload?.tokens);
-  if (!userTokens) throw new GuestPreviewError("The authenticated session response is invalid.");
-  writePendingPromotion({ email: normalizedEmail, promotion, userAccessToken: userTokens.accessToken });
-  writeGuestPreviewSession(null);
-  writeGuestOperation(null);
-  return promotion;
-};
-
 export const startNewGuestPreviewSession = (): void => {
+  forgetBrowserIdentity();
   writeGuestPreviewSession(null);
   writeGuestOperation(null);
-  writePendingPromotion(null);
 };
 
 export const guestPreviewPath = (previewId: string): string => `/preview/${encodeURIComponent(previewId)}`;

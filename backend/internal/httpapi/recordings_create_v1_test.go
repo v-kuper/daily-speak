@@ -136,7 +136,7 @@ func registerRecordingCreateV1User(t *testing.T, database *db.DB, tokenConfig au
 		t.Fatalf("register %s user: %v", label, err)
 	}
 	t.Cleanup(func() { _, _ = database.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, user.ID) })
-	grant, err := auth.LoginMobileUser(context.Background(), database, tokenConfig, auth.Credentials{Email: email, Password: "password123"}, nil, auth.DeviceInfo{Name: label, Platform: "ios"})
+	grant, err := auth.LoginIdentityUser(context.Background(), database, tokenConfig, auth.Credentials{Email: email, Password: "password123"}, nil, auth.DeviceInfo{Name: label, Platform: "ios"})
 	if err != nil {
 		t.Fatalf("login %s user: %v", label, err)
 	}

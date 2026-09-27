@@ -91,11 +91,18 @@ func recordingMediaAsset(assetID *string) *recordingMediaAssetResponse {
 }
 
 func (s *Server) optionalUser(r *http.Request) (*auth.User, error) {
-	token := sessionToken(r)
-	if token == "" {
+	token, present := bearerToken(r)
+	if !present {
 		return nil, nil
 	}
-	return auth.GetUserBySessionToken(r.Context(), s.db, token)
+	if token == "" {
+		return nil, auth.ErrInvalidAccessToken
+	}
+	identity, err := s.identityService.Authenticate(r.Context(), token)
+	if err != nil {
+		return nil, err
+	}
+	return identity.User, nil
 }
 
 func decodeJSON(r *http.Request, dest any) bool {

@@ -94,7 +94,7 @@ func CreateAnonymousIdentity(ctx context.Context, database *db.DB, config TokenC
 	return grant, nil
 }
 
-func RegisterMobileUser(ctx context.Context, database *db.DB, config TokenConfig, credentials Credentials, guest *Identity, device DeviceInfo) (TokenGrant, error) {
+func RegisterIdentityUser(ctx context.Context, database *db.DB, config TokenConfig, credentials Credentials, guest *Identity, device DeviceInfo) (TokenGrant, error) {
 	config = config.withDefaults()
 	if !config.Enabled() {
 		return TokenGrant{}, ErrIdentityUnavailable
@@ -131,7 +131,7 @@ func RegisterMobileUser(ctx context.Context, database *db.DB, config TokenConfig
 	return grant, nil
 }
 
-func LoginMobileUser(ctx context.Context, database *db.DB, config TokenConfig, credentials Credentials, guest *Identity, device DeviceInfo) (TokenGrant, error) {
+func LoginIdentityUser(ctx context.Context, database *db.DB, config TokenConfig, credentials Credentials, guest *Identity, device DeviceInfo) (TokenGrant, error) {
 	config = config.withDefaults()
 	if !config.Enabled() {
 		return TokenGrant{}, ErrIdentityUnavailable

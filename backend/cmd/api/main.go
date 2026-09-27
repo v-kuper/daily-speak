@@ -23,13 +23,13 @@ func main() {
 	if err != nil {
 		log.Fatalf("CORS configuration failed: %v", err)
 	}
-	sessionCookie, err := auth.CookieConfigFromEnv()
+	browserCookie, err := auth.CookieConfigFromEnv()
 	if err != nil {
-		log.Fatalf("session cookie configuration failed: %v", err)
+		log.Fatalf("browser refresh cookie configuration failed: %v", err)
 	}
 	identityTokens, err := auth.TokenConfigFromEnv()
 	if err != nil {
-		log.Fatalf("mobile identity configuration failed: %v", err)
+		log.Fatalf("identity configuration failed: %v", err)
 	}
 	operationsConfig, err := operations.ConfigFromEnv()
 	if err != nil {
@@ -64,7 +64,7 @@ func main() {
 
 	addr := envDefault("APP_ADDR", ":3000")
 	apiServer := httpapi.NewServer(httpapi.Config{
-		DB: database, CORS: cors, SessionCookie: sessionCookie, IdentityTokens: identityTokens,
+		DB: database, CORS: cors, BrowserCookie: browserCookie, IdentityTokens: identityTokens,
 		MediaStore: mediaStore, MediaBucket: mediaConfig.S3Bucket,
 		MediaPartSize: mediaConfig.MultipartPartSize, MediaPresignTTL: mediaConfig.PresignTTL,
 		Operations: operationsConfig,

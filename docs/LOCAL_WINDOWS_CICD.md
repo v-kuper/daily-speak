@@ -10,8 +10,8 @@ infrastructure on one test host:
 - `lan-https`: two independent Caddy HTTPS sites.
 
 The web container receives the public API origin and the canonical HTTPS web
-origin. The latter redirects direct HTTP browser access before session-cookie
-authentication begins. The backend receives an exact browser-origin CORS
+origin. The latter redirects direct HTTP browser access before authentication
+begins. The backend receives an exact browser-origin CORS
 allowlist for the web and Swagger/API origins and does not know or proxy the web
 application.
 The same images can later move to different production resources by supplying
@@ -88,7 +88,7 @@ Required GitHub Actions values:
 
 Secret values must remain in `Secrets`, never `Variables`, repository files,
 runner system variables, issue text, or logs. The workflow validates Cartesia
-presence and the mobile signing-secret length without printing their values.
+presence and the identity signing-secret length without printing their values.
 
 Optional secrets are `METRICS_BEARER_TOKEN` for protected metrics and the
 `MEDIA_S3_ACCESS_KEY_ID`, `MEDIA_S3_SECRET_ACCESS_KEY`, and
@@ -123,7 +123,7 @@ The workflow:
 
 1. checks out the same revision for both projects;
 2. installs from `web/package-lock.json` and runs the repository quality gates;
-3. validates required Cartesia and mobile-identity configuration before Docker;
+3. validates required Cartesia and unified identity configuration before Docker;
 4. verifies Docker and runs `.\scripts\setup-lan-https-proxy.ps1`;
 5. builds and starts `web`, `backend`, `worker`, `postgres`, and `lan-https` together with
    `--remove-orphans` under the stable `daily-speaking` Compose project;
@@ -132,9 +132,10 @@ The workflow:
 8. verifies Whisper and Cartesia inside the worker container.
 
 The smoke uses a unique temporary account and verifies web health, `/speak`, API
-health/readiness, OpenAPI, Swagger, exact credentialed CORS, mobile identity
-availability, registration/session, a protected call, upload
-creation/serving/deletion, and logout. It never prints cookies or tokens.
+health/readiness, OpenAPI, Swagger, exact credentialed CORS, identity
+availability, web refresh-cookie issuance, Bearer session, a protected call, upload
+creation/serving/deletion, refresh rotation, and logout. It never prints cookies
+or tokens.
 
 `--remove-orphans` is the one-time-safe migration from the former `app` service
 as well as the normal update behavior. Compose removes the old
@@ -175,11 +176,11 @@ both origins. The deployment sets:
   `CORS_ALLOWED_ORIGINS`;
 - `SESSION_COOKIE_SECURE=true` and `SESSION_COOKIE_SAME_SITE=lax` for the API.
 
-These LAN origins share a site (the same host), so the current HttpOnly session
-cookie can cross the two origins through `credentials: include`. If future web
-and API domains are genuinely cross-site, review the cookie threat model and use
-`SameSite=None` only with HTTPS, or migrate the web sandbox to the existing
-Bearer access/refresh-token contract after reviewing browser token storage.
+These LAN origins share a site (the same host), so the scoped HttpOnly refresh
+cookie can cross the two origins through `credentials: include`. Protected API
+calls use an in-memory Bearer access token. If future web and API domains are
+genuinely cross-site, review the refresh-cookie threat model and use
+`SameSite=None` only with HTTPS.
 
 ## Certificate and firewall setup
 

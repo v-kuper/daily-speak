@@ -132,7 +132,7 @@ func (s *Server) ratePolicy(r *http.Request) (ratePolicy, bool) {
 		return ratePolicy{}, false
 	}
 	switch path {
-	case "/api/v1/auth/anonymous", "/api/v1/auth/register", "/api/v1/auth/login", "/api/v1/auth/refresh", "/api/auth/register", "/api/auth/login":
+	case "/api/v1/auth/anonymous", "/api/v1/auth/register", "/api/v1/auth/login", "/api/v1/auth/refresh":
 		return ratePolicy{scope: "auth", limit: s.operations.AuthLimit}, true
 	case "/api/v1/guest/previews":
 		return ratePolicy{scope: "guest_preview", limit: s.operations.ExpensiveLimit, principal: true, alsoIP: true}, true
@@ -221,7 +221,6 @@ var operationalStaticRoutes = map[string]struct{}{
 	"/api/v1/auth/refresh": {}, "/api/v1/auth/session": {}, "/api/v1/auth/logout": {},
 	"/api/v1/auth/logout-all": {}, "/api/v1/auth/sessions": {},
 	"/api/v1/guest/previews": {}, "/api/v1/recordings": {}, "/api/v1/media/uploads": {},
-	"/api/auth/register": {}, "/api/auth/login": {}, "/api/auth/session": {}, "/api/auth/logout": {},
 	"/api/daily-questions": {}, "/api/topic-guidance": {}, "/api/study-words": {},
 	"/api/user/data": {}, "/api/user/interests": {}, "/api/user/ollama-model": {},
 	"/api/user/subscription": {}, "/api/user/english-level": {}, "/api/user/recordings": {},

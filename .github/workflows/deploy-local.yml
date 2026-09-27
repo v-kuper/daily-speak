@@ -100,7 +100,7 @@ jobs:
             throw "Missing required Cartesia configuration: $($missing -join ', ')."
           }
 
-      - name: Validate mobile identity configuration
+      - name: Validate identity configuration
         env:
           AUTH_ACCESS_TOKEN_SECRET: ${{ secrets.AUTH_ACCESS_TOKEN_SECRET }}
         run: |
@@ -145,9 +145,9 @@ jobs:
           MEDIA_S3_SESSION_TOKEN: ${{ secrets.MEDIA_S3_SESSION_TOKEN }}
         run: .\scripts\setup-lan-https-proxy.ps1
 
-      - name: Verify Docker mobile identity configuration
+      - name: Verify Docker identity configuration
         run: |
-          docker compose exec -T backend sh -lc 'test "${#AUTH_ACCESS_TOKEN_SECRET}" -ge 32 && echo mobile-identity-config-ok'
+          docker compose exec -T backend sh -lc 'test "${#AUTH_ACCESS_TOKEN_SECRET}" -ge 32 && echo identity-config-ok'
 
       - name: Smoke separate HTTP services
         run: |

@@ -79,7 +79,7 @@ func TestMobileIdentityLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	registered, err := RegisterMobileUser(ctx, database, config, credentials, &guest.Identity, DeviceInfo{Name: "Personal iPhone", Platform: "IOS"})
+	registered, err := RegisterIdentityUser(ctx, database, config, credentials, &guest.Identity, DeviceInfo{Name: "Personal iPhone", Platform: "IOS"})
 	if err != nil {
 		t.Fatalf("register mobile user: %v", err)
 	}
@@ -191,7 +191,7 @@ func TestMobileIdentityLifecycle(t *testing.T) {
 		"v1/guest/recording/"+strayAssetID+".webm", strings.Repeat("e", 64), now.Add(config.withDefaults().GuestTTL)); err != nil {
 		t.Fatalf("insert unverified guest media: %v", err)
 	}
-	strayLogin, err := LoginMobileUser(ctx, database, config, credentials, &strayGuest.Identity, DeviceInfo{Name: "Pixel stray", Platform: "android"})
+	strayLogin, err := LoginIdentityUser(ctx, database, config, credentials, &strayGuest.Identity, DeviceInfo{Name: "Pixel stray", Platform: "android"})
 	if err != nil {
 		t.Fatalf("login with unverified guest upload: %v", err)
 	}
@@ -238,7 +238,7 @@ func TestMobileIdentityLifecycle(t *testing.T) {
 		queuedPreviewJobID, strings.Repeat("d", 64), now.Add(config.withDefaults().GuestTTL)); err != nil {
 		t.Fatalf("insert queued guest preview: %v", err)
 	}
-	loggedIn, err := LoginMobileUser(ctx, database, config, credentials, &secondGuest.Identity, DeviceInfo{Name: "Pixel", Platform: "Android"})
+	loggedIn, err := LoginIdentityUser(ctx, database, config, credentials, &secondGuest.Identity, DeviceInfo{Name: "Pixel", Platform: "Android"})
 	if err != nil {
 		t.Fatalf("login and merge: %v", err)
 	}
@@ -263,7 +263,7 @@ func TestMobileIdentityLifecycle(t *testing.T) {
 		t.Fatalf("non-promoted preview media owner=%q purpose=%q err=%v", assetOwner, assetPurpose, err)
 	}
 
-	otherDevice, err := LoginMobileUser(ctx, database, config, credentials, nil, DeviceInfo{Name: "iPad", Platform: "iPadOS"})
+	otherDevice, err := LoginIdentityUser(ctx, database, config, credentials, nil, DeviceInfo{Name: "iPad", Platform: "iPadOS"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -304,7 +304,7 @@ func TestGuestPreviewPromotionReservesAccountQuota(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	account, err := RegisterMobileUser(ctx, database, config, credentials, nil, DeviceInfo{Name: "Account", Platform: "ios"})
+	account, err := RegisterIdentityUser(ctx, database, config, credentials, nil, DeviceInfo{Name: "Account", Platform: "ios"})
 	if err != nil {
 		t.Fatalf("register account: %v", err)
 	}
@@ -352,7 +352,7 @@ func TestGuestPreviewPromotionReservesAccountQuota(t *testing.T) {
 		t.Fatalf("insert preview: %v", err)
 	}
 
-	loggedIn, err := LoginMobileUser(ctx, database, config, credentials, &guest.Identity, DeviceInfo{Name: "Quota login", Platform: "android"})
+	loggedIn, err := LoginIdentityUser(ctx, database, config, credentials, &guest.Identity, DeviceInfo{Name: "Quota login", Platform: "android"})
 	if err != nil {
 		t.Fatalf("login with quota-bound preview: %v", err)
 	}
