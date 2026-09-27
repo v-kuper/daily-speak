@@ -10,9 +10,7 @@ import (
 	"daily-speaking-practice/backend/internal/domain"
 	"daily-speaking-practice/backend/internal/logging"
 	"daily-speaking-practice/backend/internal/profile"
-	"daily-speaking-practice/backend/internal/quota"
 	"daily-speaking-practice/backend/internal/subscription"
-	"github.com/jackc/pgx/v5"
 )
 
 func (s *Server) handleUserOllamaModel(w http.ResponseWriter, r *http.Request) {
@@ -31,7 +29,7 @@ func (s *Server) handleGetEnglishLevel(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	level, err := profile.GetEnglishLevel(r.Context(), s.db, user.ID)
+	level, err := s.profileService.EnglishLevel(r.Context(), user.ID)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to load English level."})
 		return
@@ -48,9 +46,9 @@ func (s *Server) handlePutEnglishLevel(w http.ResponseWriter, r *http.Request) {
 		Level string `json:"level"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&payload)
-	level, err := profile.SaveEnglishLevel(r.Context(), s.db, user.ID, payload.Level)
+	level, err := s.profileService.SaveEnglishLevel(r.Context(), user.ID, payload.Level)
 	if err != nil {
-		if err.Error() == "English level is invalid." {
+		if errors.Is(err, profile.ErrInvalidEnglishLevel) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "English level is invalid."})
 			return
 		}
@@ -69,21 +67,10 @@ func (s *Server) handleUserInterests(w http.ResponseWriter, r *http.Request) {
 		InterestIDs []string `json:"interestIds"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&payload)
-	interestIDs := domain.NormalizeInterests(payload.InterestIDs, 10)
-	if _, err := s.db.Exec(r.Context(), `DELETE FROM user_interests WHERE user_id = $1`, user.ID); err != nil {
+	interestIDs, err := s.profileService.ReplaceInterests(r.Context(), user.ID, payload.InterestIDs)
+	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to save interests."})
 		return
-	}
-	if len(interestIDs) > 0 {
-		_, err := s.db.Exec(r.Context(), `
-			INSERT INTO user_interests (user_id, interest_id)
-			SELECT $1, interest_id
-			FROM UNNEST($2::text[]) AS t(interest_id)
-			ON CONFLICT DO NOTHING`, user.ID, interestIDs)
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to save interests."})
-			return
-		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"interestIds": interestIDs})
 }
@@ -93,17 +80,12 @@ func (s *Server) handleGetSubscription(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	state, err := subscription.GetState(r.Context(), s.db, user.ID)
+	overview, err := s.subscriptionService.Get(r.Context(), user.ID)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to load subscription."})
 		return
 	}
-	q, err := quota.GetRecordingQuota(r.Context(), s.db, user.ID, &state.IsSubscriber)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to load subscription."})
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"subscription": state, "quota": q})
+	writeSubscriptionOverview(w, overview)
 }
 
 func (s *Server) handleActivateSubscription(w http.ResponseWriter, r *http.Request) {
@@ -111,22 +93,12 @@ func (s *Server) handleActivateSubscription(w http.ResponseWriter, r *http.Reque
 	if !ok {
 		return
 	}
-	_, err := s.db.Exec(r.Context(), `
-		UPDATE users
-		SET
-		  is_subscriber = TRUE,
-		  subscription_cancelled = FALSE,
-		  subscription_expires_at = CASE
-		    WHEN subscription_expires_at IS NOT NULL AND subscription_expires_at > NOW()
-		      THEN subscription_expires_at + INTERVAL '1 month'
-		    ELSE NOW() + INTERVAL '1 month'
-		  END
-		WHERE id = $1`, user.ID)
+	overview, err := s.subscriptionService.Activate(r.Context(), user.ID)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to activate subscription."})
 		return
 	}
-	s.handleGetSubscription(w, r)
+	writeSubscriptionOverview(w, overview)
 }
 
 func (s *Server) handleCancelSubscription(w http.ResponseWriter, r *http.Request) {
@@ -134,23 +106,16 @@ func (s *Server) handleCancelSubscription(w http.ResponseWriter, r *http.Request
 	if !ok {
 		return
 	}
-	tag, err := s.db.Exec(r.Context(), `
-		UPDATE users
-		SET
-		  subscription_cancelled = TRUE,
-		  subscription_expires_at = COALESCE(subscription_expires_at, NOW() + INTERVAL '1 month')
-		WHERE id = $1
-		  AND is_subscriber = TRUE
-		  AND (subscription_expires_at IS NULL OR subscription_expires_at > NOW())`, user.ID)
+	overview, err := s.subscriptionService.Cancel(r.Context(), user.ID)
 	if err != nil {
+		if errors.Is(err, subscription.ErrNoActiveSubscription) {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "No active subscription to cancel."})
+			return
+		}
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to cancel subscription."})
 		return
 	}
-	if tag.RowsAffected() == 0 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "No active subscription to cancel."})
-		return
-	}
-	s.handleGetSubscription(w, r)
+	writeSubscriptionOverview(w, overview)
 }
 
 func (s *Server) handleUserData(w http.ResponseWriter, r *http.Request) {
@@ -161,26 +126,11 @@ func (s *Server) handleUserData(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	interestRows, err := s.db.Query(r.Context(), `
-		SELECT interest_id
-		FROM user_interests
-		WHERE user_id = $1
-		ORDER BY created_at ASC`, user.ID)
+	interestIDs, err := s.profileService.Interests(r.Context(), user.ID)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to load user data."})
 		return
 	}
-	defer interestRows.Close()
-	interestIDs := []string{}
-	for interestRows.Next() {
-		var interestID string
-		if err := interestRows.Scan(&interestID); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to load user data."})
-			return
-		}
-		interestIDs = append(interestIDs, interestID)
-	}
-
 	recordingRows, err := s.db.Query(r.Context(), `
 		SELECT
 		  id, topic, duration, timestamp, transcript, corrected_transcript, suggestions,
@@ -206,12 +156,7 @@ func (s *Server) handleUserData(w http.ResponseWriter, r *http.Request) {
 		recordings = append(recordings, item.recording)
 	}
 
-	state, err := subscription.GetState(r.Context(), s.db, user.ID)
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to load user data."})
-		return
-	}
-	q, err := quota.GetRecordingQuota(r.Context(), s.db, user.ID, &state.IsSubscriber)
+	overview, err := s.subscriptionService.Get(r.Context(), user.ID)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to load user data."})
 		return
@@ -227,9 +172,34 @@ func (s *Server) handleUserData(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"interestIds":  interestIDs,
 		"recordings":   recordings,
-		"quota":        q,
-		"subscription": state,
+		"quota":        overview.Quota,
+		"subscription": subscriptionResponseFrom(overview.State),
 		"englishLevel": user.EnglishLevel,
+	})
+}
+
+type subscriptionResponse struct {
+	IsSubscriber          bool    `json:"isSubscriber"`
+	SubscriptionExpiresAt *string `json:"subscriptionExpiresAt"`
+	SubscriptionCancelled bool    `json:"subscriptionCancelled"`
+}
+
+func subscriptionResponseFrom(state subscription.State) subscriptionResponse {
+	var expiresAt *string
+	if state.ExpiresAt != nil {
+		value := state.ExpiresAt.UTC().Format(time.RFC3339Nano)
+		expiresAt = &value
+	}
+	return subscriptionResponse{
+		IsSubscriber: state.IsSubscriber, SubscriptionExpiresAt: expiresAt,
+		SubscriptionCancelled: state.Cancelled,
+	}
+}
+
+func writeSubscriptionOverview(w http.ResponseWriter, overview subscription.Overview) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"subscription": subscriptionResponseFrom(overview.State),
+		"quota":        overview.Quota,
 	})
 }
 

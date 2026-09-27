@@ -20,10 +20,12 @@ import (
 	"daily-speaking-practice/backend/internal/operations"
 	"daily-speaking-practice/backend/internal/practice"
 	practiceollama "daily-speaking-practice/backend/internal/practice/ollamaadapter"
+	"daily-speaking-practice/backend/internal/profile"
 	"daily-speaking-practice/backend/internal/recording"
 	recordingollama "daily-speaking-practice/backend/internal/recording/ollamaadapter"
 	"daily-speaking-practice/backend/internal/shadowing"
 	"daily-speaking-practice/backend/internal/storage"
+	"daily-speaking-practice/backend/internal/subscription"
 	"daily-speaking-practice/backend/internal/transcription"
 	"daily-speaking-practice/backend/internal/tts"
 	"daily-speaking-practice/backend/internal/workqueue"
@@ -58,6 +60,8 @@ type Server struct {
 	synthesizer              tts.Synthesizer
 	aiClient                 ai.ChatClient
 	practiceGenerator        practice.Generator
+	profileService           *profile.Service
+	subscriptionService      *subscription.Service
 	recordingAnalyzer        recording.Analyzer
 	recordingRewriter        recording.Rewriter
 	recordingPreviewAnalyzer recording.PreviewAnalyzer
@@ -174,6 +178,8 @@ func NewServer(config Config) *Server {
 		synthesizer:              synthesizer,
 		aiClient:                 aiClient,
 		practiceGenerator:        practiceGenerator,
+		profileService:           profile.NewService(profile.NewSQLRepository(config.DB)),
+		subscriptionService:      subscription.NewService(subscription.NewSQLRepository(config.DB)),
 		recordingAnalyzer:        recordingAnalyzer,
 		recordingRewriter:        recordingRewriter,
 		recordingPreviewAnalyzer: recordingPreviewAnalyzer,

@@ -276,3 +276,18 @@ test("mobile identity exposes an application service to HTTP transport", () => {
   assert.doesNotMatch(transport, /s\.db/);
   assert.doesNotMatch(transport, /auth\.(CreateAnonymousIdentity|RegisterMobileUser|LoginMobileUser|RotateRefreshToken|AuthenticateAccessToken)/);
 });
+
+test("profile and subscription rules stay behind application services", () => {
+  const transport = readFileSync("backend/internal/httpapi/user_handlers.go", "utf8");
+  const profileService = readFileSync("backend/internal/profile/service.go", "utf8");
+  const profileRepository = readFileSync("backend/internal/profile/repository.go", "utf8");
+  const subscriptionService = readFileSync("backend/internal/subscription/service.go", "utf8");
+  const subscriptionRepository = readFileSync("backend/internal/subscription/repository.go", "utf8");
+
+  assert.match(transport, /profileService\.(EnglishLevel|SaveEnglishLevel|ReplaceInterests)/);
+  assert.match(transport, /subscriptionService\.(Get|Activate|Cancel)/);
+  assert.doesNotMatch(transport, /DELETE FROM user_interests|INSERT INTO user_interests|subscription_cancelled =|is_subscriber = TRUE/);
+  assert.doesNotMatch(profileService + subscriptionService, /SELECT |INSERT INTO|UPDATE |DELETE FROM|net\/http|pgx/);
+  assert.match(profileRepository, /user_interests|english_level/);
+  assert.match(subscriptionRepository, /subscription_cancelled|subscription_expires_at/);
+});
