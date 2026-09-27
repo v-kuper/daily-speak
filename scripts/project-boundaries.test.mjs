@@ -224,6 +224,19 @@ test("mobile recording creation keeps transport, policy, and SQL separate", () =
   assert.doesNotMatch(repository, /http\.Status|writeJSON|writeV1Error/);
 });
 
+test("recording deletion keeps cleanup policy outside HTTP and SQL adapters", () => {
+  const transport = readFileSync("backend/internal/httpapi/recording_deletion.go", "utf8");
+  const service = readFileSync("backend/internal/recording/delete.go", "utf8");
+  const repository = readFileSync("backend/internal/recording/delete_repository.go", "utf8");
+
+  assert.match(transport, /recordingDeleter\.Delete/);
+  assert.doesNotMatch(transport, /SELECT |INSERT INTO|UPDATE |DELETE FROM|pgx|workqueue/);
+  assert.match(service, /DeletionUnitOfWork|uniqueLegacyURLs|QueueAsset/);
+  assert.doesNotMatch(service, /SELECT |INSERT INTO|UPDATE |DELETE FROM|pgx|workqueue|net\/http/);
+  assert.match(repository, /pending_file_deletions|media_assets|processing_jobs|workqueue\.Enqueue/);
+  assert.doesNotMatch(repository, /http\.Status|writeJSON/);
+});
+
 test("guest preview separates transport, processing policy, and SQL storage", () => {
   const model = readFileSync("backend/internal/guestpreview/model.go", "utf8");
   const processor = readFileSync("backend/internal/guestpreview/processor.go", "utf8");
