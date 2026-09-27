@@ -10,6 +10,7 @@ import (
 	"daily-speaking-practice/backend/internal/domain"
 	"daily-speaking-practice/backend/internal/logging"
 	"daily-speaking-practice/backend/internal/profile"
+	"daily-speaking-practice/backend/internal/recording"
 	"daily-speaking-practice/backend/internal/subscription"
 )
 
@@ -131,29 +132,14 @@ func (s *Server) handleUserData(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to load user data."})
 		return
 	}
-	recordingRows, err := s.db.Query(r.Context(), `
-		SELECT
-		  id, topic, duration, timestamp, transcript, corrected_transcript, suggestions,
-		  practice_type, audio_data_url, photo_data_url, photo_object,
-		  status, processing_stage, processing_error,
-		  shadowing_status, shadowing_audio_url, shadowing_error, shadowing_updated_at,
-		  audio_asset_id, photo_asset_id, shadowing_asset_id
-		FROM recordings
-		WHERE user_id = $1
-		ORDER BY timestamp DESC`, user.ID)
+	recordingRecords, err := s.recordingReader.List(r.Context(), user.ID, recording.ListOptions{})
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to load user data."})
 		return
 	}
-	defer recordingRows.Close()
-	recordings := []recordingResponse{}
-	for recordingRows.Next() {
-		item, err := scanRecordingPageItem(recordingRows)
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to load user data."})
-			return
-		}
-		recordings = append(recordings, item.recording)
+	recordings := make([]recordingResponse, 0, len(recordingRecords))
+	for _, record := range recordingRecords {
+		recordings = append(recordings, recordingResponseFromRecord(record))
 	}
 
 	overview, err := s.subscriptionService.Get(r.Context(), user.ID)

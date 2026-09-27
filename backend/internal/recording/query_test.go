@@ -7,13 +7,23 @@ import (
 )
 
 type recordRepositoryStub struct {
-	record Record
-	found  bool
-	err    error
+	record  Record
+	records []Record
+	found   bool
+	owned   bool
+	err     error
 }
 
 func (repository *recordRepositoryStub) Find(context.Context, string, string) (Record, bool, error) {
 	return repository.record, repository.found, repository.err
+}
+
+func (repository *recordRepositoryStub) List(context.Context, string, ListOptions) ([]Record, error) {
+	return repository.records, repository.err
+}
+
+func (repository *recordRepositoryStub) OwnsLegacyShadowing(context.Context, string, string) (bool, error) {
+	return repository.owned, repository.err
 }
 
 func TestReaderReturnsOwnedRecord(t *testing.T) {

@@ -200,8 +200,6 @@ func operationalRoute(path string) string {
 		return "/api/v1/recordings/{id}"
 	case strings.HasPrefix(path, "/api/recordings/"):
 		return "/api/recordings/{id}"
-	case strings.HasPrefix(path, "/api/recording-sessions/"):
-		return "/api/recording-sessions/{id}"
 	case strings.HasPrefix(path, "/api/feed/posts/"):
 		return "/api/feed/posts/{id}"
 	case strings.HasPrefix(path, "/api/feed/replies/"):
@@ -223,8 +221,7 @@ var operationalStaticRoutes = map[string]struct{}{
 	"/api/v1/guest/previews": {}, "/api/v1/recordings": {}, "/api/v1/media/uploads": {},
 	"/api/daily-questions": {}, "/api/topic-guidance": {}, "/api/study-words": {},
 	"/api/user/data": {}, "/api/user/interests": {}, "/api/user/ollama-model": {},
-	"/api/user/subscription": {}, "/api/user/english-level": {}, "/api/user/recordings": {},
-	"/api/recording-sessions": {}, "/api/feed/posts": {},
+	"/api/user/subscription": {}, "/api/user/english-level": {}, "/api/feed/posts": {},
 }
 
 func isOperationalStaticRoute(path string) bool {

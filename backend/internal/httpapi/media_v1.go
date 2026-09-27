@@ -96,20 +96,9 @@ func (s *Server) handleCreateMediaUploadV1(w http.ResponseWriter, r *http.Reques
 		writeV1Error(w, r, http.StatusBadRequest, "invalid_checksum", "checksum.algorithm must be sha256")
 		return
 	}
-	purpose := strings.ToLower(strings.TrimSpace(payload.Purpose))
-	if identity.Kind == "guest" {
-		if purpose != media.PurposeRecordingAudio {
-			writeV1Error(w, r, http.StatusForbidden, "guest_media_restricted", "Guests may upload one preview recording only")
-			return
-		}
-		purpose = media.PurposeGuestPreviewAudio
-	} else if purpose == media.PurposeGuestPreviewAudio {
-		writeV1Error(w, r, http.StatusBadRequest, "invalid_request", "Media purpose is invalid")
-		return
-	}
 	resource, err := s.mediaService.CreateUpload(r.Context(), media.CreateUploadInput{
-		OwnerPrincipalID: identity.PrincipalID, SessionID: identity.SessionID,
-		IdempotencyKey: r.Header.Get("Idempotency-Key"), Purpose: purpose,
+		OwnerPrincipalID: identity.PrincipalID, OwnerKind: identity.Kind, SessionID: identity.SessionID,
+		IdempotencyKey: r.Header.Get("Idempotency-Key"), Purpose: payload.Purpose,
 		ContentType: payload.ContentType, SizeBytes: payload.SizeBytes,
 		ChecksumSHA256: payload.Checksum.Value,
 	})

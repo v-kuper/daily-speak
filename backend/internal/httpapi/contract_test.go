@@ -142,15 +142,10 @@ func TestUnauthorizedAPIContractWithoutBearer(t *testing.T) {
 		body   string
 	}{
 		{http.MethodGet, "/api/user/data", ""},
-		{http.MethodPost, "/api/user/recordings", `{"recording":{}}`},
 		{http.MethodGet, "/api/recordings/demo-recording", ""},
 		{http.MethodDelete, "/api/recordings/demo-recording", ""},
 		{http.MethodPost, "/api/recordings/demo-recording/retry", ""},
 		{http.MethodPost, "/api/recordings/demo-recording/shadowing", ""},
-		{http.MethodPost, "/api/recording-sessions", `{"topic":"Free talk"}`},
-		{http.MethodPost, "/api/recording-sessions/demo-session/chunks", ""},
-		{http.MethodPost, "/api/recording-sessions/demo-session/audio", ""},
-		{http.MethodPost, "/api/recording-sessions/demo-session/finish", "{}"},
 		{http.MethodGet, "/api/feed/posts", ""},
 		{http.MethodPost, "/api/feed/posts", `{"recordingId":"demo"}`},
 		{http.MethodGet, "/api/feed/posts/demo-post", ""},

@@ -352,11 +352,21 @@ func (service *Service) OpenSignedContent(ctx context.Context, assetID string) (
 
 func normalizeCreateInput(input CreateUploadInput) CreateUploadInput {
 	input.OwnerPrincipalID = strings.TrimSpace(input.OwnerPrincipalID)
+	input.OwnerKind = strings.ToLower(strings.TrimSpace(input.OwnerKind))
 	input.SessionID = strings.TrimSpace(input.SessionID)
 	input.IdempotencyKey = strings.TrimSpace(input.IdempotencyKey)
 	input.Purpose = strings.ToLower(strings.TrimSpace(input.Purpose))
 	input.ContentType = strings.ToLower(strings.TrimSpace(strings.Split(input.ContentType, ";")[0]))
 	input.ChecksumSHA256 = strings.ToLower(strings.TrimSpace(input.ChecksumSHA256))
+	if input.OwnerKind == "guest" {
+		if input.Purpose == PurposeRecordingAudio {
+			input.Purpose = PurposeGuestPreviewAudio
+		} else {
+			input.Purpose = ""
+		}
+	} else if input.OwnerKind != "user" || input.Purpose == PurposeGuestPreviewAudio {
+		input.Purpose = ""
+	}
 	return input
 }
 

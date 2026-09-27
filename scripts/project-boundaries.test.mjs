@@ -256,24 +256,9 @@ test("recording query and retry keep persistence and queue mechanics outside HTT
   assert.doesNotMatch(queryRepository + retryRepository, /net\/http|internal\/httpapi|writeJSON/);
 });
 
-test("recording upload sessions separate transport, application policy, SQL, and files", () => {
-  const transport = readFileSync("backend/internal/httpapi/recording_sessions_handlers.go", "utf8");
-  const multipart = readFileSync("backend/internal/httpapi/recording_sessions_multipart.go", "utf8");
-  const service = readFileSync("backend/internal/recordingsession/service.go", "utf8");
-  const repository = readFileSync("backend/internal/recordingsession/repository.go", "utf8");
-  const store = readFileSync("backend/internal/storage/recording_sessions.go", "utf8");
-
-  assert.match(transport, /recordingSessionService\.(Start|SaveChunk|SaveFinal|Finalize)/);
-  assert.doesNotMatch(transport, /SELECT |INSERT INTO|UPDATE |DELETE FROM|pgx|workqueue|os\.WriteFile|os\.RemoveAll/);
-  assert.match(multipart, /ParseMultipartForm|FormFile/);
-  assert.doesNotMatch(multipart, /os\.WriteFile|os\.RemoveAll|MkdirAll/);
-  assert.match(service, /type Files interface|type Repository interface|ExecuteFinalize/);
-  assert.doesNotMatch(service, /net\/http|internal\/httpapi|SELECT |INSERT INTO|UPDATE |DELETE FROM|pgx|workqueue/);
-  assert.match(repository, /recording_upload_sessions|INSERT INTO recordings|workqueue\.Enqueue/);
-  assert.doesNotMatch(repository, /net\/http|internal\/httpapi|writeJSON/);
-  assert.match(store, /func \(store \*LocalRecordingSessions\) Publish/);
-  assert.doesNotMatch(store, /net\/http|internal\/httpapi/);
-  assert.equal(existsSync("backend/internal/httpapi/recording_sessions_storage.go"), false);
+test("legacy recording upload sessions stay retired", () => {
+  assert.equal(existsSync("backend/internal/storage/recording_sessions.go"), false);
+  assert.equal(existsSync("backend/internal/httpapi/recording_sessions_handlers.go"), false);
 });
 
 test("guest preview separates transport, processing policy, and SQL storage", () => {

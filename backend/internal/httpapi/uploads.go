@@ -56,12 +56,8 @@ func (s *Server) handleShadowingUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var owned bool
-	if err := s.db.QueryRow(r.Context(), `
-		SELECT EXISTS (
-			SELECT 1 FROM recordings
-			WHERE user_id = $1 AND shadowing_audio_url = $2
-		)`, user.ID, *publicURL).Scan(&owned); err != nil {
+	owned, err := s.recordingReader.OwnsLegacyShadowing(r.Context(), user.ID, *publicURL)
+	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to load pronunciation audio."})
 		return
 	}

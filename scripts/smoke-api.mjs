@@ -47,10 +47,10 @@ const expectedChecks = [
     expectedStatus: 401
   },
   {
-    name: "user/recordings unauthorized",
+    name: "v1 recordings unauthorized",
     method: "POST",
-    path: "/api/user/recordings",
-    body: { recording: {} },
+    path: "/api/v1/recordings",
+    body: {},
     expectedStatus: 401
   },
   {

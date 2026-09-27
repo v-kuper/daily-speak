@@ -28,6 +28,7 @@ import {
   logoutBrowserIdentity,
   restoreBrowserIdentity,
 } from "../../lib/identity";
+import { dataURLToBlob, MediaUploadError, uploadMedia } from "../../lib/mediaUpload";
 
 export type SpeakMode = "idle" | "readyToRecord" | "recording" | "recorded";
 export type AuthStatus = "idle" | "loading";
@@ -189,7 +190,6 @@ export type AppState = {
   studyEnglishLevel: EnglishLevel;
   recordingPracticeType: PracticeType;
   pendingRecordingAudioDataUrl: string | null;
-  recordingUploadSessionId: string | null;
   recordingInputError: string | null;
   pendingPhotoDataUrl: string | null;
   pendingPhotoObjectDraft: string;
@@ -228,7 +228,6 @@ export type AppState = {
 
 export type RecordingSaveDraft = {
   localRecordingId?: string;
-  recordingUploadSessionId: string | null;
   topic: string;
   duration: number;
   timestamp: string;
@@ -341,7 +340,7 @@ type SaveInterestsResponse = {
 type SaveRecordingResponse = {
   recording?: unknown;
   quota?: unknown;
-  error?: string;
+  error?: string | { message?: unknown };
 };
 
 type DeleteRecordingResponse = {
@@ -1116,7 +1115,6 @@ export const saveRecording = createAsyncThunk<
       selectedTopic,
       recordingPracticeType,
       pendingRecordingAudioDataUrl,
-      recordingUploadSessionId,
       pendingPhotoDataUrl,
       pendingPhotoObjectDraft,
       recordingDuration,
@@ -1133,9 +1131,8 @@ export const saveRecording = createAsyncThunk<
       return rejectWithValue("Unauthorized");
     }
 
-    const uploadSessionId = draft ? draft.recordingUploadSessionId?.trim() || null : recordingUploadSessionId;
     const audioDataUrl = normalizeAudioDataUrl(draft ? draft.audioDataUrl : pendingRecordingAudioDataUrl);
-    if (!uploadSessionId && !audioDataUrl) {
+    if (!audioDataUrl) {
       return rejectWithValue("Record your voice first.");
     }
 
@@ -1183,24 +1180,35 @@ export const saveRecording = createAsyncThunk<
     };
 
     try {
-      const response = uploadSessionId
-        ? await apiFetch(`/api/recording-sessions/${encodeURIComponent(uploadSessionId)}/finish`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-              duration: normalizedDuration,
-              timestamp: recordingDraft.timestamp
-            })
+      const operationID = draft?.localRecordingId?.trim() || recordingDraft.timestamp;
+      const audioAssetId = await uploadMedia({
+        blob: dataURLToBlob(audioDataUrl),
+        purpose: "recording_audio",
+        idempotencyKey: `web-recording:${operationID}:audio`,
+      });
+      const photoAssetId = photoDataUrl
+        ? await uploadMedia({
+            blob: dataURLToBlob(photoDataUrl),
+            purpose: "recording_photo",
+            idempotencyKey: `web-recording:${operationID}:photo`,
           })
-        : await apiFetch("/api/user/recordings", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json"
-            },
-            body: JSON.stringify({ recording: recordingDraft })
-          });
+        : null;
+      const response = await apiFetch("/api/v1/recordings", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": `web-recording:${operationID}`,
+        },
+        body: JSON.stringify({
+          topic: recordingDraft.topic,
+          duration: recordingDraft.duration,
+          timestamp: recordingDraft.timestamp,
+          practiceType: recordingDraft.practiceType,
+          audioAssetId,
+          photoAssetId,
+          photoObject: recordingDraft.photoObject,
+        }),
+      });
       if (response.status === 401) {
         return rejectWithValue("Unauthorized");
       }
@@ -1208,7 +1216,14 @@ export const saveRecording = createAsyncThunk<
       const payload = (await readApiJSON(response)) as SaveRecordingResponse | null;
 
       if (!response.ok) {
-        return rejectWithValue(payload?.error ?? "Failed to save recording.");
+        const error = payload?.error;
+        return rejectWithValue(
+          typeof error === "string"
+            ? error
+            : typeof error?.message === "string"
+              ? error.message
+              : "Failed to save recording.",
+        );
       }
 
       const recording = parseRecording(payload?.recording);
@@ -1218,8 +1233,13 @@ export const saveRecording = createAsyncThunk<
       const quota = parseRecordingQuota(payload?.quota);
 
       return { recording, quota };
-    } catch {
-      return rejectWithValue("Cannot connect to user data service.");
+    } catch (error) {
+      if (error instanceof MediaUploadError && error.code === "unauthorized") {
+        return rejectWithValue("Unauthorized");
+      }
+      return rejectWithValue(
+        error instanceof MediaUploadError ? error.message : "Cannot connect to user data service.",
+      );
     }
   }
 );
@@ -1515,7 +1535,6 @@ const initialState: AppState = {
   studyEnglishLevel: DEFAULT_ENGLISH_LEVEL,
   recordingPracticeType: "topic",
   pendingRecordingAudioDataUrl: null,
-  recordingUploadSessionId: null,
   recordingInputError: null,
   pendingPhotoDataUrl: null,
   pendingPhotoObjectDraft: "",
@@ -1662,7 +1681,6 @@ const applySavedRecording = (state: AppState, recording: Recording, localRecordi
   resetShadowingRequest(state);
   state.recordingPracticeType = "topic";
   state.pendingRecordingAudioDataUrl = null;
-  state.recordingUploadSessionId = null;
   state.recordingInputError = null;
   state.pendingPhotoDataUrl = null;
   state.pendingPhotoObjectDraft = "";
@@ -1742,7 +1760,6 @@ const completeAuthSuccess = (
   resetShadowingRequest(state);
   if (!state.pendingSaveAfterAuth && !state.pendingRecordingAudioDataUrl && state.speakState !== "recording") {
     state.pendingRecordingAudioDataUrl = null;
-    state.recordingUploadSessionId = null;
     state.recordingInputError = null;
     state.pendingPhotoError = null;
   }
@@ -1783,7 +1800,6 @@ const clearAuthenticatedState = (state: AppState): void => {
   state.questionsError = null;
   state.recordingPracticeType = "topic";
   state.pendingRecordingAudioDataUrl = null;
-  state.recordingUploadSessionId = null;
   state.recordingInputError = null;
   state.pendingPhotoDataUrl = null;
   state.pendingPhotoObjectDraft = "";
@@ -1895,10 +1911,6 @@ const appSlice = createSlice({
         state.recordingInputError = null;
       }
     },
-    setRecordingUploadSessionId: (state, action: PayloadAction<string | null>) => {
-      const value = typeof action.payload === "string" ? action.payload.trim() : "";
-      state.recordingUploadSessionId = value || null;
-    },
     clearRecordingDeleteError: (state) => {
       state.recordingDeleteError = null;
     },
@@ -1955,7 +1967,6 @@ const appSlice = createSlice({
       state.recordingSaveError = null;
       state.recordingPracticeType = "topic";
       state.pendingRecordingAudioDataUrl = null;
-      state.recordingUploadSessionId = null;
       state.recordingInputError = null;
       state.pendingPhotoDataUrl = null;
       state.pendingPhotoObjectDraft = "";
@@ -1991,7 +2002,6 @@ const appSlice = createSlice({
         state.speakState = "idle";
         state.recordingDuration = 0;
         state.pendingRecordingAudioDataUrl = null;
-        state.recordingUploadSessionId = null;
         state.recordingInputError = null;
         state.showQuestions = false;
         state.showWords = false;
@@ -2023,7 +2033,6 @@ const appSlice = createSlice({
       state.customTopicDraft = "";
       state.recordingSaveError = null;
       state.pendingRecordingAudioDataUrl = null;
-      state.recordingUploadSessionId = null;
       state.recordingInputError = null;
       state.pendingPhotoError = null;
       clearTopicGuidanceState(state);
@@ -2036,7 +2045,6 @@ const appSlice = createSlice({
       state.recordingDuration = 0;
       state.recordingSaveError = null;
       state.pendingRecordingAudioDataUrl = null;
-      state.recordingUploadSessionId = null;
       state.recordingInputError = null;
       state.recordingPracticeType = "free_talk";
       state.pendingPhotoError = null;
@@ -2051,7 +2059,6 @@ const appSlice = createSlice({
       state.customTopicDraft = "";
       state.recordingSaveError = null;
       state.pendingRecordingAudioDataUrl = null;
-      state.recordingUploadSessionId = null;
       state.recordingInputError = null;
       state.recordingPracticeType = "topic";
       state.pendingPhotoError = null;
@@ -2070,7 +2077,6 @@ const appSlice = createSlice({
       state.recordingDuration = 0;
       state.recordingSaveError = null;
       state.pendingRecordingAudioDataUrl = null;
-      state.recordingUploadSessionId = null;
       state.recordingInputError = null;
       state.pendingPhotoError = null;
     },
@@ -2101,7 +2107,6 @@ const appSlice = createSlice({
       state.speakState = state.selectedTopic ? "readyToRecord" : "idle";
       state.recordingSaveError = null;
       state.pendingRecordingAudioDataUrl = null;
-      state.recordingUploadSessionId = null;
       state.recordingInputError = null;
       state.pendingPhotoError = null;
     },
@@ -2115,7 +2120,6 @@ const appSlice = createSlice({
       state.customTopicDraft = "";
       state.recordingSaveError = null;
       state.pendingRecordingAudioDataUrl = null;
-      state.recordingUploadSessionId = null;
       state.recordingInputError = null;
       state.pendingPhotoError = null;
       state.recordingPracticeType = "topic";
@@ -2129,7 +2133,6 @@ const appSlice = createSlice({
       state.showAddTopicInput = false;
       state.customTopicDraft = "";
       state.pendingRecordingAudioDataUrl = null;
-      state.recordingUploadSessionId = null;
       state.recordingInputError = action.payload;
       state.recordingSaveError = null;
       state.pendingPhotoDataUrl = null;
@@ -2167,7 +2170,6 @@ const appSlice = createSlice({
       state.customTopicDraft = "";
       state.recordingPracticeType = "topic";
       state.pendingRecordingAudioDataUrl = null;
-      state.recordingUploadSessionId = null;
       state.recordingInputError = null;
       state.pendingPhotoError = null;
       if (state.topicGuidanceTopic !== normalized) {
@@ -2425,7 +2427,7 @@ const appSlice = createSlice({
           state.pendingSaveAfterAuth = true;
           if (action.meta.arg) {
             // Keep a failed background save separate from any newer speaking session.
-            state.pendingAuthSaveDraft = { ...action.meta.arg, recordingUploadSessionId: null };
+            state.pendingAuthSaveDraft = action.meta.arg;
           }
           state.recordingSaveError = "Your session expired. Sign in again to save your recording.";
           expireSessionKeepingDraft(state);
@@ -2679,7 +2681,6 @@ export const {
   setPhotoUploadError,
   setRecordingInputError,
   setRecordingAudioDataUrl,
-  setRecordingUploadSessionId,
   clearRecordingDeleteError,
   showBackgroundRecordingSave,
   finishFailedRecordingSave,

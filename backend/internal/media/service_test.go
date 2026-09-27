@@ -80,6 +80,28 @@ func TestGuestPreviewUploadUsesTighterAudioLimit(t *testing.T) {
 	}
 }
 
+func TestCreateUploadPolicyMapsOnlyGuestAudioToPreviewPurpose(t *testing.T) {
+	guestAudio := normalizeCreateInput(CreateUploadInput{OwnerKind: " guest ", Purpose: PurposeRecordingAudio})
+	if guestAudio.Purpose != PurposeGuestPreviewAudio {
+		t.Fatalf("guest audio purpose = %q", guestAudio.Purpose)
+	}
+
+	guestPhoto := normalizeCreateInput(CreateUploadInput{OwnerKind: "guest", Purpose: PurposeRecordingPhoto})
+	if guestPhoto.Purpose != "" {
+		t.Fatalf("guest photo purpose = %q, want rejected purpose", guestPhoto.Purpose)
+	}
+
+	userAudio := normalizeCreateInput(CreateUploadInput{OwnerKind: "user", Purpose: PurposeRecordingAudio})
+	if userAudio.Purpose != PurposeRecordingAudio {
+		t.Fatalf("user audio purpose = %q", userAudio.Purpose)
+	}
+
+	internalPurpose := normalizeCreateInput(CreateUploadInput{OwnerKind: "user", Purpose: PurposeGuestPreviewAudio})
+	if internalPurpose.Purpose != "" {
+		t.Fatalf("public internal purpose = %q, want rejected purpose", internalPurpose.Purpose)
+	}
+}
+
 func TestCompletingUploadFencesConcurrentAbort(t *testing.T) {
 	now := time.Date(2026, 9, 26, 20, 0, 0, 0, time.UTC)
 	resource := testUploadResource(now)

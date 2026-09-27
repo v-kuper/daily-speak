@@ -19,7 +19,7 @@ const storeFor = (overrides = {}) => configureStore({
   reducer: { app: app.default }, preloadedState: { app: { ...initial(), ...overrides } },
 });
 const draft = {
-  localRecordingId: "local-123", recordingUploadSessionId: "upload-123", topic: "Travel",
+  localRecordingId: "local-123", topic: "Travel",
   duration: 20, timestamp: "2026-09-21T10:00:00Z", practiceType: "topic",
   audioDataUrl: "data:audio/webm;base64,YWJj", photoDataUrl: null, photoObject: null,
 };
@@ -50,6 +50,10 @@ const deferred = () => {
   return { promise, resolve, reject };
 };
 const response = (body, status = 200) => new Response(JSON.stringify(body), { status });
+const readyMedia = (assetId = "audio-asset") => response({
+  asset: { id: assetId, state: "ready" },
+  upload: { id: `upload-${assetId}`, state: "completed", partSizeBytes: 8388608, partCount: 1 },
+});
 const identityResponse = (promotion) => ({
   principal: { id: "user-principal", type: "user" },
   user: { email: "person@example.test", isSubscriber: false, englishLevel: "B1" },
@@ -81,8 +85,9 @@ for (const mode of ["signIn", "signUp"]) {
       if (url.endsWith(mode === "signIn" ? "/login" : "/register")) {
         return pending.promise;
       }
-      assert.equal(url, "https://api.example.test/api/user/recordings");
-      assert.equal(JSON.parse(init.body).recording.audioDataUrl, draft.audioDataUrl);
+      if (url.endsWith("/api/v1/media/uploads")) return readyMedia();
+      assert.equal(url, "https://api.example.test/api/v1/recordings");
+      assert.equal(JSON.parse(init.body).audioAssetId, "audio-asset");
       return response({ recording: saved });
     });
     const attempt = run(store, router, mode, "/profile");
@@ -90,7 +95,7 @@ for (const mode of ["signIn", "signUp"]) {
     assert.deepEqual(router.visits, []);
     pending.resolve(response(identityResponse()));
     await attempt;
-    assert.equal(requests.length, 2);
+    assert.equal(requests.length, 3);
     assert.deepEqual(router.visits, [["replace", "/history/permanent-123"]]);
     assert.equal(store.getState().app.pendingSaveAfterAuth, false);
     assert.equal(store.getState().app.pendingRecordingAudioDataUrl, null);
@@ -115,9 +120,12 @@ test("rejected post-auth save remains on auth with a visible error and a retryab
   const run = flow("authenticateAndNavigate");
   const store = storeFor(guest), router = routerFor();
   let saveCalls = 0;
-  server(t, async (url) => url.endsWith("/login")
-    ? response(identityResponse())
-    : (++saveCalls, response({ error: "Storage unavailable" }, 503)));
+  server(t, async (url) => {
+    if (url.endsWith("/login")) return response(identityResponse());
+    if (url.endsWith("/api/v1/media/uploads")) return readyMedia();
+    saveCalls++;
+    return response({ error: { code: "storage_unavailable", message: "Storage unavailable" } }, 503);
+  });
   await run(store, router, "signIn", "/profile");
   assert.deepEqual(router.visits, []);
   assert.equal(saveCalls, 1);
@@ -139,21 +147,24 @@ test("guest save retains the recording and cancel clears both auth drafts and re
   assert.deepEqual(router.visits.at(-1), ["replace", "/speak"]);
 });
 
-test("authenticated save immediately opens the local recording, waits for final upload, then replaces the ID", async (t) => {
+test("authenticated save immediately opens the local recording and replaces it after v1 media-backed creation", async (t) => {
   const run = flow("saveAndNavigate"), store = storeFor({ isAuthenticated: true }), router = routerFor();
-  const upload = deferred(), save = deferred();
+  const save = deferred();
   let saves = 0;
   server(t, async (url) => {
-    assert.equal(url, "https://api.example.test/api/recording-sessions/upload-123/finish");
+    if (url.endsWith("/api/v1/media/uploads")) {
+      return response({ asset: { id: "audio-asset", state: "ready" }, upload: { id: "upload-123", state: "completed", partSizeBytes: 8388608, partCount: 1 } });
+    }
+    assert.equal(url, "https://api.example.test/api/v1/recordings");
     saves++;
     return save.promise;
   });
-  const attempt = run(store, router, draft, upload.promise, router.currentPath);
+  const attempt = run(store, router, draft, router.currentPath);
   assert.deepEqual(router.visits, [["push", "/history/local-123"]]);
   assert.equal(store.getState().app.recordings[0].id, "local-123");
-  assert.equal(saves, 0);
-  upload.resolve();
-  await new Promise((resolve) => setImmediate(resolve));
+  for (let index = 0; index < 10 && saves === 0; index += 1) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
   assert.equal(saves, 1);
   assert.equal(router.visits.length, 1);
   save.resolve(response({ recording: saved }));
@@ -162,29 +173,12 @@ test("authenticated save immediately opens the local recording, waits for final 
   assert.deepEqual(store.getState().app.recordings.map(({ id }) => id), ["permanent-123"]);
 });
 
-for (const failure of ["upload", "primary save"]) {
-  test(`${failure} failure falls back to data URL and removes the optimistic recording on success`, async (t) => {
-    const run = flow("saveAndNavigate"), store = storeFor({ isAuthenticated: true }), router = routerFor();
-    const requests = [];
-    server(t, async (url, init) => {
-      requests.push(url);
-      if (url.endsWith("/finish")) return response({ error: "Session expired" }, 500);
-      assert.equal(url, "https://api.example.test/api/user/recordings");
-      assert.equal(JSON.parse(init.body).recording.audioDataUrl, draft.audioDataUrl);
-      return response({ recording: saved });
-    });
-    await run(store, router, draft, failure === "upload" ? Promise.reject(new Error("upload failed")) : null, router.currentPath);
-    assert.equal(requests.length, failure === "upload" ? 1 : 2);
-    assert.deepEqual(router.visits, [["push", "/history/local-123"], ["replace", "/history/permanent-123"]]);
-    assert.deepEqual(store.getState().app.recordings.map(({ id }) => id), ["permanent-123"]);
-    assert.equal(store.getState().app.recordingSaveError, null);
-  });
-}
-
 test("terminal save failure returns to history and retains a visible failed recording", async (t) => {
   const run = flow("saveAndNavigate"), store = storeFor({ isAuthenticated: true }), router = routerFor();
-  server(t, async () => response({ error: "Storage unavailable" }, 503));
-  await run(store, router, draft, null, router.currentPath);
+  server(t, async (url) => url.endsWith("/api/v1/media/uploads")
+    ? readyMedia()
+    : response({ error: { code: "storage_unavailable", message: "Storage unavailable" } }, 503));
+  await run(store, router, draft, router.currentPath);
   assert.deepEqual(router.visits, [["push", "/history/local-123"], ["replace", "/history"]]);
   assert.equal(store.getState().app.recordingSaveError, "Storage unavailable");
   assert.equal(store.getState().app.recordings[0].status, "failed");
@@ -209,9 +203,8 @@ test("a history refresh keeps a pending or failed local recording visible", () =
 test("fallback remains a background save while the fallback response is pending", async (t) => {
   const run = flow("saveAndNavigate"), store = storeFor({ isAuthenticated: true }), router = routerFor();
   const fallback = deferred();
-  server(t, async (url) => url.endsWith("/finish")
-    ? response({ error: "Session unavailable" }, 503) : fallback.promise);
-  const attempt = run(store, router, draft, null, router.currentPath);
+  server(t, async (url) => url.endsWith("/api/v1/media/uploads") ? readyMedia() : fallback.promise);
+  const attempt = run(store, router, draft, router.currentPath);
   await new Promise((resolve) => setImmediate(resolve));
   const duringFallback = store.getState().app;
   // Resolve before asserting to avoid leaving this test's network promise pending on RED.
@@ -288,16 +281,17 @@ const renderDetails = (store, recordingId) => renderToStaticMarkup(createElement
     createElement(load("src/components/DetailsScreen.tsx").default, { recordingId })),
 ));
 
-for (const outcome of ["success", "fallback", "failure"]) {
+for (const outcome of ["success", "failure"]) {
   test(`background ${outcome} after leaving local details preserves the newer recording and location`, async (t) => {
     const store = storeFor({ isAuthenticated: true }), router = routerFor(), primary = deferred();
-    server(t, async (url) => url.endsWith("/finish") ? primary.promise
-      : outcome === "failure" ? response({ error: "Storage unavailable" }, 503) : response({ recording: saved }));
-    const attempt = flow("saveAndNavigate")(store, router, draft, null, router.currentPath);
+    server(t, async (url) => url.endsWith("/api/v1/media/uploads") ? readyMedia() : primary.promise);
+    const attempt = flow("saveAndNavigate")(store, router, draft, router.currentPath);
     router.push("/speak");
     store.dispatch(app.startFreeTalk());
     store.dispatch(app.tickRecording());
-    primary.resolve(outcome === "success" ? response({ recording: saved }) : response({ error: "Session unavailable" }, 503));
+    primary.resolve(outcome === "success"
+      ? response({ recording: saved })
+      : response({ error: { code: "storage_unavailable", message: "Storage unavailable" } }, 503));
     await attempt;
     assert.equal(router.currentPath(), "/speak");
     assert.deepEqual(router.visits, [["push", "/history/local-123"], ["push", "/speak"]]);
@@ -318,9 +312,12 @@ test("post-auth save 401 invalidates the session, preserves guest audio, and all
     if (url.endsWith("/api/v1/auth/refresh")) {
       return response({ error: { code: "invalid_refresh_token", message: "Refresh token is invalid" } }, 401);
     }
+    if (url.endsWith("/api/v1/media/uploads")) return readyMedia();
     saves++;
-    assert.equal(JSON.parse(init.body).recording.audioDataUrl, draft.audioDataUrl);
-    return saves === 1 ? response({ error: "Unauthorized" }, 401) : response({ recording: saved });
+    assert.equal(JSON.parse(init.body).audioAssetId, "audio-asset");
+    return saves === 1
+      ? response({ error: { code: "unauthorized", message: "Unauthorized" } }, 401)
+      : response({ recording: saved });
   });
   await flow("authenticateAndNavigate")(store, router, "signIn", "/speak");
   const expired = store.getState().app;
@@ -344,34 +341,33 @@ test("background save 401 preserves both its retry draft and a newer speaking dr
   const requests = [];
   server(t, async (url, init) => {
     requests.push(url);
-    if (url.endsWith("/finish")) return primary.promise;
     if (url.endsWith("/login")) return response(identityResponse());
     if (url.endsWith("/api/v1/auth/refresh")) {
       return response({ error: { code: "invalid_refresh_token", message: "Refresh token is invalid" } }, 401);
     }
-    assert.equal(JSON.parse(init.body).recording.audioDataUrl, draft.audioDataUrl);
+    if (url.endsWith("/api/v1/media/uploads")) return readyMedia();
+    if (requests.filter((item) => item.endsWith("/api/v1/recordings")).length === 1) return primary.promise;
+    assert.equal(JSON.parse(init.body).audioAssetId, "audio-asset");
     return response({ recording: saved });
   });
-  const attempt = flow("saveAndNavigate")(store, router, draft, null, router.currentPath);
+  const attempt = flow("saveAndNavigate")(store, router, draft, router.currentPath);
   router.push("/speak");
   store.dispatch(app.startFreeTalk());
   store.dispatch(app.tickRecording());
   store.dispatch(app.stopRecording());
   store.dispatch(app.setRecordingAudioDataUrl(secondAudio));
-  primary.resolve(response({ error: "Unauthorized" }, 401));
+  primary.resolve(response({ error: { code: "unauthorized", message: "Unauthorized" } }, 401));
   await attempt;
   const expired = store.getState().app;
   assert.equal(expired.isAuthenticated, false);
-  assert.equal(requests.length, 1);
+  assert.ok(requests.some((url) => url.endsWith("/api/v1/recordings")));
   assert.equal(expired.pendingRecordingAudioDataUrl, secondAudio);
   assert.equal(expired.pendingAuthSaveDraft.audioDataUrl, draft.audioDataUrl);
-  assert.equal(expired.pendingAuthSaveDraft.recordingUploadSessionId, null);
   assert.equal(router.currentPath(), "/speak");
   store.dispatch(app.setAuthPasswordDraft("password123"));
   await flow("authenticateAndNavigate")(store, router, "signIn", "/speak");
-  assert.deepEqual(requests.map((url) => new URL(url).pathname), [
-    "/api/recording-sessions/upload-123/finish", "/api/v1/auth/login", "/api/user/recordings",
-  ]);
+  assert.ok(requests.some((url) => url.endsWith("/api/v1/auth/login")));
+  assert.equal(requests.filter((url) => url.endsWith("/api/v1/recordings")).length, 2);
   assert.equal(store.getState().app.pendingAuthSaveDraft, null);
   assert.equal(store.getState().app.pendingRecordingAudioDataUrl, secondAudio);
   assert.equal(store.getState().app.speakState, "recorded");
@@ -381,7 +377,7 @@ test("a later user-data 401 preserves the already recovered background audio and
   const store = storeFor({ isAuthenticated: true, userEmail: "person@example.test" }), router = routerFor(), userData = deferred();
   server(t, async (url) => url.endsWith("/api/user/data") ? userData.promise : response({ error: "Unauthorized" }, 401));
   const fetching = store.dispatch(app.fetchUserData());
-  await flow("saveAndNavigate")(store, router, draft, null, router.currentPath);
+  await flow("saveAndNavigate")(store, router, draft, router.currentPath);
   const recovery = store.getState().app.pendingAuthSaveDraft;
   userData.resolve(response({ error: "Unauthorized" }, 401));
   await fetching;
@@ -409,8 +405,13 @@ for (const outcome of ["success", "failure"]) {
     router.push = (path) => router.visits.push(["push", path]);
     const replace = router.replace;
     router.replace = (path) => { pathname = path; replace(path); };
-    server(t, async () => outcome === "success" ? response({ recording: saved }) : response({ error: "Unavailable" }, 503));
-    await flow("saveAndNavigate")(store, router, draft, null, () => pathname);
+    server(t, async (url) => {
+      if (url.endsWith("/api/v1/media/uploads")) return readyMedia();
+      return outcome === "success"
+        ? response({ recording: saved })
+        : response({ error: { code: "service_unavailable", message: "Unavailable" } }, 503);
+    });
+    await flow("saveAndNavigate")(store, router, draft, () => pathname);
     assert.equal(pathname, "/speak");
     const reconcile = flow("reconcileRecordingSaveRoute");
     reconcile(store, router, "local-123", () => pathname);

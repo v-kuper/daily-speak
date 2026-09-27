@@ -1,204 +1,14 @@
 package httpapi
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
-	"time"
 
 	"daily-speaking-practice/backend/internal/domain"
-	"daily-speaking-practice/backend/internal/logging"
 	"daily-speaking-practice/backend/internal/quota"
-	"daily-speaking-practice/backend/internal/workqueue"
-	"github.com/google/uuid"
 )
-
-func (s *Server) handleCreateRecording(w http.ResponseWriter, r *http.Request) {
-	started := time.Now()
-	logger := logging.ForRequest("api.user.recordings.post", r)
-	user, ok := s.authorizedUser(w, r, "api.user.recordings.post")
-	if !ok {
-		return
-	}
-
-	var payload struct {
-		Recording map[string]any `json:"recording"`
-	}
-	_ = json.NewDecoder(r.Body).Decode(&payload)
-	source := payload.Recording
-	practiceType := domain.NormalizePracticeType(stringAny(source["practiceType"]))
-	topic := strings.TrimSpace(stringAny(source["topic"]))
-	duration := parseIntAny(source["duration"])
-	rawAudio := stringAny(source["audioDataUrl"])
-	parsedAudio := domain.ParseIncomingAudioDataURL(rawAudio)
-	rawPhoto := stringAny(source["photoDataUrl"])
-	photoDataURL := domain.NormalizePhotoDataURL(rawPhoto)
-	photoObject := domain.NormalizePhotoObject(stringAny(source["photoObject"]))
-
-	if rawAudio != "" && parsedAudio == nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Audio must be a valid recording under 80MB."})
-		return
-	}
-	if parsedAudio == nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Audio recording is required."})
-		return
-	}
-	if rawPhoto != "" && photoDataURL == nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Photo must be a valid image under 4MB."})
-		return
-	}
-	if practiceType == "photo_description" {
-		if photoDataURL == nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Photo is required for photo description practice."})
-			return
-		}
-		if topic == "" {
-			topic = "Photo description"
-		}
-	}
-	if topic == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Recording topic is required."})
-		return
-	}
-	if duration < 0 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Recording duration is invalid."})
-		return
-	}
-
-	qBefore, err := quota.GetRecordingQuota(r.Context(), s.db, user.ID, &user.IsSubscriber)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to save recording."})
-		return
-	}
-	if quotaError := recordingQuotaError(qBefore, duration); quotaError != nil {
-		writeJSON(w, quotaError.status, map[string]string{"error": quotaError.message})
-		return
-	}
-
-	recordingID := uuid.NewString()
-	processingJobID := uuid.NewString()
-	savedAudio, err := saveAudioFile("recordings", user.ID, recordingID, parsedAudio)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to save recording."})
-		return
-	}
-	cleanupAudio := savedAudio.absolutePath
-	defer func() {
-		if cleanupAudio != "" {
-			_ = os.Remove(cleanupAudio)
-		}
-	}()
-
-	timestamp := domain.ParseTimestamp(stringAny(source["timestamp"]))
-
-	var inserted struct {
-		ID                  string
-		Topic               string
-		Duration            int
-		Timestamp           time.Time
-		Status              string
-		Transcript          string
-		CorrectedTranscript string
-		Suggestions         []byte
-		ProcessingStage     *string
-		PracticeType        string
-		AudioDataURL        *string
-		PhotoDataURL        *string
-		PhotoObject         *string
-		ProcessingError     *string
-		ShadowingStatus     string
-		ShadowingAudioURL   *string
-		ShadowingError      *string
-		ShadowingUpdatedAt  time.Time
-	}
-	tx, err := s.db.Begin(r.Context())
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to save recording."})
-		return
-	}
-	defer tx.Rollback(r.Context())
-	// Recheck and reserve quota under the same user-row lock used by mobile
-	// recording creation and guest-preview promotion. The optimistic check above
-	// avoids unnecessary file work, while this check is the concurrency boundary.
-	qBefore, err = quota.LockRecordingQuota(r.Context(), tx, user.ID, time.Now().UTC())
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to save recording."})
-		return
-	}
-	if quotaError := recordingQuotaError(qBefore, duration); quotaError != nil {
-		writeJSON(w, quotaError.status, map[string]string{"error": quotaError.message})
-		return
-	}
-	err = tx.QueryRow(r.Context(), `
-		INSERT INTO recordings
-		  (id, user_id, topic, duration, timestamp, transcript, corrected_transcript, suggestions, practice_type, audio_data_url, photo_data_url, photo_object, status, processing_stage, processing_job_id)
-		VALUES
-		  ($1, $2, $3, $4, $5, '', '', '[]'::jsonb, $6, $7, $8, $9, 'processing', 'transcribing', $10)
-		RETURNING id, topic, duration, timestamp, status, transcript, corrected_transcript, suggestions, processing_stage, practice_type, audio_data_url, photo_data_url, photo_object, processing_error,
-		          shadowing_status, shadowing_audio_url, shadowing_error, shadowing_updated_at`,
-		recordingID,
-		user.ID,
-		truncateRunes(topic, 300),
-		duration,
-		timestamp,
-		practiceType,
-		savedAudio.publicURL,
-		stringOrNil(practiceType == "photo_description", photoDataURL),
-		stringOrNil(practiceType == "photo_description", photoObject),
-		processingJobID,
-	).Scan(&inserted.ID, &inserted.Topic, &inserted.Duration, &inserted.Timestamp, &inserted.Status, &inserted.Transcript, &inserted.CorrectedTranscript, &inserted.Suggestions, &inserted.ProcessingStage, &inserted.PracticeType, &inserted.AudioDataURL, &inserted.PhotoDataURL, &inserted.PhotoObject, &inserted.ProcessingError, &inserted.ShadowingStatus, &inserted.ShadowingAudioURL, &inserted.ShadowingError, &inserted.ShadowingUpdatedAt)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to save recording."})
-		return
-	}
-	if err := workqueue.Enqueue(r.Context(), tx, workqueue.NewJob{
-		ID:             processingJobID,
-		Kind:           workqueue.KindRecordingProcess,
-		ResourceID:     recordingID,
-		IdempotencyKey: "recording:" + processingJobID,
-		MaxAttempts:    3,
-	}); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to save recording."})
-		return
-	}
-	if err := tx.Commit(r.Context()); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to save recording."})
-		return
-	}
-	cleanupAudio = ""
-
-	q := recordingQuotaAfterSave(qBefore, duration)
-	if refreshedQuota, quotaErr := quota.GetRecordingQuota(r.Context(), s.db, user.ID, &user.IsSubscriber); quotaErr == nil {
-		q = refreshedQuota
-	} else {
-		logger.Warn("recording.quota_refresh_failed", logging.ErrorMeta(quotaErr))
-	}
-	recording := recordingResponse{
-		ID:                  inserted.ID,
-		Topic:               inserted.Topic,
-		Duration:            domain.ToNonNegativeInt(inserted.Duration),
-		Timestamp:           inserted.Timestamp.UTC().Format(time.RFC3339Nano),
-		Status:              normalizeRecordingStatus(inserted.Status),
-		Transcript:          inserted.Transcript,
-		CorrectedTranscript: inserted.CorrectedTranscript,
-		Suggestions:         normalizeSuggestions(inserted.Suggestions, 0),
-		ProcessingStage:     normalizeRecordingProcessingStage(inserted.ProcessingStage),
-		PracticeType:        domain.NormalizePracticeType(inserted.PracticeType),
-		AudioDataURL:        normalizeOptionalAudio(inserted.AudioDataURL, true),
-		PhotoDataURL:        normalizeOptionalPhoto(inserted.PhotoDataURL),
-		PhotoObject:         normalizeOptionalPhotoObject(inserted.PhotoObject),
-		ProcessingError:     normalizeOptionalProcessingError(inserted.ProcessingError),
-		ShadowingStatus:     normalizeShadowingStatus(inserted.ShadowingStatus),
-		ShadowingAudioURL:   normalizeOptionalShadowingAudio(inserted.ShadowingAudioURL),
-		ShadowingError:      normalizeOptionalProcessingError(inserted.ShadowingError),
-		ShadowingUpdatedAt:  inserted.ShadowingUpdatedAt.UTC().Format(time.RFC3339Nano),
-	}
-	logger.Info("request.success", map[string]any{"status": 201, "durationMs": logging.ElapsedMs(started), "userId": user.ID, "recordingId": recording.ID})
-	writeJSON(w, http.StatusCreated, map[string]any{"recording": recording, "quota": q})
-}
 
 type savedAudioFile struct {
 	publicURL    string
@@ -266,13 +76,6 @@ func recordingQuotaAfterSave(before quota.RecordingQuota, duration int) quota.Re
 		after.WeeklyRemainingSeconds = &remaining
 	}
 	return after
-}
-
-func stringOrNil(condition bool, value *string) *string {
-	if !condition {
-		return nil
-	}
-	return value
 }
 
 func truncateRunes(value string, limit int) string {

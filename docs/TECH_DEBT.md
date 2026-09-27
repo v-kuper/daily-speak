@@ -21,6 +21,41 @@ Mobile client development can use this foundation now. The remaining items
 below are required before claiming broad production readiness or measured high
 availability.
 
+## Active architecture refactor plan
+
+This refactor is intentionally separate from production hardening. Its goal is
+to leave a small, explicit backend architecture in which transport, application
+policy, persistence, and infrastructure adapters can change independently.
+
+Complete the following stages in order, keeping every stage deployable and the
+OpenAPI contract and architecture documentation current:
+
+1. **Completed:** Move the web sandbox to the versioned media/recording flow and remove the
+   duplicate legacy recording-create and recording-upload-session paths.
+2. Remove direct SQL and transaction management from `internal/httpapi`; HTTP
+   handlers may validate transport data, call an application service, and map
+   its result only.
+3. Move dependency construction and environment-driven adapter selection out
+   of `internal/httpapi` into an application composition root shared by the API
+   and worker entry points where appropriate.
+4. Finish the media application boundary so ownership, guest restrictions, and
+   lifecycle transitions are application policy rather than HTTP policy.
+5. Isolate the retained Feed backend behind its own repository and service
+   boundary while keeping it absent from the web and mobile clients.
+6. Replace the catch-all `internal/domain` helpers with feature-owned helpers,
+   then split large files only where the split follows a real responsibility.
+
+Architecture completion criteria:
+
+- `internal/httpapi` contains no SQL and constructs no database, provider,
+  storage, queue, worker, or feature service.
+- recording creation has one media-backed application flow for web and mobile.
+- each retained feature owns its persistence and business rules.
+- dependency direction is transport -> application port -> adapter, with
+  environment parsing confined to configuration/composition code.
+- `ARCHITECTURE.md`, OpenAPI/Swagger, contract tests, and CI boundary checks
+  describe and enforce the resulting structure.
+
 ## P0: authentication and security hardening
 
 - Add an access-token key ring with `kid`, an active signing key, overlapping
@@ -82,12 +117,9 @@ data, call a service, and map its result.
 Continue reducing the remaining direct persistence in `backend/internal/httpapi`
 in this order so every merge stays deployable:
 
-1. Retire the duplicate direct legacy recording-create path when the web
-   sandbox uses the versioned media/create contract. Recording queries, retry,
-   and upload sessions already use recording-owned services and repositories.
-2. Finish the media HTTP/application boundary so authorization and completion
+1. Finish the media HTTP/application boundary so authorization and completion
    policy are not split between handlers and `internal/media`.
-3. Keep Feed isolated until the retained-Feed product decision is made; do not
+2. Keep Feed isolated until the retained-Feed product decision is made; do not
    intermingle its SQL or media policy with recording modules.
 
 Each extraction must preserve routes, OpenAPI, persisted data, authorization,

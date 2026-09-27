@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
@@ -262,6 +262,72 @@ async function request(fetchImpl, url, { origin, cookie, json, ...options } = {}
   });
 }
 
+async function uploadSmokeMedia({ fetchImpl, apiBaseURL, webOrigin, accessToken, bytes, contentType, purpose }) {
+  const checksum = createHash("sha256").update(bytes).digest("hex");
+  const resource = await expectJSON(
+    `create ${purpose} upload`,
+    await request(fetchImpl, endpoint(apiBaseURL, "/api/v1/media/uploads"), {
+      method: "POST",
+      origin: webOrigin,
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Idempotency-Key": `stack-smoke:${purpose}:${randomUUID()}`,
+      },
+      json: {
+        purpose,
+        contentType,
+        sizeBytes: bytes.byteLength,
+        checksum: { algorithm: "sha256", value: checksum },
+      },
+    }),
+    201,
+  );
+  const assetID = resource?.asset?.id;
+  const uploadID = resource?.upload?.id;
+  if (typeof assetID !== "string" || typeof uploadID !== "string") {
+    throw new Error(`create ${purpose} upload failed: response did not include media identifiers.`);
+  }
+  if (resource?.asset?.state === "ready" && resource?.upload?.state === "completed") return assetID;
+
+  const partChecksum = createHash("sha256").update(bytes).digest("hex");
+  const signed = await expectJSON(
+    `sign ${purpose} upload`,
+    await request(fetchImpl, endpoint(apiBaseURL, `/api/v1/media/uploads/${encodeURIComponent(uploadID)}/parts`), {
+      method: "POST",
+      origin: webOrigin,
+      headers: { Authorization: `Bearer ${accessToken}` },
+      json: { parts: [{ partNumber: 1, sizeBytes: bytes.byteLength, checksumSha256: partChecksum }] },
+    }),
+    200,
+  );
+  const signedPart = signed?.parts?.[0];
+  if (signedPart?.request?.method !== "PUT" || typeof signedPart.request.url !== "string") {
+    throw new Error(`sign ${purpose} upload failed: response did not include a signed PUT request.`);
+  }
+  const uploadResponse = await request(
+    fetchImpl,
+    new URL(signedPart.request.url, `${apiBaseURL}/`).href,
+    { method: "PUT", headers: signedPart.request.headers, body: bytes },
+  );
+  await expectStatus(`upload ${purpose} part`, uploadResponse, 200);
+  const etag = uploadResponse.headers.get("etag");
+  if (!etag) throw new Error(`upload ${purpose} part failed: response did not include ETag.`);
+  const completed = await expectJSON(
+    `complete ${purpose} upload`,
+    await request(fetchImpl, endpoint(apiBaseURL, `/api/v1/media/uploads/${encodeURIComponent(uploadID)}/complete`), {
+      method: "POST",
+      origin: webOrigin,
+      headers: { Authorization: `Bearer ${accessToken}` },
+      json: { parts: [{ partNumber: 1, etag, checksumSha256: partChecksum }] },
+    }),
+    200,
+  );
+  if (completed?.asset?.id !== assetID || completed?.asset?.state !== "ready") {
+    throw new Error(`complete ${purpose} upload failed: asset did not become ready.`);
+  }
+  return assetID;
+}
+
 async function cleanupSession({ fetchImpl, apiBaseURL, webOrigin, accessToken, cookie, recordingID }) {
   const errors = [];
   if (recordingID) {
@@ -421,20 +487,30 @@ export async function runStackSmoke({ env = process.env, fetchImpl = fetch } = {
       200,
     );
 
+    const audioAssetID = await uploadSmokeMedia({
+      fetchImpl,
+      apiBaseURL,
+      webOrigin,
+      accessToken,
+      bytes: Buffer.from([0, 0, 0]),
+      contentType: "audio/webm",
+      purpose: "recording_audio",
+    });
     const recordingPayload = await expectJSON(
       "create disposable recording",
-      await request(fetchImpl, endpoint(apiBaseURL, "/api/user/recordings"), {
+      await request(fetchImpl, endpoint(apiBaseURL, "/api/v1/recordings"), {
         method: "POST",
         origin: webOrigin,
-        headers: { Authorization: `Bearer ${accessToken}` },
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Idempotency-Key": `stack-smoke:recording:${randomUUID()}`,
+        },
         json: {
-          recording: {
-            topic: "Stack smoke",
-            duration: 1,
-            practiceType: "free_talk",
-            timestamp: new Date().toISOString(),
-            audioDataUrl: "data:audio/webm;base64,AAAA",
-          },
+          topic: "Stack smoke",
+          duration: 1,
+          practiceType: "free_talk",
+          timestamp: new Date().toISOString(),
+          audioAssetId: audioAssetID,
         },
       }),
       201,
@@ -444,8 +520,16 @@ export async function runStackSmoke({ env = process.env, fetchImpl = fetch } = {
       throw new Error("create disposable recording failed: response did not include a recording id.");
     }
 
-    const uploadURL = resolveApiUploadURL(recordingPayload?.recording?.audioDataUrl, apiBaseURL);
-    const uploadResponse = await request(fetchImpl, uploadURL, { origin: webOrigin, headers: { Authorization: `Bearer ${accessToken}` } });
+    const downloadPlan = await expectJSON(
+      "authorize disposable recording audio",
+      await request(fetchImpl, endpoint(apiBaseURL, `/api/v1/media/${encodeURIComponent(audioAssetID)}/download`), {
+        origin: webOrigin,
+        headers: { Authorization: `Bearer ${accessToken}` },
+      }),
+      200,
+    );
+    const uploadURL = new URL(downloadPlan?.request?.url, `${apiBaseURL}/`).href;
+    const uploadResponse = await request(fetchImpl, uploadURL);
     await expectStatus("serve disposable recording audio", uploadResponse, 200);
     if ((await uploadResponse.arrayBuffer()).byteLength === 0) {
       throw new Error("serve disposable recording audio failed: response was empty.");

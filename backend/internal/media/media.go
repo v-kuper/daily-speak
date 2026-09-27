@@ -25,7 +25,7 @@ var (
 const (
 	PurposeRecordingAudio = "recording_audio"
 	// PurposeGuestPreviewAudio is an internal storage purpose. Clients still
-	// request recording_audio; the HTTP authorization layer maps guest uploads
+	// request recording_audio; the media application service maps guest uploads
 	// to this value so PostgreSQL can enforce one live guest object atomically.
 	PurposeGuestPreviewAudio = "guest_preview_audio"
 	PurposeRecordingPhoto    = "recording_photo"
@@ -87,6 +87,7 @@ type UploadResource struct {
 
 type CreateUploadInput struct {
 	OwnerPrincipalID string
+	OwnerKind        string
 	SessionID        string
 	IdempotencyKey   string
 	Purpose          string

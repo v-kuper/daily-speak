@@ -76,7 +76,7 @@ func (t *sqlCreateTransaction) Insert(ctx context.Context, command CreateCommand
 		   suggestions, practice_type, audio_data_url, photo_data_url, photo_object,
 		   status, processing_stage, processing_job_id, audio_asset_id, photo_asset_id)
 		VALUES
-		  ($1, $2, $3, $4, $5, '', '', '[]'::jsonb, $6, NULL, NULL, NULL,
+		  ($1, $2, $3, $4, $5, '', '', '[]'::jsonb, $6, NULL, NULL, $10,
 		   'processing', 'transcribing', $7, $8, $9)
 		RETURNING id, topic, duration, timestamp, status, transcript,
 		          corrected_transcript, suggestions, processing_stage, practice_type,
@@ -85,7 +85,7 @@ func (t *sqlCreateTransaction) Insert(ctx context.Context, command CreateCommand
 		          shadowing_updated_at, audio_asset_id, photo_asset_id`,
 		command.RecordingID, command.UserID, command.Input.Topic, command.Input.Duration,
 		command.Input.Timestamp, command.Input.PracticeType, command.JobID,
-		command.Input.AudioAssetID, command.Input.PhotoAssetID,
+		command.Input.AudioAssetID, command.Input.PhotoAssetID, command.Input.PhotoObject,
 	).Scan(createdDestinations(&created)...)
 	return created, err
 }

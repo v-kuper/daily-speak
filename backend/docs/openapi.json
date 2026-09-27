@@ -1546,42 +1546,6 @@
         }
       }
     },
-    "/api/user/recordings": {
-      "post": {
-        "tags": [
-          "Recordings"
-        ],
-        "summary": "Save a full base64 recording for background processing",
-        "description": "Legacy/fallback upload flow. Backend saves the recording immediately, returns it with `status=processing`, then runs transcription, AI suggestions, and the natural conversational rewrite in separate background steps.",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateRecordingRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "$ref": "#/components/responses/RecordingWithQuotaCreated"
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "402": {
-            "$ref": "#/components/responses/PaymentRequired"
-          },
-          "500": {
-            "$ref": "#/components/responses/InternalServerError"
-          }
-        }
-      }
-    },
     "/api/recordings/{recordingId}": {
       "get": {
         "tags": [
@@ -1725,196 +1689,6 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
-          },
-          "500": {
-            "$ref": "#/components/responses/InternalServerError"
-          }
-        }
-      }
-    },
-    "/api/recording-sessions": {
-      "post": {
-        "tags": [
-          "Recording upload sessions"
-        ],
-        "summary": "Start chunked recording upload session",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateRecordingSessionRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Upload session created.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CreateRecordingSessionResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "500": {
-            "$ref": "#/components/responses/InternalServerError"
-          }
-        }
-      }
-    },
-    "/api/recording-sessions/{sessionId}/chunks": {
-      "post": {
-        "tags": [
-          "Recording upload sessions"
-        ],
-        "summary": "Upload one recording chunk",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/SessionIdPath"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "multipart/form-data": {
-              "schema": {
-                "$ref": "#/components/schemas/UploadRecordingChunkRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Chunk saved.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UploadRecordingChunkResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "500": {
-            "$ref": "#/components/responses/InternalServerError"
-          }
-        }
-      }
-    },
-    "/api/recording-sessions/{sessionId}/audio": {
-      "post": {
-        "tags": [
-          "Recording upload sessions"
-        ],
-        "summary": "Upload the final complete recording audio",
-        "description": "Uploads the complete browser-created Blob for the session. Backend prefers this file over raw chunk concatenation when finishing the recording.",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/SessionIdPath"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "multipart/form-data": {
-              "schema": {
-                "$ref": "#/components/schemas/UploadRecordingFinalAudioRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Final audio saved.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UploadRecordingFinalAudioResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "500": {
-            "$ref": "#/components/responses/InternalServerError"
-          }
-        }
-      }
-    },
-    "/api/recording-sessions/{sessionId}/finish": {
-      "post": {
-        "tags": [
-          "Recording upload sessions"
-        ],
-        "summary": "Finish chunked upload and start background processing",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/SessionIdPath"
-          }
-        ],
-        "requestBody": {
-          "required": false,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/FinishRecordingSessionRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Session was already finalized; existing recording returned.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RecordingResponse"
-                }
-              }
-            }
-          },
-          "201": {
-            "$ref": "#/components/responses/RecordingWithQuotaCreated"
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "402": {
-            "$ref": "#/components/responses/PaymentRequired"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -3780,6 +3554,18 @@
               }
             ],
             "description": "Required when practiceType is photo_description."
+          },
+          "photoObject": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 120
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional short label for a photo-description prompt."
           }
         },
         "example": {
@@ -3788,7 +3574,8 @@
           "timestamp": "2026-09-26T20:00:00Z",
           "practiceType": "free_talk",
           "audioAssetId": "e8ca3d43-6c11-4e62-9566-d9f408ec1b65",
-          "photoAssetId": null
+          "photoAssetId": null,
+          "photoObject": null
         }
       },
       "MediaPurpose": {

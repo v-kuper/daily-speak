@@ -134,8 +134,8 @@ test("API requests preserve multipart chunks, blobs, JSON, options and response 
       method: "POST", body, signal: controller.signal, cache: "no-store",
       headers: new Headers({ "X-Test": "preserved" }), credentials: "omit", redirect: "error",
     };
-    const result = await client.fetch("api/recording-sessions/demo/chunks", init);
-    assert.equal(calls[0].url, "https://api.example.com/api/recording-sessions/demo/chunks");
+    const result = await client.fetch("api/v1/media/uploads/demo/parts", init);
+    assert.equal(calls[0].url, "https://api.example.com/api/v1/media/uploads/demo/parts");
     assert.deepEqual(calls[0].init, { ...init, credentials: "include" });
     assert.equal(calls[0].init.body, body);
     assert.equal(calls[0].init.signal, controller.signal);

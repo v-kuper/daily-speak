@@ -23,7 +23,6 @@ import (
 	"daily-speaking-practice/backend/internal/profile"
 	"daily-speaking-practice/backend/internal/recording"
 	recordingollama "daily-speaking-practice/backend/internal/recording/ollamaadapter"
-	"daily-speaking-practice/backend/internal/recordingsession"
 	"daily-speaking-practice/backend/internal/shadowing"
 	"daily-speaking-practice/backend/internal/storage"
 	"daily-speaking-practice/backend/internal/subscription"
@@ -50,7 +49,6 @@ type Config struct {
 	MediaPartSize            int64
 	MediaPresignTTL          time.Duration
 	LegacyUploads            storage.LegacyUploadStore
-	RecordingSessions        recordingsession.Files
 	TranscribeAudio          func(context.Context, string) (string, error)
 	ProbeAudioDuration       func(context.Context, string) (time.Duration, error)
 	Operations               operations.Config
@@ -60,7 +58,6 @@ type Server struct {
 	db                       *db.DB
 	jobStore                 *workqueue.Store
 	legacyUploads            storage.LegacyUploadStore
-	recordingSessionService  *recordingsession.Service
 	synthesizer              tts.Synthesizer
 	aiClient                 ai.ChatClient
 	practiceGenerator        practice.Generator
@@ -158,14 +155,7 @@ func NewServer(config Config) *Server {
 	if legacyUploads == nil {
 		legacyUploads = storage.NewLegacyUploads(resolveUploadsDir())
 	}
-	recordingSessions := config.RecordingSessions
-	if recordingSessions == nil {
-		recordingSessions = storage.NewLocalRecordingSessions(resolveUploadsDir())
-	}
 	recordingRecords := recording.NewSQLQueryRepository(config.DB)
-	recordingSessionService := recordingsession.NewService(
-		recordingsession.NewSQLRepository(config.DB), recordingRecords, recordingSessions, uuid.NewString,
-	)
 	mediaSigner, _ := media.NewURLSigner(signingSecret)
 	transcribeAudio := config.TranscribeAudio
 	if transcribeAudio == nil {
@@ -193,7 +183,6 @@ func NewServer(config Config) *Server {
 		db:                       config.DB,
 		jobStore:                 workqueue.NewStore(config.DB),
 		legacyUploads:            legacyUploads,
-		recordingSessionService:  recordingSessionService,
 		synthesizer:              synthesizer,
 		aiClient:                 aiClient,
 		practiceGenerator:        practiceGenerator,
@@ -330,8 +319,6 @@ func (s *Server) routeAPI(w http.ResponseWriter, r *http.Request) {
 		s.handleGetEnglishLevel(w, r)
 	case path == "/api/user/english-level" && r.Method == http.MethodPut:
 		s.handlePutEnglishLevel(w, r)
-	case path == "/api/user/recordings" && r.Method == http.MethodPost:
-		s.handleCreateRecording(w, r)
 	case strings.HasPrefix(path, "/api/recordings/") && strings.HasSuffix(path, "/retry") && r.Method == http.MethodPost:
 		s.routeRecordingRetryPath(w, r, strings.TrimPrefix(path, "/api/recordings/"))
 	case strings.HasPrefix(path, "/api/recordings/") && strings.HasSuffix(path, "/shadowing") && r.Method == http.MethodPost:
@@ -340,10 +327,6 @@ func (s *Server) routeAPI(w http.ResponseWriter, r *http.Request) {
 		s.handleGetRecording(w, r, strings.TrimPrefix(path, "/api/recordings/"))
 	case strings.HasPrefix(path, "/api/recordings/") && r.Method == http.MethodDelete:
 		s.handleDeleteRecording(w, r, strings.TrimPrefix(path, "/api/recordings/"))
-	case path == "/api/recording-sessions" && r.Method == http.MethodPost:
-		s.handleCreateRecordingSession(w, r)
-	case strings.HasPrefix(path, "/api/recording-sessions/"):
-		s.routeRecordingSessionPath(w, r, strings.TrimPrefix(path, "/api/recording-sessions/"))
 	case path == "/api/feed/posts" && r.Method == http.MethodGet:
 		s.handleFeedPosts(w, r)
 	case path == "/api/feed/posts" && r.Method == http.MethodPost:

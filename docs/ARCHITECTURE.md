@@ -42,8 +42,9 @@ dependency. A native client can therefore call the same API directly.
 
 - `/api/v1/*` is the stable client contract shared by mobile and web identity,
   media, guest preview, and new recording development.
-- `/api/*` is the remaining legacy web resource surface. It uses the same
-  Bearer identity but remains until the sandbox moves to v1 media/create APIs.
+- `/api/*` is the remaining legacy web resource surface for profile, practice,
+  recording detail/actions, and the retained Feed. Recording creation uses the
+  same v1 media-backed contract in web and mobile.
 - `/openapi.json` and `/docs` expose the backend-owned OpenAPI contract and
   Swagger UI.
 - `/healthz` is process liveness; `/readyz` checks PostgreSQL and queue
@@ -131,7 +132,6 @@ backend/internal/media       authorized media lifecycle
 backend/internal/practice    speaking-practice generation application service
 backend/internal/practice/ollamaadapter  Ollama adapter for the practice port
 backend/internal/recording   recording creation, deletion, processing, analysis
-backend/internal/recordingsession  legacy web upload-session application boundary
 backend/internal/guestpreview     bounded anonymous preview lifecycle
 backend/internal/shadowing        pronunciation generation lifecycle
 backend/internal/profile          profile application service and repository

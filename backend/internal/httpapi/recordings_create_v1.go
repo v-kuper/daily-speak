@@ -19,6 +19,7 @@ type recordingCreateV1Request struct {
 	PracticeType string  `json:"practiceType"`
 	AudioAssetID string  `json:"audioAssetId"`
 	PhotoAssetID *string `json:"photoAssetId"`
+	PhotoObject  *string `json:"photoObject"`
 }
 
 func (s *Server) handleCreateRecordingV1(w http.ResponseWriter, r *http.Request) {
@@ -83,7 +84,7 @@ func parseRecordingCreateV1(payload recordingCreateV1Request) (recording.CreateI
 	return recording.CreateInput{
 		Topic: payload.Topic, Duration: payload.Duration, Timestamp: timestamp,
 		PracticeType: payload.PracticeType, AudioAssetID: payload.AudioAssetID,
-		PhotoAssetID: payload.PhotoAssetID,
+		PhotoAssetID: payload.PhotoAssetID, PhotoObject: payload.PhotoObject,
 	}, nil
 }
 

@@ -4,21 +4,21 @@ import test from "node:test";
 
 const speakScreen = readFileSync("src/components/SpeakScreen.tsx", "utf8");
 const appSlice = readFileSync("src/store/slices/appSlice.ts", "utf8");
+const mediaUpload = readFileSync("src/lib/mediaUpload.ts", "utf8");
 
-test("SpeakScreen uploads a final complete Blob to the recording session", () => {
-  assert.match(speakScreen, /uploadRecordingFinalAudio/);
-  assert.match(speakScreen, /\/api\/recording-sessions\/\$\{encodeURIComponent\(sessionId\)\}\/audio/);
+test("authenticated recordings use the shared v1 multipart media contract", () => {
+  assert.match(appSlice, /uploadMedia/);
+  assert.match(appSlice, /\/api\/v1\/recordings/);
+  assert.match(mediaUpload, /\/api\/v1\/media\/uploads/);
 });
 
-test("SpeakScreen falls back to full save if final session audio upload fails", () => {
-  assert.match(speakScreen, /setRecordingUploadSessionId\(null\)/);
-  assert.match(speakScreen, /Full recording will be uploaded when you save/);
+test("legacy live recording sessions are absent from the web flow", () => {
+  assert.doesNotMatch(speakScreen + appSlice, /recording-sessions|recordingUploadSessionId/);
 });
 
-test("SpeakScreen prepares local playback without waiting for final upload", () => {
-  assert.doesNotMatch(speakScreen, /Promise\.all\(\[readBlobAsDataUrl\(blob\), finalUpload\]\)/);
+test("SpeakScreen prepares local playback before the explicit save", () => {
   assert.match(speakScreen, /void readBlobAsDataUrl\(blob\)/);
-  assert.match(speakScreen, /finalAudioUploadPromiseRef/);
+  assert.doesNotMatch(speakScreen, /finalAudioUploadPromiseRef/);
 });
 
 test("Redux supports optimistic background recording save", () => {

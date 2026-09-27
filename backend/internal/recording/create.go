@@ -25,6 +25,7 @@ type CreateInput struct {
 	PracticeType string
 	AudioAssetID string
 	PhotoAssetID *string
+	PhotoObject  *string
 }
 
 type Created struct {
@@ -178,6 +179,17 @@ func NormalizeCreateInput(input CreateInput) (CreateInput, error) {
 	if input.PracticeType == "photo_description" && input.PhotoAssetID == nil {
 		return CreateInput{}, &ValidationError{Message: "Photo asset is required for photo description practice"}
 	}
+	if input.PhotoObject != nil {
+		value := truncateCreateRunes(strings.Join(strings.Fields(*input.PhotoObject), " "), 120)
+		if value == "" {
+			input.PhotoObject = nil
+		} else {
+			input.PhotoObject = &value
+		}
+	}
+	if input.PracticeType != "photo_description" {
+		input.PhotoObject = nil
+	}
 	return input, nil
 }
 
@@ -248,7 +260,8 @@ func createdMatches(created Created, input CreateInput) bool {
 		created.Timestamp.Equal(input.Timestamp) &&
 		created.PracticeType == input.PracticeType &&
 		created.AudioAssetID == input.AudioAssetID &&
-		equalOptionalString(created.PhotoAssetID, input.PhotoAssetID)
+		equalOptionalString(created.PhotoAssetID, input.PhotoAssetID) &&
+		equalOptionalString(created.PhotoObject, input.PhotoObject)
 }
 
 func equalOptionalString(left *string, right *string) bool {
