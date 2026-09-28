@@ -16,21 +16,23 @@ import (
 )
 
 const (
-	groqEndpoint      = "https://api.groq.com/openai/v1/audio/transcriptions"
-	groqDefaultModel  = "whisper-large-v3-turbo"
-	groqMaxAudioBytes = 25_000_000
-	groqMaxResponse   = 2 * 1024 * 1024
+	groqEndpoint       = "https://api.groq.com/openai/v1/audio/transcriptions"
+	groqModelsEndpoint = "https://api.groq.com/openai/v1/models"
+	groqDefaultModel   = "whisper-large-v3-turbo"
+	groqMaxAudioBytes  = 25_000_000
+	groqMaxResponse    = 2 * 1024 * 1024
 )
 
 type GroqConfig struct {
-	APIKey     string
-	Model      string
-	Language   string
-	Prompt     string
-	FFmpegPath string
-	Timeout    time.Duration
-	Endpoint   string
-	Client     *http.Client
+	APIKey         string
+	Model          string
+	Language       string
+	Prompt         string
+	FFmpegPath     string
+	Timeout        time.Duration
+	Endpoint       string
+	ModelsEndpoint string
+	Client         *http.Client
 }
 
 type Groq struct {
@@ -44,6 +46,9 @@ func NewGroq(config GroqConfig) *Groq {
 	if config.Endpoint == "" {
 		config.Endpoint = groqEndpoint
 	}
+	if config.ModelsEndpoint == "" {
+		config.ModelsEndpoint = groqModelsEndpoint
+	}
 	if config.Timeout <= 0 {
 		config.Timeout = 3 * time.Minute
 	}
@@ -51,6 +56,42 @@ func NewGroq(config GroqConfig) *Groq {
 		config.Client = http.DefaultClient
 	}
 	return &Groq{config: config}
+}
+
+// Check verifies the configured key and model without submitting audio.
+func (g *Groq) Check(ctx context.Context) error {
+	if strings.TrimSpace(g.config.APIKey) == "" {
+		return Error{Message: "GROQ_API_KEY is required for transcription.", Status: 500}
+	}
+	checkCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	request, err := http.NewRequestWithContext(checkCtx, http.MethodGet, g.config.ModelsEndpoint, nil)
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Authorization", "Bearer "+g.config.APIKey)
+	response, err := g.config.Client.Do(request)
+	if err != nil {
+		return fmt.Errorf("Groq model check failed: %w", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return Error{Message: fmt.Sprintf("Groq model check failed (HTTP %d).", response.StatusCode), Status: response.StatusCode}
+	}
+	var models struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(io.LimitReader(response.Body, groqMaxResponse)).Decode(&models); err != nil {
+		return Error{Message: "Groq returned an invalid model list.", Status: 502}
+	}
+	for _, model := range models.Data {
+		if model.ID == g.config.Model {
+			return nil
+		}
+	}
+	return Error{Message: "Configured Groq transcription model is unavailable.", Status: 502}
 }
 
 func (g *Groq) Transcribe(ctx context.Context, path string) (string, error) {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log"
 	"os"
+	"os/exec"
 	"os/signal"
 	"strings"
 	"syscall"
@@ -12,12 +13,17 @@ import (
 	"daily-speaking-practice/backend/internal/app"
 	"daily-speaking-practice/backend/internal/db"
 	"daily-speaking-practice/backend/internal/storage"
+	"daily-speaking-practice/backend/internal/transcription"
 	"daily-speaking-practice/backend/internal/worker"
 )
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if len(os.Args) == 2 && os.Args[1] == "--check-groq" {
+		checkGroq(ctx)
+		return
+	}
 	if strings.TrimSpace(os.Getenv("GROQ_API_KEY")) == "" {
 		log.Fatal("GROQ_API_KEY is required for worker transcription")
 	}
@@ -55,6 +61,24 @@ func main() {
 	if err := runtime.Run(ctx, config); err != nil && !errors.Is(err, context.Canceled) {
 		log.Fatalf("worker failed: %v", err)
 	}
+}
+
+func checkGroq(ctx context.Context) {
+	ffmpeg := strings.TrimSpace(os.Getenv("FFMPEG_BINARY_PATH"))
+	if ffmpeg == "" {
+		ffmpeg = "ffmpeg"
+	}
+	if _, err := exec.LookPath(ffmpeg); err != nil {
+		log.Fatal("ffmpeg is unavailable for Groq transcription")
+	}
+	groq := transcription.NewGroq(transcription.GroqConfig{
+		APIKey: os.Getenv("GROQ_API_KEY"),
+		Model:  os.Getenv("GROQ_WHISPER_MODEL"),
+	})
+	if err := groq.Check(ctx); err != nil {
+		log.Fatalf("Groq configuration check failed: %v", err)
+	}
+	log.Println("groq-config-ok")
 }
 
 func parseDatabaseSSL(value string) (bool, error) {

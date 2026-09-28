@@ -104,6 +104,43 @@ func TestGroqNeedsKeyBeforeSendingAudio(t *testing.T) {
 	}
 }
 
+func TestGroqCheckValidatesKeyAndModel(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/models" || r.Header.Get("Authorization") != "Bearer test-key" {
+			t.Errorf("unexpected model check request: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		_, _ = io.WriteString(w, `{"data":[{"id":"whisper-large-v3-turbo"}]}`)
+	}))
+	defer server.Close()
+	groq := NewGroq(GroqConfig{APIKey: "test-key", ModelsEndpoint: server.URL + "/models"})
+	if err := groq.Check(context.Background()); err != nil {
+		t.Fatalf("expected valid Groq configuration: %v", err)
+	}
+}
+
+func TestGroqCheckRejectsUnavailableModelAndSanitizesProviderError(t *testing.T) {
+	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"data":[{"id":"other-model"}]}`)
+	}))
+	defer modelServer.Close()
+	groq := NewGroq(GroqConfig{APIKey: "test-key", ModelsEndpoint: modelServer.URL})
+	var typed Error
+	if err := groq.Check(context.Background()); !errors.As(err, &typed) || !strings.Contains(typed.Message, "unavailable") {
+		t.Fatalf("expected unavailable model error, got %v", err)
+	}
+	unauthorizedServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = io.WriteString(w, "sensitive provider response")
+	}))
+	defer unauthorizedServer.Close()
+	groq = NewGroq(GroqConfig{APIKey: "test-key", ModelsEndpoint: unauthorizedServer.URL})
+	if err := groq.Check(context.Background()); !errors.As(err, &typed) || typed.Status != http.StatusUnauthorized || strings.Contains(err.Error(), "sensitive") {
+		t.Fatalf("expected sanitized authentication error, got %v", err)
+	}
+}
+
 func TestGroqCompressesAudioAboveFreePlanLimit(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("test ffmpeg replacement is a POSIX script")

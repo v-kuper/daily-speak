@@ -176,7 +176,7 @@ jobs:
 
       - name: Verify Docker Groq configuration
         run: |
-          docker compose exec -T worker sh -lc 'test -n "$GROQ_API_KEY" && test "$GROQ_WHISPER_MODEL" = whisper-large-v3-turbo && test -x "$FFMPEG_BINARY_PATH" && curl --fail --silent --show-error --output /dev/null --header "Authorization: Bearer $GROQ_API_KEY" https://api.groq.com/openai/v1/models && echo groq-config-ok'
+          docker compose exec -T worker ./daily-speaking-worker --check-groq
 
       - name: Verify Docker Cartesia configuration
         run: |

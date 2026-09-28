@@ -181,11 +181,7 @@ test("multi-pass analysis concurrency is source-controlled for clean Windows dep
 
 test("local deploy workflow verifies Groq configuration inside the worker container", () => {
   assert.match(deployWorkflow, /name:\s+Verify Docker Groq configuration/);
-  assert.match(deployWorkflow, /docker compose exec -T worker sh -lc/);
-  assert.match(deployWorkflow, /test -n "\$GROQ_API_KEY"/);
-  assert.match(deployWorkflow, /test -x "\$FFMPEG_BINARY_PATH"/);
-  assert.match(deployWorkflow, /https:\/\/api\.groq\.com\/openai\/v1\/models/);
-  assert.match(deployWorkflow, /echo groq-config-ok/);
+  assert.match(deployWorkflow, /docker compose exec -T worker \.\/daily-speaking-worker --check-groq/);
 });
 
 test("local deploy workflow configures persistent uploaded media storage", () => {
