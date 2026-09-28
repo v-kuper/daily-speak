@@ -303,6 +303,24 @@ test("API dependency construction lives in the application composition root", ()
   assert.match(apiMain, /app\.NewAPI\(app\.APIConfig/);
 });
 
+test("realtime Cartesia protocol stays in its interview adapter", () => {
+  const composition = readFileSync("backend/internal/app/cartesia_realtime.go", "utf8");
+  const workerComposition = readFileSync("backend/internal/app/worker.go", "utf8");
+  const adapter = readFileSync("backend/internal/interview/cartesiaadapter/realtime.go", "utf8");
+  const ttsAdapter = readFileSync("backend/internal/tts/cartesia.go", "utf8");
+  const service = readFileSync("backend/internal/interview/service.go", "utf8");
+  const transport = readFileSync("backend/internal/httpapi/interviews_v1.go", "utf8");
+
+  assert.match(composition, /cartesiaadapter\.New/);
+  assert.doesNotMatch(composition, /ink-2|pcm_s16le|stt\/websocket|url\.Parse|CreateSTTAccessToken/);
+  for (const providerDetail of [/ink-2/, /pcm_s16le/, /CreateSTTAccessToken/, /IssueRealtimeCredential/]) {
+    assert.match(adapter, providerDetail);
+  }
+  assert.doesNotMatch(service + transport, /CreateSTTAccessToken|stt\/websocket|Cartesia-Version/);
+  assert.match(workerComposition, /tts\.NewCartesia\(tts\.Config/);
+  assert.doesNotMatch(ttsAdapter, /os\.Getenv|ConfigFromEnv/);
+});
+
 test("media ownership and guest policy stay in the media application service", () => {
   const transport = readFileSync("backend/internal/httpapi/media_v1.go", "utf8");
   const service = readFileSync("backend/internal/media/service.go", "utf8");

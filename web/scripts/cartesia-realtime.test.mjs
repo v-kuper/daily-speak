@@ -131,6 +131,7 @@ test("live snapshots concatenate final deltas verbatim and replace the interim h
     turnSeq: 4,
     finalText: "I went ",
     interimText: "home",
+    captionText: "home",
   });
 
   const answer = client.finalizeTurn(4);
@@ -142,6 +143,7 @@ test("live snapshots concatenate final deltas verbatim and replace the interim h
     turnSeq: 4,
     finalText: "I went home.",
     interimText: "",
+    captionText: "",
   });
 });
 
@@ -166,12 +168,12 @@ test("rapid turn boundaries keep late final deltas attached to the matching answ
   assert.equal(await second, "second answer");
 
   assert.deepEqual(snapshots.filter((snapshot) => snapshot.finalText || snapshot.interimText), [
-    { turnSeq: 1, finalText: "first ", interimText: "" },
-    { turnSeq: 1, finalText: "first ", interimText: "late hypothesis" },
-    { turnSeq: 1, finalText: "first answer", interimText: "" },
-    { turnSeq: 1, finalText: "first answer", interimText: "" },
-    { turnSeq: 2, finalText: "second answer", interimText: "" },
-    { turnSeq: 2, finalText: "second answer", interimText: "" },
+    { turnSeq: 1, finalText: "first ", interimText: "", captionText: "first " },
+    { turnSeq: 1, finalText: "first ", interimText: "late hypothesis", captionText: "late hypothesis" },
+    { turnSeq: 1, finalText: "first answer", interimText: "", captionText: "answer" },
+    { turnSeq: 1, finalText: "first answer", interimText: "", captionText: "" },
+    { turnSeq: 2, finalText: "second answer", interimText: "", captionText: "second answer" },
+    { turnSeq: 2, finalText: "second answer", interimText: "", captionText: "" },
   ]);
   assert.equal(snapshots.some((snapshot) => snapshot.turnSeq === 3 && (snapshot.finalText || snapshot.interimText)), false);
 });

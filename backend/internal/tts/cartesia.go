@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 )
@@ -56,16 +55,6 @@ type cartesiaOutputFormat struct {
 type cartesiaGenerationConfig struct {
 	Volume float64 `json:"volume"`
 	Speed  float64 `json:"speed"`
-}
-
-func ConfigFromEnv() Config {
-	return normalizeConfig(Config{
-		APIKey:     os.Getenv("CARTESIA_API_KEY"),
-		VoiceID:    os.Getenv("CARTESIA_VOICE_ID"),
-		Model:      os.Getenv("CARTESIA_MODEL"),
-		APIURL:     os.Getenv("CARTESIA_API_URL"),
-		APIVersion: os.Getenv("CARTESIA_API_VERSION"),
-	})
 }
 
 func NewCartesia(config Config) Synthesizer {

@@ -93,6 +93,13 @@ their DTOs into feature-owned models at the boundary. Provider-specific
 request formats, errors, retry details, and credentials must not leak into HTTP
 or core feature policy.
 
+The realtime interview STT path is the documented direct-client exception: the
+API may return a short-lived, narrowly scoped delegation credential after the
+interview service authorizes the session and bounds its lifetime. Concrete
+backend protocol construction still belongs in a dedicated provider adapter,
+and the long-lived provider key remains server-only. The corresponding browser
+protocol adapter is a versioned client dependency rather than feature policy.
+
 Media bytes belong in the storage abstraction, not PostgreSQL. PostgreSQL owns
 media identity, ownership, state, location, size, and checksum.
 

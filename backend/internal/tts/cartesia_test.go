@@ -131,14 +131,12 @@ func TestCartesiaSynthesizeHonorsHTTPTimeout(t *testing.T) {
 	}
 }
 
-func TestConfigFromEnvAppliesStableDefaults(t *testing.T) {
-	t.Setenv("CARTESIA_API_KEY", " key ")
-	t.Setenv("CARTESIA_VOICE_ID", " voice ")
-	t.Setenv("CARTESIA_MODEL", "")
-	t.Setenv("CARTESIA_API_URL", "")
-	t.Setenv("CARTESIA_API_VERSION", "")
-
-	config := ConfigFromEnv()
+func TestNewCartesiaAppliesStableDefaults(t *testing.T) {
+	client, ok := NewCartesia(Config{APIKey: " key ", VoiceID: " voice "}).(*cartesiaClient)
+	if !ok {
+		t.Fatal("Cartesia synthesizer has an unexpected implementation")
+	}
+	config := client.config
 	if config.APIKey != "key" || config.VoiceID != "voice" {
 		t.Fatalf("credentials were not trimmed: %#v", config)
 	}

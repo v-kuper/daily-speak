@@ -168,8 +168,19 @@ continue to contain learner speech only.
 Free-talk recordings and non-interview guest previews use Cartesia's batch
 transcription API. Audio remains in backend-owned storage; the worker sends a
 temporary materialized copy and deletes it after processing. The long-lived
-Cartesia key remains server-only. Provider adapters may change independently of
-the interview API and transcript composition rules.
+Cartesia key remains server-only. Batch provider adapters may change without
+changing the interview API or transcript composition rules.
+
+Realtime interview STT deliberately crosses the browser boundary to avoid an
+extra streaming hop: the API authorizes the interview and returns a short-lived
+STT-scoped credential together with the provider connection parameters, while
+the browser speaks the configured provider's WebSocket protocol. Realtime
+connection mapping lives in `interview/cartesiaadapter`, the shared Cartesia
+HTTP client lives in `transcription`, and `internal/app` only supplies
+configuration and wires the adapter to the provider-neutral interview port.
+Replacing this direct realtime provider requires a coordinated backend-adapter
+and web-client change, but does not change interview state, persistence, or
+final processing.
 
 Every account recording is duration-probed by the recording worker before
 transcription. The repository verifies the measured duration against the
@@ -189,6 +200,7 @@ backend/internal/auth        unified web/mobile identity and token lifecycle
 backend/internal/db          PostgreSQL connection and migrations
 backend/internal/httpapi     HTTP transport, authorization gates, response mapping
 backend/internal/interview  adaptive interview sessions, turns, and question policy
+backend/internal/interview/cartesiaadapter  Cartesia realtime credential and connection mapping
 backend/internal/learner     shared learner level and interest vocabulary
 backend/internal/media       authorized media lifecycle
 backend/internal/practice    speaking-practice generation application service

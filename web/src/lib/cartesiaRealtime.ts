@@ -13,6 +13,8 @@ export type CartesiaTranscriptSnapshot = {
   turnSeq: number;
   finalText: string;
   interimText: string;
+  /** Latest provider delta for the temporary on-screen subtitle. */
+  captionText: string;
 };
 
 type TranscriptListener = (snapshot: CartesiaTranscriptSnapshot) => void;
@@ -228,7 +230,7 @@ export class CartesiaRealtimeTranscriber {
         } else {
           this.active.interimText = message.text;
         }
-        this.emitTranscript(this.active);
+        this.emitTranscript(this.active, message.text);
       } else if (this.currentTurnSeq !== null) {
         if (message.is_final === true) {
           this.currentText += message.text;
@@ -236,7 +238,7 @@ export class CartesiaRealtimeTranscriber {
         } else {
           this.currentInterimText = message.text;
         }
-        this.emitCurrentTranscript();
+        this.emitCurrentTranscript(message.text);
       }
       return;
     }
@@ -302,20 +304,25 @@ export class CartesiaRealtimeTranscriber {
     }
   }
 
-  private emitCurrentTranscript(): void {
+  private emitCurrentTranscript(captionText = ""): void {
     if (this.currentTurnSeq === null) return;
     this.onTranscript?.({
       turnSeq: this.currentTurnSeq,
       finalText: this.currentText,
       interimText: this.currentInterimText,
+      captionText,
     });
   }
 
-  private emitTranscript(transcript: Pick<Finalization, "turnSeq" | "text" | "interimText">): void {
+  private emitTranscript(
+    transcript: Pick<Finalization, "turnSeq" | "text" | "interimText">,
+    captionText = "",
+  ): void {
     this.onTranscript?.({
       turnSeq: transcript.turnSeq,
       finalText: transcript.text,
       interimText: transcript.interimText,
+      captionText,
     });
   }
 

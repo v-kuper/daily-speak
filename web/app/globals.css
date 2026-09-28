@@ -1921,16 +1921,28 @@ body {
   margin: 15px auto 0;
 }
 
-.interview-live-transcript {
-  margin-top: 18px;
-  text-align: left;
+.interview-live-caption {
+  width: fit-content;
+  max-width: min(100%, 720px);
+  margin: 12px auto 0;
+  padding: 9px 14px;
+  overflow: hidden;
+  border-radius: 12px;
+  background: rgba(25, 25, 24, 0.92);
+  box-shadow: 0 8px 24px rgba(24, 24, 22, 0.16);
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 550;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  text-align: center;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
-.interview-caption-hint {
-  margin: -3px 0 10px;
-  color: var(--text-muted);
-  font-size: 12px;
-  line-height: 1.45;
+.interview-live-notice {
+  margin-top: 12px;
 }
 
 .interview-question-hint {

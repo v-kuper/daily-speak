@@ -361,7 +361,7 @@ const renderDetails = (store, recordingId) => renderToStaticMarkup(createElement
     createElement(load("src/components/DetailsScreen.tsx").default, { recordingId })),
 ));
 
-test("the live interview uses one chronological transcript block without turn cards or timestamps", () => {
+test("the live interview shows only the current question without an accumulated transcript", () => {
   const InterviewQuestionCard = load("src/components/InterviewQuestionCard.tsx").default;
   const markup = renderToStaticMarkup(createElement(InterviewQuestionCard, {
     turns: [{
@@ -375,23 +375,25 @@ test("the live interview uses one chronological transcript block without turn ca
       seq: 2,
       question: "What did you enjoy there?",
       askedAtMs: 70000,
-      endedAtMs: 74000,
+      endedAtMs: null,
       provisionalTranscript: "",
-      transcriptStatus: "queued",
+      transcriptStatus: "pending",
     }],
     canAdvance: true,
     onNext: () => {},
     liveTranscriptionAvailable: true,
+    liveCaption: null,
+    hasAnswerEvidence: false,
+    boundaryPending: false,
   }));
 
-  assert.equal((markup.match(/conversation-transcript/g) ?? []).length, 1);
-  assert.match(markup, /Interviewer:<\/strong> Where did you travel\?/);
-  assert.match(markup, /You:<\/strong> I went to Rome\./);
-  assert.match(markup, /What did you enjoy there\?[\s\S]*Transcribing answer/);
-  assert.doesNotMatch(markup, /Interview timeline|interview-timeline|01:05|01:10/);
+  assert.match(markup, /Question 2/);
+  assert.match(markup, /What did you enjoy there\?/);
+  assert.doesNotMatch(markup, /Where did you travel\?|I went to Rome\./);
+  assert.doesNotMatch(markup, /Conversation transcript|conversation-transcript|Interviewer:|You:|01:05|01:10/);
 });
 
-test("the current answer renders stable live text followed by one replaceable subtitle hypothesis", () => {
+test("the live interview renders only the latest ephemeral subtitle phrase", () => {
   const InterviewQuestionCard = load("src/components/InterviewQuestionCard.tsx").default;
   const markup = renderToStaticMarkup(createElement(InterviewQuestionCard, {
     turns: [{
@@ -407,12 +409,14 @@ test("the current answer renders stable live text followed by one replaceable su
     canAdvance: true,
     onNext: () => {},
     liveTranscriptionAvailable: true,
+    liveCaption: "to work",
+    hasAnswerEvidence: true,
+    boundaryPending: false,
   }));
 
-  assert.equal((markup.match(/conversation-transcript/g) ?? []).length, 1);
-  assert.match(markup, /You:<\/strong> I went <span class="conversation-answer-interim">to work<\/span>/);
-  assert.match(markup, /Live subtitles show what was recognized/);
-  assert.doesNotMatch(markup, /Transcribing answer/);
+  assert.equal((markup.match(/interview-live-caption/g) ?? []).length, 1);
+  assert.match(markup, /class="interview-live-caption"[^>]*>to work<\/div>/);
+  assert.doesNotMatch(markup, /I went|Conversation transcript|conversation-transcript|Live subtitles show what was recognized/);
 });
 
 test("the local topic processing route immediately renders its saved conversation snapshot", () => {

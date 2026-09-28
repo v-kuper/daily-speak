@@ -65,7 +65,13 @@ func NewWorker(config WorkerConfig) *background.Runtime {
 	}
 	synthesizer := config.Synthesizer
 	if synthesizer == nil {
-		synthesizer = tts.NewCartesia(tts.ConfigFromEnv())
+		synthesizer = tts.NewCartesia(tts.Config{
+			APIKey:     os.Getenv("CARTESIA_API_KEY"),
+			VoiceID:    os.Getenv("CARTESIA_VOICE_ID"),
+			Model:      os.Getenv("CARTESIA_MODEL"),
+			APIURL:     os.Getenv("CARTESIA_API_URL"),
+			APIVersion: os.Getenv("CARTESIA_API_VERSION"),
+		})
 	}
 	mediaService := media.NewService(media.NewSQLRepository(config.DB), config.MediaStore, media.Config{
 		Bucket: config.MediaBucket, PartSizeBytes: config.MediaPartSize, SignedRequestTTL: config.MediaPresignTTL,

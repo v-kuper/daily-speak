@@ -38,6 +38,7 @@ import {
   type InterviewTurn,
 } from "../lib/interviewSession";
 import { CartesiaRealtimeTranscriber } from "../lib/cartesiaRealtime";
+import { EphemeralCaptionController } from "../lib/ephemeralCaption";
 import { InterviewTurnCapture, type CapturedInterviewTurn } from "../lib/interviewTurnCapture";
 import type { SavedInterviewTurn } from "../lib/interviewTimeline";
 import {
@@ -237,6 +238,7 @@ export default function SpeakScreen() {
   const [interviewSaveStatus, setInterviewSaveStatus] = useState<FinalAudioUploadState>("idle");
   const [interviewSaveError, setInterviewSaveError] = useState<string | null>(null);
   const [liveTranscriptionAvailable, setLiveTranscriptionAvailable] = useState(true);
+  const [interviewLiveCaption, setInterviewLiveCaption] = useState<string | null>(null);
   const [interviewLiveWarning, setInterviewLiveWarning] = useState<string | null>(null);
   const [interviewCaptureFailure, setInterviewCaptureFailure] = useState<string | null>(null);
   const [interviewStopNotice, setInterviewStopNotice] = useState<string | null>(null);
@@ -312,6 +314,22 @@ export default function SpeakScreen() {
   const interviewSaveProtectedSessionIdRef = useRef<string | null>(null);
   const currentAnswerHasSpeechRef = useRef(false);
   const interviewBoundaryPendingRef = useRef(false);
+  const interviewCaptionControllerRef = useRef<EphemeralCaptionController | null>(null);
+
+  useEffect(() => {
+    const controller = new EphemeralCaptionController(setInterviewLiveCaption);
+    interviewCaptionControllerRef.current = controller;
+    return () => {
+      controller.dispose();
+      if (interviewCaptionControllerRef.current === controller) {
+        interviewCaptionControllerRef.current = null;
+      }
+    };
+  }, []);
+
+  const clearInterviewLiveCaption = useCallback(() => {
+    interviewCaptionControllerRef.current?.clear();
+  }, []);
 
   const updateInterview = useCallback((updater: (current: InterviewSession | null) => InterviewSession | null) => {
     const next = updater(interviewRef.current);
@@ -567,6 +585,7 @@ export default function SpeakScreen() {
   }, []);
 
   const finishInterviewCapture = useCallback(() => {
+    clearInterviewLiveCaption();
     const session = interviewRef.current;
     if (!session || interviewStartedAtRef.current === null || interviewEndedAtMsRef.current !== null) return;
     const last = session.turns[session.turns.length - 1];
@@ -628,7 +647,7 @@ export default function SpeakScreen() {
       void realtime.close();
     }
     updateCurrentAnswerSpeech(false);
-  }, [currentInterviewAnswerIsPresent, dispatch, interviewElapsedMs, queueInterviewSegment, updateCurrentAnswerSpeech, updateInterview]);
+  }, [clearInterviewLiveCaption, currentInterviewAnswerIsPresent, dispatch, interviewElapsedMs, queueInterviewSegment, updateCurrentAnswerSpeech, updateInterview]);
 
   const finishActiveRecording = useCallback((notice?: string) => {
     if (recordingStartedAtRef.current !== null && recordingEndedAtMsRef.current === null) {
@@ -856,21 +875,31 @@ export default function SpeakScreen() {
                   interviewRealtimeRef.current = null;
                   turnCaptureRef.current?.setPCMListener(null);
                 }
+                clearInterviewLiveCaption();
                 setLiveTranscriptionAvailable(false);
                 setInterviewLiveWarning(
                   "Realtime transcription disconnected. Completed answer audio will use the background fallback.",
                 );
               },
-              ({ turnSeq, finalText, interimText }) => {
+              (snapshot) => {
+                const { turnSeq, finalText, interimText } = snapshot;
                 if (!isCurrent() || interviewRef.current?.id !== session.id) return;
                 updateInterview((current) => current?.id === session.id ? {
                   ...current,
-                  turns: current.turns.map((turn) => turn.seq === turnSeq ? {
-                    ...turn,
-                    liveTranscriptFinal: finalText,
-                    liveTranscriptInterim: interimText,
-                  } : turn),
+                  turns: current.turns.map((turn) => {
+                    if (turn.seq !== turnSeq || turn.transcriptStatus === "ready") return turn;
+                    return {
+                      ...turn,
+                      liveTranscriptFinal: finalText,
+                      liveTranscriptInterim: interimText,
+                    };
+                  }),
                 } : current);
+                const visibleTurn = interviewRef.current?.turns[interviewRef.current.turns.length - 1];
+                if (recordingEndedAtMsRef.current === null
+                  && visibleTurn?.seq === turnSeq && visibleTurn.endedAtMs === null) {
+                  interviewCaptionControllerRef.current?.update(snapshot);
+                }
               },
             );
             if (!isCurrent()) {
@@ -881,6 +910,7 @@ export default function SpeakScreen() {
             }
           } catch {
             localRealtime = null;
+            clearInterviewLiveCaption();
             setInterviewLiveWarning(
               "Realtime transcription is unavailable. Completed answer audio will use the background fallback.",
             );
@@ -916,6 +946,7 @@ export default function SpeakScreen() {
         }
         if (localCapture && localRealtime) {
           interviewRealtimeRef.current = localRealtime;
+          interviewCaptionControllerRef.current?.beginTurn(1);
           localRealtime.beginTurn(1);
           localCapture.setPCMListener((pcm) => localRealtime?.sendPCM(pcm));
           setLiveTranscriptionAvailable(true);
@@ -951,7 +982,7 @@ export default function SpeakScreen() {
         if (isCurrent()) dispatch(setRecordingInputError(resolveMicrophoneError(error)));
       }
     },
-    [dispatch, finishActiveRecording, releaseMedia, updateCurrentAnswerSpeech, updateInterview]
+    [clearInterviewLiveCaption, dispatch, finishActiveRecording, releaseMedia, updateCurrentAnswerSpeech, updateInterview]
   );
 
   const buildRecordingSaveDraft = useCallback((): RecordingSaveDraft | null => {
@@ -1155,6 +1186,7 @@ export default function SpeakScreen() {
     recordingEndedAtMsRef.current = null;
     setInterviewStopNotice(null);
     if (captureInterview) {
+      clearInterviewLiveCaption();
       setInterviewCaptureFailure(null);
       setInterviewAnswerWarning(null);
       interviewBoundaryPendingRef.current = false;
@@ -1241,11 +1273,12 @@ export default function SpeakScreen() {
     const advance = advanceInterviewTimeline(session, usedInterviewCandidateIdsRef.current, elapsedMs, maxAtMs);
     if (!advance) return;
     const { candidate, previousTurn } = advance;
+    const nextTurnSeq = advance.session.turns[advance.session.turns.length - 1].seq;
+    interviewCaptionControllerRef.current?.beginTurn(nextTurnSeq);
     interviewBoundaryPendingRef.current = true;
     setInterviewBoundaryPending(true);
     setInterviewAnswerWarning(null);
     const realtime = interviewRealtimeRef.current;
-    const nextTurnSeq = advance.session.turns[advance.session.turns.length - 1].seq;
     const generation = interviewGenerationRef.current;
     void capture.closeTurn(realtime ? () => {
       const transcript = realtime.finalizeTurn(previousTurn.seq);
@@ -1388,6 +1421,7 @@ export default function SpeakScreen() {
 
   useEffect(() => {
     if (speakState === "idle") {
+      clearInterviewLiveCaption();
       if (interviewRef.current?.id && !interviewSavingRef.current) cancelCurrentInterview();
       interviewPreparationKeyRef.current = null;
       interviewPreparationGenerationRef.current += 1;
@@ -1426,6 +1460,7 @@ export default function SpeakScreen() {
     setInterviewSyncError(null);
     setInterviewSaveError(null);
     setInterviewSaveStatus("idle");
+    clearInterviewLiveCaption();
     setInterviewLiveWarning(null);
     setInterviewCaptureFailure(null);
     setInterviewStopNotice(null);
@@ -1531,7 +1566,7 @@ export default function SpeakScreen() {
       }
       if (pendingInterviewPreparationRef.current === preparation) pendingInterviewPreparationRef.current = null;
     });
-  }, [cancelCurrentInterview, interviewRefreshToken, isAuthenticated, mergeInterview, recordingPracticeType, selectedEnglishLevel, selectedInterestIds, selectedTopic, speakState, updateCurrentAnswerSpeech, updateInterview]);
+  }, [cancelCurrentInterview, clearInterviewLiveCaption, interviewRefreshToken, isAuthenticated, mergeInterview, recordingPracticeType, selectedEnglishLevel, selectedInterestIds, selectedTopic, speakState, updateCurrentAnswerSpeech, updateInterview]);
 
   useEffect(() => {
     if (!interview?.id || (speakState !== "readyToRecord" && speakState !== "recording" && speakState !== "recorded")) return;
@@ -1985,6 +2020,7 @@ export default function SpeakScreen() {
                 && interviewElapsedMs() < (recordingLimitMsRef.current ?? Number.POSITIVE_INFINITY)}
               onNext={onNextInterviewQuestion}
               liveTranscriptionAvailable={liveTranscriptionAvailable}
+              liveCaption={interviewLiveCaption}
               hasAnswerEvidence={hasCurrentAnswer}
               boundaryPending={interviewBoundaryPending}
             />
