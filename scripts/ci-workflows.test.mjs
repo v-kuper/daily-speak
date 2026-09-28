@@ -157,19 +157,14 @@ test("local deploy uses a stable Docker Compose project name", () => {
   assert.match(rootPackage.scripts["docker:app"], /up --build -d --remove-orphans web backend worker postgres/);
 });
 
-test("local deploy workflow defaults to the Docker-local Python Whisper backend", () => {
-  assert.match(deployWorkflow, /WHISPER_BACKEND:\s+openai/);
-  assert.doesNotMatch(deployWorkflow, /vars\.WHISPER_BACKEND/);
-  assert.match(deployWorkflow, /WHISPER_PYTHON_BIN:\s+\/opt\/whisper\/bin\/python/);
-  assert.match(deployWorkflow, /WHISPER_OPENAI_MODEL_DIR:\s+\/app\/tools\/whisper\/openai-models/);
-  assert.match(deployWorkflow, /WHISPER_OPENAI_CACHE_DIR:\s+\/app\/tools\/whisper\/cache/);
-  assert.match(deployWorkflow, /WHISPER_FFMPEG_BIN:\s+\/usr\/bin\/ffmpeg/);
-  assert.match(deployWorkflow, /WHISPER_OPENAI_DEVICE:\s+cpu/);
-  assert.match(deployWorkflow, /WHISPER_OPENAI_FP16:\s+false/);
-  assert.match(deployWorkflow, /WHISPER_OPENAI_MODEL:\s+base/);
-  assert.match(deployWorkflow, /WHISPER_LANGUAGE:\s+auto/);
-  assert.doesNotMatch(deployWorkflow, /vars\.WHISPER_OPENAI_MODEL/);
-  assert.doesNotMatch(deployWorkflow, /vars\.WHISPER_LANGUAGE/);
+test("local deploy uses Groq transcription and a secret key", () => {
+  assert.match(deployWorkflow, /GROQ_WHISPER_MODEL:\s+whisper-large-v3-turbo/);
+  assert.match(deployWorkflow, /TRANSCRIPTION_LANGUAGE:\s+auto/);
+  assert.match(deployWorkflow, /FFMPEG_BINARY_PATH:\s+\/usr\/bin\/ffmpeg/);
+  assert.match(deployWorkflow, /GROQ_API_KEY:\s+\$\{\{ secrets\.GROQ_API_KEY \}\}/);
+  assert.doesNotMatch(deployWorkflow, /vars\.GROQ_API_KEY/);
+  assert.match(deployWorkflow, /name:\s+Validate Groq configuration/);
+  assert.equal(deployStep("Build and start local Docker HTTPS stack")?.env?.GROQ_API_KEY, "${{ secrets.GROQ_API_KEY }}");
 });
 
 test("multi-pass analysis concurrency is source-controlled for clean Windows deploys", () => {
@@ -184,12 +179,13 @@ test("multi-pass analysis concurrency is source-controlled for clean Windows dep
   assert.match(envExample, /AI_ANALYSIS_CONCURRENCY=3/);
 });
 
-test("local deploy workflow verifies Whisper inside the worker container", () => {
-  assert.match(deployWorkflow, /name:\s+Verify Docker Whisper runtime/);
+test("local deploy workflow verifies Groq configuration inside the worker container", () => {
+  assert.match(deployWorkflow, /name:\s+Verify Docker Groq configuration/);
   assert.match(deployWorkflow, /docker compose exec -T worker sh -lc/);
-  assert.match(deployWorkflow, /test -x "\$WHISPER_PYTHON_BIN"/);
-  assert.match(deployWorkflow, /\$WHISPER_PYTHON_BIN -m whisper --help/);
-  assert.match(deployWorkflow, /echo whisper-ok/);
+  assert.match(deployWorkflow, /test -n "\$GROQ_API_KEY"/);
+  assert.match(deployWorkflow, /test -x "\$FFMPEG_BINARY_PATH"/);
+  assert.match(deployWorkflow, /https:\/\/api\.groq\.com\/openai\/v1\/models/);
+  assert.match(deployWorkflow, /echo groq-config-ok/);
 });
 
 test("local deploy workflow configures persistent uploaded media storage", () => {
@@ -377,15 +373,11 @@ test("Docker build creates public before copying it into the runtime image", () 
   assert.match(webDockerfile, /COPY --from=build \/app\/public \.\/public/);
 });
 
-test("Docker runtime includes the local Python Whisper backend", () => {
+test("Docker runtime includes audio tools without a local speech model", () => {
   assert.match(dockerfile, /FROM debian:bookworm-slim AS runtime/);
-  assert.match(dockerfile, /python3-venv/);
   assert.match(dockerfile, /ffmpeg/);
-  assert.match(dockerfile, /openai-whisper/);
-  assert.match(dockerfile, /WHISPER_BACKEND=openai/);
-  assert.match(dockerfile, /WHISPER_PYTHON_BIN=\/opt\/whisper\/bin\/python/);
-  assert.match(dockerfile, /WHISPER_OPENAI_MODEL=base(?:\s|$)/);
-  assert.match(dockerfile, /WHISPER_FFMPEG_BIN=\/usr\/bin\/ffmpeg/);
+  assert.doesNotMatch(dockerfile, /openai-whisper|python3-venv|WHISPER_BACKEND/);
+  assert.match(dockerfile, /FFMPEG_BINARY_PATH=\/usr\/bin\/ffmpeg/);
 });
 
 test("Compose gives independent contexts and bounded worker execution", () => {
@@ -421,10 +413,7 @@ test("Compose keeps backend credentials and persistent data with their owners", 
   const { web, backend, worker, postgres } = compose.services;
   assert.ok(backend, "backend service is required");
   assert.equal(web.volumes, undefined);
-  assert.deepEqual(backend.volumes, [
-    "${WHISPER_TOOLS_HOST_DIR:-./backend/tools}:/app/tools",
-    "${UPLOADS_HOST_DIR:-./.data/uploads}:/app/uploads",
-  ]);
+  assert.deepEqual(backend.volumes, ["${UPLOADS_HOST_DIR:-./.data/uploads}:/app/uploads"]);
   assert.deepEqual(worker.volumes, backend.volumes);
   assert.deepEqual(postgres.volumes, ["postgres_data:/var/lib/postgresql/data"]);
   assert.deepEqual(postgres.ports, ["127.0.0.1:${POSTGRES_PORT:-5432}:5432"]);
@@ -461,7 +450,7 @@ test("application images ship only their own production runtime and assets", () 
   assert.ok(backend.includes("ENV APP_ADDR=:3000"));
   assert.ok(backend.includes("EXPOSE 3000"));
   assert.ok(backend.includes('CMD ["./daily-speaking-api"]'));
-  assert.match(backend.join("\n"), /apt-get install[^\n]*ca-certificates curl ffmpeg python3 python3-venv/);
+  assert.match(backend.join("\n"), /apt-get install[^\n]*ca-certificates curl ffmpeg/);
   assert.doesNotMatch(backend.join("\n"), /node:|next-build|server\.js|COPY.*web/);
 });
 
@@ -473,12 +462,12 @@ test("project build contexts exclude secrets and generated files but retain sour
     }
     for (const file of project === "web"
       ? ["app/layout.tsx", "src/lib/apiConfig.ts", "package-lock.json", "public/logo.svg"]
-      : ["go.mod", "go.sum", "cmd/api/main.go", "migrations/0001_init.sql", "docs/openapi.json", "tools/whisper/cache/.gitkeep"]) {
+      : ["go.mod", "go.sum", "cmd/api/main.go", "migrations/0001_init.sql", "docs/openapi.json"]) {
       assert.equal(excluded.ignores(file), false, `${project}: must retain ${file}`);
     }
     for (const file of project === "web"
       ? [".next/server/app.js", "tsconfig.tsbuildinfo", "out/index.html"]
-      : [".venv/bin/python", "daily-speaking-api", "uploads/recording.webm", "tools/whisper/openai-models/base.pt"]) {
+      : [".venv/bin/python", "daily-speaking-api", "uploads/recording.webm", "tools/model-cache/base.pt"]) {
       assert.equal(excluded.ignores(file), true, `${project}: must exclude ${file}`);
     }
   }
@@ -503,22 +492,10 @@ test("Docker runtime and Compose use persistent uploaded media storage", () => {
   assert.doesNotMatch(dockerCompose, /\.\/public\/uploads:\/app\/public\/uploads/);
 });
 
-test("Docker Compose defaults to the local Python Whisper backend", () => {
-  assert.match(dockerCompose, /WHISPER_BACKEND:\s+\$\{WHISPER_BACKEND:-openai\}/);
-  assert.match(
-    dockerCompose,
-    /WHISPER_PYTHON_BIN:\s+\$\{WHISPER_PYTHON_BIN:-\/opt\/whisper\/bin\/python\}/,
-  );
-  assert.match(
-    dockerCompose,
-    /WHISPER_FFMPEG_BIN:\s+\$\{WHISPER_FFMPEG_BIN:-\/usr\/bin\/ffmpeg\}/,
-  );
-  assert.match(
-    dockerCompose,
-    /WHISPER_OPENAI_MODEL:\s+\$\{WHISPER_OPENAI_MODEL:-base\}/,
-  );
-  assert.match(
-    dockerCompose,
-    /WHISPER_LANGUAGE:\s+\$\{WHISPER_LANGUAGE:-auto\}/,
-  );
+test("Docker Compose gives Groq credentials only to the worker", () => {
+  assert.match(dockerCompose, /GROQ_API_KEY:\s+\$\{GROQ_API_KEY:-\}/);
+  assert.match(dockerCompose, /GROQ_WHISPER_MODEL:\s+\$\{GROQ_WHISPER_MODEL:-whisper-large-v3-turbo\}/);
+  assert.match(dockerCompose, /FFMPEG_BINARY_PATH:\s+\$\{FFMPEG_BINARY_PATH:-\/usr\/bin\/ffmpeg\}/);
+  assert.equal(compose.services.backend.environment.GROQ_API_KEY, undefined);
+  assert.equal(compose.services.worker.environment.GROQ_API_KEY, "${GROQ_API_KEY:-}");
 });

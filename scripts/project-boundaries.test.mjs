@@ -81,7 +81,7 @@ test("standalone backend upload defaults are ignored by Git", () => {
   }
 });
 
-test("backend environment example exposes the supported Whisper initial prompt", () => {
+test("backend environment example documents server-only Groq transcription", () => {
   const env = Object.fromEntries(readFileSync("backend/.env.example", "utf8")
     .split(/\r?\n/)
     .filter((line) => line && !line.startsWith("#") && line.includes("="))
@@ -89,10 +89,9 @@ test("backend environment example exposes the supported Whisper initial prompt",
       const separator = line.indexOf("=");
       return [line.slice(0, separator), line.slice(separator + 1).replace(/^"|"$/g, "")];
     }));
-  const whisper = readFileSync("backend/internal/transcription/whisper.go", "utf8");
-
-  assert.match(whisper, /os\.Getenv\("WHISPER_INITIAL_PROMPT"\)/);
-  assert.match(env.WHISPER_INITIAL_PROMPT ?? "", /English.*Russian.*Cyrillic/);
+  assert.equal(env.GROQ_API_KEY, "");
+  assert.equal(env.GROQ_WHISPER_MODEL, "whisper-large-v3-turbo");
+  assert.equal(env.TRANSCRIPTION_LANGUAGE, "auto");
 });
 
 test("backend source has no Next.js upstream", () => {

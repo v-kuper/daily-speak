@@ -60,7 +60,7 @@ func resolveFFprobeBinary() (string, error) {
 	if runtime.GOOS == "windows" {
 		name += ".exe"
 	}
-	if ffmpeg := strings.TrimSpace(os.Getenv("WHISPER_FFMPEG_BIN")); ffmpeg != "" {
+	if ffmpeg := strings.TrimSpace(os.Getenv("FFMPEG_BINARY_PATH")); ffmpeg != "" {
 		candidate := filepath.Join(filepath.Dir(ffmpeg), name)
 		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
 			return candidate, nil

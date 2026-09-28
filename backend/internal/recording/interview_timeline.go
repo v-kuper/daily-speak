@@ -14,7 +14,7 @@ type TimedTranscript struct {
 }
 
 // FinalInterviewAnswersWithinDuration refuses final answer attribution when
-// click times or Whisper offsets extend beyond the measured complete audio.
+// click times or transcription offsets extend beyond the measured complete audio.
 // A two-second margin allows recorder and audio-probe rounding differences.
 func FinalInterviewAnswersWithinDuration(turns []InterviewTurn, transcript TimedTranscript, audioDurationMS int) map[int]string {
 	if !validInterviewTiming(turns, audioDurationMS) {
@@ -45,7 +45,7 @@ func validInterviewTiming(turns []InterviewTurn, audioDurationMS int) bool {
 
 // FinalInterviewAnswers assigns every timed piece to the nearest question
 // interval using its midpoint. The answer text is final, but the boundary is
-// always approximate: Whisper timing does not identify an exact click instant.
+// always approximate: transcription timing does not identify an exact click instant.
 func FinalInterviewAnswers(turns []InterviewTurn, transcript TimedTranscript) map[int]string {
 	if len(turns) == 0 || len(transcript.Segments) == 0 {
 		return nil

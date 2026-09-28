@@ -23,7 +23,6 @@ Component-specific instructions remain next to their owners:
 - [`../web/README.md`](../web/README.md)
 - [`../backend/README.md`](../backend/README.md)
 - [`../backend/docs/README.md`](../backend/docs/README.md)
-- [`../backend/tools/whisper/README.md`](../backend/tools/whisper/README.md)
 
 The generated OpenAPI artifact is
 [`../backend/docs/openapi.json`](../backend/docs/openapi.json). It is the API

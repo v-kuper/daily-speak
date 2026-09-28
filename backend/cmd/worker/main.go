@@ -18,6 +18,9 @@ import (
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if strings.TrimSpace(os.Getenv("GROQ_API_KEY")) == "" {
+		log.Fatal("GROQ_API_KEY is required for worker transcription")
+	}
 
 	requireSSL, err := parseDatabaseSSL(os.Getenv("DATABASE_SSL"))
 	if err != nil {

@@ -163,7 +163,7 @@ Unified identity:
 
 `ffprobe` is required by the worker to verify guest audio duration. It is
 included with `ffmpeg` in the backend image. Outside Docker the worker resolves
-it next to `WHISPER_FFMPEG_BIN` or from `PATH`; `FFPROBE_BINARY_PATH` can supply
+it next to `FFMPEG_BINARY_PATH` or from `PATH`; `FFPROBE_BINARY_PATH` can supply
 an explicit executable path.
 
 Access tokens are signed JWTs. Refresh tokens are opaque, single-use, and only
@@ -189,14 +189,15 @@ requires the same Bearer access token used by native clients.
 AI and media variables are grouped in the example file:
 
 - `OLLAMA_*` and `AI_ANALYSIS_CONCURRENCY` configure question/analysis calls;
-- `WHISPER_*` configures the Python or `whisper.cpp` transcription backend;
+- `GROQ_API_KEY` and `GROQ_WHISPER_MODEL` configure Groq transcription in the worker;
+- `TRANSCRIPTION_LANGUAGE`, `TRANSCRIPTION_PROMPT`, and `FFMPEG_BINARY_PATH` configure optional audio handling;
 - `CARTESIA_*` configures pronunciation audio synthesis.
 
-`CARTESIA_API_KEY` and the `MEDIA_S3_*` credential values are secrets. Never
+`GROQ_API_KEY`, `CARTESIA_API_KEY`, and the `MEDIA_S3_*` credential values are secrets. Never
 commit them or expose them through web configuration. S3 settings are optional
 in local mode; an unset S3 secret must not block the current Windows deployment.
-Uploaded media and Whisper models/cache must use persistent storage in
-production.
+Uploaded media must use persistent storage in production. The worker sends a
+temporary copy to Groq and keeps the original in backend-owned storage.
 
 ## Tests and contract checks
 
@@ -229,22 +230,16 @@ The build context is only `backend/`:
 docker build -t daily-speaking-backend backend
 ```
 
-The runtime image contains the Go API, Python Whisper, and ffmpeg; it contains no
-Node.js or Next.js output. Compose mounts only backend-owned persistent paths:
+The runtime image contains the Go API and ffmpeg for audio probing and
+compression; it contains no local speech model, Node.js, or Next.js output.
+Compose mounts `${UPLOADS_HOST_DIR}:/app/uploads` into the API and worker.
 
-- `${UPLOADS_HOST_DIR}:/app/uploads`;
-- `${WHISPER_TOOLS_HOST_DIR}:/app/tools`.
+## Groq transcription
 
-## Local Whisper
-
-From the repository root:
-
-```bash
-npm run setup:whisper
-npm run check:whisper
-```
-
-These commands create and inspect `backend/.venv`,
-`backend/tools/whisper/openai-models`, `backend/tools/whisper/cache`, and
-`backend/tools/ffmpeg`. See `tools/whisper/README.md` for both supported
-backends and exact relative paths.
+The worker transcribes recordings and interview answers through Groq's
+`/openai/v1/audio/transcriptions` endpoint. Set `GROQ_API_KEY` in the worker
+environment. `GROQ_WHISPER_MODEL` defaults to `whisper-large-v3-turbo`.
+The free plan accepts files up to 25 MB, so the worker converts larger files
+to 16 kHz mono FLAC before upload. Files still over 25 MB fail explicitly.
+The worker requests timestamps for full interview recordings. Uploaded audio
+stays in backend storage; temporary worker copies are deleted after processing.

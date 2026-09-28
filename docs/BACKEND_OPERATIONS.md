@@ -65,7 +65,7 @@ Recommended first alerts:
 | oldest `interview.process` job | > 2 min | > 10 min |
 | terminal/failed jobs | any sustained increase | page when user work is affected |
 
-External Ollama, Whisper, and Cartesia outcome/duration counters are the next
+External Ollama, Groq, and Cartesia outcome/duration counters are the next
 provider-specific dashboard increment. Existing structured worker events remain
 available until those counters are exported.
 
@@ -77,11 +77,11 @@ background processing. Scale worker pools independently by job kind:
 1. Add API replicas when p95 latency or in-flight requests rise while the DB
    pool stays below 70% utilization.
 2. Add recording workers when `recording.process` age rises. Increase
-   `WORKER_RECORDING_CONCURRENCY` only within Whisper/Ollama CPU, memory, and
-   provider limits.
+   `WORKER_RECORDING_CONCURRENCY` only within Groq's audio and request rate
+   limits and Ollama capacity.
 3. Scale adaptive interview workers with `WORKER_INTERVIEW_CONCURRENCY` when
    preparation, answer transcription, or question refill waits grow. Measure
-   answer upload time, queue wait, local Whisper time, question generation time,
+   answer upload time, queue wait, Groq transcription time, question generation time,
    and the fraction of transitions using an adaptive question separately.
 4. Scale guest preview and shadowing pools independently; do not let a Cartesia
    slowdown consume recording workers.

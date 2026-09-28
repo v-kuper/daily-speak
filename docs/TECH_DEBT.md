@@ -47,7 +47,7 @@ Configured thresholds are hypotheses until these checks are measured remotely.
 
 ### Providers and workers
 
-- Keep Ollama, Whisper, and Cartesia behind feature-owned ports/adapters.
+- Keep Ollama, Groq, and Cartesia behind feature-owned ports/adapters.
 - Standardize deadlines, retry budgets, non-retryable errors, circuit breakers,
   and provider-specific concurrency limits.
 - Export bounded latency, outcome, retry, saturation, and cost metrics per

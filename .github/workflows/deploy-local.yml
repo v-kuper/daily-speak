@@ -68,17 +68,9 @@ jobs:
       READINESS_TIMEOUT: ${{ vars.READINESS_TIMEOUT || '2s' }}
       READINESS_MAX_QUEUE_DEPTH: ${{ vars.READINESS_MAX_QUEUE_DEPTH || '1000' }}
       READINESS_MAX_OLDEST_JOB_AGE: ${{ vars.READINESS_MAX_OLDEST_JOB_AGE || '30m' }}
-      WHISPER_BACKEND: openai
-      WHISPER_BINARY_PATH: ${{ vars.WHISPER_BINARY_PATH || '' }}
-      WHISPER_MODEL_PATH: ${{ vars.WHISPER_MODEL_PATH || '' }}
-      WHISPER_PYTHON_BIN: /opt/whisper/bin/python
-      WHISPER_OPENAI_MODEL: base
-      WHISPER_OPENAI_MODEL_DIR: /app/tools/whisper/openai-models
-      WHISPER_OPENAI_CACHE_DIR: /app/tools/whisper/cache
-      WHISPER_FFMPEG_BIN: /usr/bin/ffmpeg
-      WHISPER_OPENAI_DEVICE: cpu
-      WHISPER_OPENAI_FP16: false
-      WHISPER_LANGUAGE: auto
+      GROQ_WHISPER_MODEL: whisper-large-v3-turbo
+      TRANSCRIPTION_LANGUAGE: auto
+      FFMPEG_BINARY_PATH: /usr/bin/ffmpeg
 
     steps:
       - name: Checkout
@@ -112,6 +104,14 @@ jobs:
             throw "GitHub Actions secret AUTH_ACCESS_TOKEN_SECRET must contain at least 32 characters."
           }
 
+      - name: Validate Groq configuration
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:GROQ_API_KEY)) {
+            throw "Missing required GitHub Actions secret GROQ_API_KEY. Add it under repository Settings > Secrets and variables > Actions > Secrets."
+          }
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -136,6 +136,7 @@ jobs:
 
       - name: Build and start local Docker HTTPS stack
         env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           CARTESIA_API_KEY: ${{ secrets.CARTESIA_API_KEY }}
           CARTESIA_VOICE_ID: ${{ vars.CARTESIA_VOICE_ID }}
           AUTH_ACCESS_TOKEN_SECRET: ${{ secrets.AUTH_ACCESS_TOKEN_SECRET }}
@@ -173,9 +174,9 @@ jobs:
           $env:API_BASE_URL = "https://${env:LAN_HOST_IP}:${env:API_HTTPS_PORT}"
           node scripts/smoke-stack.mjs
 
-      - name: Verify Docker Whisper runtime
+      - name: Verify Docker Groq configuration
         run: |
-          docker compose exec -T worker sh -lc 'env | grep WHISPER && test -x "$WHISPER_PYTHON_BIN" && $WHISPER_PYTHON_BIN -m whisper --help >/dev/null && echo whisper-ok'
+          docker compose exec -T worker sh -lc 'test -n "$GROQ_API_KEY" && test "$GROQ_WHISPER_MODEL" = whisper-large-v3-turbo && test -x "$FFMPEG_BINARY_PATH" && curl --fail --silent --show-error --output /dev/null --header "Authorization: Bearer $GROQ_API_KEY" https://api.groq.com/openai/v1/models && echo groq-config-ok'
 
       - name: Verify Docker Cartesia configuration
         run: |

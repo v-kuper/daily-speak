@@ -23,7 +23,7 @@ func NewMaterializer(database *db.DB, store storage.Store) *Materializer {
 	return &Materializer{db: database, store: store}
 }
 
-// Materialize gives path-based processors such as whisper.cpp a
+// Materialize gives path-based processors such as audio transcription a
 // bounded temporary file while keeping the durable source in the configured
 // store. Local and S3 objects therefore follow the same integrity path and a
 // worker never depends on an API container's filesystem.

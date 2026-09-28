@@ -177,7 +177,7 @@ func (p *Processor) transcribe(ctx context.Context, job ProcessingJob, work Proc
 	}
 	transcript = NormalizeTranscript(transcript)
 	if transcript == "" {
-		return errors.New("Whisper returned an empty transcript. Try speaking louder or recording again.")
+		return errors.New("Transcription returned an empty transcript. Try speaking louder or recording again.")
 	}
 	if work.InterviewSessionID != nil && isInterviewRepository {
 		turns, loadErr := interviewRepository.LoadInterviewTurns(ctx, *work.InterviewSessionID)

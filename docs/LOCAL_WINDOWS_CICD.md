@@ -81,14 +81,15 @@ It uses the stable Compose project name `daily-speaking`.
 Required GitHub Actions values:
 
 - secret `CARTESIA_API_KEY`;
+- secret `GROQ_API_KEY`;
 - variable `CARTESIA_VOICE_ID`;
 - secret `AUTH_ACCESS_TOKEN_SECRET`, containing at least 32 characters generated
   from a cryptographically secure random source (48 random bytes or more are
   recommended).
 
 Secret values must remain in `Secrets`, never `Variables`, repository files,
-runner system variables, issue text, or logs. The workflow validates Cartesia
-presence and the identity signing-secret length without printing their values.
+runner system variables, issue text, or logs. The workflow validates Groq and
+Cartesia presence and the identity signing-secret length without printing values.
 
 Optional secrets are `METRICS_BEARER_TOKEN` for protected metrics and the
 `MEDIA_S3_ACCESS_KEY_ID`, `MEDIA_S3_SECRET_ACCESS_KEY`, and
@@ -108,14 +109,13 @@ Optional repository variables and defaults:
 | `OLLAMA_BASE_URL` | `http://host.docker.internal:11434` | backend AI service |
 | `OLLAMA_MODEL` | `gemma4:31b-cloud` | backend AI model |
 | `OLLAMA_THINKING_MODEL` | `true` | backend model behavior |
-| `WHISPER_BINARY_PATH` | empty | optional `whisper.cpp` binary |
-| `WHISPER_MODEL_PATH` | empty | optional `whisper.cpp` model |
 
 The workflow deliberately fixes `AI_ANALYSIS_CONCURRENCY=3`,
 `WORKER_GUEST_PREVIEW_CONCURRENCY=1`,
-`WHISPER_BACKEND=openai`, `WHISPER_OPENAI_MODEL=base`, and
-`WHISPER_LANGUAGE=auto` in source so old runner variables cannot silently alter
-the deployed transcription mode.
+`GROQ_WHISPER_MODEL=whisper-large-v3-turbo` and
+`TRANSCRIPTION_LANGUAGE=auto` in source. The worker alone receives the Groq key
+and sends temporary audio copies to the Groq transcription endpoint. Original
+audio stays on the persistent Windows uploads volume.
 
 ## Deployment flow
 
@@ -123,13 +123,13 @@ The workflow:
 
 1. checks out the same revision for both projects;
 2. installs from `web/package-lock.json` and runs the repository quality gates;
-3. validates required Cartesia and unified identity configuration before Docker;
+3. validates required Groq, Cartesia, and unified identity configuration before Docker;
 4. verifies Docker and runs `.\scripts\setup-lan-https-proxy.ps1`;
 5. builds and starts `web`, `backend`, `worker`, `postgres`, and `lan-https` together with
    `--remove-orphans` under the stable `daily-speaking` Compose project;
 6. verifies the signing secret reached the backend container;
 7. runs `scripts/smoke-stack.mjs` against the separate HTTP and trusted HTTPS origins;
-8. verifies Whisper and Cartesia inside the worker container.
+8. verifies Groq credentials and network access, ffmpeg, and Cartesia inside the worker container.
 
 The smoke uses a unique temporary account and verifies web health, `/speak`, API
 health/readiness, OpenAPI, Swagger, exact credentialed CORS, identity

@@ -59,7 +59,7 @@ test("HTTP deployment selects a physical LAN adapter and preserves provider/stor
   assert.equal(typeof lan.buildComposeCommand, "function");
   const env = {
     APP_PORT: " 8080 ", API_PORT: " 8081 ", COMPOSE_PROJECT_NAME: "custom-app",
-    CARTESIA_API_KEY: "test-key", WHISPER_LANGUAGE: "en", UPLOADS_HOST_DIR: "D:\\media",
+    CARTESIA_API_KEY: "test-key", TRANSCRIPTION_LANGUAGE: "en", UPLOADS_HOST_DIR: "D:\\media",
     PUBLIC_API_BASE_URL: "https://stale.example", CORS_ALLOWED_ORIGINS: "*",
   };
   const command = lan.buildComposeCommand({ env, interfaces: {

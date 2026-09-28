@@ -19,7 +19,7 @@ Go API -------- PostgreSQL
 Go worker ----------+
   |
   +-- local persistent media (test) or private S3-compatible storage
-  +-- Whisper, Ollama, and Cartesia
+  +-- Groq transcription, Ollama, and Cartesia
 ```
 
 - `web/` is a Next.js sandbox client. It owns browser routes and UI state, but
@@ -155,6 +155,9 @@ the canonical speech-only transcript used for error analysis. Optional
 on that transcript's timeline. Live and final transcription, question
 generation, and temporary-audio cleanup run through durable worker jobs;
 provider adapters may change independently of the interview API and timeline.
+Audio remains in backend-owned storage. The worker sends a temporary copy to
+Groq's transcription API, receives text and optional timestamps, and deletes
+the temporary copy; the API does not expose the Groq key to clients.
 Final answer attribution checks question and transcription offsets against the
 verified complete-audio duration. Without usable timed output, it uses ordered
 answer transcripts only when they reconstruct the full transcript exactly;

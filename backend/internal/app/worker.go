@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"os"
 	"time"
 
 	"daily-speaking-practice/backend/internal/ai"
@@ -41,9 +42,14 @@ func NewWorker(config WorkerConfig) *background.Runtime {
 		aiClient = ai.OllamaClient{}
 	}
 	analysis := recording.NewAnalysisService(recordingollama.New(aiClient), recording.AnalysisConfigFromEnv())
+	groq := transcription.NewGroq(transcription.GroqConfig{
+		APIKey: os.Getenv("GROQ_API_KEY"), Model: os.Getenv("GROQ_WHISPER_MODEL"),
+		Language: os.Getenv("TRANSCRIPTION_LANGUAGE"), Prompt: os.Getenv("TRANSCRIPTION_PROMPT"),
+		FFmpegPath: os.Getenv("FFMPEG_BINARY_PATH"),
+	})
 	transcribe := config.TranscribeAudio
 	if transcribe == nil {
-		transcribe = transcription.TranscribeAudioWithLocalWhisper
+		transcribe = groq.Transcribe
 	}
 	transcribeForProcessing := func(ctx context.Context, path string) (string, error) {
 		transcript, err := transcribe(ctx, path)
@@ -58,7 +64,7 @@ func NewWorker(config WorkerConfig) *background.Runtime {
 	timedTranscribe := config.TranscribeTimedAudio
 	if timedTranscribe == nil && config.TranscribeAudio == nil {
 		timedTranscribe = func(ctx context.Context, path string) (recording.TimedTranscript, error) {
-			result, err := transcription.TranscribeTimedAudioWithLocalWhisper(ctx, path)
+			result, err := groq.TranscribeTimed(ctx, path)
 			if err != nil {
 				return recording.TimedTranscript{}, err
 			}
