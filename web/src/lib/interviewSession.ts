@@ -11,6 +11,10 @@ export type InterviewTurn = {
   endedAtMs: number | null;
   provisionalTranscript: string;
   transcriptStatus?: string;
+  /** Client-only stable deltas received from the live STT socket. */
+  liveTranscriptFinal?: string;
+  /** Client-only replaceable STT hypothesis. It is never submitted. */
+  liveTranscriptInterim?: string;
 };
 export type InterviewSession = {
   id: string;
@@ -25,7 +29,46 @@ export type InterviewSession = {
   maxDurationSeconds: number | null;
 };
 
+export type InterviewTranscriptionSocketConfig = {
+  token: string;
+  expiresAt: string;
+  websocketUrl: string;
+  model: string;
+  encoding: string;
+  sampleRate: number;
+};
+
 type ErrorBody = { error?: { message?: unknown } };
+
+export const mergeInterviewTranscriptStatus = (
+  serverStatus: string | undefined,
+  localStatus: string | undefined,
+): string | undefined => {
+  if (serverStatus === "ready") return "ready";
+  if (localStatus === "failed") return "failed";
+  return serverStatus || localStatus;
+};
+
+/** Keep local recognition feedback while an older/empty server snapshot is merged. */
+export const preserveLiveInterviewTurn = (
+  server: InterviewTurn,
+  local: InterviewTurn,
+): InterviewTurn => {
+  const merged = {
+    ...server,
+    provisionalTranscript: server.transcriptStatus === "ready"
+      ? server.provisionalTranscript
+      : server.provisionalTranscript || local.provisionalTranscript,
+  };
+  // A ready server transcript is canonical for both realtime submission and
+  // batch fallback. Do not let a stale partial socket hypothesis cover it.
+  if (server.transcriptStatus === "ready") return merged;
+  return {
+    ...merged,
+    ...(local.liveTranscriptFinal !== undefined ? { liveTranscriptFinal: local.liveTranscriptFinal } : {}),
+    ...(local.liveTranscriptInterim !== undefined ? { liveTranscriptInterim: local.liveTranscriptInterim } : {}),
+  };
+};
 
 const parseSession = (payload: unknown): InterviewSession => {
   const outer = payload && typeof payload === "object" ? payload as Record<string, unknown> : {};
@@ -162,6 +205,47 @@ export const uploadInterviewTurnAudio = async (
     throw new Error(typeof payload?.error?.message === "string" ? payload.error.message : "The answer could not be processed.");
   }
 };
+
+export const getInterviewTranscriptionToken = async (
+  id: string,
+): Promise<InterviewTranscriptionSocketConfig> => {
+  const response = await apiFetch(`${interviewPath(id)}/transcription-token`, postJSON({}));
+  const payload = await readApiJSON<unknown>(response).catch(() => null);
+  if (!response.ok) {
+    const error = payload && typeof payload === "object" ? (payload as ErrorBody).error : null;
+    throw new Error(typeof error?.message === "string" ? error.message : "Realtime transcription is unavailable.");
+  }
+  const value = payload && typeof payload === "object" ? payload as Record<string, unknown> : {};
+  const sampleRate = Number(value.sampleRate);
+  if (
+    typeof value.token !== "string" || !value.token ||
+    typeof value.expiresAt !== "string" || !value.expiresAt ||
+    typeof value.websocketUrl !== "string" || !value.websocketUrl ||
+    typeof value.model !== "string" || !value.model ||
+    typeof value.encoding !== "string" || !value.encoding ||
+    !Number.isSafeInteger(sampleRate) || sampleRate <= 0
+  ) {
+    throw new Error("The transcription service returned an invalid connection token.");
+  }
+  return {
+    token: value.token,
+    expiresAt: value.expiresAt,
+    websocketUrl: value.websocketUrl,
+    model: value.model,
+    encoding: value.encoding,
+    sampleRate,
+  };
+};
+
+export const submitInterviewTurnTranscript = (
+  id: string,
+  seq: number,
+  text: string,
+  idempotencyKey: string,
+): Promise<InterviewSession> => interviewRequest(
+  `${interviewPath(id)}/turns/${seq}/transcript`,
+  postJSON({ idempotencyKey, text }, idempotencyKey),
+);
 
 export const finalizeInterview = async (
   id: string,

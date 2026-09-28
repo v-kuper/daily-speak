@@ -30,7 +30,7 @@ import {
 import SuggestionCard from "./SuggestionCard";
 import RecordingLoadError from "./RecordingLoadError";
 import ProtectedMediaImage from "./ProtectedMediaImage";
-import InterviewTimeline from "./InterviewTimeline";
+import ConversationTranscript from "./ConversationTranscript";
 
 const formatPracticeLabel = (value: "free_talk" | "topic" | "photo_description"): string => {
   switch (value) {
@@ -186,6 +186,13 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
   const recordingDuration = recording?.duration ?? 0;
   const playbackPercent = recordingDuration > 0 ? Math.max(0, Math.min(100, (playbackPosition / recordingDuration) * 100)) : 0;
   const hasTranscript = recording ? recording.transcript.trim().length > 0 : false;
+  const hasConversationTranscript = recording?.practiceType === "topic"
+    && Boolean(recording.interviewTurns?.length);
+  const hasCorrectedConversation = Boolean(
+    recording?.practiceType === "topic"
+    && recording.interviewTurns?.length
+    && recording.interviewTurns.every((turn) => Boolean(turn.correctedAnswerText?.trim())),
+  );
   const hasCorrectedTranscript = recording ? recording.correctedTranscript.trim().length > 0 : false;
   const hasSuggestions = recording ? recording.suggestions.length > 0 : false;
   const transcriptSegments = useMemo(() => {
@@ -562,11 +569,15 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
         </div>
       </div>
 
-      {recording && <InterviewTimeline turns={recording.interviewTurns} processing={isProcessing} />}
-
       <div className="transcript-section">
-        <div className="section-title">Transcript</div>
-        {hasTranscript ? (
+        <div className="section-title">{hasConversationTranscript ? "Conversation transcript" : "Transcript"}</div>
+        {hasConversationTranscript ? (
+          <ConversationTranscript
+            turns={recording.interviewTurns}
+            suggestions={recording.suggestions}
+            processing={isProcessing}
+          />
+        ) : hasTranscript ? (
           <div className="transcript-text">
             {transcriptSegments.map((segment, index) =>
               segment.isError ? (
@@ -617,7 +628,14 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
       <div className="shadowing-section">
         <div className="section-title">Shadowing practice</div>
         <p className="shadowing-hint">Listen, then repeat with the same rhythm and pronunciation.</p>
-        {hasCorrectedTranscript ? (
+        {hasCorrectedConversation ? (
+          <ConversationTranscript
+            turns={recording.interviewTurns}
+            suggestions={[]}
+            processing={isProcessing}
+            answerKind="corrected"
+          />
+        ) : hasCorrectedTranscript ? (
           <div className="transcript-text">{recording.correctedTranscript}</div>
         ) : isProcessing ? (
           <div className="empty-state">

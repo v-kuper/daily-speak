@@ -2,6 +2,7 @@ package guestpreview
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"testing"
 	"time"
@@ -72,10 +73,13 @@ func (m *processorMaterializer) Materialize(context.Context, string) (string, fu
 	return "/tmp/guest.webm", func() { m.cleaned = true }, nil
 }
 
-type previewAnalyzer struct{ transcript string }
+type previewAnalyzer struct {
+	transcript string
+	dialogue   []recording.InterviewDialogueTurn
+}
 
-func (a *previewAnalyzer) PreviewCorrections(_ context.Context, transcript string) ([]recording.Suggestion, error) {
-	a.transcript = transcript
+func (a *previewAnalyzer) PreviewCorrections(_ context.Context, transcript string, dialogue []recording.InterviewDialogueTurn) ([]recording.Suggestion, error) {
+	a.transcript, a.dialogue = transcript, dialogue
 	return []recording.Suggestion{{Wrong: "go", Right: "went"}}, nil
 }
 
@@ -138,34 +142,63 @@ func TestProcessorRejectsGuestAudioBeyondMeasuredThreeMinuteLimit(t *testing.T) 
 	}
 }
 
-func TestGuestInterviewUsesWholeAudioAndKeepsAnswerTimeline(t *testing.T) {
-	end := 1000
+func TestGuestInterviewComposesReadyTurnsWithoutRetranscribingAudio(t *testing.T) {
 	sessionID := "session-1"
+	first, second := "First answer.", "Second answer."
 	store := &interviewProcessorStore{
 		processorStore: &processorStore{work: ProcessingWork{AudioAssetID: "asset-1", DeclaredDuration: 2,
 			InterviewSessionID: &sessionID}, found: true, advance: true, active: true},
-		turns: []recording.InterviewTurn{{Sequence: 1, AskedAtMS: 0, EndedAtMS: &end},
-			{Sequence: 2, AskedAtMS: 1000}},
+		turns: []recording.InterviewTurn{
+			{Sequence: 1, Question: "First question?", TranscriptStatus: "ready", FinalText: &first},
+			{Sequence: 2, Question: "Second question?", TranscriptStatus: "ready", Provisional: &second},
+		},
 	}
+	analyzer := &previewAnalyzer{}
 	processor := NewProcessor(ProcessorDependencies{
 		Store: store, Materializer: &processorMaterializer{},
 		ProbeAudioDuration: func(context.Context, string) (time.Duration, error) { return 2 * time.Second, nil },
 		Transcribe: func(context.Context, string) (string, error) {
-			t.Fatal("timed full-file transcription should be used")
+			t.Fatal("continuous interview audio must not be transcribed")
 			return "", nil
 		},
-		TranscribeTimed: func(context.Context, string) (recording.TimedTranscript, error) {
-			return recording.TimedTranscript{Text: "First. Second.", Segments: []recording.TimedSegment{
-				{StartMS: 100, EndMS: 800, Text: " First."},
-				{StartMS: 1100, EndMS: 1700, Text: " Second."},
-			}}, nil
-		},
-		Analyzer: &previewAnalyzer{},
+		Analyzer: analyzer,
 	})
 	if err := processor.Process(context.Background(), Job{ID: "job-1", ResourceID: "preview-1"}); err != nil {
 		t.Fatal(err)
 	}
-	if store.sealMS != 2000 || store.transcript != "First. Second." || store.answers[1] != "First." || store.answers[2] != "Second." {
+	if store.sealMS != 2000 || store.transcript != "First answer. Second answer." || store.answers[1] != first || store.answers[2] != second {
 		t.Fatalf("unexpected guest timeline: %#v", store)
+	}
+	wantDialogue := []recording.InterviewDialogueTurn{
+		{Sequence: 1, Question: "First question?", Answer: first},
+		{Sequence: 2, Question: "Second question?", Answer: second},
+	}
+	if analyzer.transcript != store.transcript || !reflect.DeepEqual(analyzer.dialogue, wantDialogue) {
+		t.Fatalf("analyzer=%#v", analyzer)
+	}
+}
+
+func TestGuestInterviewRetriesUntilTurnTranscriptIsReady(t *testing.T) {
+	sessionID := "session-1"
+	store := &interviewProcessorStore{
+		processorStore: &processorStore{work: ProcessingWork{AudioAssetID: "asset-1", DeclaredDuration: 1,
+			InterviewSessionID: &sessionID}, found: true, advance: true},
+		turns: []recording.InterviewTurn{{Sequence: 1, Question: "What happened?", TranscriptStatus: "queued"}},
+	}
+	processor := NewProcessor(ProcessorDependencies{
+		Store: store, Materializer: &processorMaterializer{},
+		ProbeAudioDuration: func(context.Context, string) (time.Duration, error) { return time.Second, nil },
+		Transcribe: func(context.Context, string) (string, error) {
+			t.Fatal("missing turn text must not trigger full-audio transcription")
+			return "", nil
+		},
+	})
+	err := processor.Process(context.Background(), Job{ID: "job-1", ResourceID: "preview-1"})
+	if !errors.Is(err, recording.ErrInterviewTranscriptNotReady) {
+		t.Fatalf("err=%v", err)
+	}
+	want := []string{"claim", "seal", "turns"}
+	if !reflect.DeepEqual(store.steps, want) {
+		t.Fatalf("steps=%#v", store.steps)
 	}
 }

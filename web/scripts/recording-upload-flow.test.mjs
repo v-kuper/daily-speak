@@ -21,6 +21,13 @@ test("SpeakScreen prepares local playback before the explicit save", () => {
   assert.doesNotMatch(speakScreen, /finalAudioUploadPromiseRef/);
 });
 
+test("draining interview sync immediately resumes queued realtime transcript submission", () => {
+  assert.match(
+    speakScreen,
+    /!interviewSyncQueueRef\.current\.length && interviewSegmentQueueRef\.current\.length[\s\S]*runInterviewSegmentsRef\.current\?\.\(\)/,
+  );
+});
+
 test("Redux supports optimistic background recording save", () => {
   assert.match(appSlice, /showBackgroundRecordingSave/);
   assert.match(appSlice, /backgroundSaveRecordingId/);

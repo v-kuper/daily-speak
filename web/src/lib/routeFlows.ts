@@ -135,12 +135,12 @@ const browserScheduler: PollScheduler = {
   clearInterval: (handle) => window.clearInterval(handle as number),
 };
 
-async function refreshRecording(store: AppStore, recordingId: string) {
+async function refreshRecording(store: AppStore, recordingId: string, force = false) {
   const state = store.getState().app;
   if (!state.isAuthenticated || recordingId.startsWith("local-")) return;
   const { recording, error, shouldFetch, isLoading } = recordingDetailState(state, recordingId);
   // Pause on errors until the user retries. Reads happen at each tick, including after a 401.
-  if (!error && !isLoading && (shouldFetch || (recording && shouldPollRecording(recording.status, recording.shadowingStatus)))) {
+  if (!error && !isLoading && (force || shouldFetch || (recording && shouldPollRecording(recording.status, recording.shadowingStatus)))) {
     await store.dispatch(fetchRecording(recordingId));
   }
 }
@@ -148,7 +148,7 @@ async function refreshRecording(store: AppStore, recordingId: string) {
 export function startRecordingDetailLifecycle(store: AppStore, recordingId: string, scheduler = browserScheduler) {
   store.dispatch(selectRecording(recordingId));
   const refresh = () => refreshRecording(store, recordingId);
-  void refresh();
+  void refreshRecording(store, recordingId, true);
   const timer = scheduler.setInterval(refresh, 3000);
   return () => scheduler.clearInterval(timer);
 }

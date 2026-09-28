@@ -1,4 +1,5 @@
 import type { Suggestion, SuggestionSeverity } from "./data";
+import type { SavedInterviewTurn } from "./interviewTimeline";
 
 export type TranscriptSegment = {
   text: string;
@@ -7,6 +8,13 @@ export type TranscriptSegment = {
 };
 
 type HighlightSuggestion = Pick<Suggestion, "wrong" | "severity">;
+
+export type ConversationTranscriptTurn = {
+  sequence: number;
+  question: string;
+  answerSegments: TranscriptSegment[];
+  hasAnswer: boolean;
+};
 
 const SEVERITY_RANK: Record<SuggestionSeverity, number> = {
   major: 3,
@@ -83,3 +91,17 @@ export const buildTranscriptSegments = (
 
   return segments;
 };
+
+export const buildConversationTranscriptTurns = (
+  turns: ReadonlyArray<SavedInterviewTurn>,
+  suggestions: ReadonlyArray<HighlightSuggestion>,
+  answerKind: "original" | "corrected" = "original",
+): ConversationTranscriptTurn[] => turns.map((turn) => {
+  const answerText = answerKind === "corrected" ? turn.correctedAnswerText ?? "" : turn.answerText;
+  return {
+    sequence: turn.sequence,
+    question: turn.question,
+    answerSegments: buildTranscriptSegments(answerText, answerKind === "corrected" ? [] : suggestions),
+    hasAnswer: answerText.trim().length > 0,
+  };
+});

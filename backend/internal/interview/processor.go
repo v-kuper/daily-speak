@@ -16,7 +16,7 @@ type ProcessingStore interface {
 	SavePreparation(context.Context, workqueue.Job, string, Preparation) error
 	LoadTurn(context.Context, string) (TurnWork, bool, error)
 	LoadRefill(context.Context, string) (RefillWork, bool, error)
-	SaveTranscript(context.Context, workqueue.Job, string, string) error
+	SaveTranscript(context.Context, workqueue.Job, string, string) (string, error)
 	SaveAdaptive(context.Context, workqueue.Job, string, int, string) (bool, error)
 	SaveRefill(context.Context, workqueue.Job, string, []string) (int, error)
 	QueueWaitMs(context.Context, string) int64
@@ -69,15 +69,15 @@ func (p *Processor) Process(ctx context.Context, job workqueue.Job) error {
 		logger.Info("prepare.completed", map[string]any{"queueWaitMs": queueWait, "generationMs": logging.ElapsedMs(started), "candidateCount": len(prepared.Questions)})
 		return nil
 	case "turn":
-		if p.materializer == nil || p.transcriber == nil {
-			return errors.New("interview transcription is not configured")
-		}
 		work, required, err := p.store.LoadTurn(ctx, job.ResourceID)
 		if err != nil || !required {
 			return err
 		}
 		transcriptionMs := int64(0)
 		if work.Status != "ready" {
+			if p.materializer == nil || p.transcriber == nil {
+				return errors.New("interview transcription is not configured")
+			}
 			started := time.Now()
 			path, cleanup, err := p.materializer.Materialize(ctx, work.AudioAssetID)
 			if err != nil {
@@ -90,10 +90,11 @@ func (p *Processor) Process(ctx context.Context, job workqueue.Job) error {
 				logger.Warn("turn.transcription_failed", map[string]any{"queueWaitMs": queueWait, "transcriptionMs": transcriptionMs})
 				return err
 			}
-			if err := p.store.SaveTranscript(ctx, job, work.TurnID, transcript); err != nil {
+			canonicalTranscript, err := p.store.SaveTranscript(ctx, job, work.TurnID, transcript)
+			if err != nil {
 				return err
 			}
-			work.Transcript = transcript
+			work.Transcript = canonicalTranscript
 		}
 		if len(work.History) > 0 {
 			work.History[len(work.History)-1].Transcript = work.Transcript

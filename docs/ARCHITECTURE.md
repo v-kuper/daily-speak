@@ -19,7 +19,7 @@ Go API -------- PostgreSQL
 Go worker ----------+
   |
   +-- local persistent media (test) or private S3-compatible storage
-  +-- Groq transcription, Ollama, and Cartesia
+  +-- Cartesia speech services and Ollama
 ```
 
 - `web/` is a Next.js sandbox client. It owns browser routes and UI state, but
@@ -142,27 +142,34 @@ documented in OpenAPI.
 Adaptive topic interviews use a separate `/api/v1/interviews` lifecycle. The
 selected opening question starts a durable session; three hidden prepared
 questions keep navigation responsive while completed answers are transcribed
-and used to generate later questions. The browser records one continuous final
-audio file and separately uploads self-contained answer audio for background
-transcription. Presented question text, answer boundaries, and provisional
-transcripts are session data, never part of the learner's spoken transcript.
+and used to generate later questions. During an answer, the browser sends raw
+PCM to Cartesia over a realtime WebSocket using a short-lived, STT-scoped token
+issued by the API. The browser persists each final answer transcript through
+the interview API and records one continuous audio file for playback. Presented
+question text and answer boundaries remain session data rather than learner
+speech.
 The existing topic-guidance contract remains available to older clients.
 
 The final recording or guest preview is created from the continuous audio when
-the learner saves the interview. Full-audio transcription remains the source of
-the canonical speech-only transcript used for error analysis. Optional
-`interviewTurns` metadata places the displayed questions and aligned answers
-on that transcript's timeline. Live and final transcription, question
-generation, and temporary-audio cleanup run through durable worker jobs;
-provider adapters may change independently of the interview API and timeline.
-Audio remains in backend-owned storage. The worker sends a temporary copy to
-Groq's transcription API, receives text and optional timestamps, and deletes
-the temporary copy; the API does not expose the Groq key to clients.
-Final answer attribution checks question and transcription offsets against the
-verified complete-audio duration. Without usable timed output, it uses ordered
-answer transcripts only when they reconstruct the full transcript exactly;
-otherwise the full transcript stays separate from questions rather than
-presenting uncertain answer boundaries as fact.
+the learner saves the interview. Its canonical text is composed from the stored
+per-turn transcripts in sequence, so final analysis does not transcribe the
+continuous audio again. The composed question-and-answer dialogue gives the AI
+the interview context while the transcript field remains learner speech only.
+If a turn has no realtime transcript, its uploaded answer audio can still use
+the durable worker and Cartesia's batch endpoint before finalization.
+
+The rewrite step returns one corrected learner answer for every stored turn in
+the same sequence. The repository stores those answers on the turns and builds
+the corrected interview transcript from the immutable questions and corrected
+answers in chronological order. Shadowing speaks that complete dialogue without
+synthetic role labels. Free-talk and photo-description corrected transcripts
+continue to contain learner speech only.
+
+Free-talk recordings and non-interview guest previews use Cartesia's batch
+transcription API. Audio remains in backend-owned storage; the worker sends a
+temporary materialized copy and deletes it after processing. The long-lived
+Cartesia key remains server-only. Provider adapters may change independently of
+the interview API and transcript composition rules.
 
 Every account recording is duration-probed by the recording worker before
 transcription. The repository verifies the measured duration against the

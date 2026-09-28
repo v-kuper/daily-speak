@@ -116,6 +116,17 @@ func TestRateLimitFailsClosedWhenSharedStoreIsUnavailable(t *testing.T) {
 	}
 }
 
+func TestInterviewTranscriptionTokenUsesExpensiveRateLimit(t *testing.T) {
+	limit := operations.Limit{Requests: 7, Window: time.Hour}
+	server := newTestServer(Config{Operations: operations.Config{ExpensiveLimit: limit}})
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/interviews/session/transcription-token", nil)
+	policy, ok := server.ratePolicy(request)
+	if !ok || policy.scope != "interview_transcription_token" || policy.limit != limit ||
+		!policy.principal || !policy.alsoIP {
+		t.Fatalf("transcription token rate policy = %+v, enabled=%v", policy, ok)
+	}
+}
+
 func TestOperationalRoutesDoNotUseResourceIdentifiers(t *testing.T) {
 	cases := map[string]string{
 		"/api/v1/recordings/secret-recording-id":       "/api/v1/recordings/{id}",

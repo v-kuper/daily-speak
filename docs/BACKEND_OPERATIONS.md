@@ -65,7 +65,7 @@ Recommended first alerts:
 | oldest `interview.process` job | > 2 min | > 10 min |
 | terminal/failed jobs | any sustained increase | page when user work is affected |
 
-External Ollama, Groq, and Cartesia outcome/duration counters are the next
+External Ollama and Cartesia outcome/duration counters are the next
 provider-specific dashboard increment. Existing structured worker events remain
 available until those counters are exported.
 
@@ -77,11 +77,11 @@ background processing. Scale worker pools independently by job kind:
 1. Add API replicas when p95 latency or in-flight requests rise while the DB
    pool stays below 70% utilization.
 2. Add recording workers when `recording.process` age rises. Increase
-   `WORKER_RECORDING_CONCURRENCY` only within Groq's audio and request rate
-   limits and Ollama capacity.
+   `WORKER_RECORDING_CONCURRENCY` only within Cartesia's STT concurrency and
+   credit limits and Ollama capacity.
 3. Scale adaptive interview workers with `WORKER_INTERVIEW_CONCURRENCY` when
    preparation, answer transcription, or question refill waits grow. Measure
-   answer upload time, queue wait, Groq transcription time, question generation time,
+   answer upload time, queue wait, Cartesia transcription time, question generation time,
    and the fraction of transitions using an adaptive question separately.
 4. Scale guest preview and shadowing pools independently; do not let a Cartesia
    slowdown consume recording workers.
@@ -98,12 +98,69 @@ metrics and indexes bounded without deleting recordings, media, or audit-worthy
 authentication sessions. Expired distributed rate-limit counters are pruned by
 the same bounded maintenance loop rather than during user requests.
 
-Interview answer WAV files are temporary media with a 24-hour retention time.
-The regular media sweep enqueues their deletion after expiry; it does not delete
-the complete recording or its separate question timeline. A guest may upload
-at most 8 MiB of answer WAV data per interview; an account may upload 24 MiB.
-The final audio is transcribed independently as one file. Monitor media cleanup
-age as well as interview job age if live transcription is heavily used.
+Interview answer WAV files are uploaded only when a turn needs the batch STT
+fallback and are temporary media with a 24-hour retention time. The regular
+media sweep enqueues their deletion after expiry; it does not delete the complete
+recording or the stored question and answer turns. A guest may upload at most
+8 MiB of fallback WAV data per interview; an account may upload 24 MiB. The
+complete recording remains available for playback and duration verification;
+it is not sent for interview transcription. Monitor media cleanup age as well
+as interview job age when fallback transcription is used heavily.
+
+Before deploying the migration that removes full-audio interview STT, let the
+previous worker drain recording and guest-preview jobs linked to interviews.
+Missing per-turn text cannot be reconstructed without sending the complete
+recording through the retired timed-transcription path.
+
+The Windows deployment workflow enforces this transition before replacing any
+container. The gate does not wait for or drain jobs itself. Its first preflight
+reads the existing Compose PostgreSQL database and fails while matching jobs
+remain, leaving the old API and worker online so the worker can finish them.
+After the new images are built, the setup script checks again, pauses only the
+old API to prevent a new job from racing the check, and immediately repeats the
+same query while the old worker stays online. The API is restarted automatically
+if that final gate fails. An interrupted workflow also attempts to restart the
+quiesced API by its saved container ID. The gate prints only aggregate counts by
+job kind and state; it does not print resource IDs, transcripts, credentials, or
+the database connection string.
+
+Deploy workflows are serialized with `cancel-in-progress: false`. A newer push
+waits for the current rollout instead of cancelling it after the API has been
+quiesced. The recovery step remains a fallback for failures and manual
+cancellation.
+
+When the workflow reports `Cartesia realtime rollout blocked`, keep the old
+worker running, inspect `docker compose logs worker`, wait for the active jobs
+to finish or become terminal, and rerun the deployment; the failed run does not
+wait and resume automatically. Use this query for a manual check; it must return
+no rows:
+
+```sql
+SELECT j.id, j.kind, j.state, j.resource_id
+FROM processing_jobs j
+WHERE j.state IN ('queued', 'running', 'retry_wait')
+  AND (
+    (
+      j.kind = 'recording.process'
+      AND EXISTS (
+        SELECT 1 FROM interview_sessions s
+        WHERE s.recording_id = j.resource_id
+      )
+    )
+    OR (
+      j.kind = 'guest.preview'
+      AND EXISTS (
+        SELECT 1 FROM interview_sessions s
+        WHERE s.guest_preview_id = j.resource_id
+      )
+    )
+  );
+```
+
+Take the matched database and uploads backup after the queue reaches zero, then
+deploy the API and worker together. Do not bypass the gate or stop the old
+worker to force a rollout. Do not retry an old linked job with the new worker
+unless every interview turn already has a nonempty ready transcript.
 
 ## Backup and recovery
 

@@ -10,12 +10,14 @@ const load = createTypeScriptLoader();
 const sourcePath = (relativePath) => fileURLToPath(new URL(relativePath, import.meta.url));
 const {
   advanceInterviewTimeline,
+  commitInterviewAdvance,
+  hasInterviewAnswerEvidence,
   MAX_LIVE_SEGMENT_ATTEMPTS,
   resolveInterviewRecordingLimitSeconds,
   rotateFailedInterviewSegment,
-  withoutInterviewTimeline,
 } = load(sourcePath("../src/lib/interviewFlow.ts"));
-const { encodeWav, InterviewTurnCapture } = load(sourcePath("../src/lib/interviewTurnCapture.ts"));
+const { encodeWav, InterviewTurnCapture, pcmHasSpeechActivity } = load(sourcePath("../src/lib/interviewTurnCapture.ts"));
+const { mergeInterviewTranscriptStatus, preserveLiveInterviewTurn } = load(sourcePath("../src/lib/interviewSession.ts"));
 const { parseInterviewTurns } = load(sourcePath("../src/lib/interviewTimeline.ts"));
 const { createInterviewRecovery, mayAbandonInterview, recoverPreviousInterview } = load(sourcePath("../src/lib/interviewRecovery.ts"));
 
@@ -35,6 +37,50 @@ const recoveryRecord = (phase = "active", sessionId = "interview-1") => ({
   input: { topic: "Travel", level: "b1", interestIds: ["travel"] },
   sessionId,
   phase,
+});
+
+test("server polling preserves local captions until a canonical transcript is ready", () => {
+  const local = {
+    seq: 1,
+    question: "Where did you go?",
+    askedAtMs: 0,
+    endedAtMs: 2000,
+    provisionalTranscript: "",
+    transcriptStatus: "queued",
+    liveTranscriptFinal: "I went ",
+    liveTranscriptInterim: "home",
+  };
+  const pending = preserveLiveInterviewTurn({
+    ...local,
+    provisionalTranscript: "",
+    liveTranscriptFinal: undefined,
+    liveTranscriptInterim: undefined,
+  }, local);
+  assert.equal(pending.liveTranscriptFinal, "I went ");
+  assert.equal(pending.liveTranscriptInterim, "home");
+
+  const ready = preserveLiveInterviewTurn({
+    ...local,
+    provisionalTranscript: "I went home after batch transcription.",
+    transcriptStatus: "ready",
+    liveTranscriptFinal: undefined,
+    liveTranscriptInterim: undefined,
+  }, local);
+  assert.equal(ready.provisionalTranscript, "I went home after batch transcription.");
+  assert.equal(ready.liveTranscriptFinal, undefined);
+  assert.equal(ready.liveTranscriptInterim, undefined);
+  const readyEmpty = preserveLiveInterviewTurn({
+    ...local,
+    provisionalTranscript: "",
+    transcriptStatus: "ready",
+    liveTranscriptFinal: undefined,
+    liveTranscriptInterim: undefined,
+  }, { ...local, provisionalTranscript: "stale fallback text" });
+  assert.equal(readyEmpty.provisionalTranscript, "");
+  assert.equal(readyEmpty.liveTranscriptInterim, undefined);
+  assert.equal(mergeInterviewTranscriptStatus("ready", "failed"), "ready");
+  assert.equal(mergeInterviewTranscriptStatus("queued", "failed"), "failed");
+  assert.equal(mergeInterviewTranscriptStatus("queued", "pending"), "queued");
 });
 
 test("navigation cancels an unsaved interview but protects an ongoing or completed save", () => {
@@ -157,6 +203,47 @@ test("Next keeps the current answer open when no question is ready", () => {
   assert.equal(session.turns[0].endedAtMs, null);
 });
 
+test("a prepared Next commits only after its audio boundary and preserves late subtitles", () => {
+  const session = {
+    id: "interview-1",
+    status: "recording",
+    topic: "Travel",
+    openingQuestion: "Where did you go?",
+    error: null,
+    usefulWords: [],
+    turns: [{
+      seq: 1,
+      question: "Where did you go?",
+      askedAtMs: 0,
+      endedAtMs: null,
+      provisionalTranscript: "",
+      liveTranscriptFinal: "I went",
+      liveTranscriptInterim: "",
+    }],
+    candidates: [{ id: "candidate-2", question: "What did you enjoy?" }],
+    currentTurnSeq: 1,
+    maxDurationSeconds: 600,
+  };
+  const advance = advanceInterviewTimeline(session, new Set(), 1200);
+  assert.ok(advance);
+  assert.equal(session.turns.length, 1, "preparing Next must leave the visible question open");
+
+  const withLateSubtitle = {
+    ...session,
+    turns: [{
+      ...session.turns[0],
+      liveTranscriptFinal: "I went to Rome.",
+    }],
+  };
+  const committed = commitInterviewAdvance(withLateSubtitle, advance);
+  assert.ok(committed);
+  assert.equal(committed.turns.length, 2);
+  assert.equal(committed.turns[0].endedAtMs, 1200);
+  assert.equal(committed.turns[0].liveTranscriptFinal, "I went to Rome.");
+  assert.equal(committed.turns[1].question, "What did you enjoy?");
+  assert.deepEqual(committed.candidates, []);
+});
+
 test("interview recording limits use the account cap and the server session cap", () => {
   assert.equal(resolveInterviewRecordingLimitSeconds({
     isAuthenticated: true,
@@ -194,30 +281,18 @@ test("a failed live WAV rotates behind later answers and is eventually dropped",
   assert.deepEqual(result.queue, [{ seq: 2, attempts: 0 }]);
 });
 
-test("degraded save preserves the full recording while omitting unsynchronized timeline linkage", () => {
-  const plain = withoutInterviewTimeline({
-    localRecordingId: "local-1",
-    topic: "Travel",
-    duration: 42,
-    audioDataUrl: "data:audio/webm;base64,AAA=",
-    interviewSessionId: "interview-1",
-    interviewEndedAtMs: 42_000,
-  });
-  assert.deepEqual(plain, {
-    localRecordingId: "local-1",
-    topic: "Travel",
-    duration: 42,
-    audioDataUrl: "data:audio/webm;base64,AAA=",
-  });
-});
-
 test("saved interview timeline labels approximate final answer matching", () => {
   const turns = parseInterviewTurns([{
     sequence: 1, question: "Where did you go?", askedAtMs: 0, endedAtMs: 3000,
     answerText: "I went to Rome.", answerSource: "final", answerAlignment: "approximate",
+    correctedAnswerText: "I travelled to Rome.",
   }]);
   assert.equal(turns[0].answerSource, "final");
   assert.equal(turns[0].answerAlignment, "approximate");
+  assert.equal(turns[0].correctedAnswerText, "I travelled to Rome.");
+  assert.equal("correctedAnswerText" in parseInterviewTurns([{
+    sequence: 2, question: "What next?", answerText: "Nothing.", answerSource: "final",
+  }])[0], false);
 });
 
 test("interview create retries use the same key in body and cancellation uses the owner session", async () => {
@@ -279,6 +354,70 @@ test("turn WAV upload binds the media asset to its interview session", async () 
   }
 });
 
+test("realtime token and final turn transcript use the v1 interview contracts", async () => {
+  const requests = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    const path = new URL(String(url)).pathname;
+    requests.push({ path, init });
+    if (path === "/api/v1/interviews/interview-1/transcription-token") {
+      return new Response(JSON.stringify({
+        token: "browser-token",
+        expiresAt: "2026-09-28T12:00:00Z",
+        websocketUrl: "wss://api.cartesia.ai/stt/websocket?cartesia_version=2026-08-14",
+        model: "ink-2",
+        encoding: "pcm_s16le",
+        sampleRate: 16000,
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }
+    if (path === "/api/v1/interviews/interview-1/turns/2/transcript") {
+      return new Response(JSON.stringify({ interview: {
+        id: "interview-1",
+        status: "recording",
+        topic: "Travel",
+        openingQuestion: "Tell me about travel.",
+        error: null,
+        usefulWords: [],
+        turns: [{
+          seq: 2,
+          question: "Where did you go?",
+          askedAtMs: 1000,
+          endedAtMs: 3000,
+          provisionalTranscript: "I went to Rome.",
+          transcriptStatus: "ready",
+        }],
+        candidates: [],
+        currentTurnSeq: 2,
+        maxDurationSeconds: 600,
+      } }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }
+    throw new Error(`Unexpected request: ${path}`);
+  };
+  try {
+    const { configureApiClient } = load(sourcePath("../src/lib/apiClient.ts"));
+    const { getInterviewTranscriptionToken, submitInterviewTurnTranscript } = load(sourcePath("../src/lib/interviewSession.ts"));
+    configureApiClient("https://example.test");
+    const token = await getInterviewTranscriptionToken("interview-1");
+    assert.equal(token.token, "browser-token");
+    assert.equal(token.sampleRate, 16000);
+    const interview = await submitInterviewTurnTranscript(
+      "interview-1",
+      2,
+      "I went to Rome.",
+      "turn-2:transcript",
+    );
+    assert.equal(interview.turns[0].provisionalTranscript, "I went to Rome.");
+    assert.deepEqual(JSON.parse(requests[0].init.body), {});
+    assert.deepEqual(JSON.parse(requests[1].init.body), {
+      idempotencyKey: "turn-2:transcript",
+      text: "I went to Rome.",
+    });
+    assert.equal(requests[1].init.headers["Idempotency-Key"], "turn-2:transcript");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("answer PCM is wrapped in a valid mono WAV header", async () => {
   const blob = encodeWav([new Int16Array([0, 32767]), new Int16Array([-32768, 1])], 16000);
   const bytes = new DataView(await blob.arrayBuffer());
@@ -295,11 +434,45 @@ test("answer PCM is wrapped in a valid mono WAV header", async () => {
   assert.equal(bytes.getInt16(48, true), -32768);
 });
 
-test("a late answer boundary cannot leak stale PCM into the next WAV", async () => {
+test("answer evidence accepts live text or sustained PCM speech but rejects silence and spikes", () => {
+  const turn = {
+    seq: 1,
+    question: "What happened?",
+    askedAtMs: 0,
+    endedAtMs: null,
+    provisionalTranscript: "",
+  };
+  assert.equal(hasInterviewAnswerEvidence(turn, false), false);
+  assert.equal(hasInterviewAnswerEvidence({ ...turn, liveTranscriptInterim: "I was" }, false), true);
+  assert.equal(hasInterviewAnswerEvidence(turn, true), true);
+  assert.equal(pcmHasSpeechActivity(new Int16Array(2048)), false);
+  assert.equal(pcmHasSpeechActivity(new Int16Array(2048).fill(250)), false, "steady low-level noise is not speech");
+  const spike = new Int16Array(2048);
+  spike[100] = 20_000;
+  assert.equal(pcmHasSpeechActivity(spike), false, "one microphone spike is not a spoken answer");
+  const voiced = Int16Array.from({ length: 2048 }, (_, index) => Math.round(Math.sin(index / 8) * 2400));
+  assert.equal(pcmHasSpeechActivity(voiced), true);
+});
+
+test("terminal answer failure tells the learner to re-record instead of promising another fallback", () => {
+  const card = readFileSync(resolve("src/components/InterviewQuestionCard.tsx"), "utf8");
+  const screen = readFileSync(resolve("src/components/SpeakScreen.tsx"), "utf8");
+  assert.match(card, /could not be transcribed\. Re-record the interview before saving/);
+  assert.match(card, /hasTerminalTranscriptionFailure/);
+  assert.match(screen, /setInterviewCaptureFailure\(terminalMessage\)/);
+});
+
+test("a delayed answer boundary remains queueable without leaking PCM into the next WAV", async () => {
   const originalWindow = globalThis.window;
+  const delayedCallbacks = new Map();
+  let nextTimer = 1;
   globalThis.window = {
-    setTimeout,
-    clearTimeout,
+    setTimeout: (callback) => {
+      const id = nextTimer++;
+      delayedCallbacks.set(id, callback);
+      return id;
+    },
+    clearTimeout: (id) => delayedCallbacks.delete(id),
   };
   const sent = [];
   const processor = { port: { onmessage: null, postMessage: (message) => sent.push(message) } };
@@ -312,14 +485,286 @@ test("a late answer boundary cannot leak stale PCM into the next WAV", async () 
     );
     processor.port.onmessage({ data: { type: "samples", pcm: new Int16Array([111]) } });
     processor.port.onmessage({ data: { type: "boundary", id: 999 } });
-    const next = capture.closeTurn();
+    const streamed = [];
+    let delayed = 0;
+    capture.setPCMListener((pcm) => streamed.push(...pcm));
+    const next = capture.closeTurn(async () => "final transcript", () => { delayed += 1; });
     assert.deepEqual(sent, [{ type: "boundary", id: 1 }]);
+    delayedCallbacks.get(1)();
+    assert.equal(delayed, 1);
+    let settled = false;
+    void next.then(() => { settled = true; });
+    await Promise.resolve();
+    assert.equal(settled, false, "the delay notice must not reject or discard the pending partition");
     processor.port.onmessage({ data: { type: "samples", pcm: new Int16Array([222]) } });
     processor.port.onmessage({ data: { type: "boundary", id: 1 } });
-    const blob = await next;
+    const captured = await next;
+    const blob = captured.blob;
+    assert.ok(blob);
     const wav = new DataView(await blob.arrayBuffer());
-    assert.equal(blob.size, 46);
-    assert.equal(wav.getInt16(44, true), 222);
+    assert.equal(blob.size, 48);
+    assert.equal(wav.getInt16(44, true), 111);
+    assert.equal(wav.getInt16(46, true), 222);
+    assert.deepEqual(streamed, [222]);
+    assert.equal(await captured.transcript, "final transcript");
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test("PCM speech activity is scoped to one answer partition and resets at its boundary", async () => {
+  const originalWindow = globalThis.window;
+  globalThis.window = { setTimeout, clearTimeout };
+  const activity = [];
+  const processor = {
+    port: { onmessage: null, postMessage() {} },
+    addEventListener() {},
+    removeEventListener() {},
+    disconnect() {},
+  };
+  try {
+    const capture = new InterviewTurnCapture(
+      { sampleRate: 16000 },
+      { disconnect() {} },
+      processor,
+      { disconnect() {} },
+      undefined,
+      (active) => activity.push(active),
+    );
+    const voiced = Int16Array.from({ length: 2048 }, (_, index) => Math.round(Math.sin(index / 8) * 2400));
+    processor.port.onmessage({ data: { type: "samples", pcm: voiced } });
+    assert.equal(capture.hasSpeechActivity(), true);
+    const first = capture.closeTurn();
+    processor.port.onmessage({ data: { type: "boundary", id: 1 } });
+    await first;
+    assert.equal(capture.hasSpeechActivity(), false);
+    processor.port.onmessage({ data: { type: "samples", pcm: new Int16Array(2048) } });
+    assert.deepEqual(activity, [true, false]);
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test("an answer boundary timeout becomes terminal exactly once and ignores a late acknowledgement", async () => {
+  const originalWindow = globalThis.window;
+  const timers = new Map();
+  let nextTimer = 1;
+  globalThis.window = {
+    setTimeout: (callback) => {
+      const id = nextTimer++;
+      timers.set(id, callback);
+      return id;
+    },
+    clearTimeout: (id) => timers.delete(id),
+  };
+  const failures = [];
+  let finalized = 0;
+  const processor = {
+    port: { onmessage: null, postMessage() {} },
+    addEventListener() {},
+    removeEventListener() {},
+    disconnect() {},
+  };
+  try {
+    const capture = new InterviewTurnCapture(
+      { sampleRate: 16000, close: async () => {} },
+      { disconnect() {} },
+      processor,
+      { disconnect() {} },
+      (error) => failures.push(error.message),
+      undefined,
+      1,
+      2,
+    );
+    const lateHandler = processor.port.onmessage;
+    const pending = capture.closeTurn(() => {
+      finalized += 1;
+      return Promise.resolve("late transcript");
+    });
+    const rejection = assert.rejects(pending, /did not finish its boundary/);
+    timers.get(1)();
+    await rejection;
+    assert.equal(processor.port.onmessage, null);
+    assert.equal(finalized, 0);
+    assert.equal(failures.length, 1);
+    lateHandler({ data: { type: "boundary", id: 1 } });
+    assert.equal(finalized, 0);
+    assert.equal(failures.length, 1);
+    await assert.rejects(capture.closeTurn(), /did not finish its boundary/);
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test("final stop resumes a suspended audio context before posting its bounded boundary", async () => {
+  const originalWindow = globalThis.window;
+  globalThis.window = { setTimeout, clearTimeout };
+  const events = [];
+  const context = {
+    sampleRate: 16000,
+    state: "suspended",
+    resume: async () => {
+      events.push("resume");
+      context.state = "running";
+    },
+    close: async () => { events.push("close"); },
+  };
+  const processor = {
+    port: { onmessage: null, postMessage: (message) => events.push(`boundary:${message.id}`) },
+    addEventListener() {},
+    removeEventListener() {},
+    disconnect() {},
+  };
+  try {
+    const capture = new InterviewTurnCapture(
+      context,
+      { disconnect() {} },
+      processor,
+      { disconnect() {} },
+    );
+    processor.port.onmessage({ data: { type: "samples", pcm: new Int16Array([700, -700]) } });
+    const stopped = capture.stop(async () => "final answer");
+    await Promise.resolve();
+    assert.deepEqual(events.slice(0, 2), ["resume", "boundary:1"]);
+    processor.port.onmessage({ data: { type: "boundary", id: 1 } });
+    const captured = await stopped;
+    assert.equal(await captured.transcript, "final answer");
+    const wav = new DataView(await captured.blob.arrayBuffer());
+    assert.equal(wav.getInt16(44, true), 700);
+    assert.equal(wav.getInt16(46, true), -700);
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test("final stop still times out when a hidden document never resolves AudioContext resume", async () => {
+  const originalWindow = globalThis.window;
+  const timers = new Map();
+  let nextTimer = 1;
+  globalThis.window = {
+    setTimeout: (callback) => {
+      const id = nextTimer++;
+      timers.set(id, callback);
+      return id;
+    },
+    clearTimeout: (id) => timers.delete(id),
+  };
+  const sent = [];
+  const failures = [];
+  const context = {
+    sampleRate: 16000,
+    state: "suspended",
+    resume: () => new Promise(() => {}),
+    close: async () => {},
+  };
+  const processor = {
+    port: { onmessage: null, postMessage: (message) => sent.push(message) },
+    addEventListener() {},
+    removeEventListener() {},
+    disconnect() {},
+  };
+  try {
+    const capture = new InterviewTurnCapture(
+      context,
+      { disconnect() {} },
+      processor,
+      { disconnect() {} },
+      (error) => failures.push(error.message),
+      undefined,
+      1,
+      2,
+    );
+    const stopped = capture.stop();
+    const rejection = assert.rejects(stopped, /did not finish its boundary/);
+    assert.deepEqual(sent, [{ type: "boundary", id: 1 }]);
+    timers.get(1)();
+    await rejection;
+    assert.equal(failures.length, 1);
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test("a permanent worklet failure rejects the pending boundary explicitly", async () => {
+  const originalWindow = globalThis.window;
+  globalThis.window = { setTimeout, clearTimeout };
+  const listeners = new Map();
+  const processor = {
+    port: { onmessage: null, postMessage() {} },
+    addEventListener: (type, listener) => listeners.set(type, listener),
+    removeEventListener: (type) => listeners.delete(type),
+    disconnect() {},
+  };
+  try {
+    const capture = new InterviewTurnCapture(
+      { sampleRate: 16000, close: async () => {} },
+      { disconnect() {} },
+      processor,
+      { disconnect() {} },
+    );
+    const pending = capture.closeTurn();
+    listeners.get("processorerror")();
+    await assert.rejects(pending, /Live answer capture stopped unexpectedly/);
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test("a boundary postMessage failure is terminal and stops capture immediately", async () => {
+  const originalWindow = globalThis.window;
+  globalThis.window = { setTimeout, clearTimeout };
+  const failures = [];
+  const processor = {
+    port: {
+      onmessage: null,
+      postMessage() { throw new Error("audio worklet port is closed"); },
+    },
+    addEventListener() {},
+    removeEventListener() {},
+    disconnect() {},
+  };
+  try {
+    const capture = new InterviewTurnCapture(
+      { sampleRate: 16000, close: async () => {} },
+      { disconnect() {} },
+      processor,
+      { disconnect() {} },
+      (error) => failures.push(error.message),
+    );
+    await assert.rejects(capture.closeTurn(), /audio worklet port is closed/);
+    assert.deepEqual(failures, ["audio worklet port is closed"]);
+    assert.equal(processor.port.onmessage, null);
+    await assert.rejects(capture.closeTurn(), /audio worklet port is closed/);
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test("a worklet failure without a pending boundary is reported and stays terminal", async () => {
+  const originalWindow = globalThis.window;
+  globalThis.window = { setTimeout, clearTimeout };
+  const listeners = new Map();
+  const failures = [];
+  const processor = {
+    port: { onmessage: null, postMessage() {} },
+    addEventListener: (type, listener) => listeners.set(type, listener),
+    removeEventListener: (type) => listeners.delete(type),
+    disconnect() {},
+  };
+  try {
+    const capture = new InterviewTurnCapture(
+      { sampleRate: 16000, close: async () => {} },
+      { disconnect() {} },
+      processor,
+      { disconnect() {} },
+      (error) => failures.push(error.message),
+    );
+    const onProcessorError = listeners.get("processorerror");
+    onProcessorError();
+    onProcessorError();
+    assert.deepEqual(failures, ["Live answer capture stopped unexpectedly. Please retry the recording."]);
+    await assert.rejects(capture.closeTurn(), /Live answer capture stopped unexpectedly/);
+    await assert.rejects(capture.stop(), /Live answer capture stopped unexpectedly/);
   } finally {
     globalThis.window = originalWindow;
   }

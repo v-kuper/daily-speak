@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { buildTranscriptSegments } from "../lib/transcriptHighlight";
-import InterviewTimeline from "./InterviewTimeline";
+import ConversationTranscript from "./ConversationTranscript";
 import {
   fetchGuestPreview,
   guestPreviewPath,
@@ -85,6 +85,7 @@ export default function GuestPreviewScreen({ previewId }: { previewId: string })
 
   const processing = preview.state === "queued" || preview.state === "processing";
   const ready = preview.state === "ready";
+  const hasConversationTranscript = preview.practiceType === "topic" && preview.interviewTurns.length > 0;
 
   return (
     <section>
@@ -121,11 +122,15 @@ export default function GuestPreviewScreen({ previewId }: { previewId: string })
         </div>
       )}
 
-      <InterviewTimeline turns={preview.interviewTurns} processing={processing} />
-
       <div className="transcript-section">
-        <div className="section-title">Transcript</div>
-        {preview.transcript ? (
+        <div className="section-title">{hasConversationTranscript ? "Conversation transcript" : "Transcript"}</div>
+        {hasConversationTranscript ? (
+          <ConversationTranscript
+            turns={preview.interviewTurns}
+            suggestions={preview.corrections}
+            processing={processing}
+          />
+        ) : preview.transcript ? (
           <div className="transcript-text">
             {transcriptSegments.map((segment, index) => segment.isError ? (
               <mark

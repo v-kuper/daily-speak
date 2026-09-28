@@ -1,13 +1,14 @@
 package recording
 
 type recordingAnalysisInput struct {
-	Transcript   string   `json:"transcript"`
-	Topic        string   `json:"topic"`
-	Interests    []string `json:"interests,omitempty"`
-	PracticeType string   `json:"practiceType"`
-	PhotoObject  *string  `json:"photoObject,omitempty"`
-	EnglishLevel string   `json:"englishLevel"`
-	Russian      []string `json:"requiredRussianPhrases,omitempty"`
+	Transcript     string                  `json:"transcript"`
+	InterviewTurns []InterviewDialogueTurn `json:"interviewTurns,omitempty"`
+	Topic          string                  `json:"topic"`
+	Interests      []string                `json:"interests,omitempty"`
+	PracticeType   string                  `json:"practiceType"`
+	PhotoObject    *string                 `json:"photoObject,omitempty"`
+	EnglishLevel   string                  `json:"englishLevel"`
+	Russian        []string                `json:"requiredRussianPhrases,omitempty"`
 }
 
 type analysisPass struct {

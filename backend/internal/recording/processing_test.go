@@ -18,7 +18,7 @@ type processorRepository struct {
 	duration           int
 	transcript         string
 	suggestions        []Suggestion
-	corrected          string
+	corrected          RewriteResult
 	shadowingID        string
 	advanceTranscript  bool
 	advanceSuggestions bool
@@ -71,7 +71,7 @@ func (r *processorRepository) SaveSuggestions(_ context.Context, _ ProcessingJob
 	r.suggestions = suggestions
 	return r.advanceSuggestions, nil
 }
-func (r *processorRepository) CompleteRecording(_ context.Context, _ ProcessingJob, corrected, shadowingID string) (bool, error) {
+func (r *processorRepository) CompleteRecording(_ context.Context, _ ProcessingJob, corrected RewriteResult, shadowingID string) (bool, error) {
 	r.steps = append(r.steps, "complete")
 	r.corrected = corrected
 	r.shadowingID = shadowingID
@@ -85,11 +85,17 @@ func (a *processorAnalyzer) Analyze(_ context.Context, input AnalysisInput, _ An
 	return []Suggestion{{Wrong: "go", Right: "went", Explanation: "Use past tense."}}, nil
 }
 
-type processorRewriter struct{ inputs []RewriteInput }
+type processorRewriter struct {
+	inputs []RewriteInput
+	result RewriteResult
+}
 
-func (r *processorRewriter) Rewrite(_ context.Context, input RewriteInput, _ AnalysisLogger) (string, error) {
+func (r *processorRewriter) Rewrite(_ context.Context, input RewriteInput, _ AnalysisLogger) (RewriteResult, error) {
 	r.inputs = append(r.inputs, input)
-	return "I went home.", nil
+	if r.result.CorrectedTranscript != "" {
+		return r.result, nil
+	}
+	return RewriteResult{CorrectedTranscript: "I went home."}, nil
 }
 
 type processorMaterializer struct{ cleaned bool }
@@ -135,7 +141,7 @@ func TestProcessorRunsDurableStagesInOrder(t *testing.T) {
 	if !reflect.DeepEqual(repository.steps, wantSteps) {
 		t.Fatalf("steps=%#v", repository.steps)
 	}
-	if repository.duration != 31 || repository.transcript != "I go home." || repository.corrected != "I went home." || repository.shadowingID != "shadowing-job" {
+	if repository.duration != 31 || repository.transcript != "I go home." || repository.corrected.CorrectedTranscript != "I went home." || repository.shadowingID != "shadowing-job" {
 		t.Fatalf("repository=%#v", repository)
 	}
 	if len(analyzer.inputs) != 1 || !reflect.DeepEqual(analyzer.inputs[0].Interests, []string{"travel"}) {
@@ -166,37 +172,129 @@ func TestProcessorResumesSuggestionStageWithoutAudioWork(t *testing.T) {
 	}
 }
 
-func TestProcessorUsesWholeInterviewAudioAndTimedAnswers(t *testing.T) {
-	end := 1000
+func TestProcessorResumesInterviewSuggestionsWithDialogueContext(t *testing.T) {
+	answer := "I go yesterday."
+	repository := &interviewProcessorRepository{
+		processorRepository: &processorRepository{
+			found: true, advanceSuggestions: true,
+			work: ProcessingWork{UserID: "user-1", Stage: "suggestions", Transcript: answer,
+				InterviewSessionID: pointer("session-1"), PracticeType: "topic"},
+		},
+		turns: []InterviewTurn{{
+			Sequence: 1, Question: "Where did you go yesterday?", TranscriptStatus: "ready", FinalText: &answer,
+		}},
+	}
+	analyzer := &processorAnalyzer{}
+	rewriter := &processorRewriter{result: RewriteResult{
+		CorrectedTranscript: "Where did you go yesterday? I went home yesterday.",
+		CorrectedAnswers: []CorrectedInterviewAnswer{{
+			Sequence: 1, CorrectedAnswerText: "I went home yesterday.",
+		}},
+	}}
+	processor := NewProcessor(ProcessingDependencies{
+		Repository: repository, Analyzer: analyzer, Rewriter: rewriter,
+		NewID: func() string { return "shadowing-job" },
+		Transcribe: func(context.Context, string) (string, error) {
+			t.Fatal("suggestion resume must not transcribe audio")
+			return "", nil
+		},
+	})
+	if err := processor.Process(context.Background(), ProcessingJob{ID: "job-1", ResourceID: "recording-1"}, discardAnalysisLogger{}); err != nil {
+		t.Fatal(err)
+	}
+	wantSteps := []string{"load", "interests", "turns", "suggestions", "turns", "complete"}
+	if !reflect.DeepEqual(repository.steps, wantSteps) {
+		t.Fatalf("steps=%#v", repository.steps)
+	}
+	wantDialogue := []InterviewDialogueTurn{{Sequence: 1, Question: "Where did you go yesterday?", Answer: answer}}
+	if len(analyzer.inputs) != 1 || !reflect.DeepEqual(analyzer.inputs[0].InterviewTurns, wantDialogue) {
+		t.Fatalf("analysis=%#v", analyzer.inputs)
+	}
+	if len(rewriter.inputs) != 1 || !reflect.DeepEqual(rewriter.inputs[0].InterviewTurns, wantDialogue) ||
+		repository.corrected.CorrectedTranscript != "Where did you go yesterday? I went home yesterday." {
+		t.Fatalf("rewrite=%#v corrected=%#v", rewriter.inputs, repository.corrected)
+	}
+}
+
+func TestProcessorComposesReadyInterviewTurnsWithoutRetranscribingAudio(t *testing.T) {
+	first, second := "First answer.", "Second answer."
 	repository := &interviewProcessorRepository{
 		processorRepository: &processorRepository{
 			found: true, advanceTranscript: true, advanceSuggestions: true,
 			work: ProcessingWork{UserID: "user-1", Stage: "transcribing", AudioAssetID: pointer("asset-1"),
 				InterviewSessionID: pointer("session-1"), DeclaredDuration: 2, PracticeType: "topic"},
 		},
-		turns: []InterviewTurn{{Sequence: 1, AskedAtMS: 0, EndedAtMS: &end}, {Sequence: 2, AskedAtMS: 1000}},
+		turns: []InterviewTurn{
+			{Sequence: 1, Question: "First question?", TranscriptStatus: "ready", FinalText: &first},
+			{Sequence: 2, Question: "Second question?", TranscriptStatus: "ready", Provisional: &second},
+		},
 	}
+	analyzer := &processorAnalyzer{}
+	rewriter := &processorRewriter{result: RewriteResult{
+		CorrectedTranscript: "First question? First corrected answer. Second question? Second corrected answer.",
+		CorrectedAnswers: []CorrectedInterviewAnswer{
+			{Sequence: 1, CorrectedAnswerText: "First corrected answer."},
+			{Sequence: 2, CorrectedAnswerText: "Second corrected answer."},
+		},
+	}}
 	processor := NewProcessor(ProcessingDependencies{
 		Repository: repository, Materializer: &processorMaterializer{},
 		ProbeAudioDuration: func(context.Context, string) (time.Duration, error) { return 1900 * time.Millisecond, nil },
 		Transcribe: func(context.Context, string) (string, error) {
-			t.Fatal("the whole interview should use one timed transcription")
+			t.Fatal("continuous interview audio must not be transcribed")
 			return "", nil
 		},
-		TranscribeTimed: func(context.Context, string) (TimedTranscript, error) {
-			return TimedTranscript{Text: "First. Second.", Segments: []TimedSegment{
-				{StartMS: 100, EndMS: 800, Text: " First."},
-				{StartMS: 1100, EndMS: 1700, Text: " Second."},
-			}}, nil
-		},
-		Analyzer: &processorAnalyzer{}, Rewriter: &processorRewriter{}, NewID: func() string { return "shadowing-job" },
+		Analyzer: analyzer, Rewriter: rewriter, NewID: func() string { return "shadowing-job" },
 	})
 	if err := processor.Process(context.Background(), ProcessingJob{ID: "job-1", ResourceID: "recording-1"}, discardAnalysisLogger{}); err != nil {
 		t.Fatal(err)
 	}
-	if repository.verifySeconds != 2 || repository.verifyMS != 1900 || repository.transcript != "First. Second." ||
-		repository.answers[1] != "First." || repository.answers[2] != "Second." {
+	if repository.verifySeconds != 2 || repository.verifyMS != 1900 || repository.transcript != "First answer. Second answer." ||
+		repository.answers[1] != first || repository.answers[2] != second {
 		t.Fatalf("unexpected interview processing: %#v", repository)
+	}
+	wantDialogue := []InterviewDialogueTurn{
+		{Sequence: 1, Question: "First question?", Answer: first},
+		{Sequence: 2, Question: "Second question?", Answer: second},
+	}
+	if len(analyzer.inputs) != 1 || !reflect.DeepEqual(analyzer.inputs[0].InterviewTurns, wantDialogue) {
+		t.Fatalf("analysis=%#v", analyzer.inputs)
+	}
+	if len(rewriter.inputs) != 1 || !reflect.DeepEqual(rewriter.inputs[0].InterviewTurns, wantDialogue) {
+		t.Fatalf("rewrite=%#v", rewriter.inputs)
+	}
+	if got := repository.corrected.CorrectedTranscript; got != "First question? First corrected answer. Second question? Second corrected answer." {
+		t.Fatalf("corrected transcript=%q", got)
+	}
+	if !reflect.DeepEqual(repository.corrected.CorrectedAnswers, rewriter.result.CorrectedAnswers) {
+		t.Fatalf("corrected answers=%#v", repository.corrected.CorrectedAnswers)
+	}
+}
+
+func TestProcessorRetriesInterviewUntilEveryTurnTranscriptIsReady(t *testing.T) {
+	repository := &interviewProcessorRepository{
+		processorRepository: &processorRepository{
+			found: true, advanceTranscript: true,
+			work: ProcessingWork{UserID: "user-1", Stage: "transcribing", AudioAssetID: pointer("asset-1"),
+				InterviewSessionID: pointer("session-1"), PracticeType: "topic"},
+		},
+		turns: []InterviewTurn{{Sequence: 1, Question: "What happened?", TranscriptStatus: "queued"}},
+	}
+	processor := NewProcessor(ProcessingDependencies{
+		Repository: repository, Materializer: &processorMaterializer{},
+		ProbeAudioDuration: func(context.Context, string) (time.Duration, error) { return time.Second, nil },
+		Transcribe: func(context.Context, string) (string, error) {
+			t.Fatal("missing turn text must not trigger full-audio transcription")
+			return "", nil
+		},
+	})
+	err := processor.Process(context.Background(), ProcessingJob{ID: "job-1", ResourceID: "recording-1"}, discardAnalysisLogger{})
+	if !errors.Is(err, ErrInterviewTranscriptNotReady) {
+		t.Fatalf("err=%v", err)
+	}
+	want := []string{"load", "verify", "interests", "turns"}
+	if !reflect.DeepEqual(repository.steps, want) {
+		t.Fatalf("steps=%#v", repository.steps)
 	}
 }
 

@@ -85,7 +85,7 @@ func NewAPI(config APIConfig) *httpapi.Server {
 	mediaSigner, _ := media.NewURLSigner(signingSecret)
 	var interviewService *interview.Service
 	if config.DB != nil {
-		interviewService = interview.NewService(interview.NewSQLRepository(config.DB))
+		interviewService = interview.NewService(interview.NewSQLRepository(config.DB), newCartesiaRealtimeIssuer())
 	}
 	recordingRecords := recording.NewSQLQueryRepository(config.DB)
 	recordingDeletion := recording.NewSQLDeletionRepository(config.DB)

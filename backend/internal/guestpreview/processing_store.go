@@ -52,7 +52,8 @@ func (s *Store) SaveTranscript(ctx context.Context, job Job, transcript string, 
 
 func (s *Store) LoadInterviewTurns(ctx context.Context, sessionID string) ([]recording.InterviewTurn, error) {
 	rows, err := s.db.Query(ctx, `
-		SELECT seq, question, asked_at_ms, ended_at_ms, provisional_transcript
+		SELECT seq, question, asked_at_ms, ended_at_ms, transcript_status,
+		       provisional_transcript, final_transcript
 		FROM interview_turns WHERE session_id = $1 ORDER BY seq`, sessionID)
 	if err != nil {
 		return nil, err
@@ -61,7 +62,8 @@ func (s *Store) LoadInterviewTurns(ctx context.Context, sessionID string) ([]rec
 	var turns []recording.InterviewTurn
 	for rows.Next() {
 		var turn recording.InterviewTurn
-		if err := rows.Scan(&turn.Sequence, &turn.Question, &turn.AskedAtMS, &turn.EndedAtMS, &turn.Provisional); err != nil {
+		if err := rows.Scan(&turn.Sequence, &turn.Question, &turn.AskedAtMS, &turn.EndedAtMS,
+			&turn.TranscriptStatus, &turn.Provisional, &turn.FinalText); err != nil {
 			return nil, err
 		}
 		turns = append(turns, turn)

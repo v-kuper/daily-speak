@@ -13,6 +13,7 @@ var (
 	ErrQuota         = errors.New("guest interview preview unavailable")
 	ErrDurationLimit = errors.New("interview duration limit exhausted")
 	ErrNotReady      = errors.New("interview preparation is not ready")
+	ErrUnavailable   = errors.New("interview transcription is unavailable")
 )
 
 const (
@@ -54,6 +55,8 @@ type Session struct {
 	MaxDurationSeconds int         `json:"maxDurationSeconds"`
 	Error              string      `json:"error,omitempty"`
 	CreatedAt          time.Time   `json:"createdAt"`
+	StartedAt          *time.Time  `json:"-"`
+	ExpiresAt          time.Time   `json:"-"`
 }
 
 type CreateInput struct {
@@ -83,6 +86,27 @@ type AttachAudioInput struct {
 	IdempotencyKey   string
 	TurnSeq          int
 	AudioAssetID     string
+}
+
+type SaveTurnTranscriptInput struct {
+	OwnerPrincipalID string
+	SessionID        string
+	IdempotencyKey   string
+	TurnSeq          int
+	Transcript       string
+}
+
+type RealtimeTranscriptionCredential struct {
+	Token        string    `json:"token"`
+	ExpiresAt    time.Time `json:"expiresAt"`
+	WebSocketURL string    `json:"websocketUrl"`
+	Model        string    `json:"model"`
+	Encoding     string    `json:"encoding"`
+	SampleRate   int       `json:"sampleRate"`
+}
+
+type RealtimeCredentialIssuer interface {
+	IssueRealtimeCredential(context.Context, time.Duration) (RealtimeTranscriptionCredential, error)
 }
 
 type FinalizeInput struct {

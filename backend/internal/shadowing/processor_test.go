@@ -45,8 +45,9 @@ func TestProcessorSynthesizesAndPersistsLocalAsset(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	dialogue := "Where did you go? I went home. What did you do next? I cooked dinner."
 	repository := &processorStore{
-		work:  Work{UserID: "user-1", CorrectedTranscript: "I went home."},
+		work:  Work{UserID: "user-1", CorrectedTranscript: dialogue},
 		found: true, completed: true,
 	}
 	synth := &synthesizer{}
@@ -59,7 +60,7 @@ func TestProcessorSynthesizesAndPersistsLocalAsset(t *testing.T) {
 	if err := processor.Process(context.Background(), job, logger); err != nil {
 		t.Fatal(err)
 	}
-	if synth.text != "I went home." || repository.asset.ID != "asset-1" ||
+	if synth.text != dialogue || repository.asset.ID != "asset-1" ||
 		repository.asset.StorageDriver != storage.BackendLocal || repository.asset.ObjectKey == "" {
 		t.Fatalf("synth=%q asset=%#v", synth.text, repository.asset)
 	}

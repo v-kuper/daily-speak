@@ -16,7 +16,7 @@ project.
 
 ```text
 web/                     Next.js application
-backend/                 Go API/worker, migrations, OpenAPI, Whisper tooling
+backend/                 Go API/worker, migrations, OpenAPI, provider adapters
 scripts/                 repository and deployment utilities
 docs/                    canonical architecture, operations, and roadmap
 docker-compose.yml       local single-host orchestration
@@ -45,7 +45,7 @@ APP_ADDR=:3219 go run ./cmd/api
 ```
 
 Run `go run ./cmd/worker` in a second backend process with the same database,
-uploads path, Whisper, Ollama, and Cartesia configuration. The API only accepts
+uploads path, Ollama, and Cartesia configuration. The API only accepts
 requests and transactionally queues work; the worker owns transcription,
 analysis, TTS, and media cleanup.
 
@@ -96,7 +96,7 @@ between API and worker through `UPLOADS_HOST_DIR`.
   `PUBLIC_WEB_BASE_URL` is an optional canonical web origin used by HTTPS
   deployments to redirect direct HTTP access before authentication.
   Both are read at runtime. Do not put server secrets in `web/.env.local`.
-- Backend: database, CORS, browser refresh-cookie, uploads, Ollama, Whisper, Cartesia,
+- Backend: database, CORS, browser refresh-cookie, uploads, Ollama, Cartesia,
   logging, and listen-address variables. See `backend/.env.example`.
 - Root Compose: host ports, persistent host paths, and values passed to either
   container. See `.env.example`.
@@ -189,7 +189,7 @@ configured uploads host directory. The explicit project name and
 single `app` service safe. See the Windows runbook before rollback; the
 transition has downtime and requires a current database/uploads backup.
 
-Backend-specific Ollama, Whisper, and Cartesia instructions live in
+Backend-specific Ollama and Cartesia instructions live in
 [`backend/README.md`](backend/README.md). The canonical documentation index is
 [`docs/README.md`](docs/README.md), the current system boundary is documented in
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), follow-up work is tracked in

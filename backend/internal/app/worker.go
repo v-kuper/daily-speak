@@ -24,16 +24,15 @@ import (
 )
 
 type WorkerConfig struct {
-	DB                   *db.DB
-	MediaStore           storage.Store
-	MediaBucket          string
-	MediaPartSize        int64
-	MediaPresignTTL      time.Duration
-	AIClient             ai.ChatClient
-	Synthesizer          shadowing.Synthesizer
-	TranscribeAudio      func(context.Context, string) (string, error)
-	TranscribeTimedAudio func(context.Context, string) (recording.TimedTranscript, error)
-	ProbeAudioDuration   func(context.Context, string) (time.Duration, error)
+	DB                 *db.DB
+	MediaStore         storage.Store
+	MediaBucket        string
+	MediaPartSize      int64
+	MediaPresignTTL    time.Duration
+	AIClient           ai.ChatClient
+	Synthesizer        shadowing.Synthesizer
+	TranscribeAudio    func(context.Context, string) (string, error)
+	ProbeAudioDuration func(context.Context, string) (time.Duration, error)
 }
 
 func NewWorker(config WorkerConfig) *background.Runtime {
@@ -42,14 +41,13 @@ func NewWorker(config WorkerConfig) *background.Runtime {
 		aiClient = ai.OllamaClient{}
 	}
 	analysis := recording.NewAnalysisService(recordingollama.New(aiClient), recording.AnalysisConfigFromEnv())
-	groq := transcription.NewGroq(transcription.GroqConfig{
-		APIKey: os.Getenv("GROQ_API_KEY"), Model: os.Getenv("GROQ_WHISPER_MODEL"),
-		Language: os.Getenv("TRANSCRIPTION_LANGUAGE"), Prompt: os.Getenv("TRANSCRIPTION_PROMPT"),
-		FFmpegPath: os.Getenv("FFMPEG_BINARY_PATH"),
+	cartesia := transcription.NewCartesia(transcription.CartesiaConfig{
+		APIKey: os.Getenv("CARTESIA_API_KEY"), Language: os.Getenv("TRANSCRIPTION_LANGUAGE"),
+		APIVersion: os.Getenv("CARTESIA_API_VERSION"),
 	})
 	transcribe := config.TranscribeAudio
 	if transcribe == nil {
-		transcribe = groq.Transcribe
+		transcribe = cartesia.Transcribe
 	}
 	transcribeForProcessing := func(ctx context.Context, path string) (string, error) {
 		transcript, err := transcribe(ctx, path)
@@ -60,22 +58,6 @@ func NewWorker(config WorkerConfig) *background.Runtime {
 			}
 		}
 		return transcript, err
-	}
-	timedTranscribe := config.TranscribeTimedAudio
-	if timedTranscribe == nil && config.TranscribeAudio == nil {
-		timedTranscribe = func(ctx context.Context, path string) (recording.TimedTranscript, error) {
-			result, err := groq.TranscribeTimed(ctx, path)
-			if err != nil {
-				return recording.TimedTranscript{}, err
-			}
-			segments := make([]recording.TimedSegment, 0, len(result.Segments))
-			for _, segment := range result.Segments {
-				segments = append(segments, recording.TimedSegment{
-					StartMS: segment.StartMS, EndMS: segment.EndMS, Text: segment.Text,
-				})
-			}
-			return recording.TimedTranscript{Text: result.Text, Segments: segments}, nil
-		}
 	}
 	probe := config.ProbeAudioDuration
 	if probe == nil {
@@ -93,13 +75,13 @@ func NewWorker(config WorkerConfig) *background.Runtime {
 	recordingProcessor := recording.NewProcessor(recording.ProcessingDependencies{
 		Repository: recordingRepository, Materializer: materializer,
 		ProbeAudioDuration: probe,
-		Transcribe:         transcribeForProcessing, TranscribeTimed: timedTranscribe,
-		Analyzer: analysis, Rewriter: analysis, NewID: uuid.NewString,
+		Transcribe:         transcribeForProcessing,
+		Analyzer:           analysis, Rewriter: analysis, NewID: uuid.NewString,
 	})
 	guestStore := guestpreview.NewStore(config.DB, guestpreview.QueueCapacityFromEnv())
 	guestProcessor := guestpreview.NewProcessor(guestpreview.ProcessorDependencies{
 		Store: guestStore, Materializer: materializer, ProbeAudioDuration: probe,
-		Transcribe: transcribeForProcessing, TranscribeTimed: timedTranscribe, Analyzer: analysis,
+		Transcribe: transcribeForProcessing, Analyzer: analysis,
 	})
 	interviewRepository := interview.NewSQLRepository(config.DB)
 	interviewProcessor := interview.NewProcessor(interviewRepository, materializer,

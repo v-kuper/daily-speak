@@ -9,8 +9,5 @@ npm-debug.log
 public/uploads
 /backend/.cache
 /backend/.venv
-/backend/tools/whisper/cache
-/backend/tools/whisper/pip-cache
-/backend/tools/whisper/openai-models
 /backend/tools/ffmpeg/bin/ffmpeg
 /backend/tmp

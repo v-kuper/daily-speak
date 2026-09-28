@@ -39,6 +39,8 @@ func (s *Server) routeInterviewV1(w http.ResponseWriter, r *http.Request, path s
 		s.handleAdvanceInterviewV1(w, r, id)
 	case len(parts) == 2 && parts[1] == "finalize" && r.Method == http.MethodPost:
 		s.handleFinalizeInterviewV1(w, r, id)
+	case len(parts) == 2 && parts[1] == "transcription-token" && r.Method == http.MethodPost:
+		s.handleInterviewTranscriptionTokenV1(w, r, id)
 	case len(parts) == 4 && parts[1] == "turns" && parts[3] == "audio" && r.Method == http.MethodPost:
 		seq, err := strconv.Atoi(parts[2])
 		if err != nil || seq < 1 {
@@ -46,12 +48,33 @@ func (s *Server) routeInterviewV1(w http.ResponseWriter, r *http.Request, path s
 		} else {
 			s.handleAttachInterviewAudioV1(w, r, id, seq)
 		}
+	case len(parts) == 4 && parts[1] == "turns" && parts[3] == "transcript" && r.Method == http.MethodPost:
+		seq, err := strconv.Atoi(parts[2])
+		if err != nil || seq < 1 {
+			writeV1Error(w, r, http.StatusBadRequest, "invalid_request", "Turn sequence is invalid")
+		} else {
+			s.handleSaveInterviewTranscriptV1(w, r, id, seq)
+		}
 	case len(parts) == 1 || len(parts) == 2 || len(parts) == 4:
 		writeV1Error(w, r, http.StatusMethodNotAllowed, "method_not_allowed", "Method not allowed")
 	default:
 		writeV1Error(w, r, http.StatusNotFound, "not_found", "Interview not found")
 	}
 	return true
+}
+
+func (s *Server) handleInterviewTranscriptionTokenV1(w http.ResponseWriter, r *http.Request, id string) {
+	identity, ok := s.requiredIdentityV1(w, r)
+	if !ok || !s.interviewReady(w, r) {
+		return
+	}
+	credential, err := s.interviewService.RealtimeTranscriptionCredential(r.Context(), identity.PrincipalID, id)
+	if err != nil {
+		s.writeInterviewError(w, r, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "private, no-store")
+	writeJSON(w, http.StatusOK, credential)
 }
 
 func (s *Server) interviewReady(w http.ResponseWriter, r *http.Request) bool {
@@ -199,6 +222,29 @@ func (s *Server) handleAttachInterviewAudioV1(w http.ResponseWriter, r *http.Req
 	writeJSON(w, http.StatusAccepted, map[string]any{"interview": session})
 }
 
+func (s *Server) handleSaveInterviewTranscriptV1(w http.ResponseWriter, r *http.Request, id string, seq int) {
+	identity, ok := s.requiredIdentityV1(w, r)
+	if !ok || !s.interviewReady(w, r) {
+		return
+	}
+	var payload struct {
+		IdempotencyKey string `json:"idempotencyKey"`
+		Text           string `json:"text"`
+	}
+	if !decodeMediaJSON(w, r, &payload) {
+		return
+	}
+	session, err := s.interviewService.SaveTurnTranscript(r.Context(), interview.SaveTurnTranscriptInput{
+		OwnerPrincipalID: identity.PrincipalID, SessionID: id, TurnSeq: seq,
+		IdempotencyKey: payload.IdempotencyKey, Transcript: payload.Text,
+	})
+	if err != nil {
+		s.writeInterviewError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"interview": session})
+}
+
 func (s *Server) handleFinalizeInterviewV1(w http.ResponseWriter, r *http.Request, id string) {
 	identity, ok := s.requiredIdentityV1(w, r)
 	if !ok || !s.interviewReady(w, r) {
@@ -240,6 +286,8 @@ func (s *Server) writeInterviewError(w http.ResponseWriter, r *http.Request, err
 		writeV1Error(w, r, http.StatusForbidden, "quota_exceeded", "This guest identity has already used its single interview preview")
 	case errors.Is(err, interview.ErrNotReady):
 		writeV1Error(w, r, http.StatusConflict, "interview_not_ready", "A next question is not ready")
+	case errors.Is(err, interview.ErrUnavailable):
+		writeV1Error(w, r, http.StatusServiceUnavailable, "interview_transcription_unavailable", "Live transcription is unavailable")
 	case errors.Is(err, interview.ErrConflict):
 		writeV1Error(w, r, http.StatusConflict, "interview_conflict", "Interview state conflicts with this request")
 	default:

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"regexp"
 	"strings"
+	"time"
 
 	"daily-speaking-practice/backend/internal/learner"
 	"daily-speaking-practice/backend/internal/quota"
@@ -23,12 +24,22 @@ type Repository interface {
 	Cancel(context.Context, string, string) (Session, error)
 	Advance(context.Context, AdvanceInput) (Session, error)
 	AttachAudio(context.Context, AttachAudioInput) (Session, error)
+	SaveTurnTranscript(context.Context, SaveTurnTranscriptInput) (Session, error)
 	Finalize(context.Context, FinalizeInput) (Session, error)
 }
 
-type Service struct{ repository Repository }
+type Service struct {
+	repository       Repository
+	credentialIssuer RealtimeCredentialIssuer
+}
 
-func NewService(repository Repository) *Service { return &Service{repository: repository} }
+func NewService(repository Repository, issuer ...RealtimeCredentialIssuer) *Service {
+	service := &Service{repository: repository}
+	if len(issuer) > 0 {
+		service.credentialIssuer = issuer[0]
+	}
+	return service
+}
 
 func (s *Service) Create(ctx context.Context, input CreateInput) (Session, error) {
 	input.Topic = strings.TrimSpace(input.Topic)
@@ -104,6 +115,56 @@ func (s *Service) AttachAudio(ctx context.Context, input AttachAudioInput) (Sess
 		return Session{}, ErrInvalid
 	}
 	return s.repository.AttachAudio(ctx, input)
+}
+
+func (s *Service) SaveTurnTranscript(ctx context.Context, input SaveTurnTranscriptInput) (Session, error) {
+	if !keyPattern.MatchString(input.IdempotencyKey) || input.TurnSeq < 1 {
+		return Session{}, ErrInvalid
+	}
+	input.Transcript = strings.Join(strings.Fields(input.Transcript), " ")
+	if input.Transcript == "" || len([]rune(input.Transcript)) > 4000 {
+		return Session{}, ErrInvalid
+	}
+	return s.repository.SaveTurnTranscript(ctx, input)
+}
+
+func (s *Service) RealtimeTranscriptionCredential(ctx context.Context, ownerPrincipalID, sessionID string) (RealtimeTranscriptionCredential, error) {
+	if strings.TrimSpace(ownerPrincipalID) == "" || strings.TrimSpace(sessionID) == "" {
+		return RealtimeTranscriptionCredential{}, ErrInvalid
+	}
+	session, err := s.repository.Get(ctx, ownerPrincipalID, sessionID)
+	if err != nil {
+		return RealtimeTranscriptionCredential{}, err
+	}
+	if s.credentialIssuer == nil {
+		return RealtimeTranscriptionCredential{}, ErrUnavailable
+	}
+	// Credential issuance is the first server-side action after the browser has
+	// acquired the microphone. Activating a ready session here prevents STT
+	// credentials from being minted indefinitely without consuming its duration.
+	if session.Status == StatusReady {
+		session, err = s.repository.Start(ctx, ownerPrincipalID, sessionID)
+		if err != nil {
+			return RealtimeTranscriptionCredential{}, err
+		}
+	}
+	if session.Status != StatusRecording || session.StartedAt == nil || session.MaxDurationSeconds <= 0 {
+		return RealtimeTranscriptionCredential{}, ErrConflict
+	}
+	now := time.Now().UTC()
+	deadline := session.StartedAt.UTC().Add(time.Duration(session.MaxDurationSeconds) * time.Second)
+	if !session.ExpiresAt.IsZero() && session.ExpiresAt.Before(deadline) {
+		deadline = session.ExpiresAt
+	}
+	ttl := deadline.Sub(now).Truncate(time.Second)
+	if ttl < time.Second {
+		return RealtimeTranscriptionCredential{}, ErrDurationLimit
+	}
+	credential, err := s.credentialIssuer.IssueRealtimeCredential(ctx, ttl)
+	if err != nil || strings.TrimSpace(credential.Token) == "" {
+		return RealtimeTranscriptionCredential{}, ErrUnavailable
+	}
+	return credential, nil
 }
 
 func (s *Service) Finalize(ctx context.Context, input FinalizeInput) (Session, error) {

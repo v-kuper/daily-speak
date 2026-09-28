@@ -16,6 +16,7 @@ func TestRetryServiceSchedulesFailedStageAtomically(t *testing.T) {
 		Transcript: "I go yesterday.", SuggestionsJSON: []byte("[{\"wrong\":\"go\"}]"),
 		CorrectedTranscript: "stale", ProcessingError: &processingError,
 		ShadowingStatus: "failed", ShadowingAssetID: &shadowingAssetID,
+		InterviewTurns: []InterviewTurn{{Sequence: 1, CorrectedAnswerText: "I went yesterday."}},
 	}}
 	tx := &retryTransactionStub{claimed: true}
 	unit := &retryUnitStub{tx: tx}
@@ -38,6 +39,9 @@ func TestRetryServiceSchedulesFailedStageAtomically(t *testing.T) {
 	}
 	if result.Record.CorrectedTranscript != "" || result.Record.ShadowingStatus != "pending" || result.Record.ShadowingAssetID != nil {
 		t.Fatalf("downstream state was not cleared: %#v", result.Record)
+	}
+	if len(result.Record.InterviewTurns) != 1 || result.Record.InterviewTurns[0].CorrectedAnswerText != "" {
+		t.Fatalf("per-turn correction was not cleared: %#v", result.Record.InterviewTurns)
 	}
 	if !result.Record.ShadowingUpdatedAt.Equal(startedAt) {
 		t.Fatalf("unexpected shadowing timestamp: %s", result.Record.ShadowingUpdatedAt)

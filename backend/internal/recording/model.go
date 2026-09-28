@@ -70,15 +70,27 @@ type Record struct {
 // InterviewTurn is an optional timeline attached to a saved interview. The
 // ordinary Transcript field always contains learner speech only.
 type InterviewTurn struct {
-	Sequence        int     `json:"sequence"`
-	Question        string  `json:"question"`
-	AskedAtMS       int     `json:"askedAtMs"`
-	EndedAtMS       *int    `json:"endedAtMs,omitempty"`
-	AnswerText      string  `json:"answerText"`
-	AnswerSource    string  `json:"answerSource"`
-	AnswerAlignment string  `json:"answerAlignment,omitempty"`
-	FinalText       *string `json:"-"`
-	Provisional     *string `json:"-"`
+	Sequence            int     `json:"sequence"`
+	Question            string  `json:"question"`
+	AskedAtMS           int     `json:"askedAtMs"`
+	EndedAtMS           *int    `json:"endedAtMs,omitempty"`
+	AnswerText          string  `json:"answerText"`
+	CorrectedAnswerText string  `json:"correctedAnswerText,omitempty"`
+	AnswerSource        string  `json:"answerSource"`
+	AnswerAlignment     string  `json:"answerAlignment,omitempty"`
+	TranscriptStatus    string  `json:"-"`
+	FinalText           *string `json:"-"`
+	Provisional         *string `json:"-"`
+}
+
+// InterviewDialogueTurn gives analysis and rewrite models the immutable
+// question that prompted each learner answer. The original Transcript remains
+// learner-only; the corrected interview transcript alternates these questions
+// with the corrected answers for shadowing.
+type InterviewDialogueTurn struct {
+	Sequence int    `json:"sequence"`
+	Question string `json:"question"`
+	Answer   string `json:"answer"`
 }
 
 func (turn *InterviewTurn) ResolveAnswer() {
@@ -89,7 +101,7 @@ func (turn *InterviewTurn) ResolveAnswer() {
 			turn.AnswerAlignment = ""
 		} else {
 			turn.AnswerSource = "final"
-			turn.AnswerAlignment = "approximate"
+			turn.AnswerAlignment = ""
 		}
 	} else if turn.Provisional != nil && strings.TrimSpace(*turn.Provisional) != "" {
 		turn.AnswerText = strings.TrimSpace(*turn.Provisional)

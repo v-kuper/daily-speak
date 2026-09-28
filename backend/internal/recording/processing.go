@@ -34,7 +34,6 @@ type ProcessingWork struct {
 	PromotedGuestPreview bool
 	InterviewSessionID   *string
 	DeclaredDuration     int
-	VerifiedDurationMS   int
 }
 
 type ProcessingRepository interface {
@@ -43,7 +42,7 @@ type ProcessingRepository interface {
 	UserInterests(context.Context, string) ([]string, error)
 	SaveTranscript(context.Context, ProcessingJob, string) (bool, error)
 	SaveSuggestions(context.Context, ProcessingJob, []Suggestion) (bool, error)
-	CompleteRecording(context.Context, ProcessingJob, string, string) (bool, error)
+	CompleteRecording(context.Context, ProcessingJob, RewriteResult, string) (bool, error)
 }
 
 type AudioMaterializer interface {
@@ -55,7 +54,6 @@ type ProcessingDependencies struct {
 	Materializer       AudioMaterializer
 	ProbeAudioDuration func(context.Context, string) (time.Duration, error)
 	Transcribe         func(context.Context, string) (string, error)
-	TranscribeTimed    func(context.Context, string) (TimedTranscript, error)
 	Analyzer           Analyzer
 	Rewriter           Rewriter
 	NewID              func() string
@@ -127,7 +125,6 @@ func (p *Processor) Process(ctx context.Context, job ProcessingJob, logger Analy
 			if err := interviewRepository.VerifyInterviewDuration(ctx, job, *work.InterviewSessionID, actualSeconds, actualMS); err != nil {
 				return err
 			}
-			work.VerifiedDurationMS = actualMS
 		} else if err := p.dependencies.Repository.VerifyDuration(ctx, job, actualSeconds); err != nil {
 			return err
 		}
@@ -149,45 +146,39 @@ func (p *Processor) resume(ctx context.Context, job ProcessingJob, work Processi
 }
 
 func (p *Processor) transcribe(ctx context.Context, job ProcessingJob, work ProcessingWork, logger AnalysisLogger) error {
-	if p.dependencies.Transcribe == nil && p.dependencies.TranscribeTimed == nil {
-		return errors.New("recording transcription is not configured")
-	}
 	interests, err := p.dependencies.Repository.UserInterests(ctx, work.UserID)
 	if err != nil {
 		return err
 	}
 	var transcript string
 	var answers map[int]string
-	var timed TimedTranscript
+	var dialogue []InterviewDialogueTurn
 	interviewRepository, isInterviewRepository := p.dependencies.Repository.(InterviewProcessingRepository)
-	if work.InterviewSessionID != nil && isInterviewRepository && p.dependencies.TranscribeTimed != nil {
-		timed, err = p.dependencies.TranscribeTimed(ctx, valueOrEmpty(work.AudioPath))
-		if err == nil {
-			transcript = timed.Text
+	if work.InterviewSessionID != nil {
+		if !isInterviewRepository {
+			return errors.New("interview transcript composition is not configured")
 		}
-	}
-	if transcript == "" {
-		if p.dependencies.Transcribe == nil {
-			return errors.New("recording transcription fallback is not configured")
-		}
-		transcript, err = p.dependencies.Transcribe(ctx, valueOrEmpty(work.AudioPath))
-	}
-	if err != nil {
-		return err
-	}
-	transcript = NormalizeTranscript(transcript)
-	if transcript == "" {
-		return errors.New("Transcription returned an empty transcript. Try speaking louder or recording again.")
-	}
-	if work.InterviewSessionID != nil && isInterviewRepository {
 		turns, loadErr := interviewRepository.LoadInterviewTurns(ctx, *work.InterviewSessionID)
 		if loadErr != nil {
 			return loadErr
 		}
-		answers = FinalInterviewAnswersWithinDuration(turns, timed, work.VerifiedDurationMS)
-		if answers == nil {
-			answers = FinalInterviewAnswersFromProvisional(turns, transcript, work.VerifiedDurationMS)
+		composed, composeErr := ComposeInterviewTranscript(turns)
+		if composeErr != nil {
+			return composeErr
 		}
+		transcript, answers, dialogue = composed.Text, composed.Answers, composed.Dialogue
+	} else {
+		if p.dependencies.Transcribe == nil {
+			return errors.New("recording transcription is not configured")
+		}
+		transcript, err = p.dependencies.Transcribe(ctx, valueOrEmpty(work.AudioPath))
+		if err != nil {
+			return err
+		}
+	}
+	transcript = NormalizeTranscript(transcript)
+	if transcript == "" {
+		return errors.New("Transcription returned an empty transcript. Try speaking louder or recording again.")
 	}
 	var advanced bool
 	if work.InterviewSessionID != nil && isInterviewRepository {
@@ -199,7 +190,7 @@ func (p *Processor) transcribe(ctx context.Context, job ProcessingJob, work Proc
 		return err
 	}
 	work.Transcript = transcript
-	return p.analyzeWithInterests(ctx, job, work, interests, logger)
+	return p.analyzeWithInterests(ctx, job, work, interests, dialogue, logger)
 }
 
 func (p *Processor) analyze(ctx context.Context, job ProcessingJob, work ProcessingWork, logger AnalysisLogger) error {
@@ -207,17 +198,43 @@ func (p *Processor) analyze(ctx context.Context, job ProcessingJob, work Process
 	if err != nil {
 		return err
 	}
-	return p.analyzeWithInterests(ctx, job, work, interests, logger)
+	dialogue, err := p.interviewDialogue(ctx, work)
+	if err != nil {
+		return err
+	}
+	return p.analyzeWithInterests(ctx, job, work, interests, dialogue, logger)
 }
 
-func (p *Processor) analyzeWithInterests(ctx context.Context, job ProcessingJob, work ProcessingWork, interests []string, logger AnalysisLogger) error {
+func (p *Processor) interviewDialogue(ctx context.Context, work ProcessingWork) ([]InterviewDialogueTurn, error) {
+	if work.InterviewSessionID == nil {
+		return nil, nil
+	}
+	repository, ok := p.dependencies.Repository.(InterviewProcessingRepository)
+	if !ok {
+		return nil, errors.New("interview transcript composition is not configured")
+	}
+	turns, err := repository.LoadInterviewTurns(ctx, *work.InterviewSessionID)
+	if err != nil {
+		return nil, err
+	}
+	composed, err := ComposeInterviewTranscript(turns)
+	if err != nil {
+		return nil, err
+	}
+	if composed.Text != NormalizeTranscript(work.Transcript) {
+		return nil, errors.New("persisted interview transcript does not match finalized answers")
+	}
+	return composed.Dialogue, nil
+}
+
+func (p *Processor) analyzeWithInterests(ctx context.Context, job ProcessingJob, work ProcessingWork, interests []string, dialogue []InterviewDialogueTurn, logger AnalysisLogger) error {
 	if p.dependencies.Analyzer == nil {
 		return errors.New("recording analysis is not configured")
 	}
 	suggestions, err := p.dependencies.Analyzer.Analyze(ctx, AnalysisInput{
 		RecordingID: job.ResourceID, Transcript: work.Transcript, Topic: work.Topic,
 		Interests: interests, PracticeType: work.PracticeType, PhotoObject: work.PhotoObject,
-		EnglishLevel: work.EnglishLevel,
+		EnglishLevel: work.EnglishLevel, InterviewTurns: dialogue,
 	}, logger)
 	if err != nil {
 		return err
@@ -234,8 +251,13 @@ func (p *Processor) rewrite(ctx context.Context, job ProcessingJob, work Process
 	if p.dependencies.Rewriter == nil {
 		return errors.New("recording rewrite is not configured")
 	}
+	dialogue, err := p.interviewDialogue(ctx, work)
+	if err != nil {
+		return err
+	}
 	corrected, err := p.dependencies.Rewriter.Rewrite(ctx, RewriteInput{
 		Transcript: work.Transcript, Suggestions: work.Suggestions, EnglishLevel: work.EnglishLevel,
+		InterviewTurns: dialogue,
 	}, logger)
 	if err != nil {
 		return err

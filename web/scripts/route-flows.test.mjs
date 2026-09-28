@@ -221,6 +221,23 @@ test("a history refresh keeps a pending or failed local recording visible", () =
   assert.equal(store.getState().app.recordingSaveError, "Storage unavailable");
 });
 
+test("the local processing placeholder keeps the completed interview conversation", () => {
+  const store = storeFor({ isAuthenticated: true });
+  const interviewTurns = [{
+    sequence: 1,
+    question: "Where did you travel?",
+    askedAtMs: 0,
+    endedAtMs: 4000,
+    answerText: "I went to Rome.",
+    answerSource: "final",
+    answerAlignment: null,
+  }];
+  store.dispatch(app.showBackgroundRecordingSave({ ...draft, interviewTurns }));
+
+  assert.deepEqual(store.getState().app.recordings[0].interviewTurns, interviewTurns);
+  assert.deepEqual(store.getState().app.recordingSaveDrafts["local-123"].interviewTurns, interviewTurns);
+});
+
 test("session expiry preserves a failed upload draft for re-authentication", () => {
   const store = storeFor({ isAuthenticated: true });
   store.dispatch(app.showBackgroundRecordingSave(draft));
@@ -343,6 +360,202 @@ const renderDetails = (store, recordingId) => renderToStaticMarkup(createElement
   Provider, { store }, createElement(AppRouterContext.Provider, { value: routerFor() },
     createElement(load("src/components/DetailsScreen.tsx").default, { recordingId })),
 ));
+
+test("the live interview uses one chronological transcript block without turn cards or timestamps", () => {
+  const InterviewQuestionCard = load("src/components/InterviewQuestionCard.tsx").default;
+  const markup = renderToStaticMarkup(createElement(InterviewQuestionCard, {
+    turns: [{
+      seq: 1,
+      question: "Where did you travel?",
+      askedAtMs: 65000,
+      endedAtMs: 69000,
+      provisionalTranscript: "I went to Rome.",
+      transcriptStatus: "ready",
+    }, {
+      seq: 2,
+      question: "What did you enjoy there?",
+      askedAtMs: 70000,
+      endedAtMs: 74000,
+      provisionalTranscript: "",
+      transcriptStatus: "queued",
+    }],
+    canAdvance: true,
+    onNext: () => {},
+    liveTranscriptionAvailable: true,
+  }));
+
+  assert.equal((markup.match(/conversation-transcript/g) ?? []).length, 1);
+  assert.match(markup, /Interviewer:<\/strong> Where did you travel\?/);
+  assert.match(markup, /You:<\/strong> I went to Rome\./);
+  assert.match(markup, /What did you enjoy there\?[\s\S]*Transcribing answer/);
+  assert.doesNotMatch(markup, /Interview timeline|interview-timeline|01:05|01:10/);
+});
+
+test("the current answer renders stable live text followed by one replaceable subtitle hypothesis", () => {
+  const InterviewQuestionCard = load("src/components/InterviewQuestionCard.tsx").default;
+  const markup = renderToStaticMarkup(createElement(InterviewQuestionCard, {
+    turns: [{
+      seq: 1,
+      question: "Tell me about your day.",
+      askedAtMs: 0,
+      endedAtMs: null,
+      provisionalTranscript: "",
+      transcriptStatus: "pending",
+      liveTranscriptFinal: "I went ",
+      liveTranscriptInterim: "to work",
+    }],
+    canAdvance: true,
+    onNext: () => {},
+    liveTranscriptionAvailable: true,
+  }));
+
+  assert.equal((markup.match(/conversation-transcript/g) ?? []).length, 1);
+  assert.match(markup, /You:<\/strong> I went <span class="conversation-answer-interim">to work<\/span>/);
+  assert.match(markup, /Live subtitles show what was recognized/);
+  assert.doesNotMatch(markup, /Transcribing answer/);
+});
+
+test("the local topic processing route immediately renders its saved conversation snapshot", () => {
+  const recording = {
+    ...saved,
+    id: "local-topic",
+    status: "processing",
+    processingStage: null,
+    localAudioDataUrl: draft.audioDataUrl,
+    media: null,
+    interviewTurns: [{
+      sequence: 1,
+      question: "Where did you travel?",
+      askedAtMs: 0,
+      endedAtMs: 4000,
+      answerText: "I went to Rome.",
+      answerSource: "final",
+      answerAlignment: null,
+    }],
+  };
+  const markup = renderDetails(storeFor({ isAuthenticated: true, recordings: [recording] }), recording.id);
+
+  assert.match(markup, /Conversation transcript/);
+  assert.match(markup, /Where did you travel\?/);
+  assert.match(markup, /I went to Rome\./);
+});
+
+test("topic results render raw and corrected conversation blocks and highlight only the raw answer", () => {
+  const recording = {
+    ...saved,
+    status: "ready",
+    processingStage: null,
+    transcript: "I goed home yesterday.",
+    correctedTranscript: "I went home yesterday.",
+    suggestions: [{
+      wrong: "I goed home",
+      right: "I went home",
+      explanation: "Use the past tense went.",
+      severity: "major",
+    }],
+    interviewTurns: [{
+      sequence: 1,
+      question: "Did you say I goed home?",
+      askedAtMs: 0,
+      endedAtMs: 3000,
+      answerText: "I goed home yesterday.",
+      correctedAnswerText: "I went home yesterday.",
+      answerSource: "final",
+      answerAlignment: null,
+    }],
+  };
+  const markup = renderDetails(storeFor({ isAuthenticated: true, recordings: [recording] }), recording.id);
+
+  assert.match(markup, /Conversation transcript/);
+  assert.equal((markup.match(/conversation-transcript/g) ?? []).length, 2);
+  assert.equal((markup.match(/Interviewer:<\/strong> Did you say I goed home\?/g) ?? []).length, 2);
+  assert.match(markup, /You:<\/strong>/);
+  assert.match(markup, /Shadowing practice[\s\S]*I went home yesterday\./);
+  assert.equal((markup.match(/<mark/g) ?? []).length, 1);
+  assert.doesNotMatch(markup, /Interview timeline|interview-timeline/);
+});
+
+test("legacy topic results without corrected turn answers keep the flat natural version", () => {
+  const recording = {
+    ...saved,
+    status: "ready",
+    processingStage: null,
+    correctedTranscript: "I went home yesterday.",
+    interviewTurns: [{
+      sequence: 1,
+      question: "Where did you go?",
+      askedAtMs: 0,
+      endedAtMs: 3000,
+      answerText: "I goed home yesterday.",
+      answerSource: "final",
+      answerAlignment: null,
+    }],
+  };
+  const markup = renderDetails(storeFor({ isAuthenticated: true, recordings: [recording] }), recording.id);
+
+  assert.equal((markup.match(/Interviewer:<\/strong>/g) ?? []).length, 1);
+  assert.match(markup, /Shadowing practice[\s\S]*I went home yesterday\./);
+  assert.doesNotMatch(markup, /Natural answer is unavailable/);
+});
+
+test("a partial corrected-turn payload falls back to the complete corrected transcript", () => {
+  const recording = {
+    ...saved,
+    status: "ready",
+    processingStage: null,
+    correctedTranscript: "Where did you go? I went home. What happened next? I made dinner.",
+    interviewTurns: [{
+      sequence: 1,
+      question: "Where did you go?",
+      askedAtMs: 0,
+      endedAtMs: 3000,
+      answerText: "I goed home.",
+      correctedAnswerText: "I went home.",
+      answerSource: "final",
+      answerAlignment: null,
+    }, {
+      sequence: 2,
+      question: "What happened next?",
+      askedAtMs: 3000,
+      endedAtMs: 6000,
+      answerText: "I make dinner.",
+      answerSource: "final",
+      answerAlignment: null,
+    }],
+  };
+  const markup = renderDetails(storeFor({ isAuthenticated: true, recordings: [recording] }), recording.id);
+
+  assert.equal((markup.match(/conversation-transcript/g) ?? []).length, 1);
+  assert.match(markup, /Shadowing practice[\s\S]*Where did you go\? I went home\. What happened next\? I made dinner\./);
+  assert.doesNotMatch(markup, /Natural answer is unavailable/);
+});
+
+for (const practiceType of ["free_talk", "photo_description"]) {
+  test(`${practiceType} results keep the plain transcript`, () => {
+    const recording = {
+      ...saved,
+      practiceType,
+      status: "ready",
+      processingStage: null,
+      transcript: "Plain speaking transcript.",
+      correctedTranscript: "Natural speaking transcript.",
+      interviewTurns: [{
+        sequence: 1,
+        question: "A question that should not be rendered",
+        askedAtMs: 0,
+        endedAtMs: 3000,
+        answerText: "An answer that should not be rendered",
+        answerSource: "final",
+        answerAlignment: null,
+      }],
+    };
+    const markup = renderDetails(storeFor({ isAuthenticated: true, recordings: [recording] }), recording.id);
+
+    assert.match(markup, /Plain speaking transcript\./);
+    assert.match(markup, /Natural speaking transcript\./);
+    assert.doesNotMatch(markup, /Conversation transcript|Interviewer:|You:/);
+  });
+}
 
 for (const outcome of ["success", "failure"]) {
   test(`background ${outcome} after leaving local details preserves the newer recording and location`, async (t) => {
@@ -573,6 +786,47 @@ test("unloaded detail lifecycle exposes a recoverable error without request loop
   assert.equal(flow("recordingDetailState")(store.getState().app, saved.id).recording.id, saved.id);
   await scheduler.tick();
   assert.equal(requests, 2);
+  stop();
+});
+
+test("a cached ready list item is hydrated once so interview turns appear after a reload", async (t) => {
+  const listRecord = {
+    ...saved,
+    status: "ready",
+    processingStage: null,
+    transcript: "I goed home.",
+    correctedTranscript: "Where did you go? I went home.",
+    shadowingStatus: "ready",
+  };
+  const detailRecord = {
+    ...listRecord,
+    interviewTurns: [{
+      sequence: 1,
+      question: "Where did you go?",
+      askedAtMs: 0,
+      endedAtMs: 3000,
+      answerText: "I goed home.",
+      correctedAnswerText: "I went home.",
+      answerSource: "final",
+      answerAlignment: null,
+    }],
+  };
+  const store = storeFor({ isAuthenticated: true, recordings: [listRecord] });
+  const scheduler = schedulerFor();
+  let requests = 0;
+  server(t, async (url) => {
+    requests++;
+    assert.equal(url, `https://api.example.test/api/v1/recordings/${saved.id}`);
+    return response({ recording: detailRecord });
+  });
+
+  const stop = flow("startRecordingDetailLifecycle")(store, saved.id, scheduler);
+  await settle();
+  assert.equal(requests, 1);
+  assert.equal(store.getState().app.recordings[0].interviewTurns.length, 1);
+  assert.match(renderDetails(store, saved.id), /Interviewer:<\/strong> Where did you go\?/);
+  await scheduler.tick();
+  assert.equal(requests, 1, "a ready hydrated detail must not keep polling");
   stop();
 });
 

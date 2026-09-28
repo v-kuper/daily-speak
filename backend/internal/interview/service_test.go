@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"daily-speaking-practice/backend/internal/workqueue"
 )
@@ -17,6 +18,10 @@ type serviceRepositoryFake struct {
 	find          bool
 	findErr       error
 	advanceCalled bool
+	startCalled   bool
+	startSession  Session
+	transcript    SaveTurnTranscriptInput
+	getSession    Session
 }
 
 func (f *serviceRepositoryFake) FindByCreateKey(_ context.Context, _, _, _ string) (Session, bool, error) {
@@ -29,10 +34,14 @@ func (f *serviceRepositoryFake) Create(_ context.Context, input CreateInput, max
 	return Session{ID: "session", OpeningQuestion: input.OpeningQuestion}, nil
 }
 func (f *serviceRepositoryFake) Get(context.Context, string, string) (Session, error) {
-	return Session{}, nil
+	return f.getSession, nil
 }
 func (f *serviceRepositoryFake) EnsureRefill(context.Context, string, string) error { return nil }
 func (f *serviceRepositoryFake) Start(context.Context, string, string) (Session, error) {
+	f.startCalled = true
+	if f.startSession.ID != "" {
+		return f.startSession, nil
+	}
 	return Session{}, nil
 }
 func (f *serviceRepositoryFake) Cancel(context.Context, string, string) (Session, error) {
@@ -44,6 +53,10 @@ func (f *serviceRepositoryFake) Advance(context.Context, AdvanceInput) (Session,
 }
 func (f *serviceRepositoryFake) AttachAudio(context.Context, AttachAudioInput) (Session, error) {
 	return Session{}, nil
+}
+func (f *serviceRepositoryFake) SaveTurnTranscript(_ context.Context, input SaveTurnTranscriptInput) (Session, error) {
+	f.transcript = input
+	return Session{ID: input.SessionID}, nil
 }
 func (f *serviceRepositoryFake) Finalize(context.Context, FinalizeInput) (Session, error) {
 	return Session{}, nil
@@ -132,6 +145,93 @@ func TestAdvanceHasNoFixedTenQuestionLimit(t *testing.T) {
 	}
 }
 
+func TestSaveTurnTranscriptNormalizesRealtimeText(t *testing.T) {
+	repo := &serviceRepositoryFake{}
+	got, err := NewService(repo).SaveTurnTranscript(context.Background(), SaveTurnTranscriptInput{
+		OwnerPrincipalID: "principal", SessionID: "session", TurnSeq: 2,
+		IdempotencyKey: "transcript-12345678", Transcript: "  I   went\n home.  ",
+	})
+	if err != nil || got.ID != "session" {
+		t.Fatalf("save transcript got=%+v err=%v", got, err)
+	}
+	if repo.transcript.Transcript != "I went home." || repo.transcript.TurnSeq != 2 {
+		t.Fatalf("normalized input = %+v", repo.transcript)
+	}
+}
+
+type credentialIssuerFake struct {
+	credential RealtimeTranscriptionCredential
+	err        error
+	ttl        time.Duration
+	calls      int
+}
+
+func (f *credentialIssuerFake) IssueRealtimeCredential(_ context.Context, ttl time.Duration) (RealtimeTranscriptionCredential, error) {
+	f.ttl = ttl
+	f.calls++
+	return f.credential, f.err
+}
+
+func TestRealtimeCredentialRequiresOwnedActiveSession(t *testing.T) {
+	now := time.Now().UTC()
+	startedAt := now.Add(-time.Minute)
+	repo := &serviceRepositoryFake{getSession: Session{
+		ID: "session", Status: StatusRecording, StartedAt: &startedAt,
+		ExpiresAt: now.Add(time.Hour), MaxDurationSeconds: 600,
+	}}
+	want := RealtimeTranscriptionCredential{Token: "short-lived", Model: "ink-2"}
+	issuer := &credentialIssuerFake{credential: want}
+	got, err := NewService(repo, issuer).
+		RealtimeTranscriptionCredential(context.Background(), "principal", "session")
+	if err != nil || got.Token != want.Token || got.Model != "ink-2" {
+		t.Fatalf("credential=%+v err=%v", got, err)
+	}
+	if issuer.ttl < 8*time.Minute || issuer.ttl > 9*time.Minute {
+		t.Fatalf("credential ttl = %s", issuer.ttl)
+	}
+	repo.getSession.Status = StatusFinalized
+	if _, err := NewService(repo, issuer).
+		RealtimeTranscriptionCredential(context.Background(), "principal", "session"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("finalized session credential err=%v", err)
+	}
+	if issuer.calls != 1 {
+		t.Fatalf("issuer calls = %d", issuer.calls)
+	}
+}
+
+func TestRealtimeCredentialActivatesReadySessionAndRejectsExpiredDuration(t *testing.T) {
+	now := time.Now().UTC()
+	startedAt := now
+	active := Session{ID: "session", Status: StatusRecording, StartedAt: &startedAt,
+		ExpiresAt: now.Add(time.Hour), MaxDurationSeconds: 180}
+	repo := &serviceRepositoryFake{
+		getSession:   Session{ID: "session", Status: StatusReady},
+		startSession: active,
+	}
+	issuer := &credentialIssuerFake{credential: RealtimeTranscriptionCredential{Token: "short-lived"}}
+	if _, err := NewService(repo, issuer).RealtimeTranscriptionCredential(
+		context.Background(), "principal", "session",
+	); err != nil || !repo.startCalled {
+		t.Fatalf("ready session activation err=%v called=%v", err, repo.startCalled)
+	}
+	if issuer.ttl < 2*time.Minute || issuer.ttl > 3*time.Minute {
+		t.Fatalf("guest credential ttl = %s", issuer.ttl)
+	}
+
+	expiredStart := now.Add(-181 * time.Second)
+	repo.getSession = Session{ID: "session", Status: StatusRecording, StartedAt: &expiredStart,
+		ExpiresAt: now.Add(time.Hour), MaxDurationSeconds: 180}
+	calls := issuer.calls
+	if _, err := NewService(repo, issuer).RealtimeTranscriptionCredential(
+		context.Background(), "principal", "session",
+	); !errors.Is(err, ErrDurationLimit) {
+		t.Fatalf("expired duration credential err=%v", err)
+	}
+	if issuer.calls != calls {
+		t.Fatal("expired session called credential issuer")
+	}
+}
+
 func TestFinalizationIdentityIncludesEndedAt(t *testing.T) {
 	row := sessionRow{
 		FinalizeKey: "finalize-12345678", EndedAtMs: 4200,
@@ -183,8 +283,10 @@ func TestFollowupRejectsRepeatedQuestionAndTreatsTranscriptAsData(t *testing.T) 
 }
 
 type processingStoreFake struct {
-	savedTranscript string
-	savedJob        workqueue.Job
+	savedTranscript     string
+	canonicalTranscript string
+	savedJob            workqueue.Job
+	allowAdaptive       bool
 }
 
 func (f *processingStoreFake) LoadPreparation(context.Context, string) (PreparationWork, bool, error) {
@@ -202,12 +304,18 @@ func (f *processingStoreFake) LoadRefill(context.Context, string) (RefillWork, b
 	return RefillWork{}, false, nil
 }
 
-func (f *processingStoreFake) SaveTranscript(_ context.Context, job workqueue.Job, _ string, transcript string) error {
+func (f *processingStoreFake) SaveTranscript(_ context.Context, job workqueue.Job, _ string, transcript string) (string, error) {
 	f.savedJob = job
 	f.savedTranscript = transcript
-	return nil
+	if f.canonicalTranscript != "" {
+		return f.canonicalTranscript, nil
+	}
+	return transcript, nil
 }
 func (f *processingStoreFake) SaveAdaptive(context.Context, workqueue.Job, string, int, string) (bool, error) {
+	if f.allowAdaptive {
+		return true, nil
+	}
 	panic("empty answer must not generate a question")
 }
 func (f *processingStoreFake) SaveRefill(context.Context, workqueue.Job, string, []string) (int, error) {
@@ -242,5 +350,39 @@ func TestEmptyTurnTranscriptDoesNotGenerateFollowup(t *testing.T) {
 		ResourceID: "turn", LeaseToken: "lease", Payload: []byte(`{"step":"turn"}`)})
 	if err != nil || store.savedTranscript != "   " || store.savedJob.LeaseToken != "lease" {
 		t.Fatalf("empty transcript processing err=%v saved=%q job=%+v", err, store.savedTranscript, store.savedJob)
+	}
+}
+
+type generatorCapture struct {
+	history []ContextTurn
+}
+
+func (*generatorCapture) Prepare(context.Context, string, string, string, []string) (Preparation, error) {
+	return Preparation{}, nil
+}
+func (g *generatorCapture) Followup(_ context.Context, _ string, history []ContextTurn, _ []string) (string, error) {
+	g.history = append([]ContextTurn(nil), history...)
+	return "What happened next?", nil
+}
+func (*generatorCapture) Refill(context.Context, string, []ContextTurn, []string) ([]string, error) {
+	return nil, nil
+}
+
+func TestFallbackTranscriptionUsesRealtimeWinnerForFollowup(t *testing.T) {
+	store := &processingStoreFake{canonicalTranscript: "the realtime answer", allowAdaptive: true}
+	generator := &generatorCapture{}
+	processor := NewProcessor(store, materializerFake{}, TranscribeFunc(func(context.Context, string) (string, error) {
+		return "stale batch answer", nil
+	}), generator)
+	err := processor.Process(context.Background(), workqueue.Job{ID: "job", Kind: JobKind,
+		ResourceID: "turn", LeaseToken: "lease", Payload: []byte(`{"step":"turn"}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if store.savedTranscript != "stale batch answer" {
+		t.Fatalf("saved fallback transcript = %q", store.savedTranscript)
+	}
+	if len(generator.history) != 1 || generator.history[0].Transcript != "the realtime answer" {
+		t.Fatalf("follow-up history = %+v", generator.history)
 	}
 }

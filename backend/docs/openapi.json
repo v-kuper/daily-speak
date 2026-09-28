@@ -1853,6 +1853,45 @@
         }
       }
     },
+    "/api/v1/interviews/{interviewId}/transcription-token": {
+      "post": {
+        "tags": [
+          "Interviews"
+        ],
+        "summary": "Create a short-lived Cartesia STT credential",
+        "description": "Starts a ready interview when necessary, then returns an STT-only access token bounded by the remaining interview duration and the manual Ink 2 WebSocket configuration. The server keeps CARTESIA_API_KEY private.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RequestIdHeader"
+          },
+          {
+            "$ref": "#/components/parameters/InterviewIdPath"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/V1InterviewTranscriptionCredentialOK"
+          },
+          "401": {
+            "$ref": "#/components/responses/V1Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/V1NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/V1Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/V1ServiceUnavailable"
+          }
+        }
+      }
+    },
     "/api/v1/interviews/{interviewId}/turns/{sequence}/audio": {
       "post": {
         "tags": [
@@ -1898,13 +1937,68 @@
             "$ref": "#/components/responses/V1ServiceUnavailable"
           }
         },
-        "description": "The audioAssetId must refer to an owned ready interview_turn_audio WAV upload. Local transcription and follow-up generation run as durable work.",
+        "description": "The audioAssetId must refer to an owned ready interview_turn_audio WAV upload. The segment is retained with the interview and is transcribed through Cartesia batch STT only when no realtime transcript was saved for this turn.",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/InterviewTurnAudioRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/interviews/{interviewId}/turns/{sequence}/transcript": {
+      "post": {
+        "tags": [
+          "Interviews"
+        ],
+        "summary": "Save a finalized realtime answer transcript",
+        "description": "Persists the final Ink 2 text for one answer and schedules adaptive question generation. The transcript is idempotent and becomes the canonical text for this turn.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RequestIdHeader"
+          },
+          {
+            "$ref": "#/components/parameters/InterviewIdPath"
+          },
+          {
+            "$ref": "#/components/parameters/InterviewTurnSequencePath"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/V1InterviewOK"
+          },
+          "400": {
+            "$ref": "#/components/responses/V1BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/V1Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/V1NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/V1Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/V1ServiceUnavailable"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InterviewTurnTranscriptRequest"
               }
             }
           }
@@ -1953,7 +2047,7 @@
             "$ref": "#/components/responses/V1ServiceUnavailable"
           }
         },
-        "description": "Closes the last turn and confirms the recording or guest preview already linked atomically during creation with interviewSessionId. The complete audio is the canonical final recording.",
+        "description": "Closes the last turn and confirms the recording or guest preview already linked atomically during creation with interviewSessionId. The complete audio remains available for playback, while canonical interview text is assembled from the finalized turn transcripts without retranscribing the complete file.",
         "requestBody": {
           "required": true,
           "content": {
@@ -2912,6 +3006,21 @@
           }
         }
       },
+      "V1InterviewTranscriptionCredentialOK": {
+        "description": "Short-lived realtime interview transcription credential.",
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestID"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/InterviewTranscriptionCredential"
+            }
+          }
+        }
+      },
       "V1InterviewAccepted": {
         "description": "Interview preparation or answer transcription queued.",
         "headers": {
@@ -3532,7 +3641,7 @@
             "items": {
               "$ref": "#/components/schemas/SavedInterviewTurn"
             },
-            "description": "Present only for a saved adaptive topic interview. Question text is metadata, not part of transcript."
+            "description": "Present only for a saved adaptive topic interview. Each turn keeps the immutable question, learner answer, and optional corrected learner answer separate."
           }
         },
         "example": {
@@ -4289,7 +4398,8 @@
             "type": "string"
           },
           "correctedTranscript": {
-            "type": "string"
+            "type": "string",
+            "description": "Natural transcript used for shadowing. For adaptive topic interviews this is the chronological question-and-corrected-answer dialogue without role labels; for free talk and photo description it contains learner speech only."
           },
           "suggestions": {
             "type": "array",
@@ -4345,7 +4455,7 @@
             "items": {
               "$ref": "#/components/schemas/SavedInterviewTurn"
             },
-            "description": "Present only for a saved adaptive topic interview. Question text is metadata, not part of transcript."
+            "description": "Present only for a saved adaptive topic interview. Each turn keeps the immutable question, learner answer, and optional corrected learner answer separate."
           }
         },
         "example": {
@@ -4968,6 +5078,62 @@
           }
         }
       },
+      "InterviewTurnTranscriptRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "idempotencyKey",
+          "text"
+        ],
+        "properties": {
+          "idempotencyKey": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000,
+            "description": "Final answer text assembled from Cartesia is_final deltas before flush_done."
+          }
+        }
+      },
+      "InterviewTranscriptionCredential": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "token",
+          "expiresAt",
+          "websocketUrl",
+          "model",
+          "encoding",
+          "sampleRate"
+        ],
+        "properties": {
+          "token": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "websocketUrl": {
+            "type": "string",
+            "format": "uri"
+          },
+          "model": {
+            "type": "string",
+            "const": "ink-2"
+          },
+          "encoding": {
+            "type": "string",
+            "const": "pcm_s16le"
+          },
+          "sampleRate": {
+            "type": "integer",
+            "const": 16000
+          }
+        }
+      },
       "FinalizeInterviewRequest": {
         "type": "object",
         "additionalProperties": false,
@@ -5023,6 +5189,12 @@
           "answerText": {
             "type": "string",
             "description": "Speech only, with no synthetic question text."
+          },
+          "correctedAnswerText": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000,
+            "description": "AI-corrected learner answer. Present after an account interview recording completes; it never contains the interviewer question."
           },
           "answerSource": {
             "type": "string",

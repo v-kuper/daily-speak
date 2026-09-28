@@ -176,7 +176,8 @@ func (r *SQLProcessingRepository) SaveTranscript(ctx context.Context, job Proces
 
 func (r *SQLProcessingRepository) LoadInterviewTurns(ctx context.Context, sessionID string) ([]InterviewTurn, error) {
 	rows, err := r.db.Query(ctx, `
-		SELECT seq, question, asked_at_ms, ended_at_ms, provisional_transcript
+		SELECT seq, question, asked_at_ms, ended_at_ms, transcript_status,
+		       provisional_transcript, final_transcript
 		FROM interview_turns WHERE session_id = $1 ORDER BY seq`, sessionID)
 	if err != nil {
 		return nil, err
@@ -185,7 +186,8 @@ func (r *SQLProcessingRepository) LoadInterviewTurns(ctx context.Context, sessio
 	var turns []InterviewTurn
 	for rows.Next() {
 		var turn InterviewTurn
-		if err := rows.Scan(&turn.Sequence, &turn.Question, &turn.AskedAtMS, &turn.EndedAtMS, &turn.Provisional); err != nil {
+		if err := rows.Scan(&turn.Sequence, &turn.Question, &turn.AskedAtMS, &turn.EndedAtMS,
+			&turn.TranscriptStatus, &turn.Provisional, &turn.FinalText); err != nil {
 			return nil, err
 		}
 		turns = append(turns, turn)
@@ -245,12 +247,15 @@ func (r *SQLProcessingRepository) SaveSuggestions(ctx context.Context, job Proce
 	return result.RowsAffected() > 0, nil
 }
 
-func (r *SQLProcessingRepository) CompleteRecording(ctx context.Context, job ProcessingJob, correctedTranscript, shadowingJobID string) (bool, error) {
+func (r *SQLProcessingRepository) CompleteRecording(ctx context.Context, job ProcessingJob, corrected RewriteResult, shadowingJobID string) (bool, error) {
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
 		return false, err
 	}
 	defer tx.Rollback(ctx)
+	if err := requireRecordingLease(ctx, tx, job); err != nil {
+		return false, err
+	}
 	result, err := tx.Exec(ctx, `
 		UPDATE recordings
 		SET status = 'ready', corrected_transcript = $2, processing_stage = NULL,
@@ -258,12 +263,87 @@ func (r *SQLProcessingRepository) CompleteRecording(ctx context.Context, job Pro
 		    shadowing_updated_at = NOW(), shadowing_attempt_id = $4
 		WHERE id = $1 AND status = 'processing' AND processing_job_id = $3
 		  AND EXISTS (SELECT 1 FROM processing_jobs WHERE id = $3 AND state = 'running' AND lease_token = $5)`,
-		job.ResourceID, correctedTranscript, job.ID, shadowingJobID, job.LeaseToken)
+		job.ResourceID, corrected.CorrectedTranscript, job.ID, shadowingJobID, job.LeaseToken)
 	if err != nil {
 		return false, err
 	}
 	if result.RowsAffected() == 0 {
 		return false, nil
+	}
+	var interview bool
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM interview_sessions WHERE recording_id = $1
+		)`, job.ResourceID).Scan(&interview); err != nil {
+		return false, err
+	}
+	rows, err := tx.Query(ctx, `
+		SELECT t.seq, t.question
+		FROM interview_turns t
+		JOIN interview_sessions s ON s.id = t.session_id
+		WHERE s.recording_id = $1
+		ORDER BY t.seq
+		FOR UPDATE OF t`, job.ResourceID)
+	if err != nil {
+		return false, err
+	}
+	type persistedTurn struct {
+		sequence int
+		question string
+	}
+	turns := make([]persistedTurn, 0)
+	for rows.Next() {
+		var turn persistedTurn
+		if err := rows.Scan(&turn.sequence, &turn.question); err != nil {
+			rows.Close()
+			return false, err
+		}
+		turns = append(turns, turn)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return false, err
+	}
+	if interview && (len(turns) == 0 || len(turns) != len(corrected.CorrectedAnswers)) {
+		return false, errors.New("corrected interview answers do not match the saved turns")
+	}
+	if interview {
+		dialogueParts := make([]string, 0, len(turns)*2)
+		for index, turn := range turns {
+			answer := corrected.CorrectedAnswers[index]
+			answerRaw := strings.TrimSpace(answer.CorrectedAnswerText)
+			answerText := strings.Join(strings.Fields(answerRaw), " ")
+			question := strings.TrimSpace(turn.question)
+			if answer.Sequence != turn.sequence || answerText == "" || answerText != answerRaw ||
+				len([]rune(answerText)) > 4000 || containsCyrillic(answerText) ||
+				question == "" {
+				return false, errors.New("corrected interview answers do not match the saved turns")
+			}
+			dialogueParts = append(dialogueParts, question, answerText)
+		}
+		dialogue := strings.Join(dialogueParts, " ")
+		if normalizeCorrectedInterviewTranscript(dialogue) != dialogue || corrected.CorrectedTranscript != dialogue {
+			return false, errors.New("corrected interview transcript does not match the saved dialogue")
+		}
+		for _, answer := range corrected.CorrectedAnswers {
+			result, err := tx.Exec(ctx, `
+				UPDATE interview_turns t
+				SET corrected_answer_text = $3, updated_at = NOW()
+				FROM interview_sessions s
+				WHERE t.session_id = s.id AND s.recording_id = $1 AND t.seq = $2`,
+				job.ResourceID, answer.Sequence, answer.CorrectedAnswerText)
+			if err != nil {
+				return false, err
+			}
+			if result.RowsAffected() != 1 {
+				return false, errors.New("interview timeline changed during recording completion")
+			}
+		}
+	} else {
+		if len(corrected.CorrectedAnswers) != 0 || strings.TrimSpace(corrected.CorrectedTranscript) == "" {
+			return false, errors.New("corrected recording transcript is invalid")
+		}
 	}
 	if err := workqueue.Enqueue(ctx, tx, workqueue.NewJob{
 		ID: shadowingJobID, Kind: workqueue.KindShadowingSynthesize, ResourceID: job.ResourceID,

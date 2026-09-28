@@ -141,6 +141,9 @@ func (s *Server) ratePolicy(r *http.Request) (ratePolicy, bool) {
 	case "/api/v1/interviews":
 		return ratePolicy{scope: "interview_create", limit: s.operations.ExpensiveLimit, principal: true, alsoIP: true}, true
 	}
+	if strings.HasPrefix(path, "/api/v1/interviews/") && strings.HasSuffix(path, "/transcription-token") {
+		return ratePolicy{scope: "interview_transcription_token", limit: s.operations.ExpensiveLimit, principal: true, alsoIP: true}, true
+	}
 	if strings.HasPrefix(path, "/api/") {
 		return ratePolicy{scope: "api_write", limit: s.operations.WriteLimit, principal: true}, true
 	}

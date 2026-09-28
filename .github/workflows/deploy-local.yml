@@ -9,7 +9,7 @@ on:
 
 concurrency:
   group: daily-speaking-local-deploy
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   deploy:
@@ -68,8 +68,7 @@ jobs:
       READINESS_TIMEOUT: ${{ vars.READINESS_TIMEOUT || '2s' }}
       READINESS_MAX_QUEUE_DEPTH: ${{ vars.READINESS_MAX_QUEUE_DEPTH || '1000' }}
       READINESS_MAX_OLDEST_JOB_AGE: ${{ vars.READINESS_MAX_OLDEST_JOB_AGE || '30m' }}
-      GROQ_WHISPER_MODEL: whisper-large-v3-turbo
-      TRANSCRIPTION_LANGUAGE: auto
+      TRANSCRIPTION_LANGUAGE: en
       FFMPEG_BINARY_PATH: /usr/bin/ffmpeg
 
     steps:
@@ -104,14 +103,6 @@ jobs:
             throw "GitHub Actions secret AUTH_ACCESS_TOKEN_SECRET must contain at least 32 characters."
           }
 
-      - name: Validate Groq configuration
-        env:
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-        run: |
-          if ([string]::IsNullOrWhiteSpace($env:GROQ_API_KEY)) {
-            throw "Missing required GitHub Actions secret GROQ_API_KEY. Add it under repository Settings > Secrets and variables > Actions > Secrets."
-          }
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -134,9 +125,11 @@ jobs:
       - name: Check Docker
         run: docker version
 
+      - name: Preflight Cartesia realtime migration
+        run: .\scripts\preflight-cartesia-realtime-migration.ps1
+
       - name: Build and start local Docker HTTPS stack
         env:
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           CARTESIA_API_KEY: ${{ secrets.CARTESIA_API_KEY }}
           CARTESIA_VOICE_ID: ${{ vars.CARTESIA_VOICE_ID }}
           AUTH_ACCESS_TOKEN_SECRET: ${{ secrets.AUTH_ACCESS_TOKEN_SECRET }}
@@ -145,6 +138,27 @@ jobs:
           MEDIA_S3_SECRET_ACCESS_KEY: ${{ secrets.MEDIA_S3_SECRET_ACCESS_KEY }}
           MEDIA_S3_SESSION_TOKEN: ${{ secrets.MEDIA_S3_SESSION_TOKEN }}
         run: .\scripts\setup-lan-https-proxy.ps1
+
+      - name: Restore quiesced API after interrupted rollout
+        if: ${{ failure() || cancelled() }}
+        run: |
+          $containerId = $env:DAILY_SPEAKING_QUIESCED_BACKEND_ID
+          if ([string]::IsNullOrWhiteSpace($containerId)) {
+            Write-Host "No quiesced API container needs recovery."
+            exit 0
+          }
+          $state = (& docker inspect --format "{{.State.Running}}" $containerId 2>$null | Out-String).Trim()
+          if ($LASTEXITCODE -ne 0) {
+            Write-Warning "The previous API container no longer exists; inspect the Compose stack before retrying deployment."
+            exit 0
+          }
+          if ($state -ne "true") {
+            docker start $containerId | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+              throw "The previous API container could not be restarted automatically. Restart it before accepting traffic."
+            }
+          }
+          Write-Host "The previous API container is running after the interrupted rollout."
 
       - name: Verify Docker identity configuration
         run: |
@@ -174,13 +188,9 @@ jobs:
           $env:API_BASE_URL = "https://${env:LAN_HOST_IP}:${env:API_HTTPS_PORT}"
           node scripts/smoke-stack.mjs
 
-      - name: Verify Docker Groq configuration
-        run: |
-          docker compose exec -T worker ./daily-speaking-worker --check-groq
-
       - name: Verify Docker Cartesia configuration
         run: |
-          docker compose exec -T worker sh -lc 'test -n "$CARTESIA_API_KEY" && test -n "$CARTESIA_VOICE_ID" && echo cartesia-config-ok'
+          docker compose exec -T worker ./daily-speaking-worker --check-cartesia
 
       - name: Deployment diagnostics
         if: failure()

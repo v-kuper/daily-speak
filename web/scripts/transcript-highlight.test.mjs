@@ -60,3 +60,39 @@ test("twenty-five different suggestions remain highlightable", () => {
   assert.equal(segments.filter((part) => part.isError).length, 25);
 });
 
+test("conversation transcript highlights learner answers without marking interviewer questions", () => {
+  const [turn] = highlight.buildConversationTranscriptTurns([{
+    sequence: 1,
+    question: "Did you say I goed home?",
+    askedAtMs: 0,
+    endedAtMs: 3000,
+    answerText: "I goed home yesterday.",
+    correctedAnswerText: "I went home yesterday.",
+    answerSource: "final",
+    answerAlignment: null,
+  }], [{ wrong: "I goed home", severity: "major" }]);
+
+  assert.equal(turn.question, "Did you say I goed home?");
+  assert.equal(turn.hasAnswer, true);
+  assert.deepEqual(
+    turn.answerSegments.filter((part) => part.isError).map((part) => part.text),
+    ["I goed home"],
+  );
+});
+
+test("corrected conversation keeps each question and renders the natural answer without error marks", () => {
+  const [turn] = highlight.buildConversationTranscriptTurns([{
+    sequence: 1,
+    question: "Where did you go?",
+    askedAtMs: 0,
+    endedAtMs: 3000,
+    answerText: "I goed home.",
+    correctedAnswerText: "I went home.",
+    answerSource: "final",
+    answerAlignment: null,
+  }], [{ wrong: "I went home", severity: "major" }], "corrected");
+
+  assert.equal(turn.question, "Where did you go?");
+  assert.equal(turn.hasAnswer, true);
+  assert.deepEqual(turn.answerSegments, [{ text: "I went home.", isError: false, severity: null }]);
+});

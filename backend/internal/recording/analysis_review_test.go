@@ -47,7 +47,7 @@ func TestReviewerFlatDecisionsRequireEveryKnownCandidate(t *testing.T) {
 }
 
 func TestReviewerPromptRequestsOnlyFlatDecisionValues(t *testing.T) {
-	prompt := recordingReviewerPrompt("I am forgot.", []analysisCandidate{{ID: "verb_grammar-001", Wrong: "am forgot", Right: "forgot", Explanation: "Use past simple.", Category: categoryVerbGrammar}}, nil)
+	prompt := recordingReviewerPrompt("I am forgot.", []analysisCandidate{{ID: "verb_grammar-001", Wrong: "am forgot", Right: "forgot", Explanation: "Use past simple.", Category: categoryVerbGrammar}}, nil, nil)
 	if !strings.Contains(prompt, `{"decisions":{"verb_grammar-001":"medium"}}`) {
 		t.Fatalf("reviewer prompt does not request the flat decision map: %s", prompt)
 	}
@@ -92,7 +92,7 @@ func TestReviewerRejectsStyleAsMinorAndUnsupportedEnums(t *testing.T) {
 }
 
 func TestReviewerPromptLimitsTheModelToCandidateAdjudication(t *testing.T) {
-	prompt := recordingReviewerPrompt("I am forgot капуста.", []analysisCandidate{{ID: "verb_grammar-001", Wrong: "am forgot", Right: "forgot", Explanation: "Use past simple.", Category: categoryVerbGrammar}}, []string{"капуста"})
+	prompt := recordingReviewerPrompt("I am forgot капуста.", []analysisCandidate{{ID: "verb_grammar-001", Wrong: "am forgot", Right: "forgot", Explanation: "Use past simple.", Category: categoryVerbGrammar}}, []string{"капуста"}, nil)
 	for _, fragment := range []string{
 		"adjudicator, not an error detector",
 		"do not add, rewrite, merge, or omit candidates",

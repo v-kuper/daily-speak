@@ -49,29 +49,28 @@ test("generated Caddy config selects the LAN IP certificate when clients omit IP
   );
 });
 
-test("LAN HTTPS deployment recreates only Caddy after starting the application stack", () => {
+test("LAN HTTPS deployment gates replacement and recreates only Caddy explicitly", () => {
   const script = readFileSync(scriptPath, "utf8");
   const composeBlock = script.match(/if \(-not \$SkipDockerComposeUp\) \{([\s\S]*?)\r?\n  \}/)?.[1];
   assert.ok(composeBlock, "Compose commands must remain guarded by SkipDockerComposeUp");
 
-  const primaryUp = "docker compose up --build -d --remove-orphans web backend worker postgres";
+  const imageBuild = "docker compose build web backend worker";
+  const rolloutGate = "preflight-cartesia-realtime-migration.ps1";
+  const primaryUp = "docker compose up --no-build -d --remove-orphans web backend worker postgres";
   const caddyRecreate = "docker compose up -d --force-recreate --no-deps lan-https";
-  const composeStatements = composeBlock.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const buildIndex = composeBlock.indexOf(imageBuild);
+  const gateIndex = composeBlock.indexOf(rolloutGate);
   const primaryIndex = composeBlock.indexOf(primaryUp);
   const recreateIndex = composeBlock.indexOf(caddyRecreate);
 
-  assert.deepEqual(composeStatements, [
-    primaryUp,
-    "if ($LASTEXITCODE -ne 0) {",
-    'throw "Failed to build or start web, backend, worker, and postgres services."',
-    "}",
-    caddyRecreate,
-    "if ($LASTEXITCODE -ne 0) {",
-    'throw "Failed to recreate lan-https service with current TLS configuration."',
-    "}",
-  ], "each native Compose command must be followed immediately by its own exit-code guard");
-  assert.ok(primaryIndex >= 0, "the application services must use the stable project orphan-cleanup deployment");
+  assert.ok(buildIndex >= 0 && buildIndex < gateIndex,
+    "new images must be built while the existing stack is still online");
+  assert.ok(gateIndex < primaryIndex,
+    "the migration rollout gate must pass before application containers are replaced");
   assert.ok(recreateIndex > primaryIndex, "Caddy must be force-recreated after the application services start");
+  assert.match(composeBlock, /docker compose build web backend worker\r?\n\s*if \(\$LASTEXITCODE -ne 0\)/);
+  assert.match(composeBlock, /docker compose up --no-build -d --remove-orphans web backend worker postgres\r?\n\s*if \(\$LASTEXITCODE -ne 0\)/);
+  assert.match(composeBlock, /try\s*\{[\s\S]*preflight-cartesia-realtime-migration\.ps1[\s\S]*docker compose up --no-build[\s\S]*\}\s*catch\s*\{[\s\S]*Restore-QuiescedBackend/);
   assert.doesNotMatch(composeBlock, /--force-recreate[^\r\n]*(?:web|backend|postgres)/);
   assert.doesNotMatch(script, /docker compose (?:down|rm)\b|docker volume rm\b|docker system prune\b|(?:^|\s)-v(?:\s|$)/m);
 
@@ -147,7 +146,7 @@ test("HTTPS setup supplies one same-site hostname pair and secure cookies before
   for (const [name, variable, fallback] of [["AppPort", "APP_PORT", 3218], ["ApiPort", "API_PORT", 3219], ["HttpsPort", "HTTPS_PORT", 3443], ["ApiHttpsPort", "API_HTTPS_PORT", 3444]]) {
     assert.ok(script.includes(`[int]$${name} = $(if ($env:${variable}) { [int]$env:${variable} } else { ${fallback} })`));
   }
-  const beforeCompose = script.split("docker compose up --build -d --remove-orphans")[0];
+  const beforeCompose = script.split("docker compose build web backend worker")[0];
   const variables = Object.fromEntries([...beforeCompose.matchAll(/\$env:(\w+) = "([^"\n]*)"/g)].map(([, name, value]) => [name, value]));
   assert.deepEqual(Object.fromEntries(["APP_PORT", "API_PORT", "HTTPS_PORT", "API_HTTPS_PORT", "PUBLIC_WEB_BASE_URL", "PUBLIC_API_BASE_URL", "CORS_ALLOWED_ORIGINS", "SESSION_COOKIE_SECURE", "SESSION_COOKIE_SAME_SITE"].map((name) => [name, variables[name]])), {
     APP_PORT: "$AppPort", API_PORT: "$ApiPort", HTTPS_PORT: "$HttpsPort", API_HTTPS_PORT: "$ApiHttpsPort",

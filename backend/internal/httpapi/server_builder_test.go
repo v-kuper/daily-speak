@@ -158,7 +158,7 @@ func newTestServer(config Config) *Server {
 	}
 	transcribe := config.TranscribeAudio
 	if transcribe == nil {
-		transcribe = transcription.NewGroq(transcription.GroqConfig{APIKey: os.Getenv("GROQ_API_KEY")}).Transcribe
+		transcribe = transcription.NewCartesia(transcription.CartesiaConfig{APIKey: os.Getenv("CARTESIA_API_KEY")}).Transcribe
 	}
 	probe := config.ProbeAudioDuration
 	if probe == nil {

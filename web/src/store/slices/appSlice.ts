@@ -39,7 +39,7 @@ import {
 } from "../../lib/identity";
 import { dataURLToBlob, MediaUploadError, uploadMedia } from "../../lib/mediaUpload";
 import { finalizeInterview } from "../../lib/interviewSession";
-import { parseInterviewTurns } from "../../lib/interviewTimeline";
+import { parseInterviewTurns, type SavedInterviewTurn } from "../../lib/interviewTimeline";
 
 export type SpeakMode = "idle" | "readyToRecord" | "recording" | "recorded";
 export type AuthStatus = "idle" | "loading";
@@ -147,6 +147,7 @@ export type RecordingSaveDraft = {
   photoObject: string | null;
   interviewSessionId?: string;
   interviewEndedAtMs?: number;
+  interviewTurns?: SavedInterviewTurn[];
 };
 
 const today = new Date();
@@ -1849,7 +1850,7 @@ const appSlice = createSlice({
         timestamp,
         status: "processing",
         transcript: "",
-        interviewTurns: [],
+        interviewTurns: parseInterviewTurns(draft.interviewTurns),
         correctedTranscript: "",
         suggestions: [],
         processingStage: null,

@@ -63,6 +63,31 @@ func TestRecordingV1ResponseExcludesPublicMediaFields(t *testing.T) {
 	}
 }
 
+func TestRecordingV1ResponseIncludesPerTurnCorrectedAnswers(t *testing.T) {
+	response := recordingV1ResponseFromRecord(recording.Record{
+		ID: "recording-1", Topic: "Travel", Timestamp: time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC),
+		Status: "ready", PracticeType: "topic", ShadowingStatus: "ready",
+		ShadowingUpdatedAt: time.Date(2026, 9, 27, 12, 1, 0, 0, time.UTC),
+		InterviewTurns: []recording.InterviewTurn{{
+			Sequence: 1, Question: "Where did you go?", AnswerText: "I go home.",
+			CorrectedAnswerText: "I went home.", AnswerSource: "final",
+		}},
+	})
+	encoded, err := json.Marshal(response)
+	if err != nil {
+		t.Fatalf("encode v1 recording: %v", err)
+	}
+	for _, fragment := range []string{
+		`"question":"Where did you go?"`,
+		`"answerText":"I go home."`,
+		`"correctedAnswerText":"I went home."`,
+	} {
+		if !bytes.Contains(encoded, []byte(fragment)) {
+			t.Fatalf("v1 response is missing %s: %s", fragment, encoded)
+		}
+	}
+}
+
 func TestCreateRecordingV1AttachesReadyMediaAndIsIdempotent(t *testing.T) {
 	fixture := newRecordingCreateV1Fixture(t)
 	audioID := fixture.insertAsset(t, fixture.owner.Identity.PrincipalID, "recording_audio")

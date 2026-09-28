@@ -1,138 +1,65 @@
 package recording
 
-import "strings"
+import (
+	"errors"
+	"fmt"
+	"strings"
+)
 
-type TimedSegment struct {
-	StartMS int
-	EndMS   int
-	Text    string
-}
+var ErrInterviewTranscriptNotReady = errors.New("interview answer transcript is not ready")
 
-type TimedTranscript struct {
+type ComposedInterviewTranscript struct {
 	Text     string
-	Segments []TimedSegment
+	Answers  map[int]string
+	Dialogue []InterviewDialogueTurn
 }
 
-// FinalInterviewAnswersWithinDuration refuses final answer attribution when
-// click times or transcription offsets extend beyond the measured complete audio.
-// A two-second margin allows recorder and audio-probe rounding differences.
-func FinalInterviewAnswersWithinDuration(turns []InterviewTurn, transcript TimedTranscript, audioDurationMS int) map[int]string {
-	if !validInterviewTiming(turns, audioDurationMS) {
-		return nil
-	}
-	limit := audioDurationMS + 2000
-	for _, segment := range transcript.Segments {
-		if segment.EndMS > limit {
-			return nil
-		}
-	}
-	return FinalInterviewAnswers(turns, transcript)
-}
-
-func validInterviewTiming(turns []InterviewTurn, audioDurationMS int) bool {
-	if audioDurationMS <= 0 || len(turns) == 0 {
-		return false
-	}
-	limit := audioDurationMS + 2000
-	for _, turn := range turns {
-		if turn.AskedAtMS < 0 || turn.AskedAtMS > limit ||
-			(turn.EndedAtMS != nil && (*turn.EndedAtMS < turn.AskedAtMS || *turn.EndedAtMS > limit)) {
-			return false
-		}
-	}
-	return true
-}
-
-// FinalInterviewAnswers assigns every timed piece to the nearest question
-// interval using its midpoint. The answer text is final, but the boundary is
-// always approximate: transcription timing does not identify an exact click instant.
-func FinalInterviewAnswers(turns []InterviewTurn, transcript TimedTranscript) map[int]string {
-	if len(turns) == 0 || len(transcript.Segments) == 0 {
-		return nil
-	}
-	var complete strings.Builder
-	for _, part := range transcript.Segments {
-		complete.WriteString(part.Text)
-	}
-	if NormalizeTranscript(complete.String()) != NormalizeTranscript(transcript.Text) {
-		return nil
-	}
-	for index, turn := range turns {
-		if turn.Sequence < 1 || turn.AskedAtMS < 0 ||
-			(index > 0 && (turn.Sequence <= turns[index-1].Sequence || turn.AskedAtMS < turns[index-1].AskedAtMS)) {
-			return nil
-		}
-	}
-	assigned := make([]strings.Builder, len(turns))
-	previousOwner := -1
-	for _, part := range transcript.Segments {
-		if part.StartMS < 0 || part.EndMS < part.StartMS {
-			return nil
-		}
-		midpoint := part.StartMS + (part.EndMS-part.StartMS)/2
-		owner, bestDistance := -1, int(^uint(0)>>1)
-		for index, turn := range turns {
-			end := int(^uint(0) >> 1)
-			if turn.EndedAtMS != nil {
-				end = *turn.EndedAtMS
-			} else if index+1 < len(turns) {
-				end = turns[index+1].AskedAtMS
-			}
-			if end < turn.AskedAtMS {
-				return nil
-			}
-			distance := 0
-			if midpoint < turn.AskedAtMS {
-				distance = turn.AskedAtMS - midpoint
-			} else if midpoint > end {
-				distance = midpoint - end
-			}
-			// On an exact question boundary the later question owns the text.
-			if distance <= bestDistance {
-				owner, bestDistance = index, distance
-			}
-		}
-		if owner < 0 || owner < previousOwner {
-			return nil
-		}
-		previousOwner = owner
-		assigned[owner].WriteString(part.Text)
+// ComposeInterviewTranscript builds the canonical learner-only transcript
+// from completed per-turn transcription. The continuous interview recording
+// remains the duration and playback source; it is not transcribed again.
+func ComposeInterviewTranscript(turns []InterviewTurn) (ComposedInterviewTranscript, error) {
+	if len(turns) == 0 {
+		return ComposedInterviewTranscript{}, fmt.Errorf("%w: interview has no turns", ErrInterviewTranscriptNotReady)
 	}
 	answers := make(map[int]string, len(turns))
-	var rejoined strings.Builder
-	for index, turn := range turns {
-		answers[turn.Sequence] = NormalizeTranscript(assigned[index].String())
-		rejoined.WriteString(assigned[index].String())
-	}
-	if NormalizeTranscript(rejoined.String()) != NormalizeTranscript(transcript.Text) {
-		return nil
-	}
-	return answers
-}
-
-// FinalInterviewAnswersFromProvisional uses completed answer transcriptions
-// only when their ordered text exactly reconstructs the full-file result.
-// Different model wording or an unfinished answer leaves the timeline
-// unaligned, so the canonical full transcript remains the only final text.
-func FinalInterviewAnswersFromProvisional(turns []InterviewTurn, fullText string, audioDurationMS int) map[int]string {
-	if !validInterviewTiming(turns, audioDurationMS) || strings.TrimSpace(fullText) == "" {
-		return nil
-	}
-	answers := make(map[int]string, len(turns))
+	dialogue := make([]InterviewDialogueTurn, 0, len(turns))
 	parts := make([]string, 0, len(turns))
 	for index, turn := range turns {
-		if turn.Sequence < 1 || turn.Provisional == nil ||
-			(index > 0 && turn.Sequence <= turns[index-1].Sequence) {
-			return nil
+		if turn.Sequence != index+1 {
+			return ComposedInterviewTranscript{}, fmt.Errorf("%w: turn sequence %d is missing", ErrInterviewTranscriptNotReady, index+1)
 		}
-		answer := strings.Join(strings.Fields(*turn.Provisional), " ")
+		if turn.TranscriptStatus != "ready" {
+			return ComposedInterviewTranscript{}, fmt.Errorf("%w: turn %d status is %s", ErrInterviewTranscriptNotReady, turn.Sequence, strings.TrimSpace(turn.TranscriptStatus))
+		}
+		var source *string
+		if turn.FinalText != nil {
+			source = turn.FinalText
+		} else {
+			source = turn.Provisional
+		}
+		if source == nil {
+			return ComposedInterviewTranscript{}, fmt.Errorf("%w: turn %d has no final text", ErrInterviewTranscriptNotReady, turn.Sequence)
+		}
+		rawAnswer := strings.Join(strings.Fields(strings.TrimSpace(*source)), " ")
+		answer := NormalizeTranscript(rawAnswer)
+		if answer == "" {
+			return ComposedInterviewTranscript{}, fmt.Errorf("%w: turn %d is empty", ErrInterviewTranscriptNotReady, turn.Sequence)
+		}
+		if answer != rawAnswer {
+			return ComposedInterviewTranscript{}, errors.New("interview answer transcript exceeds the supported length")
+		}
+		question := strings.TrimSpace(turn.Question)
+		if question == "" {
+			return ComposedInterviewTranscript{}, fmt.Errorf("%w: turn %d has no question", ErrInterviewTranscriptNotReady, turn.Sequence)
+		}
 		answers[turn.Sequence] = answer
-		if answer != "" {
-			parts = append(parts, answer)
-		}
+		parts = append(parts, answer)
+		dialogue = append(dialogue, InterviewDialogueTurn{Sequence: turn.Sequence, Question: question, Answer: answer})
 	}
-	if strings.Join(parts, " ") != strings.Join(strings.Fields(fullText), " ") {
-		return nil
+	joined := strings.Join(parts, " ")
+	text := NormalizeTranscript(joined)
+	if text == "" || text != joined {
+		return ComposedInterviewTranscript{}, errors.New("interview transcript exceeds the supported length")
 	}
-	return answers
+	return ComposedInterviewTranscript{Text: text, Answers: answers, Dialogue: dialogue}, nil
 }

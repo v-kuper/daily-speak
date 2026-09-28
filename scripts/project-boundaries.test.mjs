@@ -81,7 +81,7 @@ test("standalone backend upload defaults are ignored by Git", () => {
   }
 });
 
-test("backend environment example documents server-only Groq transcription", () => {
+test("backend environment example documents server-only Cartesia speech services", () => {
   const env = Object.fromEntries(readFileSync("backend/.env.example", "utf8")
     .split(/\r?\n/)
     .filter((line) => line && !line.startsWith("#") && line.includes("="))
@@ -89,9 +89,9 @@ test("backend environment example documents server-only Groq transcription", () 
       const separator = line.indexOf("=");
       return [line.slice(0, separator), line.slice(separator + 1).replace(/^"|"$/g, "")];
     }));
-  assert.equal(env.GROQ_API_KEY, "");
-  assert.equal(env.GROQ_WHISPER_MODEL, "whisper-large-v3-turbo");
-  assert.equal(env.TRANSCRIPTION_LANGUAGE, "auto");
+  assert.equal(env.CARTESIA_API_KEY, "");
+  assert.equal(env.CARTESIA_API_VERSION, "2026-08-14");
+  assert.equal(env.TRANSCRIPTION_LANGUAGE, "en");
 });
 
 test("backend source has no Next.js upstream", () => {

@@ -100,6 +100,35 @@ function Ensure-FirewallRule {
   }
 }
 
+function Clear-QuiescedBackendMarker {
+  $env:DAILY_SPEAKING_QUIESCED_BACKEND_ID = ""
+  if (-not [string]::IsNullOrWhiteSpace($env:GITHUB_ENV)) {
+    "DAILY_SPEAKING_QUIESCED_BACKEND_ID=" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+  }
+}
+
+function Restore-QuiescedBackend {
+  $containerId = $env:DAILY_SPEAKING_QUIESCED_BACKEND_ID
+  if ([string]::IsNullOrWhiteSpace($containerId)) {
+    return
+  }
+
+  $state = (& docker inspect --format "{{.State.Running}}" $containerId 2>$null | Out-String).Trim()
+  if ($LASTEXITCODE -ne 0) {
+    Write-Warning "The previous API container no longer exists and could not be restored automatically."
+    return
+  }
+  if ($state -ne "true") {
+    & docker start $containerId | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+      Write-Warning "The previous API container could not be restarted automatically."
+      return
+    }
+    Write-Host "The previous API container was restarted after the deployment failed."
+  }
+  Clear-QuiescedBackendMarker
+}
+
 if ([string]::IsNullOrWhiteSpace($HostIp)) {
   $HostIp = Get-PrivateIPv4Address
 }
@@ -166,9 +195,22 @@ https://${HostIp}:${ApiHttpsPort} {
   }
 
   if (-not $SkipDockerComposeUp) {
-    docker compose up --build -d --remove-orphans web backend worker postgres
+    docker compose build web backend worker
     if ($LASTEXITCODE -ne 0) {
-      throw "Failed to build or start web, backend, worker, and postgres services."
+      throw "Failed to build web, backend, and worker services. The existing stack was not replaced."
+    }
+
+    try {
+      & (Join-Path $PSScriptRoot "preflight-cartesia-realtime-migration.ps1") -QuiesceBackend
+
+      docker compose up --no-build -d --remove-orphans web backend worker postgres
+      if ($LASTEXITCODE -ne 0) {
+        throw "Failed to start web, backend, worker, and postgres services."
+      }
+      Clear-QuiescedBackendMarker
+    } catch {
+      Restore-QuiescedBackend
+      throw
     }
 
     docker compose up -d --force-recreate --no-deps lan-https

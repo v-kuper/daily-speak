@@ -5,7 +5,6 @@ import (
 	"errors"
 	"log"
 	"os"
-	"os/exec"
 	"os/signal"
 	"strings"
 	"syscall"
@@ -20,12 +19,12 @@ import (
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if len(os.Args) == 2 && os.Args[1] == "--check-groq" {
-		checkGroq(ctx)
+	if len(os.Args) == 2 && os.Args[1] == "--check-cartesia" {
+		checkCartesia(ctx)
 		return
 	}
-	if strings.TrimSpace(os.Getenv("GROQ_API_KEY")) == "" {
-		log.Fatal("GROQ_API_KEY is required for worker transcription")
+	if strings.TrimSpace(os.Getenv("CARTESIA_API_KEY")) == "" {
+		log.Fatal("CARTESIA_API_KEY is required for worker transcription and speech synthesis")
 	}
 
 	requireSSL, err := parseDatabaseSSL(os.Getenv("DATABASE_SSL"))
@@ -63,22 +62,18 @@ func main() {
 	}
 }
 
-func checkGroq(ctx context.Context) {
-	ffmpeg := strings.TrimSpace(os.Getenv("FFMPEG_BINARY_PATH"))
-	if ffmpeg == "" {
-		ffmpeg = "ffmpeg"
+func checkCartesia(ctx context.Context) {
+	if strings.TrimSpace(os.Getenv("CARTESIA_VOICE_ID")) == "" {
+		log.Fatal("CARTESIA_VOICE_ID is required for speech synthesis")
 	}
-	if _, err := exec.LookPath(ffmpeg); err != nil {
-		log.Fatal("ffmpeg is unavailable for Groq transcription")
-	}
-	groq := transcription.NewGroq(transcription.GroqConfig{
-		APIKey: os.Getenv("GROQ_API_KEY"),
-		Model:  os.Getenv("GROQ_WHISPER_MODEL"),
+	cartesia := transcription.NewCartesia(transcription.CartesiaConfig{
+		APIKey:     os.Getenv("CARTESIA_API_KEY"),
+		APIVersion: os.Getenv("CARTESIA_API_VERSION"),
 	})
-	if err := groq.Check(ctx); err != nil {
-		log.Fatalf("Groq configuration check failed: %v", err)
+	if err := cartesia.Check(ctx); err != nil {
+		log.Fatalf("Cartesia configuration check failed: %v", err)
 	}
-	log.Println("groq-config-ok")
+	log.Println("cartesia-config-ok")
 }
 
 func parseDatabaseSSL(value string) (bool, error) {

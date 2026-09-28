@@ -19,13 +19,14 @@ type Analyzer interface {
 }
 
 type AnalysisInput struct {
-	RecordingID  string
-	Transcript   string
-	Topic        string
-	Interests    []string
-	PracticeType string
-	PhotoObject  *string
-	EnglishLevel string
+	RecordingID    string
+	Transcript     string
+	InterviewTurns []InterviewDialogueTurn
+	Topic          string
+	Interests      []string
+	PracticeType   string
+	PhotoObject    *string
+	EnglishLevel   string
 }
 
 type AnalysisLogger interface {
@@ -74,19 +75,20 @@ func (s *AnalysisService) Analyze(ctx context.Context, request AnalysisInput, lo
 		return []Suggestion{}, nil
 	}
 	input := recordingAnalysisInput{
-		Transcript:   transcript,
-		Topic:        strings.TrimSpace(request.Topic),
-		Interests:    request.Interests,
-		PracticeType: request.PracticeType,
-		PhotoObject:  request.PhotoObject,
-		EnglishLevel: learner.FormatEnglishLevel(request.EnglishLevel),
-		Russian:      extractRussianPhrases(transcript),
+		Transcript:     transcript,
+		InterviewTurns: request.InterviewTurns,
+		Topic:          strings.TrimSpace(request.Topic),
+		Interests:      request.Interests,
+		PracticeType:   request.PracticeType,
+		PhotoObject:    request.PhotoObject,
+		EnglishLevel:   learner.FormatEnglishLevel(request.EnglishLevel),
+		Russian:        extractRussianPhrases(transcript),
 	}
 	candidates, err := s.runDetectors(ctx, input, request.RecordingID, logger)
 	if err != nil {
 		return nil, ErrAnalysis
 	}
-	suggestions, err := s.requestReview(ctx, transcript, candidates, input.Russian, request.RecordingID, logger)
+	suggestions, err := s.requestReview(ctx, transcript, candidates, input.Russian, input.InterviewTurns, request.RecordingID, logger)
 	if err != nil {
 		return nil, ErrAnalysis
 	}
@@ -192,8 +194,8 @@ func (s *AnalysisService) requestDetector(ctx context.Context, pass analysisPass
 	return nil, ErrAnalysis
 }
 
-func (s *AnalysisService) requestReview(ctx context.Context, transcript string, candidates []analysisCandidate, requiredRussian []string, recordingID string, logger AnalysisLogger) ([]suggestion, error) {
-	prompt := recordingReviewerPrompt(transcript, candidates, requiredRussian)
+func (s *AnalysisService) requestReview(ctx context.Context, transcript string, candidates []analysisCandidate, requiredRussian []string, interviewTurns []InterviewDialogueTurn, recordingID string, logger AnalysisLogger) ([]suggestion, error) {
+	prompt := recordingReviewerPrompt(transcript, candidates, requiredRussian, interviewTurns)
 	for attempt := 0; attempt < 2; attempt++ {
 		started := time.Now()
 		strictJSON := attempt > 0

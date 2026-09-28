@@ -26,6 +26,11 @@ const deployWorkflow = readFileSync(
   ".github/workflows/deploy-local.yml",
   "utf8",
 );
+const cartesiaRealtimePreflight = readFileSync(
+  "scripts/preflight-cartesia-realtime-migration.ps1",
+  "utf8",
+);
+const httpsSetup = readFileSync("scripts/setup-lan-https-proxy.ps1", "utf8");
 const parsedDeployWorkflow = parseYaml(deployWorkflow);
 const deployStep = (name) => parsedDeployWorkflow.jobs.deploy.steps.find(
   (step) => step.name === name,
@@ -103,6 +108,47 @@ test("local deploy workflow verifies quality, deploys the LAN Docker app, and ch
   assert.match(deployWorkflow, /docker compose logs --tail 120 lan-https/);
 });
 
+test("Windows rollout blocks replacement until legacy interview finalization is drained", () => {
+  const preflight = deployStep("Preflight Cartesia realtime migration");
+  const build = deployStep("Build and start local Docker HTTPS stack");
+  const recovery = deployStep("Restore quiesced API after interrupted rollout");
+  assert.equal(parsedDeployWorkflow.concurrency["cancel-in-progress"], false,
+    "a newer push must wait instead of cancelling a rollout after it quiesces the API");
+  assert.equal(preflight?.run, ".\\scripts\\preflight-cartesia-realtime-migration.ps1");
+  assert.ok(parsedDeployWorkflow.jobs.deploy.steps.indexOf(preflight) < parsedDeployWorkflow.jobs.deploy.steps.indexOf(build));
+
+  for (const fragment of [
+    "0014_cartesia_realtime_transcripts.sql",
+    "queued", "running", "retry_wait",
+    "recording.process", "guest.preview",
+    "session.recording_id = job.resource_id",
+    "session.guest_preview_id = job.resource_id",
+  ]) assert.match(cartesiaRealtimePreflight, new RegExp(fragment.replaceAll(".", "\\.")));
+  assert.match(cartesiaRealtimePreflight, /schema_migrations WHERE name = '\$MigrationName'/);
+  assert.match(cartesiaRealtimePreflight, /string_agg\(active\.kind \|\| '\/' \|\| active\.state/);
+  assert.match(cartesiaRealtimePreflight, /if \(-not \$QuiesceBackend\) \{[\s\S]*?return[\s\S]*?\}/);
+  assert.doesNotMatch(cartesiaRealtimePreflight, /docker (?:stop|rm)[^\r\n]*worker/i);
+  assert.doesNotMatch(cartesiaRealtimePreflight, /DATABASE_URL|CARTESIA_API_KEY|SELECT\s+(?:job|j)\.(?:id|resource_id)/i);
+
+  const gateCall = "Assert-NoActiveLegacyInterviewJobs -PostgresContainerId";
+  const firstGate = cartesiaRealtimePreflight.indexOf(gateCall);
+  const backendStop = cartesiaRealtimePreflight.indexOf("docker stop --time 30");
+  const finalGate = cartesiaRealtimePreflight.indexOf(gateCall, firstGate + 1);
+  assert.ok(firstGate >= 0 && firstGate < backendStop && backendStop < finalGate,
+    "the old API must be quiesced between two checks while the old worker stays running");
+
+  const imageBuild = httpsSetup.indexOf("docker compose build web backend worker");
+  const quiesce = httpsSetup.indexOf("preflight-cartesia-realtime-migration.ps1");
+  const replace = httpsSetup.indexOf("docker compose up --no-build -d --remove-orphans web backend worker postgres");
+  assert.ok(imageBuild >= 0 && imageBuild < quiesce && quiesce < replace,
+    "images must build before the final quiesce and containers may be replaced only after it passes");
+
+  assert.equal(recovery?.if, "${{ failure() || cancelled() }}");
+  assert.match(recovery?.run ?? "", /DAILY_SPEAKING_QUIESCED_BACKEND_ID/);
+  assert.match(recovery?.run ?? "", /docker start \$containerId/);
+  assert.doesNotMatch(recovery?.run ?? "", /DATABASE_URL|CARTESIA_API_KEY|AUTH_ACCESS_TOKEN_SECRET/);
+});
+
 test("trusted HTTPS verification starts Node with the explicit mkcert root CA and HTTPS origins", () => {
   const run = deployStep("Verify trusted HTTPS endpoints")?.run;
   assert.equal(typeof run, "string");
@@ -150,21 +196,20 @@ test("local deploy uses a stable Docker Compose project name", () => {
   assert.match(deployWorkflow, /COMPOSE_PROJECT_NAME:\s+daily-speaking/);
   assert.match(dockerLanScript, /COMPOSE_PROJECT_NAME/);
   assert.match(dockerLanScript, /"--remove-orphans"/);
-  const httpsSetup = readFileSync("scripts/setup-lan-https-proxy.ps1", "utf8");
-  assert.match(httpsSetup, /docker compose up --build -d --remove-orphans web backend worker postgres\r?\n\s*if \(\$LASTEXITCODE -ne 0\) \{\r?\n\s*throw "Failed to build or start web, backend, worker, and postgres services\."/);
+  assert.match(httpsSetup, /docker compose build web backend worker\r?\n\s*if \(\$LASTEXITCODE -ne 0\) \{\r?\n\s*throw "Failed to build web, backend, and worker services\. The existing stack was not replaced\."/);
+  assert.match(httpsSetup, /docker compose up --no-build -d --remove-orphans web backend worker postgres\r?\n\s*if \(\$LASTEXITCODE -ne 0\) \{\r?\n\s*throw "Failed to start web, backend, worker, and postgres services\."/);
   assert.match(httpsSetup, /docker compose up -d --force-recreate --no-deps lan-https\r?\n\s*if \(\$LASTEXITCODE -ne 0\) \{\r?\n\s*throw "Failed to recreate lan-https service with current TLS configuration\."/);
   assert.doesNotMatch(httpsSetup, /docker compose down[^\r\n]*-v/);
   assert.match(rootPackage.scripts["docker:app"], /up --build -d --remove-orphans web backend worker postgres/);
 });
 
-test("local deploy uses Groq transcription and a secret key", () => {
-  assert.match(deployWorkflow, /GROQ_WHISPER_MODEL:\s+whisper-large-v3-turbo/);
-  assert.match(deployWorkflow, /TRANSCRIPTION_LANGUAGE:\s+auto/);
+test("local deploy uses Cartesia speech services with one secret key", () => {
+  assert.match(deployWorkflow, /TRANSCRIPTION_LANGUAGE:\s+en/);
   assert.match(deployWorkflow, /FFMPEG_BINARY_PATH:\s+\/usr\/bin\/ffmpeg/);
-  assert.match(deployWorkflow, /GROQ_API_KEY:\s+\$\{\{ secrets\.GROQ_API_KEY \}\}/);
-  assert.doesNotMatch(deployWorkflow, /vars\.GROQ_API_KEY/);
-  assert.match(deployWorkflow, /name:\s+Validate Groq configuration/);
-  assert.equal(deployStep("Build and start local Docker HTTPS stack")?.env?.GROQ_API_KEY, "${{ secrets.GROQ_API_KEY }}");
+  assert.match(deployWorkflow, /CARTESIA_API_KEY:\s+\$\{\{ secrets\.CARTESIA_API_KEY \}\}/);
+  assert.doesNotMatch(deployWorkflow, /vars\.CARTESIA_API_KEY/);
+  assert.match(deployWorkflow, /name:\s+Validate Cartesia configuration/);
+  assert.equal(deployStep("Build and start local Docker HTTPS stack")?.env?.CARTESIA_API_KEY, "${{ secrets.CARTESIA_API_KEY }}");
 });
 
 test("multi-pass analysis concurrency is source-controlled for clean Windows deploys", () => {
@@ -179,9 +224,9 @@ test("multi-pass analysis concurrency is source-controlled for clean Windows dep
   assert.match(envExample, /AI_ANALYSIS_CONCURRENCY=3/);
 });
 
-test("local deploy workflow verifies Groq configuration inside the worker container", () => {
-  assert.match(deployWorkflow, /name:\s+Verify Docker Groq configuration/);
-  assert.match(deployWorkflow, /docker compose exec -T worker \.\/daily-speaking-worker --check-groq/);
+test("local deploy workflow verifies Cartesia without uploading audio", () => {
+  assert.match(deployWorkflow, /name:\s+Verify Docker Cartesia configuration/);
+  assert.match(deployWorkflow, /docker compose exec -T worker \.\/daily-speaking-worker --check-cartesia/);
 });
 
 test("local deploy workflow configures persistent uploaded media storage", () => {
@@ -338,11 +383,11 @@ test("local deploy stops before Docker when Cartesia configuration is missing", 
   assert.doesNotMatch(deployWorkflow, /Write-Host[^\n]*CARTESIA_API_KEY/);
 });
 
-test("local deploy verifies Cartesia variables reached the worker container without printing them", () => {
+test("local deploy verifies Cartesia connectivity without printing credentials or sending audio", () => {
   assert.match(deployWorkflow, /name:\s+Verify Docker Cartesia configuration/);
   assert.match(
     deployWorkflow,
-    /test -n "\$CARTESIA_API_KEY" && test -n "\$CARTESIA_VOICE_ID" && echo cartesia-config-ok/,
+    /docker compose exec -T worker \.\/daily-speaking-worker --check-cartesia/,
   );
   assert.doesNotMatch(deployWorkflow, /env \| grep CARTESIA/);
 });
@@ -372,7 +417,7 @@ test("Docker build creates public before copying it into the runtime image", () 
 test("Docker runtime includes audio tools without a local speech model", () => {
   assert.match(dockerfile, /FROM debian:bookworm-slim AS runtime/);
   assert.match(dockerfile, /ffmpeg/);
-  assert.doesNotMatch(dockerfile, /openai-whisper|python3-venv|WHISPER_BACKEND/);
+  assert.doesNotMatch(dockerfile, /python3-venv|pip install/);
   assert.match(dockerfile, /FFMPEG_BINARY_PATH=\/usr\/bin\/ffmpeg/);
 });
 
@@ -435,7 +480,7 @@ test("application images ship only their own production runtime and assets", () 
   assert.ok(web.includes("COPY --from=build /app/.next/static ./.next/static"));
   assert.ok(web.includes("EXPOSE 3000"));
   assert.ok(web.includes('CMD ["node", "server.js"]'));
-  assert.doesNotMatch(web.join("\n"), /golang|daily-speaking-api|whisper|ffmpeg|backend|PUBLIC_API_BASE_URL/);
+  assert.doesNotMatch(web.join("\n"), /golang|daily-speaking-api|ffmpeg|backend|PUBLIC_API_BASE_URL/);
   assert.deepEqual(backend.filter((line) => line.startsWith("FROM ")), [
     "FROM golang:1.26.2-alpine AS build", "FROM debian:bookworm-slim AS runtime",
   ]);
@@ -488,10 +533,9 @@ test("Docker runtime and Compose use persistent uploaded media storage", () => {
   assert.doesNotMatch(dockerCompose, /\.\/public\/uploads:\/app\/public\/uploads/);
 });
 
-test("Docker Compose gives Groq credentials only to the worker", () => {
-  assert.match(dockerCompose, /GROQ_API_KEY:\s+\$\{GROQ_API_KEY:-\}/);
-  assert.match(dockerCompose, /GROQ_WHISPER_MODEL:\s+\$\{GROQ_WHISPER_MODEL:-whisper-large-v3-turbo\}/);
+test("Docker Compose gives one Cartesia key to the API and worker", () => {
+  assert.match(dockerCompose, /CARTESIA_API_KEY:\s+\$\{CARTESIA_API_KEY:-\}/);
   assert.match(dockerCompose, /FFMPEG_BINARY_PATH:\s+\$\{FFMPEG_BINARY_PATH:-\/usr\/bin\/ffmpeg\}/);
-  assert.equal(compose.services.backend.environment.GROQ_API_KEY, undefined);
-  assert.equal(compose.services.worker.environment.GROQ_API_KEY, "${GROQ_API_KEY:-}");
+  assert.equal(compose.services.backend.environment.CARTESIA_API_KEY, "${CARTESIA_API_KEY:-}");
+  assert.equal(compose.services.worker.environment.CARTESIA_API_KEY, "${CARTESIA_API_KEY:-}");
 });

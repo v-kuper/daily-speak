@@ -189,15 +189,16 @@ requires the same Bearer access token used by native clients.
 AI and media variables are grouped in the example file:
 
 - `OLLAMA_*` and `AI_ANALYSIS_CONCURRENCY` configure question/analysis calls;
-- `GROQ_API_KEY` and `GROQ_WHISPER_MODEL` configure Groq transcription in the worker;
-- `TRANSCRIPTION_LANGUAGE`, `TRANSCRIPTION_PROMPT`, and `FFMPEG_BINARY_PATH` configure optional audio handling;
-- `CARTESIA_*` configures pronunciation audio synthesis.
+- `CARTESIA_API_KEY` configures Cartesia transcription and pronunciation audio synthesis;
+- `TRANSCRIPTION_LANGUAGE` selects the language for Cartesia batch transcription;
+- `CARTESIA_MODEL`, `CARTESIA_VOICE_ID`, and `CARTESIA_API_URL` configure pronunciation audio synthesis;
+- `FFMPEG_BINARY_PATH` and `FFPROBE_BINARY_PATH` configure audio duration probing.
 
-`GROQ_API_KEY`, `CARTESIA_API_KEY`, and the `MEDIA_S3_*` credential values are secrets. Never
+`CARTESIA_API_KEY` and the `MEDIA_S3_*` credential values are secrets. Never
 commit them or expose them through web configuration. S3 settings are optional
 in local mode; an unset S3 secret must not block the current Windows deployment.
 Uploaded media must use persistent storage in production. The worker sends a
-temporary copy to Groq and keeps the original in backend-owned storage.
+temporary copy to Cartesia and keeps the original in backend-owned storage.
 
 ## Tests and contract checks
 
@@ -230,16 +231,22 @@ The build context is only `backend/`:
 docker build -t daily-speaking-backend backend
 ```
 
-The runtime image contains the Go API and ffmpeg for audio probing and
-compression; it contains no local speech model, Node.js, or Next.js output.
+The runtime image contains the Go API and ffmpeg for audio probing; it contains
+no local speech model, Node.js, or Next.js output.
 Compose mounts `${UPLOADS_HOST_DIR}:/app/uploads` into the API and worker.
 
-## Groq transcription
+## Cartesia speech services
 
-The worker transcribes recordings and interview answers through Groq's
-`/openai/v1/audio/transcriptions` endpoint. Set `GROQ_API_KEY` in the worker
-environment. `GROQ_WHISPER_MODEL` defaults to `whisper-large-v3-turbo`.
-The free plan accepts files up to 25 MB, so the worker converts larger files
-to 16 kHz mono FLAC before upload. Files still over 25 MB fail explicitly.
-The worker requests timestamps for full interview recordings. Uploaded audio
-stays in backend storage; temporary worker copies are deleted after processing.
+The worker transcribes free-talk audio, non-interview guest previews, and turn
+audio fallbacks through Cartesia's `POST /stt` endpoint with `ink-whisper`.
+Realtime interview answers use short-lived STT-scoped browser tokens minted by
+the API, and final interview analysis composes the stored turn transcripts
+without transcribing the continuous recording again. The same server-only
+`CARTESIA_API_KEY` is used for both paths and for Cartesia Sonic pronunciation
+audio. `CARTESIA_API_VERSION` defaults to `2026-08-14`;
+`TRANSCRIPTION_LANGUAGE` defaults to `en`.
+
+The worker submits the recording container directly, without a
+transcription-specific conversion step. Uploaded audio remains in backend
+storage; materialized worker copies are deleted after processing. Provider
+error bodies are never returned to clients or written to logs.

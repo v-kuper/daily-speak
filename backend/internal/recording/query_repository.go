@@ -18,18 +18,37 @@ func (repository *SQLQueryRepository) Find(ctx context.Context, userID string, r
 	if repository == nil || repository.db == nil {
 		return Record{}, false, errors.New("recording database is not configured")
 	}
-	record, found, err := findRecord(ctx, repository.db, userID, recordingID)
+	tx, err := repository.db.Begin(ctx)
+	if err != nil {
+		return Record{}, false, err
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY`); err != nil {
+		return Record{}, false, err
+	}
+	record, found, err := findRecord(ctx, tx, userID, recordingID)
 	if err != nil || !found {
 		return record, found, err
 	}
-	record.InterviewTurns, err = repository.interviewTurns(ctx, record.ID)
-	return record, err == nil, err
+	record.InterviewTurns, err = repository.interviewTurns(ctx, tx, record.ID)
+	if err != nil {
+		return Record{}, false, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Record{}, false, err
+	}
+	return record, true, nil
 }
 
-func (repository *SQLQueryRepository) interviewTurns(ctx context.Context, recordingID string) ([]InterviewTurn, error) {
-	rows, err := repository.db.Query(ctx, `
+type interviewTurnQuerier interface {
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+}
+
+func (repository *SQLQueryRepository) interviewTurns(ctx context.Context, querier interviewTurnQuerier, recordingID string) ([]InterviewTurn, error) {
+	rows, err := querier.Query(ctx, `
 		SELECT t.seq, t.question, t.asked_at_ms, t.ended_at_ms,
-		       t.provisional_transcript, t.final_transcript
+		       t.provisional_transcript, t.final_transcript,
+		       COALESCE(t.corrected_answer_text, '')
 		FROM interview_turns t
 		JOIN interview_sessions s ON s.id = t.session_id
 		WHERE s.recording_id = $1
@@ -42,7 +61,8 @@ func (repository *SQLQueryRepository) interviewTurns(ctx context.Context, record
 	for rows.Next() {
 		var turn InterviewTurn
 		if err := rows.Scan(&turn.Sequence, &turn.Question, &turn.AskedAtMS,
-			&turn.EndedAtMS, &turn.Provisional, &turn.FinalText); err != nil {
+			&turn.EndedAtMS, &turn.Provisional, &turn.FinalText,
+			&turn.CorrectedAnswerText); err != nil {
 			return nil, err
 		}
 		turn.ResolveAnswer()

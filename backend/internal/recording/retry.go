@@ -121,6 +121,9 @@ func afterRetryClaim(record Record, startedAt time.Time) Record {
 	record.ShadowingAssetID = nil
 	record.ShadowingError = nil
 	record.ShadowingUpdatedAt = startedAt.UTC()
+	for index := range record.InterviewTurns {
+		record.InterviewTurns[index].CorrectedAnswerText = ""
+	}
 	if record.ProcessingStage != nil {
 		switch *record.ProcessingStage {
 		case "transcribing":

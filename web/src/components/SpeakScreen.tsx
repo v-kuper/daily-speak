@@ -27,20 +27,27 @@ import {
   cancelInterview,
   finalizeInterview,
   getInterview,
+  getInterviewTranscriptionToken,
+  mergeInterviewTranscriptStatus,
+  preserveLiveInterviewTurn,
   prepareInterview,
   startInterview,
+  submitInterviewTurnTranscript,
   uploadInterviewTurnAudio,
   type InterviewSession,
   type InterviewTurn,
 } from "../lib/interviewSession";
-import { InterviewTurnCapture } from "../lib/interviewTurnCapture";
+import { CartesiaRealtimeTranscriber } from "../lib/cartesiaRealtime";
+import { InterviewTurnCapture, type CapturedInterviewTurn } from "../lib/interviewTurnCapture";
+import type { SavedInterviewTurn } from "../lib/interviewTimeline";
 import {
   advanceInterviewTimeline,
+  commitInterviewAdvance,
+  hasInterviewAnswerEvidence,
   MAX_LIVE_SEGMENT_ATTEMPTS,
   MIN_ANSWER_MS,
   resolveInterviewRecordingLimitSeconds,
   rotateFailedInterviewSegment,
-  withoutInterviewTimeline,
 } from "../lib/interviewFlow";
 import { newIdempotencyKey } from "../lib/mediaUpload";
 import { formatTime, toDateKey } from "../lib/utils";
@@ -86,10 +93,28 @@ type InterviewSegmentOperation = {
   generation: number;
   sessionId: string;
   seq: number;
-  blob: Blob;
+  blob: Blob | null;
+  transcript: Promise<string> | null;
+  transcriptSubmitted: boolean;
   key: string;
   attempts: number;
 };
+
+const snapshotInterviewTurns = (session: InterviewSession | null): SavedInterviewTurn[] =>
+  session?.turns.map((turn) => {
+    const answerText = turn.provisionalTranscript;
+    return {
+      sequence: turn.seq,
+      question: turn.question,
+      askedAtMs: turn.askedAtMs,
+      endedAtMs: turn.endedAtMs,
+      answerText,
+      answerSource: answerText
+        ? turn.transcriptStatus === "ready" ? "final" : "provisional"
+        : "none",
+      answerAlignment: null,
+    };
+  }) ?? [];
 
 const waitForPromiseWithin = (operation: Promise<unknown>, timeoutMs: number): Promise<boolean> =>
   new Promise((resolve) => {
@@ -213,8 +238,11 @@ export default function SpeakScreen() {
   const [interviewSaveError, setInterviewSaveError] = useState<string | null>(null);
   const [liveTranscriptionAvailable, setLiveTranscriptionAvailable] = useState(true);
   const [interviewLiveWarning, setInterviewLiveWarning] = useState<string | null>(null);
-  const [interviewDegradedSaveReady, setInterviewDegradedSaveReady] = useState(false);
+  const [interviewCaptureFailure, setInterviewCaptureFailure] = useState<string | null>(null);
   const [interviewStopNotice, setInterviewStopNotice] = useState<string | null>(null);
+  const [interviewAnswerWarning, setInterviewAnswerWarning] = useState<string | null>(null);
+  const [currentAnswerHasSpeech, setCurrentAnswerHasSpeech] = useState(false);
+  const [interviewBoundaryPending, setInterviewBoundaryPending] = useState(false);
   const [interviewRefreshToken, setInterviewRefreshToken] = useState(0);
   const {
     speakState,
@@ -268,7 +296,9 @@ export default function SpeakScreen() {
   const interviewSyncRunningRef = useRef(false);
   const interviewSegmentQueueRef = useRef<InterviewSegmentOperation[]>([]);
   const interviewSegmentRunPromiseRef = useRef<Promise<void> | null>(null);
+  const runInterviewSegmentsRef = useRef<(() => Promise<void>) | null>(null);
   const turnCaptureRef = useRef<InterviewTurnCapture | null>(null);
+  const interviewRealtimeRef = useRef<CartesiaRealtimeTranscriber | null>(null);
   const turnCaptureStopRef = useRef<Promise<void> | null>(null);
   const recordingStartedAtRef = useRef<number | null>(null);
   const recordingEndedAtMsRef = useRef<number | null>(null);
@@ -280,12 +310,27 @@ export default function SpeakScreen() {
   const interviewSaveDraftRef = useRef<RecordingSaveDraft | null>(null);
   const interviewSavingRef = useRef(false);
   const interviewSaveProtectedSessionIdRef = useRef<string | null>(null);
-  const interviewDegradedSaveRef = useRef(false);
+  const currentAnswerHasSpeechRef = useRef(false);
+  const interviewBoundaryPendingRef = useRef(false);
 
   const updateInterview = useCallback((updater: (current: InterviewSession | null) => InterviewSession | null) => {
     const next = updater(interviewRef.current);
     interviewRef.current = next;
     setInterview(next);
+  }, []);
+
+  const updateCurrentAnswerSpeech = useCallback((active: boolean) => {
+    currentAnswerHasSpeechRef.current = active;
+    setCurrentAnswerHasSpeech(active);
+    if (active) setInterviewAnswerWarning(null);
+  }, []);
+
+  const currentInterviewAnswerIsPresent = useCallback((session = interviewRef.current): boolean => {
+    const current = session?.turns[session.turns.length - 1];
+    return hasInterviewAnswerEvidence(
+      current,
+      currentAnswerHasSpeechRef.current || Boolean(turnCaptureRef.current?.hasSpeechActivity()),
+    );
   }, []);
 
   const cancelCurrentInterview = useCallback((keepalive = false) => {
@@ -338,20 +383,19 @@ export default function SpeakScreen() {
         ? current.turns.map((turn) => {
             const latest = serverTurns.get(turn.seq);
             return latest ? {
-              ...turn,
-              provisionalTranscript: latest.provisionalTranscript || turn.provisionalTranscript,
-              transcriptStatus: turn.transcriptStatus === "failed"
-                ? "failed"
-                : latest.transcriptStatus || turn.transcriptStatus,
+              ...preserveLiveInterviewTurn(latest, turn),
+              askedAtMs: turn.askedAtMs,
+              endedAtMs: turn.endedAtMs ?? latest.endedAtMs,
+              transcriptStatus: mergeInterviewTranscriptStatus(latest.transcriptStatus, turn.transcriptStatus),
             } : turn;
           })
         : server.turns.map((turn) => {
             const local = current.turns.find((item) => item.seq === turn.seq);
             return local ? {
-              ...turn,
+              ...preserveLiveInterviewTurn(turn, local),
               askedAtMs: local.askedAtMs,
               endedAtMs: local.endedAtMs ?? turn.endedAtMs,
-              transcriptStatus: local.transcriptStatus === "failed" ? "failed" : turn.transcriptStatus,
+              transcriptStatus: mergeInterviewTranscriptStatus(turn.transcriptStatus, local.transcriptStatus),
             } : turn;
           });
       const candidates = [...server.candidates, ...(authoritativeCandidates ? [] : current.candidates)]
@@ -394,6 +438,9 @@ export default function SpeakScreen() {
       }
     } finally {
       interviewSyncRunningRef.current = false;
+      if (!interviewSyncQueueRef.current.length && interviewSegmentQueueRef.current.length) {
+        void runInterviewSegmentsRef.current?.();
+      }
     }
   }, [mergeInterview]);
 
@@ -421,7 +468,35 @@ export default function SpeakScreen() {
           continue;
         }
         try {
-          await uploadInterviewTurnAudio(segment.sessionId, segment.seq, segment.blob, !isAuthenticated, segment.key);
+          if (!segment.transcriptSubmitted && segment.transcript) {
+            try {
+              const text = await segment.transcript;
+              segment.transcript = null;
+              if (text.trim()) {
+                const session = await submitInterviewTurnTranscript(
+                  segment.sessionId,
+                  segment.seq,
+                  text,
+                  `${segment.key}:transcript`,
+                );
+                if (!isCurrent()) continue;
+                segment.transcriptSubmitted = true;
+                mergeInterview(session);
+              }
+            } catch {
+              // The WAV below remains the durable batch fallback when the
+              // realtime socket or transcript submission is unavailable.
+              segment.transcript = null;
+            }
+          }
+          // A successful realtime transcript is the complete per-turn result.
+          // Keep only the uninterrupted recording for playback/history. Upload
+          // this temporary WAV solely when the turn needs batch STT fallback.
+          if (!segment.transcriptSubmitted && segment.blob) {
+            await uploadInterviewTurnAudio(segment.sessionId, segment.seq, segment.blob, !isAuthenticated, segment.key);
+          } else if (!segment.transcriptSubmitted) {
+            throw new Error("No answer audio or realtime transcript is available.");
+          }
           if (!isCurrent()) continue;
           interviewSegmentQueueRef.current.shift();
         } catch {
@@ -431,17 +506,18 @@ export default function SpeakScreen() {
             segment,
             MAX_LIVE_SEGMENT_ATTEMPTS,
           );
-          interviewSegmentQueueRef.current = rotated.queue;
           if (rotated.dropped) {
-            updateInterview((current) => current ? {
-              ...current,
-              turns: current.turns.map((turn) => turn.seq === segment.seq
-                ? { ...turn, transcriptStatus: "failed" }
-                : turn),
-            } : current);
+            // Keep the durable WAV available for the next periodic/save retry.
+            // A bounded pass still prevents one offline upload from starving
+            // later answers, while reconnecting can recover without recording
+            // the answer again.
+            segment.attempts = 0;
+            interviewSegmentQueueRef.current = [...rotated.queue, segment];
             setInterviewLiveWarning(
-              "Some answers could not be transcribed live. The complete recording will still be analyzed after saving.",
+              "Some answers could not be transcribed. Keep this page open and retry saving after the connection recovers.",
             );
+          } else {
+            interviewSegmentQueueRef.current = rotated.queue;
           }
         }
       }
@@ -450,15 +526,25 @@ export default function SpeakScreen() {
     });
     interviewSegmentRunPromiseRef.current = running;
     return running;
-  }, [isAuthenticated, updateInterview]);
+  }, [isAuthenticated, mergeInterview]);
 
-  const queueInterviewSegment = useCallback((sessionId: string, seq: number, blob: Blob | null, generation = interviewGenerationRef.current) => {
-    if (!blob || blob.size <= 44 || generation !== interviewGenerationRef.current || interviewRef.current?.id !== sessionId) return;
+  useEffect(() => {
+    runInterviewSegmentsRef.current = runInterviewSegments;
+    return () => {
+      if (runInterviewSegmentsRef.current === runInterviewSegments) runInterviewSegmentsRef.current = null;
+    };
+  }, [runInterviewSegments]);
+
+  const queueInterviewSegment = useCallback((sessionId: string, seq: number, captured: CapturedInterviewTurn, generation = interviewGenerationRef.current) => {
+    const blob = captured.blob && captured.blob.size > 44 ? captured.blob : null;
+    if ((!blob && !captured.transcript) || generation !== interviewGenerationRef.current || interviewRef.current?.id !== sessionId) return;
     interviewSegmentQueueRef.current.push({
       generation,
       sessionId,
       seq,
       blob,
+      transcript: captured.transcript,
+      transcriptSubmitted: false,
       key: newIdempotencyKey(`interview-answer-${seq}`),
       attempts: 0,
     });
@@ -484,6 +570,13 @@ export default function SpeakScreen() {
     const session = interviewRef.current;
     if (!session || interviewStartedAtRef.current === null || interviewEndedAtMsRef.current !== null) return;
     const last = session.turns[session.turns.length - 1];
+    const answerPresent = currentInterviewAnswerIsPresent(session);
+    if (last && !answerPresent) {
+      const message = "No spoken answer was detected for the current question. Re-record this interview before saving.";
+      setInterviewAnswerWarning("Say an answer before finishing the interview.");
+      setInterviewCaptureFailure(message);
+      dispatch(setRecordingInputError(message));
+    }
     const endedAtMs = Math.max(interviewElapsedMs(), last ? last.askedAtMs + 1 : 0);
     interviewEndedAtMsRef.current = endedAtMs;
     if (last) {
@@ -493,20 +586,49 @@ export default function SpeakScreen() {
       } : current);
     }
     const capture = turnCaptureRef.current;
+    const realtime = interviewRealtimeRef.current;
     turnCaptureRef.current = null;
+    interviewRealtimeRef.current = null;
     if (capture && last) {
       const generation = interviewGenerationRef.current;
-      turnCaptureStopRef.current = capture.stop()
-        .then((blob) => queueInterviewSegment(session.id, last.seq, blob, generation))
-        .catch(() => {
+      turnCaptureStopRef.current = capture.stop(
+        realtime ? () => realtime.finalizeTurn(last.seq) : undefined,
+        () => {
+          if (mountedRef.current) {
+            setInterviewLiveWarning("Finishing the last answer is taking longer than expected…");
+          }
+        },
+      )
+        .then((captured) => {
+          if (answerPresent) queueInterviewSegment(session.id, last.seq, captured, generation);
+        })
+        .catch((error: unknown) => {
           if (!mountedRef.current) return;
+          const message = error instanceof Error
+            ? error.message
+            : "Answer capture could not finish.";
+          const fatalMessage = `${message} Re-record this interview before saving.`;
           setLiveTranscriptionAvailable(false);
-          setInterviewLiveWarning(
-            "Live answer capture stopped. The complete recording is safe and will still be analyzed after saving.",
-          );
+          setInterviewCaptureFailure((current) => current ?? fatalMessage);
+          setInterviewLiveWarning(fatalMessage);
+          dispatch(setRecordingInputError(fatalMessage));
+        })
+        .finally(() => {
+          capture.setPCMListener(null);
+          if (realtime) void realtime.close();
+          interviewBoundaryPendingRef.current = false;
+          if (mountedRef.current) {
+            setInterviewBoundaryPending(false);
+            setInterviewLiveWarning((current) => current === "Finishing the last answer is taking longer than expected…"
+              ? null
+              : current);
+          }
         });
+    } else if (realtime) {
+      void realtime.close();
     }
-  }, [interviewElapsedMs, queueInterviewSegment, updateInterview]);
+    updateCurrentAnswerSpeech(false);
+  }, [currentInterviewAnswerIsPresent, dispatch, interviewElapsedMs, queueInterviewSegment, updateCurrentAnswerSpeech, updateInterview]);
 
   const finishActiveRecording = useCallback((notice?: string) => {
     if (recordingStartedAtRef.current !== null && recordingEndedAtMsRef.current === null) {
@@ -545,14 +667,14 @@ export default function SpeakScreen() {
     return interviewSegmentQueueRef.current.length === 0;
   }, [runInterviewSegments]);
 
-  const synchronizeInterviewBeforeSave = useCallback(async (): Promise<boolean> => {
+  const synchronizeInterviewBeforeSave = useCallback(async (): Promise<"ready" | "pending" | "failed"> => {
     const deadline = performance.now() + 15_000;
     if (turnCaptureStopRef.current) {
       const captureStopped = await waitForPromiseWithin(
         turnCaptureStopRef.current,
         Math.min(4000, Math.max(0, deadline - performance.now())),
       );
-      if (!captureStopped) return false;
+      if (!captureStopped) return "pending";
     }
     while (interviewSyncQueueRef.current.length && performance.now() < deadline) {
       const completed = await waitForPromiseWithin(
@@ -568,13 +690,35 @@ export default function SpeakScreen() {
       }
     }
     if (interviewSyncQueueRef.current.length) {
-      return false;
+      return "pending";
     }
-    // Live answer WAVs stay best effort, but wait for an already active runner
-    // within a bound so navigation does not discard healthy queued uploads.
-    await waitForInterviewSegmentsBeforeSave();
-    return true;
-  }, [runInterviewSync, waitForInterviewSegmentsBeforeSave]);
+    const segmentsReady = await waitForInterviewSegmentsBeforeSave(
+      Math.min(8000, Math.max(0, deadline - performance.now())),
+    );
+    if (!segmentsReady) return "pending";
+
+    while (performance.now() < deadline) {
+      const current = interviewRef.current;
+      const endedTurns = current?.turns.filter((turn) => turn.endedAtMs !== null) ?? [];
+      if (endedTurns.length > 0 && endedTurns.every((turn) => turn.transcriptStatus === "ready")) {
+        return "ready";
+      }
+      if (endedTurns.some((turn) => turn.transcriptStatus === "failed") || !current?.id) {
+        return "failed";
+      }
+      try {
+        mergeInterview(await getInterview(current.id), true);
+      } catch {
+        // Keep polling within the save deadline; the user can retry without
+        // re-recording if the connection remains unavailable.
+      }
+      const remaining = Math.max(0, deadline - performance.now());
+      if (remaining > 0) {
+        await new Promise<void>((resolve) => window.setTimeout(resolve, Math.min(500, remaining)));
+      }
+    }
+    return "pending";
+  }, [mergeInterview, runInterviewSync, waitForInterviewSegmentsBeforeSave]);
 
   const createRecordingFromMicrophone = useCallback(
     async (onRecordingStarted: () => void, captureInterview: boolean, attempt: number) => {
@@ -592,6 +736,7 @@ export default function SpeakScreen() {
       let stream: MediaStream | null = null;
       let recorder: MediaRecorder | null = null;
       let localCapture: InterviewTurnCapture | null = null;
+      let localRealtime: CartesiaRealtimeTranscriber | null = null;
       const stopLocalStream = () => {
         if (stream) for (const track of stream.getTracks()) track.stop();
         if (mediaStreamRef.current === stream) mediaStreamRef.current = null;
@@ -618,14 +763,32 @@ export default function SpeakScreen() {
 
         if (captureInterview) {
           try {
-            localCapture = await InterviewTurnCapture.start(stream);
+            localCapture = await InterviewTurnCapture.start(
+              stream,
+              (error) => {
+                if (!isCurrent()) return;
+                if (turnCaptureRef.current === localCapture) turnCaptureRef.current = null;
+                if (interviewRealtimeRef.current === localRealtime) interviewRealtimeRef.current = null;
+                if (localRealtime) void localRealtime.close();
+                const message = `${error.message} Re-record this interview so every answer can be analyzed.`;
+                setLiveTranscriptionAvailable(false);
+                setInterviewCaptureFailure(message);
+                setInterviewLiveWarning(message);
+                dispatch(setRecordingInputError(message));
+                if (recordingStartedAtRef.current !== null && recordingEndedAtMsRef.current === null) {
+                  finishActiveRecording("Answer capture failed. Re-record this interview before saving.");
+                }
+              },
+              (active) => {
+                if (isCurrent()) updateCurrentAnswerSpeech(active);
+              },
+            );
             if (!isCurrent()) {
               await localCapture.stop().catch(() => null);
               stopLocalStream();
               return;
             }
             turnCaptureRef.current = localCapture;
-            setLiveTranscriptionAvailable(true);
           } catch {
             if (!isCurrent()) {
               stopLocalStream();
@@ -682,18 +845,83 @@ export default function SpeakScreen() {
 
         if (captureInterview && localCapture) {
           try {
-            // The worklet starts collecting as soon as it is connected. Finish
-            // this boundary before the canonical recording begins so setup
-            // audio cannot race with the first real answer boundary.
+            const session = interviewRef.current;
+            if (!session) throw new Error("The interview session is unavailable.");
+            localRealtime = await CartesiaRealtimeTranscriber.connect(
+              await getInterviewTranscriptionToken(session.id),
+              undefined,
+              () => {
+                if (!mountedRef.current || interviewRef.current?.id !== session.id) return;
+                if (interviewRealtimeRef.current === localRealtime) {
+                  interviewRealtimeRef.current = null;
+                  turnCaptureRef.current?.setPCMListener(null);
+                }
+                setLiveTranscriptionAvailable(false);
+                setInterviewLiveWarning(
+                  "Realtime transcription disconnected. Completed answer audio will use the background fallback.",
+                );
+              },
+              ({ turnSeq, finalText, interimText }) => {
+                if (!isCurrent() || interviewRef.current?.id !== session.id) return;
+                updateInterview((current) => current?.id === session.id ? {
+                  ...current,
+                  turns: current.turns.map((turn) => turn.seq === turnSeq ? {
+                    ...turn,
+                    liveTranscriptFinal: finalText,
+                    liveTranscriptInterim: interimText,
+                  } : turn),
+                } : current);
+              },
+            );
+            if (!isCurrent()) {
+              await localRealtime.close();
+              await localCapture.stop().catch(() => null);
+              stopLocalStream();
+              return;
+            }
+          } catch {
+            localRealtime = null;
+            setInterviewLiveWarning(
+              "Realtime transcription is unavailable. Completed answer audio will use the background fallback.",
+            );
+            setLiveTranscriptionAvailable(false);
+          }
+        }
+        if (captureInterview && localCapture) {
+          try {
+            // The worklet collects while the token and socket are prepared.
+            // Discard that setup partition before attaching the PCM listener,
+            // so Cartesia receives only audio from the actual interview.
             await localCapture.closeTurn();
           } catch {
             if (turnCaptureRef.current === localCapture) turnCaptureRef.current = null;
             await localCapture.stop().catch(() => null);
             localCapture = null;
-            if (isCurrent()) setLiveTranscriptionAvailable(false);
+            if (localRealtime) await localRealtime.close();
+            localRealtime = null;
+            if (isCurrent()) {
+              setLiveTranscriptionAvailable(false);
+              setInterviewLiveWarning("Answer capture could not start in this browser.");
+            }
           }
         }
+        if (captureInterview && !localCapture) {
+          stopLocalStream();
+          if (isCurrent()) {
+            dispatch(setRecordingInputError(
+              "This browser could not capture answer audio for transcription. Reload the page or use a current Chrome or Edge browser.",
+            ));
+          }
+          return;
+        }
+        if (localCapture && localRealtime) {
+          interviewRealtimeRef.current = localRealtime;
+          localRealtime.beginTurn(1);
+          localCapture.setPCMListener((pcm) => localRealtime?.sendPCM(pcm));
+          setLiveTranscriptionAvailable(true);
+        }
         if (!isCurrent()) {
+          if (localRealtime) await localRealtime.close();
           if (localCapture) await localCapture.stop().catch(() => null);
           stopLocalStream();
           return;
@@ -716,12 +944,14 @@ export default function SpeakScreen() {
         onRecordingStarted();
       } catch (error) {
         if (turnCaptureRef.current === localCapture) turnCaptureRef.current = null;
+        if (interviewRealtimeRef.current === localRealtime) interviewRealtimeRef.current = null;
+        if (localRealtime) void localRealtime.close();
         if (localCapture) void localCapture.stop();
         stopLocalStream();
         if (isCurrent()) dispatch(setRecordingInputError(resolveMicrophoneError(error)));
       }
     },
-    [dispatch, finishActiveRecording, releaseMedia]
+    [dispatch, finishActiveRecording, releaseMedia, updateCurrentAnswerSpeech, updateInterview]
   );
 
   const buildRecordingSaveDraft = useCallback((): RecordingSaveDraft | null => {
@@ -760,6 +990,7 @@ export default function SpeakScreen() {
       ...(recordingPracticeType === "topic" && interviewRef.current?.id ? {
         interviewSessionId: interviewRef.current.id,
         interviewEndedAtMs: interviewEndedAtMsRef.current ?? Math.max(0, Math.floor(recordingDuration * 1000)),
+        interviewTurns: snapshotInterviewTurns(interviewRef.current),
       } : {}),
     };
     if (draft.interviewSessionId) interviewSaveDraftRef.current = draft;
@@ -775,6 +1006,11 @@ export default function SpeakScreen() {
 
   const onSaveRecording = useCallback(() => {
     if (interviewSavingRef.current) return;
+    if (recordingPracticeType === "topic" && interviewCaptureFailure) {
+      dispatch(setRecordingInputError(interviewCaptureFailure));
+      setInterviewSaveError("Re-record this interview before saving because one answer could not be captured.");
+      return;
+    }
     if (recordingPracticeType === "topic") finishInterviewCapture();
     const draft = buildRecordingSaveDraft();
     if (!draft?.localRecordingId) {
@@ -796,52 +1032,32 @@ export default function SpeakScreen() {
       setInterviewSaveError(null);
       setInterviewSaveStatus("uploading");
       void (async () => {
-        if (!interviewDegradedSaveRef.current) {
-          const timelineSynced = await synchronizeInterviewBeforeSave();
-          if (!timelineSynced) {
-            interviewDegradedSaveRef.current = true;
-            setInterviewDegradedSaveReady(true);
-            setInterviewSaveStatus("failed");
-            setInterviewSaveError(
-              "The question timeline could not be synchronized. Your complete audio is safe in this tab. Save again to keep the recording without the interview timeline.",
-            );
-            if (owned) recovery.update(owned.createKey, { phase: "active" });
-            return;
+        const transcriptState = await synchronizeInterviewBeforeSave();
+        if (transcriptState !== "ready") {
+          const terminalMessage = "One answer could not be transcribed. Re-record the interview so every answer can be analyzed.";
+          if (transcriptState === "failed") {
+            setInterviewCaptureFailure(terminalMessage);
+            dispatch(setRecordingInputError(terminalMessage));
           }
-        }
-
-        if (interviewDegradedSaveRef.current) {
-          const plainDraft: RecordingSaveDraft = withoutInterviewTimeline(draft);
-          const cancelled = await Promise.race([
-            cancelInterview(interviewSessionId).then(() => true).catch(() => false),
-            new Promise<false>((resolve) => window.setTimeout(() => resolve(false), 1500)),
-          ]);
-          interviewSaveProtectedSessionIdRef.current = null;
-          if (owned) {
-            if (cancelled) recovery.clear(owned.createKey);
-            else recovery.update(owned.createKey, { phase: "abandoned" });
-            recovery.release(owned.principalId);
-          }
-          if (isAuthenticated) {
-            await saveAndNavigate(store, router, plainDraft, () => window.location.pathname);
-            setInterviewSaveStatus("idle");
-            return;
-          }
-          const preview = await createGuestPreview({
-            topic: plainDraft.topic,
-            duration: plainDraft.duration,
-            timestamp: plainDraft.timestamp,
-            practiceType: plainDraft.practiceType,
-            audioDataUrl: plainDraft.audioDataUrl ?? "",
-          });
-          setInterviewSaveStatus("ready");
-          router.push(guestPreviewPath(preview.id));
+          setInterviewSaveStatus("failed");
+          setInterviewSaveError(
+            transcriptState === "failed"
+              ? terminalMessage
+              : "Your answers are still being transcribed. Keep this tab open for a moment, then retry saving.",
+          );
+          if (owned) recovery.update(owned.createKey, { phase: "active" });
           return;
         }
 
+        const readyDraft: RecordingSaveDraft = {
+          ...draft,
+          interviewTurns: snapshotInterviewTurns(interviewRef.current),
+        };
+        interviewSaveDraftRef.current = readyDraft;
+
         if (isAuthenticated) {
           interviewSaveProtectedSessionIdRef.current = interviewSessionId;
-          await saveAndNavigate(store, router, draft, () => window.location.pathname);
+          await saveAndNavigate(store, router, readyDraft, () => window.location.pathname);
           const saved = localRecordingId ? store.getState().app.recordingSaveResults[localRecordingId] : null;
           if (owned) {
             if (typeof saved === "string") recovery.clear(owned.createKey);
@@ -855,11 +1071,11 @@ export default function SpeakScreen() {
         interviewSaveProtectedSessionIdRef.current = interviewSessionId;
         if (!previewId) {
           const preview = await createGuestPreview({
-            topic: draft.topic,
-            duration: draft.duration,
-            timestamp: draft.timestamp,
-            practiceType: draft.practiceType,
-            audioDataUrl: draft.audioDataUrl ?? "",
+            topic: readyDraft.topic,
+            duration: readyDraft.duration,
+            timestamp: readyDraft.timestamp,
+            practiceType: readyDraft.practiceType,
+            audioDataUrl: readyDraft.audioDataUrl ?? "",
             interviewSessionId,
           });
           previewId = preview.id;
@@ -867,7 +1083,7 @@ export default function SpeakScreen() {
         }
         await finalizeInterview(
           interviewSessionId,
-          Math.max(0, Math.floor(draft.interviewEndedAtMs ?? draft.duration * 1000)),
+          Math.max(0, Math.floor(readyDraft.interviewEndedAtMs ?? readyDraft.duration * 1000)),
           { guestPreviewId: previewId },
           `interview:${interviewSessionId}:finalize:${previewId}`,
         );
@@ -883,9 +1099,7 @@ export default function SpeakScreen() {
         }
         if (owned && recovery.read()?.createKey === owned.createKey) {
           recovery.update(owned.createKey, {
-            phase: interviewDegradedSaveRef.current
-              ? "abandoned"
-              : savedInterviewPreviewIdRef.current ? "saving" : "active",
+            phase: savedInterviewPreviewIdRef.current ? "saving" : "active",
           });
         }
         setInterviewSaveStatus("failed");
@@ -923,7 +1137,7 @@ export default function SpeakScreen() {
     }
 
     void saveAndNavigate(store, router, draft, () => window.location.pathname);
-  }, [buildRecordingSaveDraft, dispatch, finishInterviewCapture, isAuthenticated, recordingPracticeType, router, store, synchronizeInterviewBeforeSave]);
+  }, [buildRecordingSaveDraft, dispatch, finishInterviewCapture, interviewCaptureFailure, isAuthenticated, recordingPracticeType, router, store, synchronizeInterviewBeforeSave]);
 
   const beginRecordingFromMicrophone = (onRecordingStarted: () => void, captureInterview = false) => {
     if (recordingStartingRef.current) {
@@ -940,6 +1154,13 @@ export default function SpeakScreen() {
     recordingStartedAtRef.current = null;
     recordingEndedAtMsRef.current = null;
     setInterviewStopNotice(null);
+    if (captureInterview) {
+      setInterviewCaptureFailure(null);
+      setInterviewAnswerWarning(null);
+      interviewBoundaryPendingRef.current = false;
+      setInterviewBoundaryPending(false);
+      updateCurrentAnswerSpeech(false);
+    }
     recordingStartingRef.current = true;
     setRecordingStarting(true);
     const attempt = ++recordingAttemptRef.current;
@@ -987,12 +1208,30 @@ export default function SpeakScreen() {
   };
 
   const onStopRecording = () => {
+    if (recordingPracticeType === "topic" && !currentInterviewAnswerIsPresent()) {
+      const message = "No spoken answer was detected for the current question. Re-record this interview before saving.";
+      setInterviewAnswerWarning("No answer was detected before Stop. Re-record this interview to continue.");
+      setInterviewCaptureFailure(message);
+      dispatch(setRecordingInputError(message));
+    }
     finishActiveRecording();
   };
 
   const onNextInterviewQuestion = () => {
     const session = interviewRef.current;
-    if (!session || interviewEndedAtMsRef.current !== null) return;
+    if (!session || interviewEndedAtMsRef.current !== null || interviewBoundaryPendingRef.current) return;
+    if (!currentInterviewAnswerIsPresent(session)) {
+      setInterviewAnswerWarning("Say an answer before moving to the next question.");
+      return;
+    }
+    const capture = turnCaptureRef.current;
+    if (!capture) {
+      const message = "Answer capture is unavailable. Re-record this interview before saving.";
+      setInterviewCaptureFailure(message);
+      dispatch(setRecordingInputError(message));
+      finishActiveRecording(message);
+      return;
+    }
     const elapsedMs = interviewElapsedMs();
     const maxAtMs = recordingLimitMsRef.current ?? Number.POSITIVE_INFINITY;
     if (elapsedMs >= maxAtMs) {
@@ -1002,25 +1241,73 @@ export default function SpeakScreen() {
     const advance = advanceInterviewTimeline(session, usedInterviewCandidateIdsRef.current, elapsedMs, maxAtMs);
     if (!advance) return;
     const { candidate, previousTurn } = advance;
-    usedInterviewCandidateIdsRef.current.add(candidate.id);
-    updateInterview(() => advance.session);
-    const audio = turnCaptureRef.current?.closeTurn().catch(() => {
-      if (mountedRef.current) {
-        setLiveTranscriptionAvailable(false);
-        setInterviewLiveWarning(
-          "Live answer capture stopped. The complete recording is safe and will still be analyzed after saving.",
-        );
-      }
-      return null;
-    }) ?? Promise.resolve(null);
-    const key = newIdempotencyKey(`interview-advance-${previousTurn.seq}`);
+    interviewBoundaryPendingRef.current = true;
+    setInterviewBoundaryPending(true);
+    setInterviewAnswerWarning(null);
+    const realtime = interviewRealtimeRef.current;
+    const nextTurnSeq = advance.session.turns[advance.session.turns.length - 1].seq;
     const generation = interviewGenerationRef.current;
-    queueInterviewSync(session.id, async () => {
-      const result = await advanceInterview(session.id, previousTurn.seq, candidate.id, advance.session.turns[advance.session.turns.length - 1].askedAtMs, key);
-      if (generation === interviewGenerationRef.current) {
-        void audio.then((blob) => queueInterviewSegment(session.id, previousTurn.seq, blob, generation));
+    void capture.closeTurn(realtime ? () => {
+      const transcript = realtime.finalizeTurn(previousTurn.seq);
+      realtime.beginTurn(nextTurnSeq);
+      return transcript;
+    } : undefined, () => {
+      if (mountedRef.current) {
+        setInterviewLiveWarning("Finishing this answer is taking longer than expected…");
       }
-      return result;
+    }).then((captured) => {
+      if (generation !== interviewGenerationRef.current || interviewRef.current?.id !== session.id) return;
+      let committed = false;
+      updateInterview((current) => {
+        if (!current) return current;
+        const next = commitInterviewAdvance(current, advance);
+        if (!next) return current;
+        committed = true;
+        return next;
+      });
+      if (!committed) {
+        const fatalMessage = "The answer boundary could not be applied safely. Re-record this interview before saving.";
+        setInterviewCaptureFailure(fatalMessage);
+        setInterviewLiveWarning(fatalMessage);
+        dispatch(setRecordingInputError(fatalMessage));
+        finishActiveRecording(fatalMessage);
+        return;
+      }
+      usedInterviewCandidateIdsRef.current.add(candidate.id);
+      const key = newIdempotencyKey(`interview-advance-${previousTurn.seq}`);
+      queueInterviewSync(session.id, async () => {
+        const result = await advanceInterview(
+          session.id,
+          previousTurn.seq,
+          candidate.id,
+          advance.session.turns[advance.session.turns.length - 1].askedAtMs,
+          key,
+        );
+        if (generation === interviewGenerationRef.current) {
+          queueInterviewSegment(session.id, previousTurn.seq, captured, generation);
+        }
+        return result;
+      });
+    }).catch((error: unknown) => {
+      if (mountedRef.current) {
+        const message = error instanceof Error
+          ? error.message
+          : "Answer capture could not finish.";
+        const fatalMessage = `${message} Re-record this interview before saving.`;
+        setLiveTranscriptionAvailable(false);
+        setInterviewCaptureFailure((current) => current ?? fatalMessage);
+        setInterviewLiveWarning(fatalMessage);
+        dispatch(setRecordingInputError(fatalMessage));
+      }
+      return { blob: null, transcript: null };
+    }).finally(() => {
+      interviewBoundaryPendingRef.current = false;
+      if (mountedRef.current) {
+        setInterviewBoundaryPending(false);
+        setInterviewLiveWarning((current) => current === "Finishing this answer is taking longer than expected…"
+          ? null
+          : current);
+      }
     });
   };
 
@@ -1034,6 +1321,9 @@ export default function SpeakScreen() {
       interviewPreparationGenerationRef.current += 1;
       interviewSyncQueueRef.current = [];
       interviewSegmentQueueRef.current = [];
+      const realtime = interviewRealtimeRef.current;
+      interviewRealtimeRef.current = null;
+      if (realtime) void realtime.close();
     };
   }, [cancelCurrentInterview]);
 
@@ -1104,6 +1394,10 @@ export default function SpeakScreen() {
       interviewGenerationRef.current += 1;
       interviewSyncQueueRef.current = [];
       interviewSegmentQueueRef.current = [];
+      interviewBoundaryPendingRef.current = false;
+      setInterviewBoundaryPending(false);
+      setInterviewAnswerWarning(null);
+      updateCurrentAnswerSpeech(false);
       updateInterview(() => null);
       return;
     }
@@ -1128,14 +1422,17 @@ export default function SpeakScreen() {
     savedInterviewPreviewIdRef.current = null;
     interviewSaveDraftRef.current = null;
     interviewSaveProtectedSessionIdRef.current = null;
-    interviewDegradedSaveRef.current = false;
     setInterviewPreparationError(null);
     setInterviewSyncError(null);
     setInterviewSaveError(null);
     setInterviewSaveStatus("idle");
     setInterviewLiveWarning(null);
-    setInterviewDegradedSaveReady(false);
+    setInterviewCaptureFailure(null);
     setInterviewStopNotice(null);
+    setInterviewAnswerWarning(null);
+    interviewBoundaryPendingRef.current = false;
+    setInterviewBoundaryPending(false);
+    updateCurrentAnswerSpeech(false);
     updateInterview(() => null);
     let preparation: Promise<InterviewSession> | null = null;
     const recovery = browserInterviewRecovery();
@@ -1234,7 +1531,7 @@ export default function SpeakScreen() {
       }
       if (pendingInterviewPreparationRef.current === preparation) pendingInterviewPreparationRef.current = null;
     });
-  }, [cancelCurrentInterview, interviewRefreshToken, isAuthenticated, mergeInterview, recordingPracticeType, selectedEnglishLevel, selectedInterestIds, selectedTopic, speakState, updateInterview]);
+  }, [cancelCurrentInterview, interviewRefreshToken, isAuthenticated, mergeInterview, recordingPracticeType, selectedEnglishLevel, selectedInterestIds, selectedTopic, speakState, updateCurrentAnswerSpeech, updateInterview]);
 
   useEffect(() => {
     if (!interview?.id || (speakState !== "readyToRecord" && speakState !== "recording" && speakState !== "recorded")) return;
@@ -1654,6 +1951,8 @@ export default function SpeakScreen() {
   if (speakState === "recording") {
     const isPhotoPractice = recordingPracticeType === "photo_description";
     const isTopicInterview = recordingPracticeType === "topic" && Boolean(selectedTopic);
+    const currentTurn = interview?.turns[interview.turns.length - 1];
+    const hasCurrentAnswer = hasInterviewAnswerEvidence(currentTurn, currentAnswerHasSpeech);
 
     return (
       <section className="speak-screen">
@@ -1680,15 +1979,20 @@ export default function SpeakScreen() {
             <InterviewQuestionCard
               turns={interview.turns}
               canAdvance={interview.candidates.length > 0
+                && hasCurrentAnswer
+                && !interviewBoundaryPending
                 && interviewElapsedMs() - (interview.turns[interview.turns.length - 1]?.askedAtMs ?? 0) >= MIN_ANSWER_MS
                 && interviewElapsedMs() < (recordingLimitMsRef.current ?? Number.POSITIVE_INFINITY)}
               onNext={onNextInterviewQuestion}
               liveTranscriptionAvailable={liveTranscriptionAvailable}
+              hasAnswerEvidence={hasCurrentAnswer}
+              boundaryPending={interviewBoundaryPending}
             />
           )}
 
           {isTopicInterview && interviewSyncError && <div className="notice top-spaced">{interviewSyncError}</div>}
           {isTopicInterview && interviewLiveWarning && <div className="notice top-spaced">{interviewLiveWarning}</div>}
+          {isTopicInterview && interviewAnswerWarning && <div className="auth-error top-spaced">{interviewAnswerWarning}</div>}
 
           <button className="btn btn-primary btn-large speak-primary-btn" onClick={onStopRecording}>
             Stop
@@ -1738,9 +2042,12 @@ export default function SpeakScreen() {
             interviewPreparationKeyRef.current = null;
             interviewPreparationGenerationRef.current += 1;
             interviewSaveDraftRef.current = null;
-            interviewDegradedSaveRef.current = false;
-            setInterviewDegradedSaveReady(false);
             setInterviewLiveWarning(null);
+            setInterviewCaptureFailure(null);
+            setInterviewAnswerWarning(null);
+            interviewBoundaryPendingRef.current = false;
+            setInterviewBoundaryPending(false);
+            updateCurrentAnswerSpeech(false);
             updateInterview(() => null);
             dispatch(reRecord());
           }} disabled={guestSaveStatus === "uploading" || interviewSaveStatus === "uploading"}>
@@ -1749,11 +2056,9 @@ export default function SpeakScreen() {
           <button
             className="btn btn-primary"
             onClick={onSaveRecording}
-            disabled={recordingSaveStatus === "loading" || guestSaveStatus === "uploading" || interviewSaveStatus === "uploading" || !pendingRecordingAudioDataUrl}
+            disabled={recordingSaveStatus === "loading" || guestSaveStatus === "uploading" || interviewSaveStatus === "uploading" || !pendingRecordingAudioDataUrl || Boolean(interviewCaptureFailure)}
           >
-            {interviewDegradedSaveReady
-              ? interviewSaveStatus === "uploading" ? "Saving audio..." : "Save audio without timeline"
-              : isAuthenticated
+            {isAuthenticated
               ? recordingSaveStatus === "loading" || interviewSaveStatus === "uploading"
                 ? "Saving..."
                 : "Save and continue"
@@ -1768,7 +2073,11 @@ export default function SpeakScreen() {
           <div className="notice top-spaced">Preparing audio, please wait a moment before saving.</div>
         )}
         {pendingRecordingAudioDataUrl && (
-          <div className="notice top-spaced">Audio is ready. Saving will start background transcription.</div>
+          <div className="notice top-spaced">
+            {recordingPracticeType === "topic"
+              ? "Audio is ready. Saving will wait for each answer transcript."
+              : "Audio is ready. Saving will start background transcription."}
+          </div>
         )}
         {recordingInputError && <div className="auth-error top-spaced">{recordingInputError}</div>}
         {recordingSaveError && <div className="auth-error top-spaced">{recordingSaveError}</div>}

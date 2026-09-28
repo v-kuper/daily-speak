@@ -50,7 +50,17 @@ func (transaction *sqlRetryTransaction) Claim(ctx context.Context, userID string
 	if err != nil {
 		return false, err
 	}
-	return result.RowsAffected() == 1, nil
+	if result.RowsAffected() != 1 {
+		return false, nil
+	}
+	if _, err := transaction.tx.Exec(ctx, `
+		UPDATE interview_turns t
+		SET corrected_answer_text = NULL, updated_at = NOW()
+		FROM interview_sessions s
+		WHERE t.session_id = s.id AND s.recording_id = $1`, recordingID); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (transaction *sqlRetryTransaction) Find(ctx context.Context, userID string, recordingID string) (Record, bool, error) {

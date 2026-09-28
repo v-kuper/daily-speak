@@ -40,7 +40,6 @@ type ProcessorDependencies struct {
 	Materializer       AudioMaterializer
 	ProbeAudioDuration func(context.Context, string) (time.Duration, error)
 	Transcribe         func(context.Context, string) (string, error)
-	TranscribeTimed    func(context.Context, string) (recording.TimedTranscript, error)
 	Analyzer           recording.PreviewAnalyzer
 }
 
@@ -93,26 +92,36 @@ func (p *Processor) Process(ctx context.Context, job Job) error {
 			return err
 		}
 	}
-	transcript := work.Transcript
-	if transcript == "" {
-		if p.dependencies.Transcribe == nil && p.dependencies.TranscribeTimed == nil {
+	transcript := recording.NormalizeTranscript(work.Transcript)
+	var dialogue []recording.InterviewDialogueTurn
+	if work.InterviewSessionID != nil {
+		interviewStore, ok := p.dependencies.Store.(InterviewProcessingStore)
+		if !ok {
+			return errors.New("guest interview transcript composition is not configured")
+		}
+		turns, loadErr := interviewStore.LoadInterviewTurns(ctx, *work.InterviewSessionID)
+		if loadErr != nil {
+			return loadErr
+		}
+		composed, composeErr := recording.ComposeInterviewTranscript(turns)
+		if composeErr != nil {
+			return composeErr
+		}
+		transcript, dialogue = composed.Text, composed.Dialogue
+		advanced, saveErr := interviewStore.SaveInterviewTranscript(
+			ctx, job, transcript, verifiedSeconds, *work.InterviewSessionID, composed.Answers,
+		)
+		if saveErr != nil {
+			return saveErr
+		}
+		if !advanced {
+			return nil
+		}
+	} else if transcript == "" {
+		if p.dependencies.Transcribe == nil {
 			return errors.New("guest preview transcription is not configured")
 		}
-		interviewStore, isInterviewStore := p.dependencies.Store.(InterviewProcessingStore)
-		var answers map[int]string
-		var timed recording.TimedTranscript
-		if work.InterviewSessionID != nil && isInterviewStore && p.dependencies.TranscribeTimed != nil {
-			timed, err = p.dependencies.TranscribeTimed(ctx, path)
-			if err == nil {
-				transcript = timed.Text
-			}
-		}
-		if transcript == "" {
-			if p.dependencies.Transcribe == nil {
-				return errors.New("guest preview transcription fallback is not configured")
-			}
-			transcript, err = p.dependencies.Transcribe(ctx, path)
-		}
+		transcript, err = p.dependencies.Transcribe(ctx, path)
 		if err != nil {
 			return fmt.Errorf("transcribe guest preview: %w", err)
 		}
@@ -120,24 +129,9 @@ func (p *Processor) Process(ctx context.Context, job Job) error {
 		if transcript == "" {
 			return errors.New("guest preview transcription is empty")
 		}
-		if work.InterviewSessionID != nil && isInterviewStore {
-			turns, loadErr := interviewStore.LoadInterviewTurns(ctx, *work.InterviewSessionID)
-			if loadErr != nil {
-				return loadErr
-			}
-			answers = recording.FinalInterviewAnswersWithinDuration(turns, timed, actualMS)
-			if answers == nil {
-				answers = recording.FinalInterviewAnswersFromProvisional(turns, transcript, actualMS)
-			}
-		}
-		var advanced bool
-		if work.InterviewSessionID != nil && isInterviewStore {
-			advanced, err = interviewStore.SaveInterviewTranscript(ctx, job, transcript, verifiedSeconds, *work.InterviewSessionID, answers)
-		} else {
-			advanced, err = p.dependencies.Store.SaveTranscript(ctx, job, transcript, verifiedSeconds)
-		}
-		if err != nil {
-			return err
+		advanced, saveErr := p.dependencies.Store.SaveTranscript(ctx, job, transcript, verifiedSeconds)
+		if saveErr != nil {
+			return saveErr
 		}
 		if !advanced {
 			return nil
@@ -155,7 +149,7 @@ func (p *Processor) Process(ctx context.Context, job Job) error {
 	if p.dependencies.Analyzer == nil {
 		return errors.New("guest preview analysis is not configured")
 	}
-	corrections, err := p.dependencies.Analyzer.PreviewCorrections(ctx, transcript)
+	corrections, err := p.dependencies.Analyzer.PreviewCorrections(ctx, transcript, dialogue)
 	if err != nil {
 		return err
 	}

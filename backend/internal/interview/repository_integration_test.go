@@ -94,6 +94,37 @@ func TestInterviewSessionSQLLifecycle(t *testing.T) {
 		NextCandidateID: started.Candidates[1].ID, AtMs: 1200}); !errors.Is(err, ErrConflict) {
 		t.Fatalf("stale advance err=%v", err)
 	}
+	if _, err := database.Exec(ctx, `UPDATE interview_turns
+		SET provisional_transcript='batch answer',final_transcript='batch answer',
+		    transcript_status='ready',transcript_origin='turn_batch'
+		WHERE session_id=$1 AND seq=2`, created.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.SaveTurnTranscript(ctx, SaveTurnTranscriptInput{
+		OwnerPrincipalID: principalID, SessionID: created.ID, TurnSeq: 2,
+		IdempotencyKey: "transcript-late-1234", Transcript: "late realtime answer",
+	}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("late realtime replacement err=%v", err)
+	}
+	transcriptInput := SaveTurnTranscriptInput{OwnerPrincipalID: principalID, SessionID: created.ID,
+		TurnSeq: 1, IdempotencyKey: "transcript-12345678", Transcript: "I enjoy long train journeys."}
+	if _, err := service.SaveTurnTranscript(ctx, transcriptInput); err != nil {
+		t.Fatalf("save realtime transcript: %v", err)
+	}
+	if _, err := database.Exec(ctx, `UPDATE interview_sessions SET status='finalizing' WHERE id=$1`, created.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.SaveTurnTranscript(ctx, transcriptInput); err != nil {
+		t.Fatalf("idempotent transcript after finalization starts: %v", err)
+	}
+	changedTranscript := transcriptInput
+	changedTranscript.IdempotencyKey = "transcript-87654321"
+	if _, err := service.SaveTurnTranscript(ctx, changedTranscript); !errors.Is(err, ErrConflict) {
+		t.Fatalf("new transcript after finalization starts err=%v", err)
+	}
+	if _, err := database.Exec(ctx, `UPDATE interview_sessions SET status='recording' WHERE id=$1`, created.ID); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := service.Cancel(ctx, principalID, created.ID); err != nil {
 		t.Fatal(err)
 	}

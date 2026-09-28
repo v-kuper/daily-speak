@@ -31,8 +31,8 @@ func TestRewriteReturnsValidatedEnglishTranscript(t *testing.T) {
 		Suggestions:  []Suggestion{{Wrong: "I go", Right: "I went"}},
 		EnglishLevel: "b1",
 	}, discardAnalysisLogger{})
-	if err != nil || got != "I went to the store yesterday." {
-		t.Fatalf("got=%q err=%v", got, err)
+	if err != nil || got.CorrectedTranscript != "I went to the store yesterday." || len(got.CorrectedAnswers) != 0 {
+		t.Fatalf("got=%#v err=%v", got, err)
 	}
 	if len(provider.requests) != 1 || provider.requests[0].Temperature != 0.35 {
 		t.Fatalf("requests=%#v", provider.requests)
@@ -46,11 +46,96 @@ func TestRewriteRetriesInvalidJSONAndRejectsRemainingRussian(t *testing.T) {
 	}}
 	service := NewAnalysisService(provider, AnalysisConfig{Concurrency: 1})
 	got, err := service.Rewrite(context.Background(), RewriteInput{Transcript: "I bought капуста.", EnglishLevel: "b1"}, discardAnalysisLogger{})
-	if err != nil || got != "I bought cabbage." {
-		t.Fatalf("got=%q err=%v", got, err)
+	if err != nil || got.CorrectedTranscript != "I bought cabbage." {
+		t.Fatalf("got=%#v err=%v", got, err)
 	}
 	if len(provider.requests) != 2 || !provider.requests[1].StrictJSON {
 		t.Fatalf("requests=%#v", provider.requests)
+	}
+}
+
+func TestRewriteInterviewReturnsCorrectedAnswersAndFullDialogue(t *testing.T) {
+	provider := &rewriteProvider{responses: []string{`{
+		"correctedAnswers":[
+			{"sequence":1,"correctedAnswerText":"I went home."},
+			{"sequence":2,"correctedAnswerText":"I cooked dinner."}
+		]
+	}`}}
+	service := NewAnalysisService(provider, AnalysisConfig{Concurrency: 1})
+	turns := []InterviewDialogueTurn{
+		{Sequence: 1, Question: "Where did you go?", Answer: "I go home."},
+		{Sequence: 2, Question: "What did you do next?", Answer: "I cook dinner."},
+	}
+	got, err := service.Rewrite(context.Background(), RewriteInput{
+		Transcript: "I go home. I cook dinner.", InterviewTurns: turns, EnglishLevel: "b1",
+	}, discardAnalysisLogger{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantTranscript := "Where did you go? I went home. What did you do next? I cooked dinner."
+	if got.CorrectedTranscript != wantTranscript {
+		t.Fatalf("corrected transcript=%q", got.CorrectedTranscript)
+	}
+	wantAnswers := []CorrectedInterviewAnswer{
+		{Sequence: 1, CorrectedAnswerText: "I went home."},
+		{Sequence: 2, CorrectedAnswerText: "I cooked dinner."},
+	}
+	if len(got.CorrectedAnswers) != len(wantAnswers) {
+		t.Fatalf("corrected answers=%#v", got.CorrectedAnswers)
+	}
+	for index := range wantAnswers {
+		if got.CorrectedAnswers[index] != wantAnswers[index] {
+			t.Fatalf("corrected answers=%#v", got.CorrectedAnswers)
+		}
+	}
+	prompt := provider.requests[0].UserPrompt
+	for _, fragment := range []string{"Where did you go?", "What did you do next?", "immutable context", "correctedAnswerText", "same sequence"} {
+		if !strings.Contains(prompt, fragment) {
+			t.Fatalf("prompt missing %q: %s", fragment, prompt)
+		}
+	}
+}
+
+func TestRewriteInterviewRetriesWhenAnyCorrectedAnswerIsEmpty(t *testing.T) {
+	provider := &rewriteProvider{responses: []string{
+		`{"correctedAnswers":[{"sequence":1,"correctedAnswerText":""},{"sequence":2,"correctedAnswerText":"Second corrected answer."}]}`,
+		`{"correctedAnswers":[{"sequence":1,"correctedAnswerText":"First corrected answer."},{"sequence":2,"correctedAnswerText":"Second corrected answer."}]}`,
+	}}
+	service := NewAnalysisService(provider, AnalysisConfig{Concurrency: 1})
+	got, err := service.Rewrite(context.Background(), RewriteInput{
+		Transcript: "First answer. Second answer.",
+		InterviewTurns: []InterviewDialogueTurn{
+			{Sequence: 1, Question: "First question?", Answer: "First answer."},
+			{Sequence: 2, Question: "Second question?", Answer: "Second answer."},
+		},
+	}, discardAnalysisLogger{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(provider.requests) != 2 || !provider.requests[1].StrictJSON {
+		t.Fatalf("requests=%#v", provider.requests)
+	}
+	want := "First question? First corrected answer. Second question? Second corrected answer."
+	if got.CorrectedTranscript != want {
+		t.Fatalf("corrected transcript=%q", got.CorrectedTranscript)
+	}
+}
+
+func TestRewriteInterviewRejectsMissingOrOutOfOrderAnswers(t *testing.T) {
+	provider := &rewriteProvider{responses: []string{
+		`{"correctedAnswers":[{"sequence":2,"correctedAnswerText":"Second corrected answer."}]}`,
+		`{"correctedAnswers":[{"sequence":2,"correctedAnswerText":"Wrong order."},{"sequence":1,"correctedAnswerText":"Wrong order."}]}`,
+	}}
+	service := NewAnalysisService(provider, AnalysisConfig{Concurrency: 1})
+	_, err := service.Rewrite(context.Background(), RewriteInput{
+		Transcript: "First answer. Second answer.",
+		InterviewTurns: []InterviewDialogueTurn{
+			{Sequence: 1, Question: "First question?", Answer: "First answer."},
+			{Sequence: 2, Question: "Second question?", Answer: "Second answer."},
+		},
+	}, discardAnalysisLogger{})
+	if !errors.Is(err, ErrRewrite) {
+		t.Fatalf("err=%v", err)
 	}
 }
 

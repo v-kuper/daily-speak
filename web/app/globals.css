@@ -1213,6 +1213,32 @@ button {
   font-size: 14px;
 }
 
+.conversation-turn + .conversation-turn {
+  margin-top: 20px;
+}
+
+.conversation-line {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.conversation-answer {
+  margin-top: 7px;
+}
+
+.conversation-speaker {
+  font-weight: 650;
+}
+
+.conversation-answer-pending {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.conversation-answer-interim {
+  color: var(--text-muted);
+}
+
 .transcript-error-mark {
   background: rgba(154, 47, 47, 0.14);
   color: #7d2530;
@@ -1895,44 +1921,16 @@ body {
   margin: 15px auto 0;
 }
 
-.interview-timeline {
-  margin-top: 28px;
+.interview-live-transcript {
+  margin-top: 18px;
   text-align: left;
 }
 
-.interview-timeline-list {
-  margin: 14px 0 0;
-  padding: 0;
-  list-style: none;
-}
-
-.interview-timeline-item {
-  margin-top: 12px;
-  padding: 13px 15px;
-  border: 1px solid var(--border-soft);
-  border-radius: 10px;
-  background: #fff;
-}
-
-.interview-timeline-time,
-.interview-timeline-pending {
+.interview-caption-hint {
+  margin: -3px 0 10px;
   color: var(--text-muted);
   font-size: 12px;
-}
-
-.interview-timeline-question {
-  margin-top: 5px;
-  font-weight: 600;
-}
-
-.interview-timeline-answer {
-  margin-top: 8px;
-  white-space: pre-wrap;
-  line-height: 1.5;
-}
-
-.interview-timeline-pending {
-  margin-top: 8px;
+  line-height: 1.45;
 }
 
 .interview-question-hint {
