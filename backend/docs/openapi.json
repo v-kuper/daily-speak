@@ -1282,7 +1282,7 @@
           "AI"
         ],
         "summary": "Generate daily speaking questions",
-        "description": "Uses an optional Bearer access token. If authenticated, the user's saved English level overrides the `level` query parameter.",
+        "description": "Returns three distinct opening questions. Each can start a longer interview about one recognizable interest theme. Uses an optional Bearer access token. If authenticated, the user's saved English level overrides the `level` query parameter.",
         "security": [
           {
             "bearerAuth": []
@@ -1308,7 +1308,7 @@
           {
             "name": "avoid",
             "in": "query",
-            "description": "Questions to avoid; may be repeated.",
+            "description": "Previous opening questions to avoid; may be repeated. The generator considers up to 20 distinct questions.",
             "schema": {
               "type": "array",
               "items": {
@@ -1338,6 +1338,7 @@
           "AI"
         ],
         "summary": "Generate follow-up questions and words for a topic",
+        "description": "The selected topic question is the first interview question. Returns ten distinct follow-up questions and eight useful words or short phrases for that same topic, for eleven interview questions in total.",
         "security": [
           {
             "bearerAuth": []
@@ -1806,7 +1807,7 @@
         "name": "interest",
         "in": "query",
         "required": false,
-        "description": "Interest ids; may be repeated. Backend keeps up to 10.",
+        "description": "Interest themes; existing profile IDs and readable names are accepted and may be repeated. Backend keeps up to 10. Readable names help the generator choose more precise subjects.",
         "schema": {
           "type": "array",
           "items": {
@@ -4165,6 +4166,7 @@
       },
       "DailyQuestionsResponse": {
         "type": "object",
+        "description": "Three opening questions for different interest themes where possible.",
         "required": [
           "questions"
         ],
@@ -4181,6 +4183,7 @@
       },
       "TopicGuidanceResponse": {
         "type": "object",
+        "description": "Ten questions after the selected opening question, plus eight topic-specific useful words or phrases.",
         "required": [
           "questions",
           "words"

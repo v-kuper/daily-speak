@@ -124,6 +124,13 @@ procedures live in [`BACKEND_OPERATIONS.md`](BACKEND_OPERATIONS.md).
 
 ## Code ownership
 
+Speaking practice uses the learner's selected interest themes to generate three
+opening questions. The chosen question becomes the first question of an
+interview; the practice service generates ten further questions focused on that
+same subject and eight useful words or short phrases. The web client owns the
+selectable interest catalog and maps saved interest IDs to theme names before
+calling the practice API. The API response counts are documented in OpenAPI.
+
 ```text
 web/                         standalone Next.js application
 backend/cmd/api              API process entrypoint and lifecycle

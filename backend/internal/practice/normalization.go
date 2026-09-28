@@ -12,7 +12,47 @@ var (
 	trailingListPunctuation = regexp.MustCompile(`[.;]+$`)
 	extraNewlinesPattern    = regexp.MustCompile(`\n{3,}`)
 	extraSpacesPattern      = regexp.MustCompile(`[ \t]+`)
+	questionTokenPattern    = regexp.MustCompile(`[\pL\pN]+`)
 )
+
+var questionFillerWords = map[string]struct{}{
+	"a": {}, "an": {}, "are": {}, "about": {}, "did": {}, "do": {}, "does": {},
+	"for": {}, "has": {}, "have": {}, "had": {}, "in": {}, "is": {}, "it": {},
+	"of": {}, "on": {}, "the": {}, "to": {}, "was": {}, "were": {}, "with": {},
+	"you": {}, "your": {},
+}
+
+// Keep word order so reversing cause and effect remains a distinct question.
+func questionKey(value string) string {
+	words := questionTokenPattern.FindAllString(strings.ToLower(value), -1)
+	meaningful := make([]string, 0, len(words))
+	for _, word := range words {
+		if _, filler := questionFillerWords[word]; filler {
+			continue
+		}
+		if word == "like" {
+			word = "enjoy"
+		}
+		meaningful = append(meaningful, word)
+	}
+	if len(meaningful) < 2 {
+		return strings.Join(words, " ")
+	}
+	return strings.Join(meaningful, " ")
+}
+
+func anyQuestionOverlap(items []string, avoid []string) bool {
+	keys := make(map[string]struct{}, len(avoid))
+	for _, question := range avoid {
+		keys[questionKey(question)] = struct{}{}
+	}
+	for _, question := range items {
+		if _, exists := keys[questionKey(question)]; exists {
+			return true
+		}
+	}
+	return false
+}
 
 func normalizeQuestions(items []string, limit int) []string {
 	seen := map[string]struct{}{}
@@ -27,7 +67,7 @@ func normalizeQuestions(items []string, limit int) []string {
 		if !strings.HasSuffix(cleaned, "?") {
 			cleaned += "?"
 		}
-		key := strings.ToLower(cleaned)
+		key := questionKey(cleaned)
 		if _, exists := seen[key]; exists {
 			continue
 		}

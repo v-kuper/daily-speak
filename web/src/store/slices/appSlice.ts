@@ -15,6 +15,14 @@ import { parseRecordingProcessingStage } from "../../lib/recordingProcessing";
 import { parseShadowingStatus } from "../../lib/shadowing";
 import { DEFAULT_ENGLISH_LEVEL, normalizeEnglishLevel, parseEnglishLevel, type EnglishLevel } from "../../lib/englishLevel";
 import { isCurrentInterviewGuidanceRequest } from "../../lib/interviewGuidance";
+import {
+  INTEREST_OPTIONS,
+  MAX_SELECTED_INTERESTS,
+  getInterestOption,
+  normalizeInterestIds,
+  resolveInterestLabels,
+  type InterestOption
+} from "../../lib/interestCatalog";
 import { formatTime } from "../../lib/utils";
 import { parseSuggestions } from "../../lib/suggestions";
 import {
@@ -34,114 +42,8 @@ import { dataURLToBlob, MediaUploadError, uploadMedia } from "../../lib/mediaUpl
 export type SpeakMode = "idle" | "readyToRecord" | "recording" | "recorded";
 export type AuthStatus = "idle" | "loading";
 export type QuestionsStatus = "idle" | "loading" | "ready" | "failed";
-export type InterestOption = {
-  id: string;
-  emoji: string;
-  label: string;
-};
-
-export const INTEREST_OPTIONS: InterestOption[] = [
-  { id: "travel", emoji: "✈️", label: "Travel" },
-  { id: "technology", emoji: "💻", label: "Technology" },
-  { id: "fitness", emoji: "🏃", label: "Fitness" },
-  { id: "business", emoji: "📈", label: "Business" },
-  { id: "music", emoji: "🎵", label: "Music" },
-  { id: "books", emoji: "📚", label: "Books" },
-  { id: "movies", emoji: "🎬", label: "Movies" },
-  { id: "food", emoji: "🍜", label: "Food" },
-  { id: "sport", emoji: "⚽", label: "Sport" },
-  { id: "design", emoji: "🎨", label: "Design" },
-  { id: "career", emoji: "🚀", label: "Career" },
-  { id: "languages", emoji: "🗣️", label: "Languages" },
-  { id: "gaming", emoji: "🎮", label: "Gaming" },
-  { id: "photography", emoji: "📷", label: "Photography" },
-  { id: "cooking", emoji: "👨‍🍳", label: "Cooking" },
-  { id: "psychology", emoji: "🧠", label: "Psychology" },
-  { id: "startups", emoji: "💡", label: "Startups" },
-  { id: "marketing", emoji: "📣", label: "Marketing" },
-  { id: "productivity", emoji: "⏱️", label: "Productivity" },
-  { id: "ai", emoji: "🤖", label: "AI" },
-  { id: "science", emoji: "🔬", label: "Science" },
-  { id: "history", emoji: "🏛️", label: "History" },
-  { id: "nature", emoji: "🌿", label: "Nature" },
-  { id: "hiking", emoji: "🥾", label: "Hiking" },
-  { id: "cycling", emoji: "🚴", label: "Cycling" },
-  { id: "swimming", emoji: "🏊", label: "Swimming" },
-  { id: "yoga", emoji: "🧘", label: "Yoga" },
-  { id: "fashion", emoji: "👗", label: "Fashion" },
-  { id: "art", emoji: "🖼️", label: "Art" },
-  { id: "architecture", emoji: "🏗️", label: "Architecture" },
-  { id: "finance", emoji: "💰", label: "Finance" },
-  { id: "investing", emoji: "📊", label: "Investing" },
-  { id: "crypto", emoji: "₿", label: "Crypto" },
-  { id: "pets", emoji: "🐶", label: "Pets" },
-  { id: "parenting", emoji: "👨‍👩‍👧", label: "Parenting" },
-  { id: "education", emoji: "🎓", label: "Education" },
-  { id: "philosophy", emoji: "📖", label: "Philosophy" },
-  { id: "self-development", emoji: "🌱", label: "Self Development" },
-  { id: "culture", emoji: "🎭", label: "Culture" },
-  { id: "volunteering", emoji: "🤝", label: "Volunteering" },
-  { id: "entrepreneurship", emoji: "🏢", label: "Entrepreneurship" },
-  { id: "public-speaking", emoji: "🎤", label: "Public Speaking" },
-  { id: "remote-work", emoji: "🏠", label: "Remote Work" },
-  { id: "health", emoji: "❤️", label: "Health" },
-  { id: "mindfulness", emoji: "🕊️", label: "Mindfulness" },
-  { id: "news", emoji: "📰", label: "News" },
-  { id: "podcasts", emoji: "🎙️", label: "Podcasts" },
-  { id: "climate", emoji: "🌍", label: "Climate" },
-  { id: "sustainability", emoji: "♻️", label: "Sustainability" },
-  { id: "astronomy", emoji: "🔭", label: "Astronomy" },
-  { id: "space", emoji: "🛰️", label: "Space" },
-  { id: "robotics", emoji: "🦾", label: "Robotics" },
-  { id: "programming", emoji: "⌨️", label: "Programming" },
-  { id: "web-development", emoji: "🌐", label: "Web Development" },
-  { id: "mobile-development", emoji: "📱", label: "Mobile Development" },
-  { id: "cybersecurity", emoji: "🛡️", label: "Cybersecurity" },
-  { id: "data-science", emoji: "📉", label: "Data Science" },
-  { id: "machine-learning", emoji: "🧩", label: "Machine Learning" },
-  { id: "mathematics", emoji: "➗", label: "Mathematics" },
-  { id: "physics", emoji: "⚛️", label: "Physics" },
-  { id: "chemistry", emoji: "🧪", label: "Chemistry" },
-  { id: "biology", emoji: "🧬", label: "Biology" },
-  { id: "medicine", emoji: "🩺", label: "Medicine" },
-  { id: "nutrition", emoji: "🥗", label: "Nutrition" },
-  { id: "mental-health", emoji: "💚", label: "Mental Health" },
-  { id: "journaling", emoji: "📝", label: "Journaling" },
-  { id: "minimalism", emoji: "🧱", label: "Minimalism" },
-  { id: "home-decor", emoji: "🛋️", label: "Home Decor" },
-  { id: "gardening", emoji: "🌻", label: "Gardening" },
-  { id: "diy", emoji: "🛠️", label: "DIY" },
-  { id: "woodworking", emoji: "🪵", label: "Woodworking" },
-  { id: "cars", emoji: "🚗", label: "Cars" },
-  { id: "motorcycles", emoji: "🏍️", label: "Motorcycles" },
-  { id: "aviation", emoji: "🛫", label: "Aviation" },
-  { id: "sailing", emoji: "⛵", label: "Sailing" },
-  { id: "chess", emoji: "♟️", label: "Chess" },
-  { id: "board-games", emoji: "🎲", label: "Board Games" },
-  { id: "card-games", emoji: "🃏", label: "Card Games" },
-  { id: "dance", emoji: "💃", label: "Dance" },
-  { id: "theater", emoji: "🎭", label: "Theater" },
-  { id: "comedy", emoji: "😂", label: "Comedy" },
-  { id: "writing", emoji: "✍️", label: "Writing" },
-  { id: "poetry", emoji: "📜", label: "Poetry" },
-  { id: "language-teaching", emoji: "🧑‍🏫", label: "Language Teaching" },
-  { id: "backpacking", emoji: "🎒", label: "Backpacking" },
-  { id: "luxury-travel", emoji: "🏝️", label: "Luxury Travel" },
-  { id: "coffee", emoji: "☕", label: "Coffee" },
-  { id: "tea", emoji: "🍵", label: "Tea" },
-  { id: "baking", emoji: "🥐", label: "Baking" },
-  { id: "desserts", emoji: "🍰", label: "Desserts" },
-  { id: "street-food", emoji: "🌮", label: "Street Food" },
-  { id: "vegan-living", emoji: "🥦", label: "Vegan Living" },
-  { id: "interior-design", emoji: "🪞", label: "Interior Design" },
-  { id: "real-estate", emoji: "🏘️", label: "Real Estate" },
-  { id: "law", emoji: "⚖️", label: "Law" },
-  { id: "economics", emoji: "🏦", label: "Economics" },
-  { id: "geopolitics", emoji: "🗺️", label: "Geopolitics" },
-  { id: "social-media", emoji: "📲", label: "Social Media" },
-  { id: "content-creation", emoji: "🎥", label: "Content Creation" },
-  { id: "audio-production", emoji: "🎛️", label: "Audio Production" }
-];
+export { INTEREST_OPTIONS, MAX_SELECTED_INTERESTS };
+export type { InterestOption };
 
 export type AppState = {
   speakState: SpeakMode;
@@ -241,20 +143,17 @@ export type RecordingSaveDraft = {
 const today = new Date();
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PASSWORD_LENGTH = 8;
-export const MAX_SELECTED_INTERESTS = 10;
 const FREE_WEEKLY_LIMIT_SECONDS = 10 * 60;
 const SESSION_LIMIT_SECONDS = 10 * 60;
 const MIN_DAILY_QUESTIONS = 3;
-const MIN_TOPIC_GUIDANCE_QUESTIONS = 17;
-const MIN_TOPIC_GUIDANCE_WORDS = 16;
+const MIN_TOPIC_GUIDANCE_QUESTIONS = 10;
+const MIN_TOPIC_GUIDANCE_WORDS = 8;
 const PHOTO_PRACTICE_MAX_OBJECT_LENGTH = 120;
 const MAX_RECORDING_AUDIO_BYTES = 80 * 1024 * 1024;
 const AUDIO_DATA_URL_PATTERN = /^data:((?:audio|video)\/[a-z0-9.+-]+(?:;[^,]+)*);base64,([A-Za-z0-9+/_=-]+)$/i;
 export const PHOTO_PRACTICE_MAX_BYTES = 4 * 1024 * 1024;
 const PHOTO_DATA_URL_PATTERN = /^data:image\/(png|jpeg|jpg|webp|gif);base64,([A-Za-z0-9+/=]+)$/i;
 const PRACTICE_TYPE_SET = new Set<PracticeType>(["free_talk", "topic", "photo_description"]);
-
-const INTEREST_LOOKUP = new Map(INTEREST_OPTIONS.map((item) => [item.id, item]));
 
 type FetchDailyQuestionsArgs = {
   dateKey: string;
@@ -515,39 +414,6 @@ const parseStudyWordsResponse = (payload: StudyWordsResponse | null): { words: s
   };
 };
 
-const normalizeInterestIds = (value: unknown): string[] => {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  const seen = new Set<string>();
-  const normalized: string[] = [];
-
-  for (const item of value) {
-    if (typeof item !== "string") {
-      continue;
-    }
-
-    const cleaned = item.trim();
-    if (!cleaned || !INTEREST_LOOKUP.has(cleaned)) {
-      continue;
-    }
-
-    if (seen.has(cleaned)) {
-      continue;
-    }
-
-    seen.add(cleaned);
-    normalized.push(cleaned);
-
-    if (normalized.length >= MAX_SELECTED_INTERESTS) {
-      break;
-    }
-  }
-
-  return normalized;
-};
-
 const parsePracticeType = (value: unknown, topic: string, hasPhoto: boolean): PracticeType => {
   if (typeof value === "string") {
     const normalized = value.trim().toLowerCase() as PracticeType;
@@ -713,14 +579,6 @@ const parseRecording = (value: unknown): Recording | null => {
 
 const buildInterestsKey = (interestIds: string[]): string => {
   return [...interestIds].sort().join("|");
-};
-
-const resolveInterestLabels = (interestIds: string[]): string[] => {
-  const labels = interestIds
-    .map((id) => INTEREST_LOOKUP.get(id)?.label)
-    .filter((value): value is string => typeof value === "string");
-
-  return [...new Set(labels)];
 };
 
 export const fetchDailyQuestions = createAsyncThunk<
@@ -1925,7 +1783,7 @@ const appSlice = createSlice({
     },
     toggleInterest: (state, action: PayloadAction<string>) => {
       const interestId = action.payload;
-      if (!INTEREST_LOOKUP.has(interestId)) {
+      if (!getInterestOption(interestId)) {
         return;
       }
 

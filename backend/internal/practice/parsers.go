@@ -11,11 +11,16 @@ import (
 var (
 	numberedLinePattern = regexp.MustCompile(`^\d+\s*[\)\.\-:]`)
 	wordsLabelPattern   = regexp.MustCompile(`(?i)^words?\s*:`)
+	sectionLabelPattern = regexp.MustCompile(`(?i)^(questions?|words?)\s*:$`)
 	wordSeparator       = regexp.MustCompile(`[,|]`)
 )
 
 func parseQuestions(content string, limit int) ([]string, bool) {
+	sawJSON := false
 	for _, candidate := range aiparse.ExtractJSONCandidates(content) {
+		if json.Valid([]byte(candidate)) {
+			sawJSON = true
+		}
 		var payload struct {
 			Questions []string `json:"questions"`
 		}
@@ -25,6 +30,9 @@ func parseQuestions(content string, limit int) ([]string, bool) {
 				return questions, true
 			}
 		}
+	}
+	if sawJSON {
+		return nil, false
 	}
 	questions := normalizeQuestions(nonEmptyLines(aiparse.NormalizeContent(content)), limit)
 	return questions, len(questions) == limit
@@ -40,7 +48,7 @@ func parseTopicGuidance(content string) (TopicGuidanceResult, bool) {
 			return TopicGuidanceResult{}, false
 		}
 		questions := normalizeQuestions(payload.Questions, 0)
-		words := normalizeWords(payload.Words)
+		words := normalizeWordList(payload.Words)
 		if len(questions) < topicGuidanceQuestionsCnt || len(words) < topicGuidanceWordsCnt {
 			return TopicGuidanceResult{}, false
 		}
@@ -50,26 +58,41 @@ func parseTopicGuidance(content string) (TopicGuidanceResult, bool) {
 		}, true
 	}
 
-	if parsed, ok := tryParse(content); ok {
-		return parsed, true
-	}
+	sawJSON := false
 	for _, candidate := range aiparse.ExtractJSONCandidates(content) {
+		if json.Valid([]byte(candidate)) {
+			sawJSON = true
+		}
 		if parsed, ok := tryParse(candidate); ok {
 			return parsed, true
 		}
 	}
+	if sawJSON {
+		return TopicGuidanceResult{}, false
+	}
 
 	var questionLines []string
 	var wordLines []string
+	section := ""
 	for _, line := range nonEmptyLines(aiparse.NormalizeContent(content)) {
-		if strings.Contains(line, "?") || numberedLinePattern.MatchString(line) {
+		if sectionLabelPattern.MatchString(line) {
+			if wordsLabelPattern.MatchString(line) {
+				section = "words"
+			} else {
+				section = "questions"
+			}
+			continue
+		}
+		if section == "words" {
+			wordLines = append(wordLines, line)
+		} else if section == "questions" || strings.Contains(line, "?") || numberedLinePattern.MatchString(line) {
 			questionLines = append(questionLines, line)
 		} else {
 			wordLines = append(wordLines, line)
 		}
 	}
 	questions := normalizeQuestions(questionLines, 0)
-	words := normalizeWords(wordLines)
+	words := normalizeWordList(wordLines)
 	if len(questions) < topicGuidanceQuestionsCnt || len(words) < topicGuidanceWordsCnt {
 		return TopicGuidanceResult{}, false
 	}
@@ -80,7 +103,11 @@ func parseTopicGuidance(content string) (TopicGuidanceResult, bool) {
 }
 
 func parseStudyPack(content string, avoidWords []string) (StudyPackResult, bool) {
+	sawJSON := false
 	for _, candidate := range aiparse.ExtractJSONCandidates(content) {
+		if json.Valid([]byte(candidate)) {
+			sawJSON = true
+		}
 		var payload struct {
 			Words      []string `json:"words"`
 			Vocabulary []string `json:"vocabulary"`
@@ -100,6 +127,9 @@ func parseStudyPack(content string, avoidWords []string) (StudyPackResult, bool)
 		if validStudyPack(words, text, avoidWords) {
 			return StudyPackResult{Words: words[:10], Text: text}, true
 		}
+	}
+	if sawJSON {
+		return StudyPackResult{}, false
 	}
 
 	lines := nonEmptyLines(aiparse.NormalizeContent(content))

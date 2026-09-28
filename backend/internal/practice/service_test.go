@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -103,5 +104,46 @@ func TestDailyQuestionsPreservesProviderError(t *testing.T) {
 	_, err := newTestService(provider).DailyQuestions(context.Background(), DailyQuestionsInput{DateKey: "2026-09-27"})
 	if !errors.Is(err, providerErr) {
 		t.Fatalf("error = %v, want wrapped provider error", err)
+	}
+}
+
+func TestDailyQuestionsAvoidsMoreThanTheLastThreeQuestions(t *testing.T) {
+	provider := &fakeCompletionProvider{responses: []Completion{
+		{Content: `{"questions":["Old fourth?","New second?","New third?"]}`},
+		{Content: `{"questions":["New first?","New second?","New third?"]}`},
+	}}
+	result, err := newTestService(provider).DailyQuestions(context.Background(), DailyQuestionsInput{
+		DateKey: "2026-09-27", AvoidQuestions: []string{"Old first?", "Old second?", "Old third?", "Old fourth?"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if provider.calls != 2 || result.Questions[0] != "New first?" {
+		t.Fatalf("calls = %d, questions = %#v", provider.calls, result.Questions)
+	}
+	if !strings.Contains(provider.requests[0].UserPrompt, "Old fourth?") {
+		t.Fatal("previous fourth question was omitted from the prompt")
+	}
+}
+
+func TestTopicGuidanceRetriesWhenFollowUpParaphrasesOpeningQuestion(t *testing.T) {
+	provider := &fakeCompletionProvider{responses: []Completion{
+		{Content: `{"questions":[
+			"What do you enjoy about cooking?","Q2?","Q3?","Q4?","Q5?",
+			"Q6?","Q7?","Q8?","Q9?","Q10?"
+		],"words":["w1","w2","w3","w4","w5","w6","w7","w8"]}`},
+		{Content: `{"questions":[
+			"Q1?","Q2?","Q3?","Q4?","Q5?",
+			"Q6?","Q7?","Q8?","Q9?","Q10?"
+		],"words":["w1","w2","w3","w4","w5","w6","w7","w8"]}`},
+	}}
+	result, err := newTestService(provider).TopicGuidance(context.Background(), TopicGuidanceInput{
+		Topic: "What do you like about cooking?", EnglishLevel: "b1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if provider.calls != 2 || len(result.Questions) != 10 || len(result.Words) != 8 {
+		t.Fatalf("calls = %d, guidance = %#v", provider.calls, result)
 	}
 }

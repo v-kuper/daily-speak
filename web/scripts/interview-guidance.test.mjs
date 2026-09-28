@@ -32,10 +32,10 @@ test("selected topic stays first and follow-up order is preserved", () => {
 });
 
 test("question navigation stays inside interview boundaries", () => {
-  assert.equal(interview.moveInterviewQuestion(0, -1, 18), 0);
-  assert.equal(interview.moveInterviewQuestion(0, 1, 18), 1);
-  assert.equal(interview.moveInterviewQuestion(17, 1, 18), 17);
-  assert.equal(interview.moveInterviewQuestion(4, -1, 18), 3);
+  assert.equal(interview.moveInterviewQuestion(0, -1, 11), 0);
+  assert.equal(interview.moveInterviewQuestion(0, 1, 11), 1);
+  assert.equal(interview.moveInterviewQuestion(10, 1, 11), 10);
+  assert.equal(interview.moveInterviewQuestion(4, -1, 11), 3);
   assert.equal(interview.moveInterviewQuestion(4, 1, 0), 0);
 });
 

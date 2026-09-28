@@ -7,8 +7,8 @@ import (
 
 const (
 	dailyQuestionsCount       = 3
-	topicGuidanceQuestionsCnt = 17
-	topicGuidanceWordsCnt     = 16
+	topicGuidanceQuestionsCnt = 10
+	topicGuidanceWordsCnt     = 8
 	maxGenerationAttempts     = 3
 	maxSeed                   = 2147483647
 )
