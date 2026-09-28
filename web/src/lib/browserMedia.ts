@@ -1,5 +1,31 @@
 export const AUDIO_MIME_CANDIDATES = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"];
 
+// Stop slightly before the contractual limit. MediaRecorder may include a
+// small final encoder frame after stop(), while guest audio is verified
+// against the exact 60 second backend limit.
+export const RECORDING_LIMIT_HEADROOM_MS = 1000;
+
+export const resolveRecordingHardLimitMs = (limitSeconds: number): number => {
+  const normalized = Math.max(0, Math.floor(limitSeconds * 1000));
+  if (normalized === 0) return 0;
+  return Math.max(250, normalized - RECORDING_LIMIT_HEADROOM_MS);
+};
+
+export const recordingElapsedMs = (startedAt: number | null, now: number): number =>
+  startedAt === null ? 0 : Math.max(0, Math.floor(now - startedAt));
+
+export const recordingMustStop = ({
+  startedAt,
+  hardLimitMs,
+  now,
+  hidden,
+}: {
+  startedAt: number | null;
+  hardLimitMs: number | null;
+  now: number;
+  hidden: boolean;
+}): boolean => hidden || (startedAt !== null && hardLimitMs !== null && recordingElapsedMs(startedAt, now) >= hardLimitMs);
+
 const AUDIO_EXTENSION_BY_MIME: Record<string, string> = {
   "audio/webm": "webm",
   "video/webm": "webm",

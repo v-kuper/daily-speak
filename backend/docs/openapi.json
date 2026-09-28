@@ -50,6 +50,9 @@
     },
     {
       "name": "Uploads"
+    },
+    {
+      "name": "Interviews"
     }
   ],
   "paths": {
@@ -879,7 +882,7 @@
           "Media"
         ],
         "summary": "Create an owned resumable media upload",
-        "description": "Creates an upload plan for recording audio or a recording photo. The client computes the complete-object SHA-256 before starting. User identities use the normal media limits. A guest identity may create one recording_audio upload up to 10 MiB for its bounded preview; guest photos and additional live assets are rejected.",
+        "description": "Creates an upload plan for recording audio, an interview-turn WAV, or a recording photo. The client computes the complete-object SHA-256 before starting. Guest identities may create bounded interview-turn WAV uploads for their owned active interview and one recording_audio upload for the final bounded preview; guest photos are rejected.",
         "security": [
           {
             "bearerAuth": []
@@ -1650,6 +1653,357 @@
           }
         ]
       }
+    },
+    "/api/v1/interviews": {
+      "post": {
+        "tags": [
+          "Interviews"
+        ],
+        "summary": "Prepare an adaptive topic interview",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RequestIdHeader"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKeyHeader"
+          }
+        ],
+        "responses": {
+          "202": {
+            "$ref": "#/components/responses/V1InterviewAccepted"
+          },
+          "400": {
+            "$ref": "#/components/responses/V1BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/V1Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/V1Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/V1NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/V1Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/V1ServiceUnavailable"
+          }
+        },
+        "description": "Creates an owned session and schedules three hidden backup questions and eight useful words. Both guest and account Bearer identities are supported.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateInterviewRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/interviews/{interviewId}": {
+      "get": {
+        "tags": [
+          "Interviews"
+        ],
+        "summary": "Read an adaptive interview session",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RequestIdHeader"
+          },
+          {
+            "$ref": "#/components/parameters/InterviewIdPath"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/V1InterviewOK"
+          },
+          "400": {
+            "$ref": "#/components/responses/V1BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/V1Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/V1Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/V1NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/V1Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/V1ServiceUnavailable"
+          }
+        },
+        "description": "Returns immutable presented turns, provisional transcripts, and candidate questions for future transitions. When a recording has at most one candidate and no active refill job, polling schedules a rate-limited durable refill after a failed attempt."
+      }
+    },
+    "/api/v1/interviews/{interviewId}/start": {
+      "post": {
+        "tags": [
+          "Interviews"
+        ],
+        "summary": "Start recording an adaptive interview",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RequestIdHeader"
+          },
+          {
+            "$ref": "#/components/parameters/InterviewIdPath"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/V1InterviewOK"
+          },
+          "400": {
+            "$ref": "#/components/responses/V1BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/V1Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/V1Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/V1NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/V1Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/V1ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/api/v1/interviews/{interviewId}/advance": {
+      "post": {
+        "tags": [
+          "Interviews"
+        ],
+        "summary": "Present the next prepared or adaptive question",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RequestIdHeader"
+          },
+          {
+            "$ref": "#/components/parameters/InterviewIdPath"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/V1InterviewOK"
+          },
+          "400": {
+            "$ref": "#/components/responses/V1BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/V1Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/V1Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/V1NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/V1Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/V1ServiceUnavailable"
+          }
+        },
+        "description": "Closes the current answer at atMs and atomically consumes a candidate. The client may display its prefetched text immediately while this request is acknowledged.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdvanceInterviewRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/interviews/{interviewId}/turns/{sequence}/audio": {
+      "post": {
+        "tags": [
+          "Interviews"
+        ],
+        "summary": "Attach a self-contained answer audio segment",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RequestIdHeader"
+          },
+          {
+            "$ref": "#/components/parameters/InterviewIdPath"
+          },
+          {
+            "$ref": "#/components/parameters/InterviewTurnSequencePath"
+          }
+        ],
+        "responses": {
+          "202": {
+            "$ref": "#/components/responses/V1InterviewAccepted"
+          },
+          "400": {
+            "$ref": "#/components/responses/V1BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/V1Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/V1Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/V1NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/V1Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/V1ServiceUnavailable"
+          }
+        },
+        "description": "The audioAssetId must refer to an owned ready interview_turn_audio WAV upload. Local transcription and follow-up generation run as durable work.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InterviewTurnAudioRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/interviews/{interviewId}/finalize": {
+      "post": {
+        "tags": [
+          "Interviews"
+        ],
+        "summary": "Finalize the interview timeline",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RequestIdHeader"
+          },
+          {
+            "$ref": "#/components/parameters/InterviewIdPath"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/V1InterviewOK"
+          },
+          "400": {
+            "$ref": "#/components/responses/V1BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/V1Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/V1Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/V1NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/V1Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/V1ServiceUnavailable"
+          }
+        },
+        "description": "Closes the last turn and confirms the recording or guest preview already linked atomically during creation with interviewSessionId. The complete audio is the canonical final recording.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FinalizeInterviewRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/interviews/{interviewId}/cancel": {
+      "post": {
+        "tags": [
+          "Interviews"
+        ],
+        "summary": "Cancel an unsaved adaptive interview",
+        "description": "Releases the principal's single active interview session. This cannot cancel an interview already attached to a recording or guest preview.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RequestIdHeader"
+          },
+          {
+            "$ref": "#/components/parameters/InterviewIdPath"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/V1InterviewOK"
+          },
+          "401": {
+            "$ref": "#/components/responses/V1Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/V1NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/V1Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/V1ServiceUnavailable"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1856,6 +2210,24 @@
         "required": true,
         "schema": {
           "type": "string"
+        }
+      },
+      "InterviewIdPath": {
+        "name": "interviewId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "InterviewTurnSequencePath": {
+        "name": "sequence",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "integer",
+          "minimum": 1
         }
       }
     },
@@ -2524,6 +2896,36 @@
             "$ref": "#/components/headers/RequestID"
           }
         }
+      },
+      "V1InterviewOK": {
+        "description": "Owned adaptive interview session.",
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestID"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/InterviewSessionResponse"
+            }
+          }
+        }
+      },
+      "V1InterviewAccepted": {
+        "description": "Interview preparation or answer transcription queued.",
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestID"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/InterviewSessionResponse"
+            }
+          }
+        }
       }
     },
     "headers": {
@@ -3011,7 +3413,7 @@
           "topic": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 160
+            "maxLength": 300
           },
           "duration": {
             "type": "integer",
@@ -3030,6 +3432,11 @@
               "free_talk",
               "topic"
             ]
+          },
+          "interviewSessionId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Optional adaptive interview session, valid only for topic practice and the same principal. Linked atomically before processing is queued."
           }
         },
         "example": {
@@ -3119,6 +3526,13 @@
           "updatedAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "interviewTurns": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SavedInterviewTurn"
+            },
+            "description": "Present only for a saved adaptive topic interview. Question text is metadata, not part of transcript."
           }
         },
         "example": {
@@ -3226,6 +3640,11 @@
               }
             ],
             "description": "Optional short label for a photo-description prompt."
+          },
+          "interviewSessionId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Optional adaptive interview session, valid only for topic practice and the same principal. Linked atomically before processing is queued."
           }
         },
         "example": {
@@ -3242,7 +3661,8 @@
         "type": "string",
         "enum": [
           "recording_audio",
-          "recording_photo"
+          "recording_photo",
+          "interview_turn_audio"
         ]
       },
       "MediaChecksum": {
@@ -3288,7 +3708,12 @@
             "type": "integer",
             "format": "int64",
             "minimum": 1,
-            "description": "Exact whole-object size. Audio is limited to 80 MiB and photos to 4 MiB."
+            "description": "Exact whole-object size. Recording audio is limited to 80 MiB, interview turn WAV audio to 24 MiB, and photos to 4 MiB; guest final audio remains limited to 10 MiB. All answer WAV uploads for an interview together are limited to 24 MiB for an account or 4 MiB for a guest."
+          },
+          "interviewSessionId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Required only for interview_turn_audio. Must identify an active interview owned by the same principal; omit for every other media purpose."
           },
           "checksum": {
             "$ref": "#/components/schemas/MediaChecksum"
@@ -3913,6 +4338,13 @@
           "media": {
             "$ref": "#/components/schemas/RecordingMedia",
             "description": "Private owned media references. Exchange each downloadPath for a short-lived opaque download request."
+          },
+          "interviewTurns": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SavedInterviewTurn"
+            },
+            "description": "Present only for a saved adaptive topic interview. Question text is metadata, not part of transcript."
           }
         },
         "example": {
@@ -4277,6 +4709,328 @@
         "properties": {
           "reactions": {
             "$ref": "#/components/schemas/ReactionSummary"
+          }
+        }
+      },
+      "InterviewCandidate": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "question"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "question": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "prepared",
+              "adaptive"
+            ]
+          }
+        }
+      },
+      "InterviewTurn": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "seq",
+          "question",
+          "questionSource",
+          "askedAtMs",
+          "transcriptStatus"
+        ],
+        "properties": {
+          "seq": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "question": {
+            "type": "string"
+          },
+          "questionSource": {
+            "type": "string",
+            "enum": [
+              "opening",
+              "prepared",
+              "adaptive"
+            ]
+          },
+          "askedAtMs": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "endedAtMs": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "provisionalTranscript": {
+            "type": "string"
+          },
+          "transcriptStatus": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "queued",
+              "ready",
+              "failed"
+            ]
+          }
+        }
+      },
+      "InterviewSession": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "status",
+          "topic",
+          "openingQuestion",
+          "usefulWords",
+          "candidates",
+          "turns",
+          "currentTurnSeq",
+          "maxDurationSeconds",
+          "createdAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "preparing",
+              "ready",
+              "recording",
+              "finalizing",
+              "finalized",
+              "failed",
+              "cancelled"
+            ]
+          },
+          "topic": {
+            "type": "string"
+          },
+          "openingQuestion": {
+            "type": "string"
+          },
+          "usefulWords": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 8
+          },
+          "candidates": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InterviewCandidate"
+            },
+            "description": "Prepared and adaptive questions available for future transitions; clients keep these hidden until selected."
+          },
+          "turns": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InterviewTurn"
+            }
+          },
+          "currentTurnSeq": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "maxDurationSeconds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 600
+          },
+          "error": {
+            "type": "string",
+            "description": "Safe preparation failure message when status is failed."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "InterviewSessionResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "interview"
+        ],
+        "properties": {
+          "interview": {
+            "$ref": "#/components/schemas/InterviewSession"
+          }
+        }
+      },
+      "CreateInterviewRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "topic"
+        ],
+        "properties": {
+          "topic": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 300
+          },
+          "openingQuestion": {
+            "type": "string",
+            "maxLength": 300,
+            "description": "Optional first question. A plain topic label is converted to a broad opening question."
+          },
+          "englishLevel": {
+            "type": "string"
+          },
+          "interests": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 10
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "description": "Alternative to the Idempotency-Key header. Reusing the same key with the same request returns the same session."
+          }
+        },
+        "example": {
+          "topic": "Learning to cook",
+          "openingQuestion": "What has cooking taught you?",
+          "englishLevel": "b1",
+          "interests": [
+            "Food and cooking"
+          ]
+        }
+      },
+      "AdvanceInterviewRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "idempotencyKey",
+          "currentTurnSeq",
+          "nextCandidateId",
+          "atMs"
+        ],
+        "properties": {
+          "idempotencyKey": {
+            "type": "string"
+          },
+          "currentTurnSeq": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "nextCandidateId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "atMs": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "InterviewTurnAudioRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "idempotencyKey",
+          "audioAssetId"
+        ],
+        "properties": {
+          "idempotencyKey": {
+            "type": "string"
+          },
+          "audioAssetId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "FinalizeInterviewRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "idempotencyKey",
+          "endedAtMs"
+        ],
+        "properties": {
+          "idempotencyKey": {
+            "type": "string"
+          },
+          "endedAtMs": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "recordingId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "guestPreviewId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "description": "Exactly one of recordingId and guestPreviewId identifies the result created with this interviewSessionId."
+      },
+      "SavedInterviewTurn": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "sequence",
+          "question",
+          "askedAtMs",
+          "answerText",
+          "answerSource"
+        ],
+        "properties": {
+          "sequence": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "question": {
+            "type": "string"
+          },
+          "askedAtMs": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "endedAtMs": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "answerText": {
+            "type": "string",
+            "description": "Speech only, with no synthetic question text."
+          },
+          "answerSource": {
+            "type": "string",
+            "enum": [
+              "final",
+              "provisional",
+              "none"
+            ]
+          },
+          "answerAlignment": {
+            "type": "string",
+            "enum": [
+              "approximate"
+            ],
+            "description": "Present when full-audio text is assigned to a question using estimated speech timestamps; the canonical transcript remains unchanged."
           }
         }
       }

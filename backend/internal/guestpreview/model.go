@@ -23,17 +23,19 @@ const (
 )
 
 var (
-	ErrNotFound = errors.New("guest preview not found")
-	ErrConflict = errors.New("guest preview conflicts with existing data")
-	ErrCapacity = errors.New("guest preview capacity is exhausted")
+	ErrNotFound                    = errors.New("guest preview not found")
+	ErrConflict                    = errors.New("guest preview conflicts with existing data")
+	ErrCapacity                    = errors.New("guest preview capacity is exhausted")
+	ErrInterviewSessionUnavailable = errors.New("interview session is unavailable")
 )
 
 type CreateRequest struct {
-	AudioAssetID string `json:"audioAssetId"`
-	Topic        string `json:"topic"`
-	Duration     int    `json:"duration"`
-	Timestamp    string `json:"timestamp,omitempty"`
-	PracticeType string `json:"practiceType"`
+	AudioAssetID       string  `json:"audioAssetId"`
+	Topic              string  `json:"topic"`
+	Duration           int     `json:"duration"`
+	Timestamp          string  `json:"timestamp,omitempty"`
+	PracticeType       string  `json:"practiceType"`
+	InterviewSessionID *string `json:"interviewSessionId,omitempty"`
 }
 
 type Preview struct {
@@ -54,6 +56,7 @@ type Preview struct {
 	ExpiresAt          time.Time
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
+	InterviewTurns     []recording.InterviewTurn
 }
 
 func NormalizeCreate(input CreateRequest, now time.Time) (CreateRequest, time.Time, error) {
@@ -63,14 +66,21 @@ func NormalizeCreate(input CreateRequest, now time.Time) (CreateRequest, time.Ti
 	if input.AudioAssetID == "" || len(input.AudioAssetID) > 200 {
 		return input, time.Time{}, errors.New("audioAssetId is required")
 	}
-	if input.Topic == "" || len([]rune(input.Topic)) > 160 {
-		return input, time.Time{}, errors.New("topic must contain between 1 and 160 characters")
+	if input.Topic == "" || len([]rune(input.Topic)) > 300 {
+		return input, time.Time{}, errors.New("topic must contain between 1 and 300 characters")
 	}
 	if input.Duration < 1 || input.Duration > int(MaxDuration/time.Second) {
 		return input, time.Time{}, errors.New("duration must be between 1 and 60 seconds")
 	}
 	if input.PracticeType != "free_talk" && input.PracticeType != "topic" {
 		return input, time.Time{}, errors.New("practiceType must be free_talk or topic")
+	}
+	if input.InterviewSessionID != nil {
+		value := strings.TrimSpace(*input.InterviewSessionID)
+		if value == "" || len(value) > 200 || input.PracticeType != "topic" {
+			return input, time.Time{}, errors.New("interviewSessionId requires a topic interview")
+		}
+		input.InterviewSessionID = &value
 	}
 	timestamp := now
 	if strings.TrimSpace(input.Timestamp) != "" {
@@ -86,12 +96,13 @@ func NormalizeCreate(input CreateRequest, now time.Time) (CreateRequest, time.Ti
 
 func RequestDigest(input CreateRequest) string {
 	encoded, _ := json.Marshal(struct {
-		AudioAssetID string `json:"audioAssetId"`
-		Topic        string `json:"topic"`
-		Duration     int    `json:"duration"`
-		Timestamp    string `json:"timestamp"`
-		PracticeType string `json:"practiceType"`
-	}{input.AudioAssetID, input.Topic, input.Duration, input.Timestamp, input.PracticeType})
+		AudioAssetID       string  `json:"audioAssetId"`
+		Topic              string  `json:"topic"`
+		Duration           int     `json:"duration"`
+		Timestamp          string  `json:"timestamp"`
+		PracticeType       string  `json:"practiceType"`
+		InterviewSessionID *string `json:"interviewSessionId,omitempty"`
+	}{input.AudioAssetID, input.Topic, input.Duration, input.Timestamp, input.PracticeType, input.InterviewSessionID})
 	digest := sha256.Sum256(encoded)
 	return hex.EncodeToString(digest[:])
 }

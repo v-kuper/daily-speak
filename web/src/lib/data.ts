@@ -1,4 +1,5 @@
 import type { ShadowingStatus } from "./shadowing";
+import type { SavedInterviewTurn } from "./interviewTimeline";
 
 export type TopicData = {
   questions: string[];
@@ -52,6 +53,7 @@ export type Recording = {
   timestamp: string;
   status: RecordingStatus;
   transcript: string;
+  interviewTurns: SavedInterviewTurn[];
   correctedTranscript: string;
   suggestions: Suggestion[];
   processingStage: RecordingProcessingStage | null;

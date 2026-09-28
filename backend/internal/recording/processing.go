@@ -11,6 +11,7 @@ import (
 const (
 	ProcessingTimeout       = 30 * time.Minute
 	guestPreviewMaxDuration = 60 * time.Second
+	accountMaxDuration      = 10 * time.Minute
 )
 
 type ProcessingJob struct {
@@ -31,11 +32,14 @@ type ProcessingWork struct {
 	PhotoObject          *string
 	EnglishLevel         string
 	PromotedGuestPreview bool
+	InterviewSessionID   *string
+	DeclaredDuration     int
+	VerifiedDurationMS   int
 }
 
 type ProcessingRepository interface {
 	LoadProcessingWork(context.Context, ProcessingJob) (ProcessingWork, bool, error)
-	UpdateVerifiedDuration(context.Context, ProcessingJob, int) error
+	VerifyDuration(context.Context, ProcessingJob, int) error
 	UserInterests(context.Context, string) ([]string, error)
 	SaveTranscript(context.Context, ProcessingJob, string) (bool, error)
 	SaveSuggestions(context.Context, ProcessingJob, []Suggestion) (bool, error)
@@ -51,9 +55,18 @@ type ProcessingDependencies struct {
 	Materializer       AudioMaterializer
 	ProbeAudioDuration func(context.Context, string) (time.Duration, error)
 	Transcribe         func(context.Context, string) (string, error)
+	TranscribeTimed    func(context.Context, string) (TimedTranscript, error)
 	Analyzer           Analyzer
 	Rewriter           Rewriter
 	NewID              func() string
+}
+
+// InterviewProcessingRepository makes saving the full transcript and its
+// question alignment one fenced, atomic state transition.
+type InterviewProcessingRepository interface {
+	LoadInterviewTurns(context.Context, string) ([]InterviewTurn, error)
+	SaveInterviewTranscript(context.Context, ProcessingJob, string, string, map[int]string) (bool, error)
+	VerifyInterviewDuration(context.Context, ProcessingJob, string, int, int) error
 }
 
 type Processor struct {
@@ -90,7 +103,7 @@ func (p *Processor) Process(ctx context.Context, job ProcessingJob, logger Analy
 	}
 	defer cleanupAudio()
 
-	if work.Stage == "transcribing" && work.PromotedGuestPreview {
+	if work.Stage == "transcribing" {
 		if p.dependencies.ProbeAudioDuration == nil {
 			return errors.New("recording audio duration could not be verified")
 		}
@@ -98,10 +111,24 @@ func (p *Processor) Process(ctx context.Context, job ProcessingJob, logger Analy
 		if probeErr != nil {
 			return errors.New("recording audio duration could not be verified")
 		}
-		if actualDuration <= 0 || actualDuration > guestPreviewMaxDuration {
+		actualSeconds := int(math.Ceil(actualDuration.Seconds()))
+		if actualDuration <= 0 || actualDuration > accountMaxDuration || actualSeconds < 1 {
+			return errors.New("recording audio exceeds its duration limit")
+		}
+		if work.PromotedGuestPreview && actualDuration > guestPreviewMaxDuration {
 			return errors.New("guest preview audio exceeds the 60 second limit")
 		}
-		if err := p.dependencies.Repository.UpdateVerifiedDuration(ctx, job, int(math.Ceil(actualDuration.Seconds()))); err != nil {
+		actualMS := int(math.Ceil(float64(actualDuration) / float64(time.Millisecond)))
+		if work.InterviewSessionID != nil {
+			interviewRepository, ok := p.dependencies.Repository.(InterviewProcessingRepository)
+			if !ok {
+				return errors.New("interview duration verification is not configured")
+			}
+			if err := interviewRepository.VerifyInterviewDuration(ctx, job, *work.InterviewSessionID, actualSeconds, actualMS); err != nil {
+				return err
+			}
+			work.VerifiedDurationMS = actualMS
+		} else if err := p.dependencies.Repository.VerifyDuration(ctx, job, actualSeconds); err != nil {
 			return err
 		}
 	}
@@ -122,14 +149,29 @@ func (p *Processor) resume(ctx context.Context, job ProcessingJob, work Processi
 }
 
 func (p *Processor) transcribe(ctx context.Context, job ProcessingJob, work ProcessingWork, logger AnalysisLogger) error {
-	if p.dependencies.Transcribe == nil {
+	if p.dependencies.Transcribe == nil && p.dependencies.TranscribeTimed == nil {
 		return errors.New("recording transcription is not configured")
 	}
 	interests, err := p.dependencies.Repository.UserInterests(ctx, work.UserID)
 	if err != nil {
 		return err
 	}
-	transcript, err := p.dependencies.Transcribe(ctx, valueOrEmpty(work.AudioPath))
+	var transcript string
+	var answers map[int]string
+	var timed TimedTranscript
+	interviewRepository, isInterviewRepository := p.dependencies.Repository.(InterviewProcessingRepository)
+	if work.InterviewSessionID != nil && isInterviewRepository && p.dependencies.TranscribeTimed != nil {
+		timed, err = p.dependencies.TranscribeTimed(ctx, valueOrEmpty(work.AudioPath))
+		if err == nil {
+			transcript = timed.Text
+		}
+	}
+	if transcript == "" {
+		if p.dependencies.Transcribe == nil {
+			return errors.New("recording transcription fallback is not configured")
+		}
+		transcript, err = p.dependencies.Transcribe(ctx, valueOrEmpty(work.AudioPath))
+	}
 	if err != nil {
 		return err
 	}
@@ -137,7 +179,22 @@ func (p *Processor) transcribe(ctx context.Context, job ProcessingJob, work Proc
 	if transcript == "" {
 		return errors.New("Whisper returned an empty transcript. Try speaking louder or recording again.")
 	}
-	advanced, err := p.dependencies.Repository.SaveTranscript(ctx, job, transcript)
+	if work.InterviewSessionID != nil && isInterviewRepository {
+		turns, loadErr := interviewRepository.LoadInterviewTurns(ctx, *work.InterviewSessionID)
+		if loadErr != nil {
+			return loadErr
+		}
+		answers = FinalInterviewAnswersWithinDuration(turns, timed, work.VerifiedDurationMS)
+		if answers == nil {
+			answers = FinalInterviewAnswersFromProvisional(turns, transcript, work.VerifiedDurationMS)
+		}
+	}
+	var advanced bool
+	if work.InterviewSessionID != nil && isInterviewRepository {
+		advanced, err = interviewRepository.SaveInterviewTranscript(ctx, job, transcript, *work.InterviewSessionID, answers)
+	} else {
+		advanced, err = p.dependencies.Repository.SaveTranscript(ctx, job, transcript)
+	}
 	if err != nil || !advanced {
 		return err
 	}

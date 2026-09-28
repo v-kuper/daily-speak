@@ -44,7 +44,8 @@ func (t *sqlCreateTransaction) Find(ctx context.Context, userID string, recordin
 		SELECT id, topic, duration, timestamp, status, transcript,
 		       corrected_transcript, suggestions, processing_stage, practice_type,
 		       photo_object, processing_error, shadowing_status, shadowing_error,
-		       shadowing_updated_at, audio_asset_id, photo_asset_id
+		       shadowing_updated_at, audio_asset_id, photo_asset_id,
+		       (SELECT s.id FROM interview_sessions s WHERE s.recording_id = recordings.id)
 		FROM recordings
 		WHERE id = $1 AND user_id = $2`, recordingID, userID).Scan(createdDestinations(&created)...)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -80,12 +81,28 @@ func (t *sqlCreateTransaction) Insert(ctx context.Context, command CreateCommand
 		RETURNING id, topic, duration, timestamp, status, transcript,
 		          corrected_transcript, suggestions, processing_stage, practice_type,
 		          photo_object, processing_error, shadowing_status, shadowing_error,
-		          shadowing_updated_at, audio_asset_id, photo_asset_id`,
+		          shadowing_updated_at, audio_asset_id, photo_asset_id, NULL::text`,
 		command.RecordingID, command.UserID, command.Input.Topic, command.Input.Duration,
 		command.Input.Timestamp, command.Input.PracticeType, command.JobID,
 		command.Input.AudioAssetID, command.Input.PhotoAssetID, command.Input.PhotoObject,
 	).Scan(createdDestinations(&created)...)
 	return created, err
+}
+
+func (t *sqlCreateTransaction) LinkInterview(ctx context.Context, sessionID, principalID, userID, recordingID string) error {
+	result, err := t.tx.Exec(ctx, `
+		UPDATE interview_sessions
+		SET recording_id = $4, status = 'finalizing', updated_at = NOW()
+		WHERE id = $1 AND owner_principal_id = $2 AND user_id = $3
+		  AND status = 'recording' AND recording_id IS NULL AND guest_preview_id IS NULL`,
+		sessionID, principalID, userID, recordingID)
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() != 1 {
+		return ErrInterviewSessionUnavailable
+	}
+	return nil
 }
 
 func (t *sqlCreateTransaction) AttachMedia(ctx context.Context, principalID string, assetIDs []string) error {
@@ -119,5 +136,6 @@ func createdDestinations(created *Created) []any {
 		&created.PhotoObject, &created.ProcessingError, &created.ShadowingStatus,
 		&created.ShadowingError,
 		&created.ShadowingUpdatedAt, &created.AudioAssetID, &created.PhotoAssetID,
+		&created.InterviewSessionID,
 	}
 }

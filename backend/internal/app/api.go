@@ -11,6 +11,7 @@ import (
 	"daily-speaking-practice/backend/internal/db"
 	"daily-speaking-practice/backend/internal/guestpreview"
 	"daily-speaking-practice/backend/internal/httpapi"
+	"daily-speaking-practice/backend/internal/interview"
 	"daily-speaking-practice/backend/internal/media"
 	"daily-speaking-practice/backend/internal/operations"
 	"daily-speaking-practice/backend/internal/practice"
@@ -82,6 +83,10 @@ func NewAPI(config APIConfig) *httpapi.Server {
 		signingSecret = []byte(strings.TrimSpace(os.Getenv("AUTH_ACCESS_TOKEN_SECRET")))
 	}
 	mediaSigner, _ := media.NewURLSigner(signingSecret)
+	var interviewService *interview.Service
+	if config.DB != nil {
+		interviewService = interview.NewService(interview.NewSQLRepository(config.DB))
+	}
 	recordingRecords := recording.NewSQLQueryRepository(config.DB)
 	recordingDeletion := recording.NewSQLDeletionRepository(config.DB)
 	return httpapi.NewServer(httpapi.Dependencies{
@@ -97,6 +102,7 @@ func NewAPI(config APIConfig) *httpapi.Server {
 			recordingRecords, recording.NewSQLRetryUnitOfWork(config.DB), uuid.NewString,
 		),
 		GuestPreviewStore: guestpreview.NewStore(config.DB, guestpreview.QueueCapacityFromEnv()),
+		InterviewService:  interviewService,
 		ShadowingStore:    shadowing.NewStore(config.DB),
 		BrowserCookie:     config.BrowserCookie, IdentityTokens: config.IdentityTokens,
 		IdentityService: auth.NewIdentityService(config.DB, config.IdentityTokens), CORS: config.CORS,

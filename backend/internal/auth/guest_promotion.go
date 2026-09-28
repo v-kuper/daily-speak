@@ -211,6 +211,15 @@ func promoteGuestPreview(ctx context.Context, tx pgx.Tx, guestPrincipalID string
 	if result.RowsAffected() != 1 {
 		return nil, errors.New("guest preview promotion lost its state transition")
 	}
+	// Keep the interview timeline reachable from the newly promoted recording.
+	if _, err := tx.Exec(ctx, `
+		UPDATE interview_sessions
+		SET recording_id = $2, user_id = $3, owner_principal_id = $3,
+		    status = 'finalized', updated_at = $4
+		WHERE guest_preview_id = $1 AND (recording_id IS NULL OR recording_id = $2)`,
+		preview.ID, preview.ID, userPrincipalID, now); err != nil {
+		return nil, err
+	}
 	return &GuestPreviewPromotion{Status: "promoted", PreviewID: preview.ID, RecordingID: preview.ID}, nil
 }
 

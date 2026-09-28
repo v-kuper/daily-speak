@@ -1,6 +1,7 @@
 package guestpreview
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -19,6 +20,17 @@ func TestNormalizeCreateAndDigestAreStableAcrossServerTimestamps(t *testing.T) {
 	}
 	if RequestDigest(first) != RequestDigest(second) {
 		t.Fatal("digest changed across server timestamps")
+	}
+}
+
+func TestNormalizeCreateUsesTheSameTopicLimitAsInterviews(t *testing.T) {
+	request := CreateRequest{AudioAssetID: "asset", Topic: strings.Repeat("a", 300), Duration: 10, PracticeType: "topic"}
+	if _, _, err := NormalizeCreate(request, time.Now()); err != nil {
+		t.Fatalf("300-rune topic was rejected: %v", err)
+	}
+	request.Topic += "b"
+	if _, _, err := NormalizeCreate(request, time.Now()); err == nil {
+		t.Fatal("301-rune topic was accepted")
 	}
 }
 

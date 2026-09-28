@@ -31,6 +31,7 @@ const routeSource = [
   readFileSync("internal/httpapi/media_v1.go", "utf8"),
   readFileSync("internal/httpapi/guest_preview.go", "utf8"),
   readFileSync("internal/httpapi/recordings_create_v1.go", "utf8"),
+  readFileSync("internal/httpapi/interviews_v1.go", "utf8"),
 ].join("\n");
 
 const httpMethods = new Set(["get", "post", "put", "delete", "patch"]);
@@ -39,6 +40,11 @@ const documentedAPIRoutes = [
   "/api/v1/auth/refresh", "/api/v1/auth/session", "/api/v1/auth/logout", "/api/v1/auth/logout-all",
   "/api/v1/auth/sessions", "/api/v1/auth/sessions/{sessionId}",
   "/api/v1/guest/previews", "/api/v1/guest/previews/{previewId}",
+  "/api/v1/interviews", "/api/v1/interviews/{interviewId}",
+  "/api/v1/interviews/{interviewId}/start", "/api/v1/interviews/{interviewId}/cancel",
+  "/api/v1/interviews/{interviewId}/advance",
+  "/api/v1/interviews/{interviewId}/turns/{sequence}/audio",
+  "/api/v1/interviews/{interviewId}/finalize",
   "/api/v1/recordings", "/api/v1/recordings/{recordingId}",
   "/api/v1/recordings/{recordingId}/retry", "/api/v1/recordings/{recordingId}/shadowing",
   "/api/v1/media/uploads", "/api/v1/media/uploads/{uploadId}",
@@ -51,6 +57,12 @@ const documentedAPIRoutes = [
 ];
 
 const protectedOperations = [
+  ["/api/v1/interviews", "post"], ["/api/v1/interviews/{interviewId}", "get"],
+  ["/api/v1/interviews/{interviewId}/start", "post"],
+  ["/api/v1/interviews/{interviewId}/cancel", "post"],
+  ["/api/v1/interviews/{interviewId}/advance", "post"],
+  ["/api/v1/interviews/{interviewId}/turns/{sequence}/audio", "post"],
+  ["/api/v1/interviews/{interviewId}/finalize", "post"],
   ["/api/v1/recordings", "get"], ["/api/v1/recordings/{recordingId}", "get"],
   ["/api/v1/recordings/{recordingId}", "delete"],
   ["/api/v1/recordings/{recordingId}/retry", "post"],
@@ -65,6 +77,10 @@ const mutationBodies = [
   ["/api/v1/auth/register", "post", "application/json"], ["/api/v1/auth/login", "post", "application/json"],
   ["/api/v1/auth/refresh", "post", "application/json"],
   ["/api/v1/guest/previews", "post", "application/json"],
+  ["/api/v1/interviews", "post", "application/json"],
+  ["/api/v1/interviews/{interviewId}/advance", "post", "application/json"],
+  ["/api/v1/interviews/{interviewId}/turns/{sequence}/audio", "post", "application/json"],
+  ["/api/v1/interviews/{interviewId}/finalize", "post", "application/json"],
   ["/api/v1/recordings", "post", "application/json"],
   ["/api/v1/media/uploads", "post", "application/json"],
   ["/api/v1/media/uploads/{uploadId}/parts", "post", "application/json"],
@@ -144,6 +160,13 @@ test("OpenAPI inventories every supported API route", () => {
     ["/api/v1/auth/sessions/{sessionId}", /strings\.HasPrefix\(path, "\/api\/v1\/auth\/sessions\/"\)/],
     ["/api/v1/guest/previews", /path == "\/api\/v1\/guest\/previews"/],
     ["/api/v1/guest/previews/{previewId}", /strings\.HasPrefix\(path, "\/api\/v1\/guest\/previews\/"\)/],
+    ["/api/v1/interviews", /path == "\/api\/v1\/interviews"/],
+    ["/api/v1/interviews/{interviewId}", /strings\.HasPrefix\(path, "\/api\/v1\/interviews\/"\)/],
+    ["/api/v1/interviews/{interviewId}/start", /parts\[1\] == "start"/],
+    ["/api/v1/interviews/{interviewId}/cancel", /parts\[1\] == "cancel"/],
+    ["/api/v1/interviews/{interviewId}/advance", /parts\[1\] == "advance"/],
+    ["/api/v1/interviews/{interviewId}/turns/{sequence}/audio", /parts\[3\] == "audio"/],
+    ["/api/v1/interviews/{interviewId}/finalize", /parts\[1\] == "finalize"/],
     ["/api/v1/recordings", /path == "\/api\/v1\/recordings"/],
     ["/api/v1/recordings/{recordingId}", /strings\.HasPrefix\(path, "\/api\/v1\/recordings\/"\)/],
     ["/api/v1/media/uploads", /path == "\/api\/v1\/media\/uploads"/],
@@ -193,6 +216,12 @@ test("identity and v1 resources declare bearer authentication", () => {
     ["/api/v1/auth/logout-all", "post"], ["/api/v1/auth/sessions", "get"],
     ["/api/v1/auth/sessions/{sessionId}", "delete"], ["/api/v1/recordings", "get"],
     ["/api/v1/guest/previews", "post"], ["/api/v1/guest/previews/{previewId}", "get"],
+    ["/api/v1/interviews", "post"], ["/api/v1/interviews/{interviewId}", "get"],
+    ["/api/v1/interviews/{interviewId}/start", "post"],
+    ["/api/v1/interviews/{interviewId}/cancel", "post"],
+    ["/api/v1/interviews/{interviewId}/advance", "post"],
+    ["/api/v1/interviews/{interviewId}/turns/{sequence}/audio", "post"],
+    ["/api/v1/interviews/{interviewId}/finalize", "post"],
     ["/api/v1/recordings", "post"], ["/api/v1/recordings/{recordingId}", "get"],
     ["/api/v1/recordings/{recordingId}", "delete"],
     ["/api/v1/recordings/{recordingId}/retry", "post"],
@@ -231,6 +260,22 @@ test("JSON and multipart mutations declare request bodies", () => {
   for (const [path, method, contentType] of mutationBodies) {
     assert.ok(openapi.paths[path][method].requestBody?.content?.[contentType], `${method.toUpperCase()} ${path} needs ${contentType} request body`);
   }
+});
+
+test("adaptive interview contract keeps final speech separate from question metadata", () => {
+  const interview = openapi.components.schemas.InterviewSession;
+  const savedTurn = openapi.components.schemas.SavedInterviewTurn;
+  assert.ok(interview.properties.candidates);
+  assert.ok(interview.properties.turns);
+  assert.deepEqual(openapi.components.schemas.InterviewTurn.properties.questionSource.enum, ["opening", "prepared", "adaptive"]);
+  assert.ok(savedTurn.required.includes("question"));
+  assert.ok(savedTurn.required.includes("answerText"));
+  assert.ok(openapi.components.schemas.V1Recording.properties.interviewTurns);
+  assert.ok(openapi.components.schemas.GuestPreview.properties.interviewTurns);
+  assert.ok(openapi.components.schemas.CreateRecordingFromAssetsRequest.properties.interviewSessionId);
+  assert.ok(openapi.components.schemas.CreateGuestPreviewRequest.properties.interviewSessionId);
+  assert.ok(openapi.components.schemas.MediaPurpose.enum.includes("interview_turn_audio"));
+  assert.ok(openapi.components.schemas.CreateMediaUploadRequest.properties.interviewSessionId);
 });
 
 test("shared externally visible schemas have representative examples", () => {

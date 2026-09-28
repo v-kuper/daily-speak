@@ -3,10 +3,10 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { buildTranscriptSegments } from "../lib/transcriptHighlight";
+import InterviewTimeline from "./InterviewTimeline";
 import {
   fetchGuestPreview,
   guestPreviewPath,
-  startNewGuestPreviewSession,
   type GuestPreview,
 } from "../lib/guestPreview";
 import { formatTime } from "../lib/utils";
@@ -64,7 +64,7 @@ export default function GuestPreviewScreen({ previewId }: { previewId: string })
         <div className="auth-error">{error}</div>
         <div className="auth-buttons top-spaced">
           <button className="btn btn-secondary" onClick={() => setRetryKey((value) => value + 1)}>Retry</button>
-          <Link className="btn btn-primary" href="/speak" onClick={startNewGuestPreviewSession}>Record a new sample</Link>
+          <Link className="btn btn-primary" href={authPath}>Sign in to continue</Link>
         </div>
       </section>
     );
@@ -121,6 +121,8 @@ export default function GuestPreviewScreen({ previewId }: { previewId: string })
         </div>
       )}
 
+      <InterviewTimeline turns={preview.interviewTurns} processing={processing} />
+
       <div className="transcript-section">
         <div className="section-title">Transcript</div>
         {preview.transcript ? (
@@ -163,11 +165,7 @@ export default function GuestPreviewScreen({ previewId }: { previewId: string })
         <Link className="btn btn-primary btn-large" href={authPath}>
           Sign in to unlock full analysis
         </Link>
-        {preview.state === "failed" && (
-          <Link className="btn btn-secondary" href="/speak" onClick={startNewGuestPreviewSession}>
-            Record a new sample
-          </Link>
-        )}
+        {preview.state === "failed" && <div className="hint">Guest access includes one preview. Sign in to record another sample.</div>}
       </div>
     </section>
   );

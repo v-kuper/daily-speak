@@ -138,6 +138,8 @@ func (s *Server) ratePolicy(r *http.Request) (ratePolicy, bool) {
 		return ratePolicy{scope: "guest_preview", limit: s.operations.ExpensiveLimit, principal: true, alsoIP: true}, true
 	case "/api/v1/recordings":
 		return ratePolicy{scope: "recording_create", limit: s.operations.ExpensiveLimit, principal: true, alsoIP: true}, true
+	case "/api/v1/interviews":
+		return ratePolicy{scope: "interview_create", limit: s.operations.ExpensiveLimit, principal: true, alsoIP: true}, true
 	}
 	if strings.HasPrefix(path, "/api/") {
 		return ratePolicy{scope: "api_write", limit: s.operations.WriteLimit, principal: true}, true
@@ -196,6 +198,8 @@ func operationalRoute(path string) string {
 		return "/api/v1/media/{id}/download"
 	case strings.HasPrefix(path, "/api/v1/guest/previews/"):
 		return "/api/v1/guest/previews/{id}"
+	case strings.HasPrefix(path, "/api/v1/interviews/"):
+		return "/api/v1/interviews/{id}"
 	case strings.HasPrefix(path, "/api/v1/recordings/"):
 		return "/api/v1/recordings/{id}"
 	case strings.HasPrefix(path, "/api/"):
@@ -210,7 +214,7 @@ var operationalStaticRoutes = map[string]struct{}{
 	"/api/v1/auth/anonymous": {}, "/api/v1/auth/register": {}, "/api/v1/auth/login": {},
 	"/api/v1/auth/refresh": {}, "/api/v1/auth/session": {}, "/api/v1/auth/logout": {},
 	"/api/v1/auth/logout-all": {}, "/api/v1/auth/sessions": {},
-	"/api/v1/guest/previews": {}, "/api/v1/recordings": {}, "/api/v1/media/uploads": {},
+	"/api/v1/guest/previews": {}, "/api/v1/recordings": {}, "/api/v1/interviews": {}, "/api/v1/media/uploads": {},
 	"/api/v1/practice/daily-questions": {}, "/api/v1/practice/topic-guidance": {}, "/api/v1/practice/study-words": {},
 	"/api/v1/profile": {}, "/api/v1/profile/interests": {}, "/api/v1/profile/english-level": {},
 	"/api/v1/subscription": {},

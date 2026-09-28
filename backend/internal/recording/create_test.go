@@ -23,6 +23,7 @@ type createTransactionStub struct {
 	inserted       bool
 	attached       bool
 	enqueued       bool
+	linked         bool
 }
 
 func (s *createTransactionStub) LockQuota(context.Context, string, time.Time) (quota.RecordingQuota, error) {
@@ -49,6 +50,13 @@ func (s *createTransactionStub) AttachMedia(context.Context, string, []string) e
 }
 func (s *createTransactionStub) EnqueueProcessing(context.Context, CreateCommand) error {
 	s.enqueued = true
+	return nil
+}
+func (s *createTransactionStub) LinkInterview(_ context.Context, sessionID, principalID, userID, recordingID string) error {
+	if sessionID == "" || principalID == "" || userID == "" || recordingID == "" || s.enqueued {
+		return ErrInterviewSessionUnavailable
+	}
+	s.linked = true
 	return nil
 }
 
@@ -99,6 +107,26 @@ func TestCreatorRejectsQuotaBeforeMediaOrPersistence(t *testing.T) {
 	})
 	if !errors.As(err, &violation) || !violation.SubscriberLimit {
 		t.Fatalf("subscriber err=%v", err)
+	}
+}
+
+func TestCreatorLinksInterviewBeforeEnqueueAndRejectsChangedRetry(t *testing.T) {
+	remaining := 120
+	tx := &createTransactionStub{quota: quota.RecordingQuota{WeeklyRemainingSeconds: &remaining}}
+	creator := NewCreator(createUnitOfWorkStub{tx: tx})
+	sessionID := "session-1"
+	input := CreateInput{Topic: "Travel", Duration: 30, Timestamp: time.Now().UTC().Truncate(time.Microsecond),
+		PracticeType: "topic", AudioAssetID: "audio", InterviewSessionID: &sessionID}
+	created, _, err := creator.Create(context.Background(), "principal", "user", "request", input)
+	if err != nil || !tx.linked || !tx.enqueued || created.InterviewSessionID == nil {
+		t.Fatalf("interview was not linked before enqueue: created=%+v tx=%+v err=%v", created, tx, err)
+	}
+	tx.found, tx.existing = true, created
+	otherSession := "session-2"
+	input.InterviewSessionID = &otherSession
+	_, _, err = creator.Create(context.Background(), "principal", "user", "request", input)
+	if !errors.Is(err, ErrCreateIdempotencyConflict) {
+		t.Fatalf("changed interview session must conflict on retry: %v", err)
 	}
 }
 

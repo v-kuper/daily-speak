@@ -18,7 +18,37 @@ func (repository *SQLQueryRepository) Find(ctx context.Context, userID string, r
 	if repository == nil || repository.db == nil {
 		return Record{}, false, errors.New("recording database is not configured")
 	}
-	return findRecord(ctx, repository.db, userID, recordingID)
+	record, found, err := findRecord(ctx, repository.db, userID, recordingID)
+	if err != nil || !found {
+		return record, found, err
+	}
+	record.InterviewTurns, err = repository.interviewTurns(ctx, record.ID)
+	return record, err == nil, err
+}
+
+func (repository *SQLQueryRepository) interviewTurns(ctx context.Context, recordingID string) ([]InterviewTurn, error) {
+	rows, err := repository.db.Query(ctx, `
+		SELECT t.seq, t.question, t.asked_at_ms, t.ended_at_ms,
+		       t.provisional_transcript, t.final_transcript
+		FROM interview_turns t
+		JOIN interview_sessions s ON s.id = t.session_id
+		WHERE s.recording_id = $1
+		ORDER BY t.seq`, recordingID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var turns []InterviewTurn
+	for rows.Next() {
+		var turn InterviewTurn
+		if err := rows.Scan(&turn.Sequence, &turn.Question, &turn.AskedAtMS,
+			&turn.EndedAtMS, &turn.Provisional, &turn.FinalText); err != nil {
+			return nil, err
+		}
+		turn.ResolveAnswer()
+		turns = append(turns, turn)
+	}
+	return turns, rows.Err()
 }
 
 func (repository *SQLQueryRepository) List(ctx context.Context, userID string, options ListOptions) ([]Record, error) {

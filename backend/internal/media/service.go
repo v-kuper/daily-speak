@@ -57,7 +57,7 @@ func (service *Service) CreateUpload(ctx context.Context, input CreateUploadInpu
 		return UploadResource{}, err
 	}
 	if existing, findErr := service.repository.FindByIdempotency(ctx, input.SessionID, input.IdempotencyKey); findErr == nil {
-		if sameUploadRequest(existing.Asset, input) {
+		if sameUploadRequest(existing.Asset, input) && existing.Upload.InterviewSessionID == input.InterviewSessionID {
 			return existing, nil
 		}
 		return UploadResource{}, ErrConflict
@@ -94,27 +94,32 @@ func (service *Service) CreateUpload(ctx context.Context, input CreateUploadInpu
 	}
 	partCount := int((input.SizeBytes + service.config.PartSizeBytes - 1) / service.config.PartSizeBytes)
 	retentionUntil := now.Add(service.config.UploadTTL)
+	assetRetentionUntil := retentionUntil
+	if input.Purpose == PurposeInterviewTurnAudio {
+		assetRetentionUntil = now.Add(24 * time.Hour)
+	}
 	resource := UploadResource{
 		Asset: Asset{
 			ID: assetID, OwnerPrincipalID: input.OwnerPrincipalID, Purpose: input.Purpose,
 			State: "uploading", StorageDriver: service.store.Backend(), Bucket: service.config.Bucket,
 			ObjectKey: objectKey, ContentType: input.ContentType, ExpectedSizeBytes: input.SizeBytes,
-			ExpectedChecksumSHA256: input.ChecksumSHA256, RetentionUntil: &retentionUntil,
+			ExpectedChecksumSHA256: input.ChecksumSHA256, RetentionUntil: &assetRetentionUntil,
 			CreatedAt: now, UpdatedAt: now,
 		},
 		Upload: Upload{
 			ID: uploadID, AssetID: assetID, ProviderUploadID: providerUpload.ID,
 			State: "uploading", PartSizeBytes: service.config.PartSizeBytes,
 			PartCount: partCount, ExpiresAt: retentionUntil,
-			CreatedBySessionID: input.SessionID, IdempotencyKey: input.IdempotencyKey,
-			CreatedAt: now, UpdatedAt: now,
+			CreatedBySessionID: input.SessionID, InterviewSessionID: input.InterviewSessionID,
+			IdempotencyKey: input.IdempotencyKey,
+			CreatedAt:      now, UpdatedAt: now,
 		},
 	}
 	if err := service.repository.InsertUpload(ctx, resource.Asset, resource.Upload); err != nil {
 		_ = service.store.AbortMultipart(ctx, providerUpload)
 		if errors.Is(err, ErrIdempotencyRace) {
 			existing, findErr := service.repository.FindByIdempotency(ctx, input.SessionID, input.IdempotencyKey)
-			if findErr == nil && sameUploadRequest(existing.Asset, input) {
+			if findErr == nil && sameUploadRequest(existing.Asset, input) && existing.Upload.InterviewSessionID == input.InterviewSessionID {
 				return existing, nil
 			}
 			return UploadResource{}, ErrConflict

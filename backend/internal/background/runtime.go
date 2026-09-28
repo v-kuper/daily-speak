@@ -29,6 +29,15 @@ type ShadowingProcessor interface {
 	Process(context.Context, shadowing.Job, shadowing.Logger) error
 }
 
+type InterviewProcessor interface {
+	Process(context.Context, workqueue.Job) error
+}
+
+type InterviewStore interface {
+	Expire(context.Context) error
+	FinalizeFailure(context.Context, pgx.Tx, workqueue.Job, string) error
+}
+
 type RecordingFinalizer interface {
 	FinalizeFailure(context.Context, pgx.Tx, string, string, string) error
 }
@@ -57,6 +66,8 @@ type Dependencies struct {
 	RecordingRepository   RecordingFinalizer
 	GuestPreviewProcessor GuestPreviewProcessor
 	GuestPreviewStore     GuestPreviewStore
+	InterviewProcessor    InterviewProcessor
+	InterviewStore        InterviewStore
 	ShadowingProcessor    ShadowingProcessor
 	ShadowingStore        ShadowingFinalizer
 	MediaCleanup          MediaCleanup
@@ -96,6 +107,13 @@ func (r *Runtime) Handle(ctx context.Context, job workqueue.Job) error {
 		jobCtx, cancel := context.WithTimeout(ctx, recording.ProcessingTimeout)
 		defer cancel()
 		return r.dependencies.RecordingProcessor.Process(jobCtx, recording.ProcessingJob{ID: job.ID, ResourceID: job.ResourceID, LeaseToken: job.LeaseToken}, logging.ForBackground("worker.recordings.process"))
+	case workqueue.KindInterviewProcess:
+		if r.dependencies.InterviewProcessor == nil {
+			return errors.New("interview processor is not configured")
+		}
+		jobCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+		defer cancel()
+		return r.dependencies.InterviewProcessor.Process(jobCtx, job)
 	case workqueue.KindShadowingSynthesize:
 		if r.dependencies.ShadowingProcessor == nil {
 			return errors.New("shadowing processor is not configured")
@@ -130,6 +148,11 @@ func (r *Runtime) FinalizeFailure(ctx context.Context, tx pgx.Tx, job workqueue.
 			return errors.New("recording repository is not configured")
 		}
 		return r.dependencies.RecordingRepository.FinalizeFailure(ctx, tx, job.ID, job.ResourceID, message)
+	case workqueue.KindInterviewProcess:
+		if r.dependencies.InterviewStore == nil {
+			return errors.New("interview store is not configured")
+		}
+		return r.dependencies.InterviewStore.FinalizeFailure(ctx, tx, job, message)
 	case workqueue.KindShadowingSynthesize:
 		if r.dependencies.ShadowingStore == nil {
 			return errors.New("shadowing store is not configured")
@@ -177,6 +200,11 @@ func (r *Runtime) Sweep(ctx context.Context) error {
 	}
 	if r.dependencies.GuestPreviewStore != nil {
 		if err := r.dependencies.GuestPreviewStore.Expire(ctx); err != nil {
+			return err
+		}
+	}
+	if r.dependencies.InterviewStore != nil {
+		if err := r.dependencies.InterviewStore.Expire(ctx); err != nil {
 			return err
 		}
 	}

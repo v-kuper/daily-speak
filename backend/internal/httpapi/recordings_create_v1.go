@@ -14,13 +14,14 @@ import (
 const maxRecordingCreateV1IdempotencyKeyBytes = 200
 
 type recordingCreateV1Request struct {
-	Topic        string  `json:"topic"`
-	Duration     int     `json:"duration"`
-	Timestamp    string  `json:"timestamp"`
-	PracticeType string  `json:"practiceType"`
-	AudioAssetID string  `json:"audioAssetId"`
-	PhotoAssetID *string `json:"photoAssetId"`
-	PhotoObject  *string `json:"photoObject"`
+	Topic              string  `json:"topic"`
+	Duration           int     `json:"duration"`
+	Timestamp          string  `json:"timestamp"`
+	PracticeType       string  `json:"practiceType"`
+	AudioAssetID       string  `json:"audioAssetId"`
+	PhotoAssetID       *string `json:"photoAssetId"`
+	PhotoObject        *string `json:"photoObject"`
+	InterviewSessionID *string `json:"interviewSessionId,omitempty"`
 }
 
 func (s *Server) handleCreateRecordingV1(w http.ResponseWriter, r *http.Request) {
@@ -56,6 +57,8 @@ func (s *Server) handleCreateRecordingV1(w http.ResponseWriter, r *http.Request)
 		writeV1Error(w, r, http.StatusNotFound, "media_not_found", "Ready media owned by this account was not found")
 	case errors.Is(err, recording.ErrCreateIdempotencyConflict):
 		writeV1Error(w, r, http.StatusConflict, "idempotency_conflict", "Idempotency-Key was already used with a different request")
+	case errors.Is(err, recording.ErrInterviewSessionUnavailable):
+		writeV1Error(w, r, http.StatusConflict, "interview_session_conflict", "Interview session is unavailable")
 	case errors.As(err, &quotaViolation) && quotaViolation.SubscriberLimit:
 		writeV1Error(w, r, http.StatusBadRequest, "quota_exceeded", "Subscribers can save recordings up to 10:00 per session.")
 	case errors.As(err, &quotaViolation):
@@ -82,6 +85,7 @@ func parseRecordingCreateV1(payload recordingCreateV1Request) (recording.CreateI
 		Topic: payload.Topic, Duration: payload.Duration, Timestamp: timestamp,
 		PracticeType: payload.PracticeType, AudioAssetID: payload.AudioAssetID,
 		PhotoAssetID: payload.PhotoAssetID, PhotoObject: payload.PhotoObject,
+		InterviewSessionID: payload.InterviewSessionID,
 	}, nil
 }
 

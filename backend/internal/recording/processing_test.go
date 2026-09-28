@@ -22,11 +22,35 @@ type processorRepository struct {
 	advanceSuggestions bool
 }
 
+type interviewProcessorRepository struct {
+	*processorRepository
+	turns         []InterviewTurn
+	answers       map[int]string
+	verifySeconds int
+	verifyMS      int
+}
+
+func (r *interviewProcessorRepository) VerifyInterviewDuration(_ context.Context, _ ProcessingJob, _ string, seconds, milliseconds int) error {
+	r.steps = append(r.steps, "verify")
+	r.verifySeconds = seconds
+	r.verifyMS = milliseconds
+	return nil
+}
+func (r *interviewProcessorRepository) LoadInterviewTurns(context.Context, string) ([]InterviewTurn, error) {
+	r.steps = append(r.steps, "turns")
+	return r.turns, nil
+}
+func (r *interviewProcessorRepository) SaveInterviewTranscript(_ context.Context, _ ProcessingJob, transcript, _ string, answers map[int]string) (bool, error) {
+	r.steps = append(r.steps, "interview_transcript")
+	r.transcript, r.answers = transcript, answers
+	return r.advanceTranscript, nil
+}
+
 func (r *processorRepository) LoadProcessingWork(context.Context, ProcessingJob) (ProcessingWork, bool, error) {
 	r.steps = append(r.steps, "load")
 	return r.work, r.found, nil
 }
-func (r *processorRepository) UpdateVerifiedDuration(_ context.Context, _ ProcessingJob, duration int) error {
+func (r *processorRepository) VerifyDuration(_ context.Context, _ ProcessingJob, duration int) error {
 	r.steps = append(r.steps, "duration")
 	r.duration = duration
 	return nil
@@ -77,7 +101,7 @@ func TestProcessorRunsDurableStagesInOrder(t *testing.T) {
 		found: true,
 		work: ProcessingWork{
 			UserID: "user-1", Stage: "transcribing", AudioAssetID: pointer("asset-1"),
-			Topic: "My day", PracticeType: "free_talk", EnglishLevel: "b1", PromotedGuestPreview: true,
+			Topic: "My day", PracticeType: "free_talk", EnglishLevel: "b1",
 		},
 		interests: []string{"travel"}, advanceTranscript: true, advanceSuggestions: true,
 	}
@@ -140,6 +164,61 @@ func TestProcessorResumesSuggestionStageWithoutAudioWork(t *testing.T) {
 	}
 }
 
+func TestProcessorUsesWholeInterviewAudioAndTimedAnswers(t *testing.T) {
+	end := 1000
+	repository := &interviewProcessorRepository{
+		processorRepository: &processorRepository{
+			found: true, advanceTranscript: true, advanceSuggestions: true,
+			work: ProcessingWork{UserID: "user-1", Stage: "transcribing", AudioAssetID: pointer("asset-1"),
+				InterviewSessionID: pointer("session-1"), DeclaredDuration: 2, PracticeType: "topic"},
+		},
+		turns: []InterviewTurn{{Sequence: 1, AskedAtMS: 0, EndedAtMS: &end}, {Sequence: 2, AskedAtMS: 1000}},
+	}
+	processor := NewProcessor(ProcessingDependencies{
+		Repository: repository, Materializer: &processorMaterializer{},
+		ProbeAudioDuration: func(context.Context, string) (time.Duration, error) { return 1900 * time.Millisecond, nil },
+		Transcribe: func(context.Context, string) (string, error) {
+			t.Fatal("the whole interview should use one timed transcription")
+			return "", nil
+		},
+		TranscribeTimed: func(context.Context, string) (TimedTranscript, error) {
+			return TimedTranscript{Text: "First. Second.", Segments: []TimedSegment{
+				{StartMS: 100, EndMS: 800, Text: " First."},
+				{StartMS: 1100, EndMS: 1700, Text: " Second."},
+			}}, nil
+		},
+		Analyzer: &processorAnalyzer{}, Rewriter: &processorRewriter{}, NewID: func() string { return "shadowing-job" },
+	})
+	if err := processor.Process(context.Background(), ProcessingJob{ID: "job-1", ResourceID: "recording-1"}, discardAnalysisLogger{}); err != nil {
+		t.Fatal(err)
+	}
+	if repository.verifySeconds != 2 || repository.verifyMS != 1900 || repository.transcript != "First. Second." ||
+		repository.answers[1] != "First." || repository.answers[2] != "Second." {
+		t.Fatalf("unexpected interview processing: %#v", repository)
+	}
+}
+
+func TestProcessorRejectsAccountAudioBeyondServerMeasuredLimit(t *testing.T) {
+	repository := &processorRepository{
+		found: true,
+		work:  ProcessingWork{UserID: "user-1", Stage: "transcribing", AudioAssetID: pointer("asset-1")},
+	}
+	processor := NewProcessor(ProcessingDependencies{
+		Repository: repository, Materializer: &processorMaterializer{},
+		ProbeAudioDuration: func(context.Context, string) (time.Duration, error) {
+			return accountMaxDuration + time.Millisecond, nil
+		},
+		Transcribe: func(context.Context, string) (string, error) {
+			t.Fatal("over-limit audio must not be transcribed")
+			return "", nil
+		},
+	})
+	err := processor.Process(context.Background(), ProcessingJob{ID: "job-1", ResourceID: "recording-1"}, discardAnalysisLogger{})
+	if err == nil || !reflect.DeepEqual(repository.steps, []string{"load"}) {
+		t.Fatalf("err=%v steps=%#v", err, repository.steps)
+	}
+}
+
 func TestProcessorStopsWhenLeaseProtectedTransitionLosesRace(t *testing.T) {
 	repository := &processorRepository{
 		found:             true,
@@ -149,13 +228,16 @@ func TestProcessorStopsWhenLeaseProtectedTransitionLosesRace(t *testing.T) {
 	processor := NewProcessor(ProcessingDependencies{
 		Repository:   repository,
 		Materializer: &processorMaterializer{},
-		Transcribe:   func(context.Context, string) (string, error) { return "I went home.", nil },
-		Analyzer:     &processorAnalyzer{}, Rewriter: &processorRewriter{}, NewID: func() string { return "unused" },
+		ProbeAudioDuration: func(context.Context, string) (time.Duration, error) {
+			return time.Second, nil
+		},
+		Transcribe: func(context.Context, string) (string, error) { return "I went home.", nil },
+		Analyzer:   &processorAnalyzer{}, Rewriter: &processorRewriter{}, NewID: func() string { return "unused" },
 	})
 	if err := processor.Process(context.Background(), ProcessingJob{ID: "job-1", ResourceID: "recording-1"}, discardAnalysisLogger{}); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"load", "interests", "transcript"}
+	want := []string{"load", "duration", "interests", "transcript"}
 	if !reflect.DeepEqual(repository.steps, want) {
 		t.Fatalf("steps=%#v", repository.steps)
 	}

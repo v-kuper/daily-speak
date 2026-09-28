@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { deleteAndNavigate, reconcileRecordingSaveRoute, recordingDetailState, startRecordingDetailLifecycle } from "../lib/routeFlows";
+import { deleteAndNavigate, reconcileRecordingSaveRoute, recordingDetailState, saveAndNavigate, startRecordingDetailLifecycle } from "../lib/routeFlows";
 
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { buildTranscriptSegments } from "../lib/transcriptHighlight";
@@ -30,6 +30,7 @@ import {
 import SuggestionCard from "./SuggestionCard";
 import RecordingLoadError from "./RecordingLoadError";
 import ProtectedMediaImage from "./ProtectedMediaImage";
+import InterviewTimeline from "./InterviewTimeline";
 
 const formatPracticeLabel = (value: "free_talk" | "topic" | "photo_description"): string => {
   switch (value) {
@@ -123,6 +124,9 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
     isPlaying,
     playbackPosition,
     backgroundSaveRecordingId,
+    recordingSaveDrafts,
+    recordingSaveStatus,
+    recordingSaveError,
     recordingDeleteStatus,
     recordingDeleteError,
     recordingRetryStatuses,
@@ -178,6 +182,7 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
   const hasAudio = Boolean(audioSrc);
   const isProcessing = recording?.status === "processing";
   const isFailed = recording?.status === "failed";
+  const failedUploadDraft = recordingId?.startsWith("local-") ? recordingSaveDrafts[recordingId] ?? null : null;
   const recordingDuration = recording?.duration ?? 0;
   const playbackPercent = recordingDuration > 0 ? Math.max(0, Math.min(100, (playbackPosition / recordingDuration) * 100)) : 0;
   const hasTranscript = recording ? recording.transcript.trim().length > 0 : false;
@@ -411,6 +416,11 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
     void dispatch(retryRecordingProcessing(recording.id)).unwrap().catch(() => undefined);
   };
 
+  const onRetryRecordingUpload = () => {
+    if (!failedUploadDraft || recordingSaveStatus === "loading") return;
+    void saveAndNavigate(store, router, failedUploadDraft, () => window.location.pathname);
+  };
+
   const renderProcessingRetry = (stage: "transcribing" | "suggestions" | "rewriting") => {
     if (!recording || !isFailed || recording.processingStage !== stage || !retryLabel) {
       return null;
@@ -486,7 +496,18 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
           </div>
         </div>
       )}
-      {isFailed && !retryLabel && (
+      {isFailed && failedUploadDraft && (
+        <div className="processing-retry">
+          <div className="auth-error">
+            {recordingSaveError ?? recording.processingError ?? "The recording could not be uploaded."}
+          </div>
+          <button className="btn btn-secondary" onClick={onRetryRecordingUpload} disabled={recordingSaveStatus === "loading"}>
+            {recordingSaveStatus === "loading" ? "Uploading..." : "Retry upload"}
+          </button>
+          <div className="hint">Keep this tab open until the upload succeeds; this unsaved audio is held in browser memory.</div>
+        </div>
+      )}
+      {isFailed && !failedUploadDraft && !retryLabel && (
         <div className="auth-error">{recording.processingError ?? "Recording processing failed. Try recording again."}</div>
       )}
 
@@ -540,6 +561,8 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
           </div>
         </div>
       </div>
+
+      {recording && <InterviewTimeline turns={recording.interviewTurns} processing={isProcessing} />}
 
       <div className="transcript-section">
         <div className="section-title">Transcript</div>

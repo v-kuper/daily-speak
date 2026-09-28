@@ -9,6 +9,7 @@ import (
 	apidocs "daily-speaking-practice/backend/docs"
 	"daily-speaking-practice/backend/internal/auth"
 	"daily-speaking-practice/backend/internal/guestpreview"
+	"daily-speaking-practice/backend/internal/interview"
 	"daily-speaking-practice/backend/internal/media"
 	"daily-speaking-practice/backend/internal/operations"
 	"daily-speaking-practice/backend/internal/practice"
@@ -30,6 +31,7 @@ type Dependencies struct {
 	RecordingReader       *recording.Reader
 	RecordingRetryService *recording.RetryService
 	GuestPreviewStore     *guestpreview.Store
+	InterviewService      *interview.Service
 	ShadowingStore        *shadowing.Store
 	BrowserCookie         auth.CookieConfig
 	IdentityTokens        auth.TokenConfig
@@ -55,6 +57,7 @@ type Server struct {
 	recordingReader       *recording.Reader
 	recordingRetryService *recording.RetryService
 	guestPreviewStore     *guestpreview.Store
+	interviewService      *interview.Service
 	shadowingStore        *shadowing.Store
 	browserCookie         auth.CookieConfig
 	identityTokens        auth.TokenConfig
@@ -81,7 +84,8 @@ func NewServer(dependencies Dependencies) *Server {
 		recordingCreator: dependencies.RecordingCreator, recordingDeleter: dependencies.RecordingDeleter,
 		recordingReader: dependencies.RecordingReader, recordingRetryService: dependencies.RecordingRetryService,
 		guestPreviewStore: dependencies.GuestPreviewStore, shadowingStore: dependencies.ShadowingStore,
-		browserCookie: dependencies.BrowserCookie, identityTokens: dependencies.IdentityTokens,
+		interviewService: dependencies.InterviewService,
+		browserCookie:    dependencies.BrowserCookie, identityTokens: dependencies.IdentityTokens,
 		identityService: dependencies.IdentityService, cors: dependencies.CORS,
 		mediaService: dependencies.MediaService, mediaSigner: dependencies.MediaSigner,
 		operations: dependencies.Operations, limiter: dependencies.Limiter,

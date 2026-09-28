@@ -15,6 +15,7 @@ func normalizeCreateInput(input CreateUploadInput) CreateUploadInput {
 	input.OwnerPrincipalID = strings.TrimSpace(input.OwnerPrincipalID)
 	input.OwnerKind = strings.ToLower(strings.TrimSpace(input.OwnerKind))
 	input.SessionID = strings.TrimSpace(input.SessionID)
+	input.InterviewSessionID = strings.TrimSpace(input.InterviewSessionID)
 	input.IdempotencyKey = strings.TrimSpace(input.IdempotencyKey)
 	input.Purpose = strings.ToLower(strings.TrimSpace(input.Purpose))
 	input.ContentType = strings.ToLower(strings.TrimSpace(strings.Split(input.ContentType, ";")[0]))
@@ -25,6 +26,9 @@ func normalizeCreateInput(input CreateUploadInput) CreateUploadInput {
 func applyCreateOwnerPolicy(input CreateUploadInput) (CreateUploadInput, error) {
 	switch input.OwnerKind {
 	case "guest":
+		if input.Purpose == PurposeInterviewTurnAudio {
+			return input, nil
+		}
 		if input.Purpose != PurposeRecordingAudio {
 			return CreateUploadInput{}, ErrGuestRestricted
 		}
@@ -47,7 +51,21 @@ func validateCreateInput(input CreateUploadInput) (string, error) {
 		return "", ErrChecksumMismatch
 	}
 	switch input.Purpose {
+	case PurposeInterviewTurnAudio:
+		if input.InterviewSessionID == "" {
+			return "", ErrInvalidRequest
+		}
+		if input.ContentType != "audio/wav" && input.ContentType != "audio/x-wav" && input.ContentType != "audio/vnd.wave" {
+			return "", ErrUnsupportedType
+		}
+		if input.SizeBytes > 24*1024*1024 {
+			return "", ErrPayloadTooLarge
+		}
+		return "wav", nil
 	case PurposeRecordingAudio, PurposeGuestPreviewAudio:
+		if input.InterviewSessionID != "" {
+			return "", ErrInvalidRequest
+		}
 		allowed := map[string]bool{
 			"audio/webm": true, "video/webm": true, "audio/mp4": true,
 			"audio/x-m4a": true, "video/mp4": true, "audio/ogg": true,
@@ -67,6 +85,9 @@ func validateCreateInput(input CreateUploadInput) (string, error) {
 		}
 		return extension, nil
 	case PurposeRecordingPhoto:
+		if input.InterviewSessionID != "" {
+			return "", ErrInvalidRequest
+		}
 		extensions := map[string]string{"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif"}
 		extension := extensions[input.ContentType]
 		if extension == "" {

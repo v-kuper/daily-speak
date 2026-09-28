@@ -150,6 +150,9 @@ func guestPreviewResponse(preview guestPreview) map[string]any {
 	if preview.State == "failed" {
 		response["processingError"] = "Preview processing failed. Please try again."
 	}
+	if preview.InterviewTurns != nil {
+		response["interviewTurns"] = preview.InterviewTurns
+	}
 	return response
 }
 
@@ -159,6 +162,8 @@ func (s *Server) writeGuestPreviewError(w http.ResponseWriter, r *http.Request, 
 		writeV1Error(w, r, http.StatusNotFound, "not_found", "Guest preview or media not found")
 	case errors.Is(err, errGuestPreviewConflict), errors.Is(err, media.ErrConflict):
 		writeV1Error(w, r, http.StatusConflict, "guest_preview_conflict", "This guest already has a preview")
+	case errors.Is(err, guestpreview.ErrInterviewSessionUnavailable):
+		writeV1Error(w, r, http.StatusConflict, "interview_session_conflict", "Interview session is unavailable")
 	case errors.Is(err, errGuestPreviewCapacity):
 		w.Header().Set("Retry-After", fmt.Sprintf("%d", guestPreviewRetryAfter))
 		writeV1Error(w, r, http.StatusServiceUnavailable, "capacity_exhausted", "Guest preview capacity is temporarily exhausted")

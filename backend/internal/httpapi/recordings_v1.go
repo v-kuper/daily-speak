@@ -16,22 +16,23 @@ import (
 // recordingV1Response exposes persisted private media only through owned media
 // references that clients exchange for short-lived download requests.
 type recordingV1Response struct {
-	ID                  string                  `json:"id"`
-	Topic               string                  `json:"topic"`
-	Duration            int                     `json:"duration"`
-	Timestamp           string                  `json:"timestamp"`
-	Status              string                  `json:"status"`
-	Transcript          string                  `json:"transcript"`
-	CorrectedTranscript string                  `json:"correctedTranscript"`
-	Suggestions         []suggestion            `json:"suggestions"`
-	ProcessingStage     *string                 `json:"processingStage"`
-	PracticeType        string                  `json:"practiceType"`
-	PhotoObject         *string                 `json:"photoObject"`
-	ProcessingError     *string                 `json:"processingError"`
-	ShadowingStatus     string                  `json:"shadowingStatus"`
-	ShadowingError      *string                 `json:"shadowingError"`
-	ShadowingUpdatedAt  string                  `json:"shadowingUpdatedAt"`
-	Media               *recordingMediaResponse `json:"media,omitempty"`
+	ID                  string                    `json:"id"`
+	Topic               string                    `json:"topic"`
+	Duration            int                       `json:"duration"`
+	Timestamp           string                    `json:"timestamp"`
+	Status              string                    `json:"status"`
+	Transcript          string                    `json:"transcript"`
+	CorrectedTranscript string                    `json:"correctedTranscript"`
+	Suggestions         []suggestion              `json:"suggestions"`
+	ProcessingStage     *string                   `json:"processingStage"`
+	PracticeType        string                    `json:"practiceType"`
+	PhotoObject         *string                   `json:"photoObject"`
+	ProcessingError     *string                   `json:"processingError"`
+	ShadowingStatus     string                    `json:"shadowingStatus"`
+	ShadowingError      *string                   `json:"shadowingError"`
+	ShadowingUpdatedAt  string                    `json:"shadowingUpdatedAt"`
+	Media               *recordingMediaResponse   `json:"media,omitempty"`
+	InterviewTurns      []recording.InterviewTurn `json:"interviewTurns,omitempty"`
 }
 
 func (s *Server) routeRecordingV1(w http.ResponseWriter, r *http.Request, relativePath string) {
@@ -215,6 +216,7 @@ func recordingV1ResponseFromRecord(record recording.Record) recordingV1Response 
 		ShadowingError:      normalizeOptionalProcessingError(record.ShadowingError),
 		ShadowingUpdatedAt:  record.ShadowingUpdatedAt.UTC().Format(time.RFC3339Nano),
 		Media:               recordingMedia(record.AudioAssetID, record.PhotoAssetID, record.ShadowingAssetID),
+		InterviewTurns:      record.InterviewTurns,
 	}
 }
 

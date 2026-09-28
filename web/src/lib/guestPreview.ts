@@ -3,12 +3,12 @@ import type { PracticeType, Suggestion } from "./data";
 import {
   browserIdentity,
   createAnonymousIdentity,
-  forgetBrowserIdentity,
   restoreBrowserIdentity,
   type IdentityPromotion,
 } from "./identity";
 import { dataURLToBlob, newIdempotencyKey, sha256Blob, uploadMedia } from "./mediaUpload";
 import { parseSuggestions } from "./suggestions";
+import { parseInterviewTurns, type SavedInterviewTurn } from "./interviewTimeline";
 
 const GUEST_SESSION_KEY = "daily-speaking.guest-preview.v1";
 const GUEST_OPERATION_KEY = "daily-speaking.guest-operation.v1";
@@ -28,6 +28,7 @@ export type GuestPreview = {
   timestamp: string;
   practiceType: "free_talk" | "topic";
   transcript: string;
+  interviewTurns: SavedInterviewTurn[];
   corrections: Suggestion[];
   processingError: string | null;
   expiresAt: string;
@@ -39,6 +40,7 @@ export type GuestPreviewDraft = {
   timestamp: string;
   practiceType: PracticeType;
   audioDataUrl: string;
+  interviewSessionId?: string;
 };
 
 export type GuestPreviewPromotion = IdentityPromotion;
@@ -52,6 +54,7 @@ type GuestPreviewOperation = {
     duration: number;
     timestamp: string;
     practiceType: "free_talk" | "topic";
+    interviewSessionId?: string;
   };
 };
 
@@ -164,6 +167,9 @@ const activeGuestIdentity = async (createIfMissing: boolean): Promise<GuestPrevi
   return session;
 };
 
+/** Prepare the same anonymous principal used by media uploads and the final preview. */
+export const ensureGuestPreviewIdentity = (): Promise<GuestPreviewSession> => activeGuestIdentity(true);
+
 const guestFetch = async (path: string, init: RequestInit, createIfMissing = false): Promise<Response> => {
   await activeGuestIdentity(createIfMissing);
   return apiFetch(path, init);
@@ -205,6 +211,7 @@ const parsePreview = (value: unknown): GuestPreview | null => {
     timestamp: candidate.timestamp,
     practiceType,
     transcript: candidate.transcript,
+    interviewTurns: parseInterviewTurns(candidate.interviewTurns),
     corrections: parseSuggestions(candidate.corrections).slice(0, 2),
     processingError: typeof candidate.processingError === "string" ? candidate.processingError : null,
     expiresAt: candidate.expiresAt,
@@ -223,6 +230,7 @@ export const createGuestPreview = async (draft: GuestPreviewDraft): Promise<Gues
   const audioChecksum = await sha256Blob(blob);
   const previousOperation = readGuestOperation();
   const operation: GuestPreviewOperation = previousOperation?.audioChecksum === audioChecksum
+    && previousOperation.previewRequest.interviewSessionId === draft.interviewSessionId
     ? previousOperation
     : {
         audioChecksum,
@@ -233,6 +241,7 @@ export const createGuestPreview = async (draft: GuestPreviewDraft): Promise<Gues
           duration,
           timestamp: draft.timestamp,
           practiceType: draft.practiceType,
+          ...(draft.interviewSessionId ? { interviewSessionId: draft.interviewSessionId } : {}),
         },
       };
   writeGuestOperation(operation);
@@ -272,10 +281,14 @@ export const fetchGuestPreview = async (previewId: string): Promise<GuestPreview
   return preview;
 };
 
-export const startNewGuestPreviewSession = (): void => {
-  forgetBrowserIdentity();
-  writeGuestPreviewSession(null);
+/** Returns false when this anonymous principal has already used its one preview. */
+export const startNewGuestPreviewSession = (): boolean => {
+  if (readGuestPreviewSession()?.previewId) return false;
+  // Reuse the existing anonymous principal. Clearing only the in-memory access
+  // token does not clear the secure refresh cookie, so it cannot create a new
+  // guest entitlement and can also break interview recovery.
   writeGuestOperation(null);
+  return true;
 };
 
 export const guestPreviewPath = (previewId: string): string => `/preview/${encodeURIComponent(previewId)}`;

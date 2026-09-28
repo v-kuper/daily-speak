@@ -38,6 +38,8 @@ import {
   restoreBrowserIdentity,
 } from "../../lib/identity";
 import { dataURLToBlob, MediaUploadError, uploadMedia } from "../../lib/mediaUpload";
+import { finalizeInterview } from "../../lib/interviewSession";
+import { parseInterviewTurns } from "../../lib/interviewTimeline";
 
 export type SpeakMode = "idle" | "readyToRecord" | "recording" | "recorded";
 export type AuthStatus = "idle" | "loading";
@@ -103,8 +105,11 @@ export type AppState = {
   userDataError: string | null;
   recordingSaveStatus: AuthStatus;
   recordingSaveError: string | null;
-  // Local ID -> permanent ID, or null after terminal failure. Used when a route mounts after saving finishes.
-  recordingSaveResults: Record<string, string | null>;
+  // Local ID -> permanent ID. Used when a route mounts after saving finishes.
+  recordingSaveResults: Record<string, string>;
+  // Kept in memory until the server confirms creation, so a transient upload
+  // failure can be retried without recording the audio again.
+  recordingSaveDrafts: Record<string, RecordingSaveDraft>;
   recordingFetchStatuses: Record<string, "loading" | "ready" | "failed">;
   recordingFetchErrors: Record<string, string>;
   recordingFetchFailureKinds: Record<string, "transient" | "terminal">;
@@ -138,6 +143,8 @@ export type RecordingSaveDraft = {
   audioDataUrl: string | null;
   photoDataUrl: string | null;
   photoObject: string | null;
+  interviewSessionId?: string;
+  interviewEndedAtMs?: number;
 };
 
 const today = new Date();
@@ -562,6 +569,7 @@ const parseRecording = (value: unknown): Recording | null => {
     timestamp: timestamp.toISOString(),
     status,
     transcript,
+    interviewTurns: parseInterviewTurns(candidate.interviewTurns),
     correctedTranscript,
     suggestions,
     processingStage,
@@ -1101,6 +1109,7 @@ export const saveRecording = createAsyncThunk<
           timestamp: recordingDraft.timestamp,
           practiceType: recordingDraft.practiceType,
           audioAssetId,
+          ...(draft?.interviewSessionId ? { interviewSessionId: draft.interviewSessionId } : {}),
           photoAssetId,
           photoObject: recordingDraft.photoObject,
         }),
@@ -1125,6 +1134,18 @@ export const saveRecording = createAsyncThunk<
       const recording = parseRecording(payload?.recording);
       if (!recording) {
         return rejectWithValue("Invalid recording payload from server.");
+      }
+      if (draft?.interviewSessionId) {
+        try {
+          await finalizeInterview(
+            draft.interviewSessionId,
+            Math.max(0, Math.floor(draft.interviewEndedAtMs ?? normalizedDuration * 1000)),
+            { recordingId: recording.id },
+            `interview:${draft.interviewSessionId}:finalize:${operationID}`,
+          );
+        } catch {
+          return rejectWithValue("Recording saved, but the interview timeline could not be attached. Retry saving to finish it.");
+        }
       }
       const quota = parseRecordingQuota(payload?.quota);
 
@@ -1456,6 +1477,7 @@ const initialState: AppState = {
   recordingSaveStatus: "idle",
   recordingSaveError: null,
   recordingSaveResults: {},
+  recordingSaveDrafts: {},
   recordingFetchStatuses: {},
   recordingFetchErrors: {},
   recordingFetchFailureKinds: {},
@@ -1551,7 +1573,10 @@ const applySavedRecording = (state: AppState, recording: Recording, localRecordi
     ...state.recordings.filter((item) => item.id !== recording.id && item.id !== backgroundSaveRecordingId)
   ];
   if (isBackgroundSave) {
-    if (backgroundSaveRecordingId) state.recordingSaveResults[backgroundSaveRecordingId] = recording.id;
+    if (backgroundSaveRecordingId) {
+      state.recordingSaveResults[backgroundSaveRecordingId] = recording.id;
+      delete state.recordingSaveDrafts[backgroundSaveRecordingId];
+    }
     if (state.pendingAuthSaveDraft?.localRecordingId === localRecordingId) {
       state.pendingAuthSaveDraft = null;
       state.pendingSaveAfterAuth = false;
@@ -1683,6 +1708,7 @@ const completeAuthSuccess = (
   state.recordingFetchErrors = {};
   state.recordingFetchFailureKinds = {};
   state.recordingSaveResults = {};
+  state.recordingSaveDrafts = {};
   applySubscriptionState(state, {
     isSubscriber,
     subscriptionExpiresAt: null,
@@ -1723,6 +1749,7 @@ const clearAuthenticatedState = (state: AppState): void => {
   state.recordingFetchErrors = {};
   state.recordingFetchFailureKinds = {};
   state.recordingSaveResults = {};
+  state.recordingSaveDrafts = {};
   state.userDataStatus = "idle";
   state.userDataError = null;
   state.recordingSaveStatus = "idle";
@@ -1748,6 +1775,10 @@ const clearAuthenticatedState = (state: AppState): void => {
 
 // Session expiry is different from an intentional logout: keep unsent work for re-authentication.
 const expireSessionKeepingDraft = (state: AppState): void => {
+  const retryDraft = state.pendingAuthSaveDraft
+    ?? (state.currentRecordingId ? state.recordingSaveDrafts[state.currentRecordingId] : null)
+    ?? Object.values(state.recordingSaveDrafts)[0]
+    ?? null;
   const draft = {
     speakState: state.speakState,
     selectedTopic: state.selectedTopic,
@@ -1758,8 +1789,8 @@ const expireSessionKeepingDraft = (state: AppState): void => {
     pendingPhotoObjectDraft: state.pendingPhotoObjectDraft,
     recordingInputError: state.recordingInputError,
     pendingPhotoError: state.pendingPhotoError,
-    pendingSaveAfterAuth: state.pendingSaveAfterAuth,
-    pendingAuthSaveDraft: state.pendingAuthSaveDraft,
+    pendingSaveAfterAuth: state.pendingSaveAfterAuth || retryDraft !== null,
+    pendingAuthSaveDraft: retryDraft,
     recordingSaveError: state.recordingSaveError,
     authEmailDraft: state.authEmailDraft || state.userEmail || "",
   };
@@ -1825,7 +1856,8 @@ const appSlice = createSlice({
       state.recordingDeleteError = null;
     },
     finishFailedRecordingSave: (state, action: PayloadAction<string>) => {
-      state.recordingSaveResults[action.payload] = null;
+      // Keep the local route and its draft available for an explicit retry.
+      delete state.recordingSaveResults[action.payload];
     },
     showBackgroundRecordingSave: (state, action: PayloadAction<RecordingSaveDraft>) => {
       const draft = action.payload;
@@ -1843,6 +1875,7 @@ const appSlice = createSlice({
         timestamp,
         status: "processing",
         transcript: "",
+        interviewTurns: [],
         correctedTranscript: "",
         suggestions: [],
         processingStage: null,
@@ -1861,6 +1894,7 @@ const appSlice = createSlice({
         recording,
         ...state.recordings.filter((item) => item.id !== localRecordingId && item.id !== state.backgroundSaveRecordingId)
       ];
+      state.recordingSaveDrafts[localRecordingId] = { ...draft, localRecordingId };
       state.currentRecordingId = localRecordingId;
       state.backgroundSaveRecordingId = localRecordingId;
       state.calendarMonth = recordingDate.getMonth();
@@ -1964,7 +1998,7 @@ const appSlice = createSlice({
       state.selectedTopic = action.payload;
       state.speakState = "readyToRecord";
       state.showQuestions = false;
-      state.showWords = false;
+      state.showWords = true;
       state.showAddTopicInput = false;
       state.customTopicDraft = "";
       state.recordingSaveError = null;

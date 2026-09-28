@@ -20,6 +20,28 @@ type processorStore struct {
 	active      bool
 }
 
+type interviewProcessorStore struct {
+	*processorStore
+	turns   []recording.InterviewTurn
+	answers map[int]string
+	sealMS  int
+}
+
+func (s *interviewProcessorStore) SealInterviewLastTurn(_ context.Context, _ Job, _ string, milliseconds int) error {
+	s.steps = append(s.steps, "seal")
+	s.sealMS = milliseconds
+	return nil
+}
+func (s *interviewProcessorStore) LoadInterviewTurns(context.Context, string) ([]recording.InterviewTurn, error) {
+	s.steps = append(s.steps, "turns")
+	return s.turns, nil
+}
+func (s *interviewProcessorStore) SaveInterviewTranscript(_ context.Context, _ Job, transcript string, duration int, _ string, answers map[int]string) (bool, error) {
+	s.steps = append(s.steps, "interview_transcript")
+	s.transcript, s.duration, s.answers = transcript, duration, answers
+	return s.advance, nil
+}
+
 func (s *processorStore) Claim(context.Context, Job) (ProcessingWork, bool, error) {
 	s.steps = append(s.steps, "claim")
 	return s.work, s.found, nil
@@ -96,5 +118,37 @@ func TestProcessorResumesPersistedTranscriptWithoutRetranscribing(t *testing.T) 
 	want := []string{"claim", "active", "complete"}
 	if !reflect.DeepEqual(store.steps, want) {
 		t.Fatalf("steps=%#v", store.steps)
+	}
+}
+
+func TestGuestInterviewUsesWholeAudioAndKeepsAnswerTimeline(t *testing.T) {
+	end := 1000
+	sessionID := "session-1"
+	store := &interviewProcessorStore{
+		processorStore: &processorStore{work: ProcessingWork{AudioAssetID: "asset-1", DeclaredDuration: 2,
+			InterviewSessionID: &sessionID}, found: true, advance: true, active: true},
+		turns: []recording.InterviewTurn{{Sequence: 1, AskedAtMS: 0, EndedAtMS: &end},
+			{Sequence: 2, AskedAtMS: 1000}},
+	}
+	processor := NewProcessor(ProcessorDependencies{
+		Store: store, Materializer: &processorMaterializer{},
+		ProbeAudioDuration: func(context.Context, string) (time.Duration, error) { return 2 * time.Second, nil },
+		Transcribe: func(context.Context, string) (string, error) {
+			t.Fatal("timed full-file transcription should be used")
+			return "", nil
+		},
+		TranscribeTimed: func(context.Context, string) (recording.TimedTranscript, error) {
+			return recording.TimedTranscript{Text: "First. Second.", Segments: []recording.TimedSegment{
+				{StartMS: 100, EndMS: 800, Text: " First."},
+				{StartMS: 1100, EndMS: 1700, Text: " Second."},
+			}}, nil
+		},
+		Analyzer: &previewAnalyzer{},
+	})
+	if err := processor.Process(context.Background(), Job{ID: "job-1", ResourceID: "preview-1"}); err != nil {
+		t.Fatal(err)
+	}
+	if store.sealMS != 2000 || store.transcript != "First. Second." || store.answers[1] != "First." || store.answers[2] != "Second." {
+		t.Fatalf("unexpected guest timeline: %#v", store)
 	}
 }

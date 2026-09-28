@@ -12,6 +12,7 @@ import (
 type Config struct {
 	RecordingConcurrency    int
 	GuestPreviewConcurrency int
+	InterviewConcurrency    int
 	ShadowingConcurrency    int
 	CleanupConcurrency      int
 	PollInterval            time.Duration
@@ -27,6 +28,7 @@ func ConfigFromEnv() (Config, error) {
 	config := Config{
 		RecordingConcurrency:    1,
 		GuestPreviewConcurrency: 1,
+		InterviewConcurrency:    2,
 		ShadowingConcurrency:    2,
 		CleanupConcurrency:      2,
 		PollInterval:            time.Second,
@@ -42,6 +44,9 @@ func ConfigFromEnv() (Config, error) {
 		return Config{}, err
 	}
 	if config.GuestPreviewConcurrency, err = positiveEnvInt("WORKER_GUEST_PREVIEW_CONCURRENCY", config.GuestPreviewConcurrency); err != nil {
+		return Config{}, err
+	}
+	if config.InterviewConcurrency, err = positiveEnvInt("WORKER_INTERVIEW_CONCURRENCY", config.InterviewConcurrency); err != nil {
 		return Config{}, err
 	}
 	if config.ShadowingConcurrency, err = positiveEnvInt("WORKER_SHADOWING_CONCURRENCY", config.ShadowingConcurrency); err != nil {

@@ -146,6 +146,8 @@ test("guest recording uses the v1 identity, multipart media contract, and opaque
   });
   assert.equal(result.id, "preview-123");
   assert.equal(guest.readGuestPreviewSession().previewId, "preview-123");
+  assert.equal(guest.startNewGuestPreviewSession(), false);
+  assert.equal(guest.readGuestPreviewSession().previewId, "preview-123");
   assert.ok(requests.some(({ url }) => url === "https://storage.example.test/opaque-upload?signature=exact"));
   assert.ok(requests.filter(({ url }) => url.startsWith("https://api.example.test")).every(({ init }) => init.credentials === "include"));
 });

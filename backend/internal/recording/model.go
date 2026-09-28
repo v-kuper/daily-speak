@@ -64,6 +64,42 @@ type Record struct {
 	AudioAssetID        *string
 	PhotoAssetID        *string
 	ShadowingAssetID    *string
+	InterviewTurns      []InterviewTurn
+}
+
+// InterviewTurn is an optional timeline attached to a saved interview. The
+// ordinary Transcript field always contains learner speech only.
+type InterviewTurn struct {
+	Sequence        int     `json:"sequence"`
+	Question        string  `json:"question"`
+	AskedAtMS       int     `json:"askedAtMs"`
+	EndedAtMS       *int    `json:"endedAtMs,omitempty"`
+	AnswerText      string  `json:"answerText"`
+	AnswerSource    string  `json:"answerSource"`
+	AnswerAlignment string  `json:"answerAlignment,omitempty"`
+	FinalText       *string `json:"-"`
+	Provisional     *string `json:"-"`
+}
+
+func (turn *InterviewTurn) ResolveAnswer() {
+	if turn.FinalText != nil {
+		turn.AnswerText = strings.TrimSpace(*turn.FinalText)
+		if turn.AnswerText == "" {
+			turn.AnswerSource = "none"
+			turn.AnswerAlignment = ""
+		} else {
+			turn.AnswerSource = "final"
+			turn.AnswerAlignment = "approximate"
+		}
+	} else if turn.Provisional != nil && strings.TrimSpace(*turn.Provisional) != "" {
+		turn.AnswerText = strings.TrimSpace(*turn.Provisional)
+		turn.AnswerSource = "provisional"
+		turn.AnswerAlignment = ""
+	} else {
+		turn.AnswerText = ""
+		turn.AnswerSource = "none"
+		turn.AnswerAlignment = ""
+	}
 }
 
 func NormalizeSuggestions(input []byte, limit int) []Suggestion {

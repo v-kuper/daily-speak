@@ -1,6 +1,6 @@
 import { apiFetch, readApiJSON, resolveApiURL } from "./apiClient";
 
-export type MediaPurpose = "recording_audio" | "recording_photo";
+export type MediaPurpose = "recording_audio" | "recording_photo" | "interview_turn_audio";
 
 export type MediaRequest = (path: string, init: RequestInit) => Promise<Response>;
 
@@ -52,6 +52,7 @@ export type UploadMediaInput = {
   blob: Blob;
   purpose: MediaPurpose;
   idempotencyKey: string;
+  interviewSessionId?: string;
   request?: MediaRequest;
 };
 
@@ -59,6 +60,7 @@ export const uploadMedia = async ({
   blob,
   purpose,
   idempotencyKey,
+  interviewSessionId,
   request = apiFetch,
 }: UploadMediaInput): Promise<string> => {
   if (blob.size <= 0) throw new MediaUploadError("Media is empty.", "invalid_media");
@@ -71,6 +73,7 @@ export const uploadMedia = async ({
     },
     body: JSON.stringify({
       purpose,
+      ...(interviewSessionId ? { interviewSessionId } : {}),
       contentType: blob.type,
       sizeBytes: blob.size,
       checksum: { algorithm: "sha256", value: checksum },

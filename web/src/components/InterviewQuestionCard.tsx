@@ -1,90 +1,59 @@
 "use client";
 
-import { useEffect, useId, useMemo, useState } from "react";
-import { buildInterviewQuestions, moveInterviewQuestion } from "../lib/interviewGuidance";
+import type { InterviewTurn } from "../lib/interviewSession";
+import { formatTime } from "../lib/utils";
 
 type InterviewQuestionCardProps = {
-  topic: string;
-  followUps: string[];
+  turns: InterviewTurn[];
+  canAdvance: boolean;
+  onNext: () => void;
+  liveTranscriptionAvailable: boolean;
 };
 
-export default function InterviewQuestionCard({ topic, followUps }: InterviewQuestionCardProps) {
-  const questions = useMemo(() => buildInterviewQuestions(topic, followUps), [followUps, topic]);
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const hintId = useId();
-
-  useEffect(() => {
-    setCurrentIndex(0);
-  }, [topic]);
-
-  useEffect(() => {
-    if (currentIndex >= questions.length) {
-      setCurrentIndex(Math.max(0, questions.length - 1));
-    }
-  }, [currentIndex, questions.length]);
-
-  if (questions.length === 0) {
-    return null;
-  }
-
-  const isFirst = currentIndex === 0;
-  const isComplete = currentIndex === questions.length - 1;
-  const progress = ((currentIndex + 1) / questions.length) * 100;
-  const move = (direction: -1 | 1) => {
-    setCurrentIndex((index) => moveInterviewQuestion(index, direction, questions.length));
-  };
+export default function InterviewQuestionCard({
+  turns,
+  canAdvance,
+  onNext,
+  liveTranscriptionAvailable,
+}: InterviewQuestionCardProps) {
+  const current = turns[turns.length - 1];
+  if (!current) return null;
 
   return (
     <div className="interview-question-panel">
-      <button
-        className="interview-question-card"
-        type="button"
-        onClick={() => move(1)}
-        aria-describedby={hintId}
-      >
-        <span aria-live="polite">{questions[currentIndex]}</span>
+      <div className="interview-question-card" aria-live="polite">
+        <span className="interview-question-count">Question {current.seq}</span>
+        <span>{current.question}</span>
+      </div>
+      <div className="interview-question-hint">
+        {canAdvance
+          ? "Answer when you are ready, then continue to the next question."
+          : "Preparing another question. You can keep speaking or finish the recording."}
+      </div>
+      <button className="btn btn-secondary interview-next-btn" type="button" onClick={onNext} disabled={!canAdvance}>
+        Next question →
       </button>
 
-      <div id={hintId} className="interview-question-hint">
-        {isComplete
-          ? "Interview complete — continue speaking or stop the recording."
-          : "Tap the question when you are ready for the next one."}
-      </div>
-
-      <div className="interview-question-navigation">
-        <button
-          className="interview-question-arrow"
-          type="button"
-          onClick={() => move(-1)}
-          disabled={isFirst}
-          aria-label="Previous interview question"
-        >
-          ←
-        </button>
-        <span className="interview-question-count" aria-live="polite">
-          {isComplete ? "Complete · " : ""}
-          {currentIndex + 1}/{questions.length}
-        </span>
-        <button
-          className="interview-question-arrow"
-          type="button"
-          onClick={() => move(1)}
-          disabled={isComplete}
-          aria-label="Next interview question"
-        >
-          →
-        </button>
-      </div>
-
-      <div
-        className="interview-question-progress"
-        role="progressbar"
-        aria-label="Interview progress"
-        aria-valuemin={1}
-        aria-valuemax={questions.length}
-        aria-valuenow={currentIndex + 1}
-      >
-        <div className="interview-question-progress-fill" style={{ width: `${progress}%` }} />
+      <div className="interview-timeline">
+        <div className="section-title">Interview timeline</div>
+        {!liveTranscriptionAvailable && (
+          <div className="notice">Live transcription is unavailable in this browser. Your complete audio will still be analyzed after saving.</div>
+        )}
+        <ol className="interview-timeline-list">
+          {turns.map((turn) => (
+            <li key={turn.seq} className="interview-timeline-item">
+              <div className="interview-timeline-time">{formatTime(Math.floor(turn.askedAtMs / 1000))}</div>
+              <div className="interview-timeline-question">{turn.question}</div>
+              {turn.provisionalTranscript ? (
+                <div className="interview-timeline-answer">{turn.provisionalTranscript}</div>
+              ) : turn.endedAtMs !== null && liveTranscriptionAvailable ? (
+                <div className="interview-timeline-pending">
+                  {turn.transcriptStatus === "failed" ? "Live transcription failed. The complete recording will still be checked after saving." : "Transcribing answer…"}
+                </div>
+              ) : null}
+            </li>
+          ))}
+        </ol>
       </div>
     </div>
   );

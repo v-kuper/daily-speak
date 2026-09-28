@@ -112,6 +112,20 @@ func (s *Store) Create(ctx context.Context, principalID, idempotencyKey, request
 	if result.RowsAffected() != 1 {
 		return Preview{}, false, ErrConflict
 	}
+	if input.InterviewSessionID != nil {
+		result, err := tx.Exec(ctx, `
+			UPDATE interview_sessions
+			SET guest_preview_id = $3, status = 'finalizing', updated_at = NOW()
+			WHERE id = $1 AND owner_principal_id = $2 AND user_id IS NULL
+			  AND status = 'recording' AND recording_id IS NULL AND guest_preview_id IS NULL`,
+			*input.InterviewSessionID, principalID, previewID)
+		if err != nil {
+			return Preview{}, false, err
+		}
+		if result.RowsAffected() != 1 {
+			return Preview{}, false, ErrInterviewSessionUnavailable
+		}
+	}
 	if err := workqueue.Enqueue(ctx, tx, workqueue.NewJob{ID: jobID, Kind: workqueue.KindGuestPreview, ResourceID: previewID, IdempotencyKey: "guest.preview:" + previewID, MaxAttempts: 3}); err != nil {
 		return Preview{}, false, err
 	}
@@ -164,7 +178,36 @@ func (s *Store) Find(ctx context.Context, principalID, previewID, idempotencyKey
 		return Preview{}, err
 	}
 	preview.PreviewCorrections = recording.NormalizeSuggestions(corrections, 2)
+	preview.InterviewTurns, err = s.interviewTurns(ctx, preview.ID)
+	if err != nil {
+		return Preview{}, err
+	}
 	return preview, nil
+}
+
+func (s *Store) interviewTurns(ctx context.Context, previewID string) ([]recording.InterviewTurn, error) {
+	rows, err := s.db.Query(ctx, `
+		SELECT t.seq, t.question, t.asked_at_ms, t.ended_at_ms,
+		       t.provisional_transcript, t.final_transcript
+		FROM interview_turns t
+		JOIN interview_sessions session ON session.id = t.session_id
+		WHERE session.guest_preview_id = $1
+		ORDER BY t.seq`, previewID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var turns []recording.InterviewTurn
+	for rows.Next() {
+		var turn recording.InterviewTurn
+		if err := rows.Scan(&turn.Sequence, &turn.Question, &turn.AskedAtMS,
+			&turn.EndedAtMS, &turn.Provisional, &turn.FinalText); err != nil {
+			return nil, err
+		}
+		turn.ResolveAnswer()
+		turns = append(turns, turn)
+	}
+	return turns, rows.Err()
 }
 
 func (s *Store) Expire(ctx context.Context) error {
@@ -177,7 +220,9 @@ func (s *Store) Expire(ctx context.Context) error {
 		SELECT p.id, p.audio_asset_id, p.preview_job_id FROM guest_previews p
 		JOIN media_assets a ON a.id = p.audio_asset_id
 		WHERE p.state <> 'promoted' AND p.expires_at <= NOW()
-		  AND a.state IN ('ready', 'failed') AND a.deleted_at IS NULL
+		  AND ((a.state IN ('ready', 'failed') AND a.deleted_at IS NULL)
+		       OR EXISTS (SELECT 1 FROM interview_sessions session
+		                  WHERE session.guest_preview_id = p.id AND session.recording_id IS NULL))
 		ORDER BY p.expires_at ASC FOR UPDATE OF p SKIP LOCKED LIMIT 100`)
 	if err != nil {
 		return err
@@ -199,6 +244,9 @@ func (s *Store) Expire(ctx context.Context) error {
 	}
 	for _, item := range expired {
 		if _, err := tx.Exec(ctx, `UPDATE guest_previews SET state = 'failed', processing_error = 'Guest preview expired', updated_at = NOW() WHERE id = $1 AND state <> 'promoted' AND expires_at <= NOW()`, item.id); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM interview_sessions WHERE guest_preview_id = $1 AND recording_id IS NULL`, item.id); err != nil {
 			return err
 		}
 		result, err := tx.Exec(ctx, `UPDATE media_assets SET state = 'deleting', updated_at = NOW() WHERE id = $1 AND state IN ('ready', 'failed') AND deleted_at IS NULL`, item.assetID)

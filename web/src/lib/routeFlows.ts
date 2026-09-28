@@ -75,7 +75,7 @@ export async function saveAndNavigate(
   if (!draft.localRecordingId || store.getState().app.recordingSaveStatus === "loading") return;
   const localPath = recordingPath(draft.localRecordingId);
   store.dispatch(showBackgroundRecordingSave(draft));
-  router.push(localPath);
+  if (currentPath() !== localPath) router.push(localPath);
   try {
     await store.dispatch(saveRecording(draft)).unwrap();
   } catch {

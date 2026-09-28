@@ -9,6 +9,8 @@ import (
 	"daily-speaking-practice/backend/internal/background"
 	"daily-speaking-practice/backend/internal/db"
 	"daily-speaking-practice/backend/internal/guestpreview"
+	"daily-speaking-practice/backend/internal/interview"
+	interviewollama "daily-speaking-practice/backend/internal/interview/ollamaadapter"
 	"daily-speaking-practice/backend/internal/media"
 	"daily-speaking-practice/backend/internal/recording"
 	recordingollama "daily-speaking-practice/backend/internal/recording/ollamaadapter"
@@ -21,15 +23,16 @@ import (
 )
 
 type WorkerConfig struct {
-	DB                 *db.DB
-	MediaStore         storage.Store
-	MediaBucket        string
-	MediaPartSize      int64
-	MediaPresignTTL    time.Duration
-	AIClient           ai.ChatClient
-	Synthesizer        shadowing.Synthesizer
-	TranscribeAudio    func(context.Context, string) (string, error)
-	ProbeAudioDuration func(context.Context, string) (time.Duration, error)
+	DB                   *db.DB
+	MediaStore           storage.Store
+	MediaBucket          string
+	MediaPartSize        int64
+	MediaPresignTTL      time.Duration
+	AIClient             ai.ChatClient
+	Synthesizer          shadowing.Synthesizer
+	TranscribeAudio      func(context.Context, string) (string, error)
+	TranscribeTimedAudio func(context.Context, string) (recording.TimedTranscript, error)
+	ProbeAudioDuration   func(context.Context, string) (time.Duration, error)
 }
 
 func NewWorker(config WorkerConfig) *background.Runtime {
@@ -52,6 +55,22 @@ func NewWorker(config WorkerConfig) *background.Runtime {
 		}
 		return transcript, err
 	}
+	timedTranscribe := config.TranscribeTimedAudio
+	if timedTranscribe == nil && config.TranscribeAudio == nil {
+		timedTranscribe = func(ctx context.Context, path string) (recording.TimedTranscript, error) {
+			result, err := transcription.TranscribeTimedAudioWithLocalWhisper(ctx, path)
+			if err != nil {
+				return recording.TimedTranscript{}, err
+			}
+			segments := make([]recording.TimedSegment, 0, len(result.Segments))
+			for _, segment := range result.Segments {
+				segments = append(segments, recording.TimedSegment{
+					StartMS: segment.StartMS, EndMS: segment.EndMS, Text: segment.Text,
+				})
+			}
+			return recording.TimedTranscript{Text: result.Text, Segments: segments}, nil
+		}
+	}
 	probe := config.ProbeAudioDuration
 	if probe == nil {
 		probe = media.ProbeAudioDuration
@@ -68,13 +87,18 @@ func NewWorker(config WorkerConfig) *background.Runtime {
 	recordingProcessor := recording.NewProcessor(recording.ProcessingDependencies{
 		Repository: recordingRepository, Materializer: materializer,
 		ProbeAudioDuration: probe,
-		Transcribe:         transcribeForProcessing, Analyzer: analysis, Rewriter: analysis, NewID: uuid.NewString,
+		Transcribe:         transcribeForProcessing, TranscribeTimed: timedTranscribe,
+		Analyzer: analysis, Rewriter: analysis, NewID: uuid.NewString,
 	})
 	guestStore := guestpreview.NewStore(config.DB, guestpreview.QueueCapacityFromEnv())
 	guestProcessor := guestpreview.NewProcessor(guestpreview.ProcessorDependencies{
 		Store: guestStore, Materializer: materializer, ProbeAudioDuration: probe,
-		Transcribe: transcribeForProcessing, Analyzer: analysis,
+		Transcribe: transcribeForProcessing, TranscribeTimed: timedTranscribe, Analyzer: analysis,
 	})
+	interviewRepository := interview.NewSQLRepository(config.DB)
+	interviewProcessor := interview.NewProcessor(interviewRepository, materializer,
+		interview.TranscribeFunc(transcribeForProcessing),
+		interview.NewLocalGenerator(interviewollama.New(aiClient)))
 	shadowStore := shadowing.NewStore(config.DB)
 	shadowProcessor := shadowing.NewProcessor(shadowing.ProcessorDependencies{
 		Store: shadowStore, Synthesizer: synthesizer, MediaStore: config.MediaStore,
@@ -85,6 +109,7 @@ func NewWorker(config WorkerConfig) *background.Runtime {
 		DB: config.DB, JobStore: workqueue.NewStore(config.DB),
 		RecordingProcessor: recordingProcessor, RecordingRepository: recordingRepository,
 		GuestPreviewProcessor: guestProcessor, GuestPreviewStore: guestStore,
+		InterviewProcessor: interviewProcessor, InterviewStore: interviewRepository,
 		ShadowingProcessor: shadowProcessor, ShadowingStore: shadowStore, MediaCleanup: cleanup,
 	})
 }

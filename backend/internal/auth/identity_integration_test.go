@@ -73,6 +73,22 @@ func TestMobileIdentityLifecycle(t *testing.T) {
 		readyPreviewJobID, strings.Repeat("b", 64), now.Add(config.withDefaults().GuestTTL)); err != nil {
 		t.Fatalf("insert ready guest preview: %v", err)
 	}
+	interviewSessionID := uuid.NewString()
+	if _, err := database.Exec(ctx, `
+		INSERT INTO interview_sessions
+		  (id, owner_principal_id, create_key, request_digest, topic, opening_question, status, max_duration_seconds,
+		   guest_preview_id)
+		VALUES ($1, $2, 'integration-interview', $3, 'First impression', 'How did it go?', 'finalized', 60, $4)`,
+		interviewSessionID, guest.Identity.PrincipalID, strings.Repeat("c", 64), readyPreviewID); err != nil {
+		t.Fatalf("insert guest interview timeline: %v", err)
+	}
+	if _, err := database.Exec(ctx, `
+		INSERT INTO interview_turns
+		  (id, session_id, seq, question, asked_at_ms, ended_at_ms, final_transcript)
+		VALUES ($1, $2, 1, 'How did it go?', 0, 12000, 'A reusable guest transcript.')`,
+		uuid.NewString(), interviewSessionID); err != nil {
+		t.Fatalf("insert guest interview turn: %v", err)
+	}
 
 	email := fmt.Sprintf("mobile-%s@example.com", uuid.NewString())
 	credentials, err := ValidateCredentials(email, "password123")
@@ -129,6 +145,13 @@ func TestMobileIdentityLifecycle(t *testing.T) {
 		&recordingAudioAssetID, &recordingJobID,
 	); err != nil || recordingOwner != registered.Identity.PrincipalID || recordingTranscript != "A reusable guest transcript." || recordingStage != "suggestions" || recordingSuggestions != "[]" || recordingAudioAssetID != guestAssetID || recordingJobID != promotedJobID {
 		t.Fatalf("promoted ready recording owner=%q transcript=%q stage=%q suggestions=%q audio=%q job=%q err=%v", recordingOwner, recordingTranscript, recordingStage, recordingSuggestions, recordingAudioAssetID, recordingJobID, err)
+	}
+	var timelineRecordingID, timelineUserID string
+	if err := database.QueryRow(ctx, `
+		SELECT recording_id, user_id FROM interview_sessions WHERE id = $1`,
+		interviewSessionID).Scan(&timelineRecordingID, &timelineUserID); err != nil ||
+		timelineRecordingID != readyPreviewID || timelineUserID != registered.Identity.PrincipalID {
+		t.Fatalf("promoted interview timeline recording=%q user=%q err=%v", timelineRecordingID, timelineUserID, err)
 	}
 	var guestJobState string
 	if err := database.QueryRow(ctx, `SELECT state FROM processing_jobs WHERE id = $1`, readyPreviewJobID).Scan(&guestJobState); err != nil || guestJobState != "cancelled" {

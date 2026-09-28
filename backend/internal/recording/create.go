@@ -13,18 +13,20 @@ import (
 )
 
 var (
-	ErrCreateMediaNotFound       = errors.New("recording media not found")
-	ErrCreateIdempotencyConflict = errors.New("idempotency key was already used with a different request")
+	ErrCreateMediaNotFound         = errors.New("recording media not found")
+	ErrCreateIdempotencyConflict   = errors.New("idempotency key was already used with a different request")
+	ErrInterviewSessionUnavailable = errors.New("interview session is unavailable")
 )
 
 type CreateInput struct {
-	Topic        string
-	Duration     int
-	Timestamp    time.Time
-	PracticeType string
-	AudioAssetID string
-	PhotoAssetID *string
-	PhotoObject  *string
+	Topic              string
+	Duration           int
+	Timestamp          time.Time
+	PracticeType       string
+	AudioAssetID       string
+	PhotoAssetID       *string
+	PhotoObject        *string
+	InterviewSessionID *string
 }
 
 type Created struct {
@@ -45,6 +47,7 @@ type Created struct {
 	ShadowingUpdatedAt  time.Time
 	AudioAssetID        string
 	PhotoAssetID        *string
+	InterviewSessionID  *string
 }
 
 type CreateCommand struct {
@@ -63,6 +66,10 @@ type CreateTransaction interface {
 	Insert(context.Context, CreateCommand) (Created, error)
 	AttachMedia(context.Context, string, []string) error
 	EnqueueProcessing(context.Context, CreateCommand) error
+}
+
+type InterviewCreateTransaction interface {
+	LinkInterview(context.Context, string, string, string, string) error
 }
 
 type CreateUnitOfWork interface {
@@ -126,6 +133,16 @@ func (c *Creator) Create(ctx context.Context, principalID, userID, idempotencyKe
 		if err != nil {
 			return err
 		}
+		if input.InterviewSessionID != nil {
+			interviewTx, ok := tx.(InterviewCreateTransaction)
+			if !ok {
+				return errors.New("interview recording transaction is not configured")
+			}
+			if err := interviewTx.LinkInterview(ctx, *input.InterviewSessionID, principalID, userID, recordingID); err != nil {
+				return err
+			}
+			created.InterviewSessionID = input.InterviewSessionID
+		}
 		if err := tx.AttachMedia(ctx, principalID, assetIDs); err != nil {
 			return err
 		}
@@ -185,6 +202,13 @@ func NormalizeCreateInput(input CreateInput) (CreateInput, error) {
 	}
 	if input.PracticeType != "photo_description" {
 		input.PhotoObject = nil
+	}
+	if input.InterviewSessionID != nil {
+		value := strings.TrimSpace(*input.InterviewSessionID)
+		if value == "" || len(value) > 200 || input.PracticeType != "topic" {
+			return CreateInput{}, &ValidationError{Message: "interviewSessionId requires a topic interview"}
+		}
+		input.InterviewSessionID = &value
 	}
 	return input, nil
 }
@@ -257,7 +281,8 @@ func createdMatches(created Created, input CreateInput) bool {
 		created.PracticeType == input.PracticeType &&
 		created.AudioAssetID == input.AudioAssetID &&
 		equalOptionalString(created.PhotoAssetID, input.PhotoAssetID) &&
-		equalOptionalString(created.PhotoObject, input.PhotoObject)
+		equalOptionalString(created.PhotoObject, input.PhotoObject) &&
+		equalOptionalString(created.InterviewSessionID, input.InterviewSessionID)
 }
 
 func equalOptionalString(left *string, right *string) bool {

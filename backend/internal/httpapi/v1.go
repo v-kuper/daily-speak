@@ -58,6 +58,9 @@ func (s *Server) dispatchV1(w http.ResponseWriter, r *http.Request) {
 	if s.routeGuestPreviewV1(w, r, path) {
 		return
 	}
+	if s.routeInterviewV1(w, r, path) {
+		return
+	}
 	if s.routeMediaV1(w, r, path) {
 		return
 	}

@@ -62,6 +62,7 @@ Recommended first alerts:
 | acquired DB connections / max | > 70% | > 85% |
 | oldest `recording.process` job | > 10 min | > 30 min |
 | oldest `guest.preview` job | > 2 min | > 10 min |
+| oldest `interview.process` job | > 2 min | > 10 min |
 | terminal/failed jobs | any sustained increase | page when user work is affected |
 
 External Ollama, Whisper, and Cartesia outcome/duration counters are the next
@@ -78,12 +79,16 @@ background processing. Scale worker pools independently by job kind:
 2. Add recording workers when `recording.process` age rises. Increase
    `WORKER_RECORDING_CONCURRENCY` only within Whisper/Ollama CPU, memory, and
    provider limits.
-3. Scale guest preview and shadowing pools independently; do not let a Cartesia
+3. Scale adaptive interview workers with `WORKER_INTERVIEW_CONCURRENCY` when
+   preparation, answer transcription, or question refill waits grow. Measure
+   answer upload time, queue wait, local Whisper time, question generation time,
+   and the fraction of transitions using an adaptive question separately.
+4. Scale guest preview and shadowing pools independently; do not let a Cartesia
    slowdown consume recording workers.
-4. Before adding replicas, size PostgreSQL `max_connections` and per-process
+5. Before adding replicas, size PostgreSQL `max_connections` and per-process
    `pool_max_conns` in `DATABASE_URL`. Reserve connections for migrations,
    administration, and backup jobs.
-5. Keep media outside API container layers. Local mode requires one shared,
+6. Keep media outside API container layers. Local mode requires one shared,
    persistent host volume; multi-host workers require the existing S3 storage
    driver or an equivalent shared object store.
 
@@ -92,6 +97,13 @@ in bounded worker maintenance batches (`WORKER_JOB_RETENTION`). This keeps queue
 metrics and indexes bounded without deleting recordings, media, or audit-worthy
 authentication sessions. Expired distributed rate-limit counters are pruned by
 the same bounded maintenance loop rather than during user requests.
+
+Interview answer WAV files are temporary media with a 24-hour retention time.
+The regular media sweep enqueues their deletion after expiry; it does not delete
+the complete recording or its separate question timeline. A guest may upload
+at most 4 MiB of answer WAV data per interview; an account may upload 24 MiB.
+The final audio is transcribed independently as one file. Monitor media cleanup
+age as well as interview job age if live transcription is heavily used.
 
 ## Backup and recovery
 

@@ -126,10 +126,40 @@ procedures live in [`BACKEND_OPERATIONS.md`](BACKEND_OPERATIONS.md).
 
 Speaking practice uses the learner's selected interest themes to generate three
 opening questions. The chosen question becomes the first question of an
-interview; the practice service generates ten further questions focused on that
-same subject and eight useful words or short phrases. The web client owns the
-selectable interest catalog and maps saved interest IDs to theme names before
-calling the practice API. The API response counts are documented in OpenAPI.
+interview. The legacy topic-guidance contract can generate ten further
+questions and eight useful words or short phrases for older clients. The web
+client owns the selectable interest catalog and maps saved interest IDs to
+theme names before calling the practice API. The API response counts are
+documented in OpenAPI.
+
+Adaptive topic interviews use a separate `/api/v1/interviews` lifecycle. The
+selected opening question starts a durable session; three hidden prepared
+questions keep navigation responsive while completed answers are transcribed
+and used to generate later questions. The browser records one continuous final
+audio file and separately uploads self-contained answer audio for background
+transcription. Presented question text, answer boundaries, and provisional
+transcripts are session data, never part of the learner's spoken transcript.
+The existing topic-guidance contract remains available to older clients.
+
+The final recording or guest preview is created from the continuous audio when
+the learner saves the interview. Full-audio transcription remains the source of
+the canonical speech-only transcript used for error analysis. Optional
+`interviewTurns` metadata places the displayed questions and aligned answers
+on that transcript's timeline. Live and final transcription, question
+generation, and temporary-audio cleanup run through durable worker jobs;
+provider adapters may change independently of the interview API and timeline.
+Final answer attribution checks question and transcription offsets against the
+verified complete-audio duration. Without usable timed output, it uses ordered
+answer transcripts only when they reconstruct the full transcript exactly;
+otherwise the full transcript stays separate from questions rather than
+presenting uncertain answer boundaries as fact.
+
+Every account recording is duration-probed by the recording worker before
+transcription. The repository reconciles the measured duration against the
+session limit and the quota reserved from the client-declared duration while
+holding the user quota lock, then stores the measured value. Interview workers
+also replace the last question boundary with the measured full-audio end. This
+keeps free talk and topic recordings on the same server-owned duration policy.
 
 ```text
 web/                         standalone Next.js application
@@ -140,6 +170,7 @@ backend/internal/aiparse     provider-neutral model-output normalization
 backend/internal/auth        unified web/mobile identity and token lifecycle
 backend/internal/db          PostgreSQL connection and migrations
 backend/internal/httpapi     HTTP transport, authorization gates, response mapping
+backend/internal/interview  adaptive interview sessions, turns, and question policy
 backend/internal/learner     shared learner level and interest vocabulary
 backend/internal/media       authorized media lifecycle
 backend/internal/practice    speaking-practice generation application service

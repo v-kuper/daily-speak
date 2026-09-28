@@ -29,8 +29,9 @@ const (
 	// PurposeGuestPreviewAudio is an internal storage purpose. Clients still
 	// request recording_audio; the media application service maps guest uploads
 	// to this value so PostgreSQL can enforce one live guest object atomically.
-	PurposeGuestPreviewAudio = "guest_preview_audio"
-	PurposeRecordingPhoto    = "recording_photo"
+	PurposeGuestPreviewAudio  = "guest_preview_audio"
+	PurposeRecordingPhoto     = "recording_photo"
+	PurposeInterviewTurnAudio = "interview_turn_audio"
 )
 
 type Asset struct {
@@ -64,6 +65,7 @@ type Upload struct {
 	PartCount          int
 	ExpiresAt          time.Time
 	CreatedBySessionID string
+	InterviewSessionID string
 	IdempotencyKey     string
 	CompletedAt        *time.Time
 	AbortedAt          *time.Time
@@ -88,14 +90,15 @@ type UploadResource struct {
 }
 
 type CreateUploadInput struct {
-	OwnerPrincipalID string
-	OwnerKind        string
-	SessionID        string
-	IdempotencyKey   string
-	Purpose          string
-	ContentType      string
-	SizeBytes        int64
-	ChecksumSHA256   string
+	OwnerPrincipalID   string
+	OwnerKind          string
+	SessionID          string
+	InterviewSessionID string
+	IdempotencyKey     string
+	Purpose            string
+	ContentType        string
+	SizeBytes          int64
+	ChecksumSHA256     string
 }
 
 type PartDescriptor struct {

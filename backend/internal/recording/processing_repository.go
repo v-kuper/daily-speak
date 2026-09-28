@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"time"
 
 	"daily-speaking-practice/backend/internal/db"
+	"daily-speaking-practice/backend/internal/quota"
 	"daily-speaking-practice/backend/internal/workqueue"
 	"github.com/jackc/pgx/v5"
 )
@@ -31,7 +33,8 @@ func (r *SQLProcessingRepository) LoadProcessingWork(ctx context.Context, job Pr
 		       EXISTS (
 		         SELECT 1 FROM guest_previews p
 		         WHERE p.promoted_recording_id = r.id AND p.state = 'promoted'
-		       )
+		       ),
+		       (SELECT s.id FROM interview_sessions s WHERE s.recording_id = r.id), r.duration
 		FROM recordings r
 		JOIN users u ON u.id = r.user_id
 		WHERE r.id = $1 AND r.status = 'processing' AND r.processing_job_id = $2`,
@@ -39,7 +42,7 @@ func (r *SQLProcessingRepository) LoadProcessingWork(ctx context.Context, job Pr
 	).Scan(
 		&work.UserID, &work.Stage, &work.AudioAssetID, &work.Transcript,
 		&suggestionJSON, &work.Topic, &work.PracticeType, &work.PhotoObject, &work.EnglishLevel,
-		&work.PromotedGuestPreview,
+		&work.PromotedGuestPreview, &work.InterviewSessionID, &work.DeclaredDuration,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ProcessingWork{}, false, nil
@@ -51,12 +54,115 @@ func (r *SQLProcessingRepository) LoadProcessingWork(ctx context.Context, job Pr
 	return work, true, nil
 }
 
-func (r *SQLProcessingRepository) UpdateVerifiedDuration(ctx context.Context, job ProcessingJob, duration int) error {
-	_, err := r.db.Exec(ctx, `
-		UPDATE recordings SET duration = $2
-		WHERE id = $1 AND status = 'processing' AND processing_job_id = $3`,
-		job.ResourceID, duration, job.ID)
+func (r *SQLProcessingRepository) VerifyDuration(ctx context.Context, job ProcessingJob, actualSeconds int) error {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if err := requireRecordingLease(ctx, tx, job); err != nil {
+		return err
+	}
+	var userID string
+	var declared int
+	var createdAt time.Time
+	err = tx.QueryRow(ctx, `
+		SELECT user_id, duration, created_at
+		FROM recordings
+		WHERE id = $1 AND status = 'processing' AND processing_job_id = $2
+		FOR UPDATE`, job.ResourceID, job.ID).Scan(&userID, &declared, &createdAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return errors.New("recording is no longer active")
+	}
+	if err != nil {
+		return err
+	}
+	if err := verifyAccountDuration(ctx, tx, userID, createdAt, declared, actualSeconds); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE recordings SET duration = $2 WHERE id = $1`, job.ResourceID, actualSeconds); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func (r *SQLProcessingRepository) VerifyInterviewDuration(ctx context.Context, job ProcessingJob, sessionID string, actualSeconds, actualMS int) error {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if err := requireRecordingLease(ctx, tx, job); err != nil {
+		return err
+	}
+	var userID string
+	var declared, maximum int
+	var createdAt time.Time
+	err = tx.QueryRow(ctx, `
+		SELECT r.user_id, r.duration, s.max_duration_seconds, r.created_at
+		FROM recordings r JOIN interview_sessions s ON s.recording_id = r.id
+		WHERE r.id = $1 AND r.status = 'processing' AND r.processing_job_id = $2 AND s.id = $3
+		FOR UPDATE OF r`, job.ResourceID, job.ID, sessionID).
+		Scan(&userID, &declared, &maximum, &createdAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return errors.New("interview recording is no longer active")
+	}
+	if err != nil {
+		return err
+	}
+	if actualSeconds < 1 || actualSeconds > maximum {
+		return errors.New("interview audio exceeds its duration limit")
+	}
+	if err := verifyAccountDuration(ctx, tx, userID, createdAt, declared, actualSeconds); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE recordings SET duration = $2 WHERE id = $1`, job.ResourceID, actualSeconds); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE interview_turns t
+		SET ended_at_ms = GREATEST(t.asked_at_ms + 1, $2), updated_at = NOW()
+		WHERE t.session_id = $1
+		  AND t.seq = (SELECT MAX(seq) FROM interview_turns WHERE session_id = $1)`,
+		sessionID, actualMS); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func requireRecordingLease(ctx context.Context, tx pgx.Tx, job ProcessingJob) error {
+	var active bool
+	err := tx.QueryRow(ctx, `SELECT state = 'running' AND lease_token = $2 AND COALESCE(lease_expires_at > NOW(), FALSE)
+		FROM processing_jobs WHERE id = $1 FOR SHARE`, job.ID, job.LeaseToken).Scan(&active)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !active) {
+		return workqueue.ErrLeaseLost
+	}
 	return err
+}
+
+func verifyAccountDuration(ctx context.Context, tx pgx.Tx, userID string, createdAt time.Time, declared, actualSeconds int) error {
+	current, err := quota.LockRecordingQuota(ctx, tx, userID, createdAt)
+	if err != nil {
+		return err
+	}
+	return validateVerifiedDuration(current, declared, actualSeconds)
+}
+
+func validateVerifiedDuration(current quota.RecordingQuota, declared, actualSeconds int) error {
+	if actualSeconds < 1 || actualSeconds > quota.SubscriberMaxSessionSeconds {
+		return errors.New("recording audio exceeds its duration limit")
+	}
+	if current.IsSubscriber {
+		return nil
+	}
+	remaining := 0
+	if current.WeeklyRemainingSeconds != nil {
+		remaining = *current.WeeklyRemainingSeconds
+	}
+	if actualSeconds > declared+remaining {
+		return errors.New("recording audio exceeds the weekly quota")
+	}
+	return nil
 }
 
 func (r *SQLProcessingRepository) UserInterests(ctx context.Context, userID string) ([]string, error) {
@@ -92,6 +198,63 @@ func (r *SQLProcessingRepository) SaveTranscript(ctx context.Context, job Proces
 		return false, err
 	}
 	return result.RowsAffected() > 0, nil
+}
+
+func (r *SQLProcessingRepository) LoadInterviewTurns(ctx context.Context, sessionID string) ([]InterviewTurn, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT seq, question, asked_at_ms, ended_at_ms, provisional_transcript
+		FROM interview_turns WHERE session_id = $1 ORDER BY seq`, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var turns []InterviewTurn
+	for rows.Next() {
+		var turn InterviewTurn
+		if err := rows.Scan(&turn.Sequence, &turn.Question, &turn.AskedAtMS, &turn.EndedAtMS, &turn.Provisional); err != nil {
+			return nil, err
+		}
+		turns = append(turns, turn)
+	}
+	return turns, rows.Err()
+}
+
+func (r *SQLProcessingRepository) SaveInterviewTranscript(ctx context.Context, job ProcessingJob, transcript string, sessionID string, answers map[int]string) (bool, error) {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback(ctx)
+	result, err := tx.Exec(ctx, `
+		UPDATE recordings
+		SET transcript = $2, processing_stage = 'suggestions', processing_error = NULL
+		WHERE id = $1 AND status = 'processing' AND processing_job_id = $3
+		  AND EXISTS (SELECT 1 FROM processing_jobs WHERE id = $3 AND state = 'running' AND lease_token = $4)`,
+		job.ResourceID, transcript, job.ID, job.LeaseToken)
+	if err != nil {
+		return false, err
+	}
+	if result.RowsAffected() == 0 {
+		return false, nil
+	}
+	for sequence, answer := range answers {
+		result, err := tx.Exec(ctx, `
+			UPDATE interview_turns t
+			SET final_transcript = $3, updated_at = NOW()
+			FROM interview_sessions s
+			WHERE t.session_id = s.id AND s.id = $1 AND s.recording_id = $2
+			  AND t.seq = $4`, sessionID, job.ResourceID, answer, sequence)
+		if err != nil {
+			return false, err
+		}
+		if result.RowsAffected() != 1 {
+			return false, errors.New("interview timeline changed during recording processing")
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (r *SQLProcessingRepository) SaveSuggestions(ctx context.Context, job ProcessingJob, suggestions []Suggestion) (bool, error) {

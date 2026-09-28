@@ -61,6 +61,44 @@ func (repository *SQLRepository) InsertUpload(ctx context.Context, asset Asset, 
 			return err
 		}
 	}
+	if asset.Purpose == PurposeInterviewTurnAudio {
+		var principalKind string
+		err := tx.QueryRow(ctx, `SELECT p.kind FROM principals p
+			JOIN device_sessions ds ON ds.principal_id=p.id
+			WHERE p.id=$1 AND ds.id=$2 AND ds.revoked_at IS NULL AND ds.expires_at>NOW()
+			AND (p.kind='user' OR (p.kind='guest' AND p.merged_into_principal_id IS NULL AND p.expires_at>NOW()))
+			FOR UPDATE OF p,ds`, asset.OwnerPrincipalID, upload.CreatedBySessionID).Scan(&principalKind)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrGuestRestricted
+		}
+		if err != nil {
+			return err
+		}
+		var sessionID string
+		err = tx.QueryRow(ctx, `SELECT id FROM interview_sessions WHERE id=$1 AND owner_principal_id=$2
+			AND status='recording' AND expires_at>NOW() FOR UPDATE`,
+			upload.InterviewSessionID, asset.OwnerPrincipalID).Scan(&sessionID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrConflict
+		}
+		if err != nil {
+			return err
+		}
+		var usedBytes int64
+		if err := tx.QueryRow(ctx, `SELECT COALESCE(SUM(a.expected_size_bytes),0)::bigint
+			FROM media_assets a JOIN media_uploads u ON u.asset_id=a.id
+			WHERE u.interview_session_id=$1 AND a.purpose='interview_turn_audio'
+			AND a.deleted_at IS NULL AND a.state<>'failed'`, sessionID).Scan(&usedBytes); err != nil {
+			return err
+		}
+		maxTotal := int64(24 * 1024 * 1024)
+		if principalKind == "guest" {
+			maxTotal = 4 * 1024 * 1024
+		}
+		if usedBytes+asset.ExpectedSizeBytes > maxTotal {
+			return ErrPayloadTooLarge
+		}
+	}
 	var bucket any
 	if asset.Bucket != "" {
 		bucket = asset.Bucket
@@ -80,11 +118,11 @@ func (repository *SQLRepository) InsertUpload(ctx context.Context, asset Asset, 
 	_, err = tx.Exec(ctx, `
 		INSERT INTO media_uploads
 		  (id, asset_id, provider_upload_id, state, part_size_bytes, part_count,
-		   expires_at, created_by_session_id, idempotency_key, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10)`,
+		   expires_at, created_by_session_id, idempotency_key, interview_session_id, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11)`,
 		upload.ID, upload.AssetID, upload.ProviderUploadID, upload.State,
 		upload.PartSizeBytes, upload.PartCount, upload.ExpiresAt,
-		upload.CreatedBySessionID, upload.IdempotencyKey, upload.CreatedAt)
+		upload.CreatedBySessionID, upload.IdempotencyKey, nullableInterviewSessionID(upload.InterviewSessionID), upload.CreatedAt)
 	if err != nil {
 		return mapRepositoryError(err)
 	}
@@ -253,7 +291,7 @@ const assetColumns = `
 const uploadColumns = assetColumns + `,
 	u.id, u.asset_id, COALESCE(u.provider_upload_id, ''), u.state,
 	u.part_size_bytes, u.part_count, u.expires_at,
-	COALESCE(u.created_by_session_id, ''), u.idempotency_key,
+	COALESCE(u.created_by_session_id, ''), u.idempotency_key, COALESCE(u.interview_session_id,''),
 	u.completed_at, u.aborted_at, u.created_at, u.updated_at`
 
 type rowScanner interface {
@@ -294,13 +332,20 @@ func (repository *SQLRepository) queryUpload(ctx context.Context, query string, 
 		&resource.Upload.ProviderUploadID, &resource.Upload.State,
 		&resource.Upload.PartSizeBytes, &resource.Upload.PartCount,
 		&resource.Upload.ExpiresAt, &resource.Upload.CreatedBySessionID,
-		&resource.Upload.IdempotencyKey, &resource.Upload.CompletedAt,
+		&resource.Upload.IdempotencyKey, &resource.Upload.InterviewSessionID, &resource.Upload.CompletedAt,
 		&resource.Upload.AbortedAt, &resource.Upload.CreatedAt, &resource.Upload.UpdatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return UploadResource{}, ErrNotFound
 	}
 	return resource, err
+}
+
+func nullableInterviewSessionID(value string) any {
+	if value == "" {
+		return nil
+	}
+	return value
 }
 
 func mapRepositoryError(err error) error {

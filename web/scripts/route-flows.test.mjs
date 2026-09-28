@@ -180,16 +180,26 @@ test("authenticated save immediately opens the local recording and replaces it a
   assert.deepEqual(store.getState().app.recordings.map(({ id }) => id), ["permanent-123"]);
 });
 
-test("terminal save failure returns to history and retains a visible failed recording", async (t) => {
+test("terminal save failure keeps a retryable local recording until upload succeeds", async (t) => {
   const run = flow("saveAndNavigate"), store = storeFor({ isAuthenticated: true }), router = routerFor();
-  server(t, async (url) => url.endsWith("/api/v1/media/uploads")
-    ? readyMedia()
-    : response({ error: { code: "storage_unavailable", message: "Storage unavailable" } }, 503));
+  let unavailable = true;
+  server(t, async (url) => {
+    if (url.endsWith("/api/v1/media/uploads")) return readyMedia();
+    return unavailable
+      ? response({ error: { code: "storage_unavailable", message: "Storage unavailable" } }, 503)
+      : response({ recording: saved });
+  });
   await run(store, router, draft, router.currentPath);
-  assert.deepEqual(router.visits, [["push", "/history/local-123"], ["replace", "/history"]]);
+  assert.deepEqual(router.visits, [["push", "/history/local-123"]]);
   assert.equal(store.getState().app.recordingSaveError, "Storage unavailable");
   assert.equal(store.getState().app.recordings[0].status, "failed");
   assert.equal(store.getState().app.backgroundSaveRecordingId, null);
+  assert.equal(store.getState().app.recordingSaveDrafts["local-123"].audioDataUrl, draft.audioDataUrl);
+
+  unavailable = false;
+  await run(store, router, store.getState().app.recordingSaveDrafts["local-123"], router.currentPath);
+  assert.deepEqual(router.visits.at(-1), ["replace", "/history/permanent-123"]);
+  assert.equal(store.getState().app.recordingSaveDrafts["local-123"], undefined);
 });
 
 test("a history refresh keeps a pending or failed local recording visible", () => {
@@ -205,6 +215,16 @@ test("a history refresh keeps a pending or failed local recording visible", () =
   refresh();
   assert.equal(store.getState().app.recordings[0].status, "failed");
   assert.equal(store.getState().app.recordingSaveError, "Storage unavailable");
+});
+
+test("session expiry preserves a failed upload draft for re-authentication", () => {
+  const store = storeFor({ isAuthenticated: true });
+  store.dispatch(app.showBackgroundRecordingSave(draft));
+  store.dispatch(app.saveRecording.rejected(null, "save", draft, "Storage unavailable"));
+  store.dispatch(app.saveInterests.rejected(null, "expire", undefined, "Unauthorized"));
+  assert.equal(store.getState().app.pendingSaveAfterAuth, true);
+  assert.equal(store.getState().app.pendingAuthSaveDraft?.localRecordingId, "local-123");
+  assert.equal(store.getState().app.pendingAuthSaveDraft?.audioDataUrl, draft.audioDataUrl);
 });
 
 test("user bootstrap loads recordings only from the v1 collection", async (t) => {
@@ -457,7 +477,10 @@ for (const outcome of ["success", "failure"]) {
     assert.equal(router.visits.length, 1, "a different active route must remain untouched");
     pathname = "/history/local-123";
     reconcile(store, router, "local-123", () => pathname);
-    assert.equal(pathname, outcome === "success" ? "/history/permanent-123" : "/history");
+    assert.equal(pathname, outcome === "success" ? "/history/permanent-123" : "/history/local-123");
+    if (outcome === "failure") {
+      assert.equal(store.getState().app.recordingSaveDrafts["local-123"].audioDataUrl, draft.audioDataUrl);
+    }
   });
 }
 

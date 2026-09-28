@@ -124,3 +124,23 @@ test("missing recorders still release any orphaned microphone stream", () => {
 
   assert.equal(releaseCalls, 1);
 });
+
+test("recording hard limits keep upload headroom for strict server quotas", () => {
+  assert.equal(browserMedia.resolveRecordingHardLimitMs(60), 59_000);
+  assert.equal(browserMedia.resolveRecordingHardLimitMs(600), 599_000);
+  assert.equal(browserMedia.resolveRecordingHardLimitMs(1), 250);
+  assert.equal(browserMedia.resolveRecordingHardLimitMs(0), 0);
+});
+
+test("recording elapsed time uses a monotonic start point and never goes negative", () => {
+  assert.equal(browserMedia.recordingElapsedMs(null, 10_000), 0);
+  assert.equal(browserMedia.recordingElapsedMs(1_000, 1_750.9), 750);
+  assert.equal(browserMedia.recordingElapsedMs(2_000, 1_999), 0);
+});
+
+test("recording lifecycle catches both elapsed limits and hidden tabs", () => {
+  const base = { startedAt: 1_000, hardLimitMs: 59_000 };
+  assert.equal(browserMedia.recordingMustStop({ ...base, now: 59_999, hidden: false }), false);
+  assert.equal(browserMedia.recordingMustStop({ ...base, now: 60_000, hidden: false }), true);
+  assert.equal(browserMedia.recordingMustStop({ ...base, now: 2_000, hidden: true }), true);
+});

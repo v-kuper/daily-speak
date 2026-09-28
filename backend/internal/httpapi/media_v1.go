@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"daily-speaking-practice/backend/internal/auth"
+	"daily-speaking-practice/backend/internal/logging"
 	"daily-speaking-practice/backend/internal/media"
 )
 
@@ -80,10 +81,11 @@ func (s *Server) handleCreateMediaUploadV1(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	var payload struct {
-		Purpose     string `json:"purpose"`
-		ContentType string `json:"contentType"`
-		SizeBytes   int64  `json:"sizeBytes"`
-		Checksum    struct {
+		Purpose            string `json:"purpose"`
+		InterviewSessionID string `json:"interviewSessionId"`
+		ContentType        string `json:"contentType"`
+		SizeBytes          int64  `json:"sizeBytes"`
+		Checksum           struct {
 			Algorithm string `json:"algorithm"`
 			Value     string `json:"value"`
 		} `json:"checksum"`
@@ -98,7 +100,8 @@ func (s *Server) handleCreateMediaUploadV1(w http.ResponseWriter, r *http.Reques
 	resource, err := s.mediaService.CreateUpload(r.Context(), media.CreateUploadInput{
 		OwnerPrincipalID: identity.PrincipalID, OwnerKind: identity.Kind, SessionID: identity.SessionID,
 		IdempotencyKey: r.Header.Get("Idempotency-Key"), Purpose: payload.Purpose,
-		ContentType: payload.ContentType, SizeBytes: payload.SizeBytes,
+		InterviewSessionID: payload.InterviewSessionID,
+		ContentType:        payload.ContentType, SizeBytes: payload.SizeBytes,
 		ChecksumSHA256: payload.Checksum.Value,
 	})
 	if err != nil {
@@ -177,6 +180,12 @@ func (s *Server) handleCompleteMediaUploadV1(w http.ResponseWriter, r *http.Requ
 	if err != nil {
 		s.writeMediaError(w, r, err)
 		return
+	}
+	if resource.Asset.Purpose == media.PurposeInterviewTurnAudio {
+		logging.ForRequest("api.v1.media", r).Info("interview.turn_upload_completed", map[string]any{
+			"uploadMs":  max(0, time.Since(resource.Upload.CreatedAt).Milliseconds()),
+			"sizeBytes": resource.Asset.ExpectedSizeBytes,
+		})
 	}
 	writeJSON(w, http.StatusOK, mediaUploadResponse(resource, nil))
 }
