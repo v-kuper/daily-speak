@@ -1993,22 +1993,25 @@ export default function SpeakScreen() {
       <section className="speak-screen">
         {isTopicInterview && Boolean(interview?.usefulWords.length) && <GuidanceWordTicker words={interview?.usefulWords ?? []} />}
 
-        <div className="speak-card speak-center-card">
-          <div className="recording-indicator">
-            <div className="recording-dot" />
-            <span>{isTopicInterview ? "Topic interview" : selectedTopic ?? "Free talk"}</span>
+        <div className="speak-card speak-center-card speak-recording-card">
+          <div className="recording-session-meta">
+            <div className="recording-indicator">
+              <div className="recording-dot" />
+              <span>{isTopicInterview ? "Topic interview" : selectedTopic ?? "Free talk"}</span>
+            </div>
+            <div className="recording-time-block">
+              <div className="timer">{formatTime(recordingDuration)}</div>
+              <div className="recorded-subtitle">
+                {isAuthenticated
+                  ? `Session limit: ${formatTime(Math.max(0, sessionLimitSeconds))}`
+                  : `Guest preview limit: ${formatTime(MAX_GUEST_PREVIEW_SECONDS)}`}
+              </div>
+            </div>
           </div>
 
           {isPhotoPractice && pendingPhotoDataUrl && (
             <img src={pendingPhotoDataUrl} alt="Photo being described" className="photo-practice-preview" />
           )}
-
-          <div className="timer">{formatTime(recordingDuration)}</div>
-          <div className="recorded-subtitle">
-            {isAuthenticated
-              ? `Session limit: ${formatTime(Math.max(0, sessionLimitSeconds))}`
-              : `Guest preview limit: ${formatTime(MAX_GUEST_PREVIEW_SECONDS)}`}
-          </div>
 
           {isTopicInterview && interview && (
             <InterviewQuestionCard
