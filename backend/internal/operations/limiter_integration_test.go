@@ -63,10 +63,11 @@ func TestLimiterSharesAtomicDecisionsThroughPostgreSQL(t *testing.T) {
 	if err != nil || !decision.Allowed || decision.Remaining != 1 {
 		t.Fatalf("new window decision=%+v err=%v", decision, err)
 	}
-	if _, err := database.Exec(ctx, `UPDATE api_rate_limits SET expires_at = NOW() - INTERVAL '1 second'`); err != nil {
+	pruneAt := now.Add(25 * time.Hour)
+	if _, err := database.Exec(ctx, `UPDATE api_rate_limits SET expires_at = $1`, pruneAt.Add(-time.Second)); err != nil {
 		t.Fatal(err)
 	}
-	removed, err := PruneExpiredRateLimits(ctx, database, now.Add(25*time.Hour), 100)
+	removed, err := PruneExpiredRateLimits(ctx, database, pruneAt, 100)
 	if err != nil || removed != 1 {
 		t.Fatalf("pruned=%d err=%v", removed, err)
 	}

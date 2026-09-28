@@ -2,19 +2,21 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { runInNewContext } from "node:vm";
 import { createTypeScriptLoader } from "./helpers/load-typescript.mjs";
 
 const load = createTypeScriptLoader();
+const sourcePath = (relativePath) => fileURLToPath(new URL(relativePath, import.meta.url));
 const {
   advanceInterviewTimeline,
   MAX_LIVE_SEGMENT_ATTEMPTS,
   rotateFailedInterviewSegment,
   withoutInterviewTimeline,
-} = load(new URL("../src/lib/interviewFlow.ts", import.meta.url).pathname);
-const { encodeWav, InterviewTurnCapture } = load(new URL("../src/lib/interviewTurnCapture.ts", import.meta.url).pathname);
-const { parseInterviewTurns } = load(new URL("../src/lib/interviewTimeline.ts", import.meta.url).pathname);
-const { createInterviewRecovery, mayAbandonInterview, recoverPreviousInterview } = load(new URL("../src/lib/interviewRecovery.ts", import.meta.url).pathname);
+} = load(sourcePath("../src/lib/interviewFlow.ts"));
+const { encodeWav, InterviewTurnCapture } = load(sourcePath("../src/lib/interviewTurnCapture.ts"));
+const { parseInterviewTurns } = load(sourcePath("../src/lib/interviewTimeline.ts"));
+const { createInterviewRecovery, mayAbandonInterview, recoverPreviousInterview } = load(sourcePath("../src/lib/interviewRecovery.ts"));
 
 const memoryStorage = () => {
   const values = new Map();
@@ -208,8 +210,8 @@ test("interview create retries use the same key in body and cancellation uses th
     } }), { status: requests.length === 1 ? 202 : 200, headers: { "Content-Type": "application/json" } });
   };
   try {
-    const { configureApiClient } = load(new URL("../src/lib/apiClient.ts", import.meta.url).pathname);
-    const { prepareInterview, cancelInterview } = load(new URL("../src/lib/interviewSession.ts", import.meta.url).pathname);
+    const { configureApiClient } = load(sourcePath("../src/lib/apiClient.ts"));
+    const { prepareInterview, cancelInterview } = load(sourcePath("../src/lib/interviewSession.ts"));
     configureApiClient("https://example.test");
     const prepared = await prepareInterview({ topic: "My dog", level: "b1", interestIds: [], guest: false, idempotencyKey: "stable-prepare-key" });
     assert.equal(prepared.openingQuestion, "What would you like to share about your dog?");
@@ -241,8 +243,8 @@ test("turn WAV upload binds the media asset to its interview session", async () 
     throw new Error(`Unexpected request: ${path}`);
   };
   try {
-    const { configureApiClient } = load(new URL("../src/lib/apiClient.ts", import.meta.url).pathname);
-    const { uploadInterviewTurnAudio } = load(new URL("../src/lib/interviewSession.ts", import.meta.url).pathname);
+    const { configureApiClient } = load(sourcePath("../src/lib/apiClient.ts"));
+    const { uploadInterviewTurnAudio } = load(sourcePath("../src/lib/interviewSession.ts"));
     configureApiClient("https://example.test");
     await uploadInterviewTurnAudio("interview-1", 1, new Blob([new Uint8Array([1, 2])], { type: "audio/wav" }), false, "turn-key");
     assert.equal(requests.length, 2);
