@@ -377,8 +377,12 @@ test("mobile media contract keeps mutations idempotent and storage requests opaq
   assert.deepEqual(openapi.components.schemas.GuestPreviewPromotion.properties.reason.enum, ["quota_exceeded"]);
 
   const accountDuration = openapi.components.schemas.CreateRecordingFromAssetsRequest.properties.duration;
+  const recordingQuota = openapi.components.schemas.RecordingQuota.properties;
   assert.equal(accountDuration.maximum, 600);
-  assert.equal(openapi.components.schemas.RecordingQuota.properties.maxSessionSeconds.maximum, 600);
+  assert.equal(recordingQuota.maxSessionSeconds.maximum, 600);
+  assert.match(recordingQuota.weeklyLimitSeconds.description, /Legacy compatibility value: 600 for non-subscribers/);
+  assert.match(recordingQuota.weeklyRemainingSeconds.description, /never decremented/);
+  assert.match(recordingQuota.weeklyRemainingSeconds.description, /does not control recording admission/);
   assert.equal(openapi.components.schemas.InterviewSession.properties.maxDurationSeconds.maximum, 600);
   assert.match(openapi.components.schemas.CreateMediaUploadRequest.properties.sizeBytes.description, /8 MiB for a guest/);
 });

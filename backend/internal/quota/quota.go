@@ -10,8 +10,9 @@ import (
 )
 
 const (
-	GuestMaxSessionSeconds   = 3 * 60
-	AccountMaxSessionSeconds = 10 * 60
+	GuestMaxSessionSeconds           = 3 * 60
+	AccountMaxSessionSeconds         = 10 * 60
+	legacyWeeklyCompatibilitySeconds = AccountMaxSessionSeconds
 )
 
 func nonNegative(value int) int {
@@ -38,6 +39,24 @@ type RecordingQuota struct {
 	MaxSessionSeconds      int  `json:"maxSessionSeconds"`
 }
 
+func recordingQuota(isSubscriber bool, usedSeconds int) RecordingQuota {
+	result := RecordingQuota{
+		IsSubscriber:      isSubscriber,
+		WeeklyUsedSeconds: nonNegative(usedSeconds),
+		MaxSessionSeconds: AccountMaxSessionSeconds,
+	}
+	if !isSubscriber {
+		// Older clients require positive weekly values before enabling recording.
+		// These fixed compatibility fields are display data only: admission uses
+		// MaxSessionSeconds, and successful recordings never decrement them.
+		limit := legacyWeeklyCompatibilitySeconds
+		remaining := legacyWeeklyCompatibilitySeconds
+		result.WeeklyLimitSeconds = &limit
+		result.WeeklyRemainingSeconds = &remaining
+	}
+	return result
+}
+
 // LockRecordingQuota returns the account recording policy and informational
 // weekly usage while holding the user row lock used by recording creation.
 func LockRecordingQuota(ctx context.Context, tx pgx.Tx, userID string, now time.Time) (RecordingQuota, error) {
@@ -58,14 +77,7 @@ func LockRecordingQuota(ctx context.Context, tx pgx.Tx, userID string, now time.
 		  AND created_at < date_trunc('week', $2::timestamptz) + INTERVAL '1 week'`, userID, now).Scan(&usedSeconds); err != nil {
 		return RecordingQuota{}, err
 	}
-	usedSeconds = nonNegative(usedSeconds)
-	return RecordingQuota{
-		IsSubscriber:           isSubscriber,
-		WeeklyLimitSeconds:     nil,
-		WeeklyUsedSeconds:      usedSeconds,
-		WeeklyRemainingSeconds: nil,
-		MaxSessionSeconds:      AccountMaxSessionSeconds,
-	}, nil
+	return recordingQuota(isSubscriber, usedSeconds), nil
 }
 
 func GetRecordingQuota(ctx context.Context, database *db.DB, userID string, knownSubscriber *bool) (RecordingQuota, error) {
@@ -92,11 +104,5 @@ func GetRecordingQuota(ctx context.Context, database *db.DB, userID string, know
 		return RecordingQuota{}, err
 	}
 
-	return RecordingQuota{
-		IsSubscriber:           isSubscriber,
-		WeeklyLimitSeconds:     nil,
-		WeeklyUsedSeconds:      nonNegative(usedSeconds),
-		WeeklyRemainingSeconds: nil,
-		MaxSessionSeconds:      AccountMaxSessionSeconds,
-	}, nil
+	return recordingQuota(isSubscriber, usedSeconds), nil
 }

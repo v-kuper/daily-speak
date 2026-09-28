@@ -7,11 +7,12 @@ import (
 )
 
 var (
-	ErrInvalid  = errors.New("invalid interview request")
-	ErrNotFound = errors.New("interview not found")
-	ErrConflict = errors.New("interview state conflict")
-	ErrQuota    = errors.New("interview quota exhausted")
-	ErrNotReady = errors.New("interview preparation is not ready")
+	ErrInvalid       = errors.New("invalid interview request")
+	ErrNotFound      = errors.New("interview not found")
+	ErrConflict      = errors.New("interview state conflict")
+	ErrQuota         = errors.New("guest interview preview unavailable")
+	ErrDurationLimit = errors.New("interview duration limit exhausted")
+	ErrNotReady      = errors.New("interview preparation is not ready")
 )
 
 const (

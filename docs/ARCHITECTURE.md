@@ -90,6 +90,11 @@ reusing work that already succeeded. Every authenticated account may save up
 to 600 seconds per recording, independent of subscription state, and has no
 weekly recording quota.
 
+The `weeklyLimitSeconds` and `weeklyRemainingSeconds` response fields remain for
+rolling compatibility with older clients. They are fixed at 600 for
+non-subscribers, null for subscribers, and never participate in recording
+admission or decrement after a recording. `weeklyUsedSeconds` is informational.
+
 Recording, guest-preview, shadowing, and cleanup jobs have independent worker
 concurrency controls. Increasing API replicas never implicitly increases paid
 processing concurrency.

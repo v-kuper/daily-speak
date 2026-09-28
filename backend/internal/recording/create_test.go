@@ -61,7 +61,11 @@ func (s *createTransactionStub) LinkInterview(_ context.Context, sessionID, prin
 }
 
 func TestCreatorOrchestratesAtomicRecordingCreation(t *testing.T) {
-	tx := &createTransactionStub{quota: quota.RecordingQuota{MaxSessionSeconds: quota.AccountMaxSessionSeconds}}
+	compatibility := quota.AccountMaxSessionSeconds
+	tx := &createTransactionStub{quota: quota.RecordingQuota{
+		WeeklyLimitSeconds: &compatibility, WeeklyRemainingSeconds: &compatibility,
+		MaxSessionSeconds: quota.AccountMaxSessionSeconds,
+	}}
 	creator := NewCreator(createUnitOfWorkStub{tx: tx})
 	photoID := "photo"
 	input := CreateInput{
@@ -78,7 +82,8 @@ func TestCreatorOrchestratesAtomicRecordingCreation(t *testing.T) {
 	if len(tx.lockedPurposes) != 2 || tx.lockedPurposes[0] != "recording_audio" || tx.lockedPurposes[1] != "recording_photo" {
 		t.Fatalf("locked purposes = %v", tx.lockedPurposes)
 	}
-	if updatedQuota.WeeklyUsedSeconds != 30 || updatedQuota.WeeklyLimitSeconds != nil || updatedQuota.WeeklyRemainingSeconds != nil {
+	if updatedQuota.WeeklyUsedSeconds != 30 || updatedQuota.WeeklyLimitSeconds == nil || *updatedQuota.WeeklyLimitSeconds != compatibility ||
+		updatedQuota.WeeklyRemainingSeconds == nil || *updatedQuota.WeeklyRemainingSeconds != compatibility {
 		t.Fatalf("updated quota = %+v", updatedQuota)
 	}
 }

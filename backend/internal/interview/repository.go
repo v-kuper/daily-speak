@@ -252,7 +252,7 @@ func (r *SQLRepository) Advance(ctx context.Context, input AdvanceInput) (Sessio
 		return Session{}, ErrConflict
 	}
 	if input.AtMs >= row.MaxDurationSeconds*1000 {
-		return Session{}, ErrQuota
+		return Session{}, ErrDurationLimit
 	}
 	if row.RecordingID != "" || row.GuestPreviewID != "" {
 		return Session{}, ErrConflict
@@ -391,7 +391,7 @@ func (r *SQLRepository) Finalize(ctx context.Context, input FinalizeInput) (Sess
 		return Session{}, err
 	}
 	if input.EndedAtMs > row.MaxDurationSeconds*1000 {
-		return Session{}, ErrQuota
+		return Session{}, ErrDurationLimit
 	}
 	if row.Status == StatusFinalized {
 		if finalizationMatches(row, input) {

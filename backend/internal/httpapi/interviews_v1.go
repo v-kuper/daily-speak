@@ -234,8 +234,10 @@ func (s *Server) writeInterviewError(w http.ResponseWriter, r *http.Request, err
 		writeV1Error(w, r, http.StatusBadRequest, "invalid_request", "Interview request is invalid")
 	case errors.Is(err, interview.ErrNotFound):
 		writeV1Error(w, r, http.StatusNotFound, "not_found", "Interview or turn not found")
-	case errors.Is(err, interview.ErrQuota):
+	case errors.Is(err, interview.ErrDurationLimit):
 		writeV1Error(w, r, http.StatusForbidden, "quota_exceeded", "Interview duration limit is exhausted")
+	case errors.Is(err, interview.ErrQuota):
+		writeV1Error(w, r, http.StatusForbidden, "quota_exceeded", "This guest identity has already used its single interview preview")
 	case errors.Is(err, interview.ErrNotReady):
 		writeV1Error(w, r, http.StatusConflict, "interview_not_ready", "A next question is not ready")
 	case errors.Is(err, interview.ErrConflict):

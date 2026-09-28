@@ -4470,7 +4470,7 @@
               "null"
             ],
             "minimum": 0,
-            "description": "Always null. Authenticated accounts have no weekly recording quota."
+            "description": "Legacy compatibility value: 600 for non-subscribers and null for subscribers. It does not represent or enforce a weekly recording quota."
           },
           "weeklyUsedSeconds": {
             "type": "integer",
@@ -4483,7 +4483,7 @@
               "null"
             ],
             "minimum": 0,
-            "description": "Always null. Authenticated accounts have no weekly recording quota."
+            "description": "Legacy compatibility value: fixed at 600 for non-subscribers and null for subscribers. It is never decremented and does not control recording admission."
           },
           "maxSessionSeconds": {
             "type": "integer",
