@@ -29,3 +29,17 @@ func TestInterviewTurnUploadRequiresSessionAndWAV(t *testing.T) {
 		t.Fatalf("non-WAV turn audio err=%v", err)
 	}
 }
+
+func TestInterviewTurnAggregateLimitsCoverThreeMinuteGuestPCM(t *testing.T) {
+	if got := interviewTurnAudioTotalLimit("guest"); got != 8*1024*1024 {
+		t.Fatalf("guest aggregate limit = %d", got)
+	}
+	threeMinutePCMBytes := int64(180 * 16000 * 2)
+	if interviewTurnAudioTotalLimit("guest") < threeMinutePCMBytes {
+		t.Fatalf("guest aggregate limit cannot hold three-minute 16 kHz mono PCM: limit=%d audio=%d",
+			interviewTurnAudioTotalLimit("guest"), threeMinutePCMBytes)
+	}
+	if got := interviewTurnAudioTotalLimit("user"); got != 24*1024*1024 {
+		t.Fatalf("account aggregate limit = %d", got)
+	}
+}

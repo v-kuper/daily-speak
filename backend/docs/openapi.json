@@ -240,7 +240,7 @@
           "Auth"
         ],
         "summary": "Sign in and optionally merge a guest identity",
-        "description": "When a guest Bearer token is supplied, its identity and current preview are merged into the account atomically. Normal account recording quota applies; authentication still succeeds when promotion is declined, with the result in guestPreviewPromotion.",
+        "description": "When a guest Bearer token is supplied, its identity and current bounded preview are merged into the account atomically. guestPreviewPromotion reports the result.",
         "security": [
           {},
           {
@@ -496,7 +496,7 @@
           "Recordings"
         ],
         "summary": "Create the single bounded guest preview",
-        "description": "Attaches one owned ready guest audio asset and queues transcription plus at most two high-confidence corrections. It never starts full multipass analysis, rewrite, or shadowing. The actual audio duration is verified server-side and must not exceed 60 seconds.",
+        "description": "Attaches one owned ready guest audio asset and queues transcription plus at most two high-confidence corrections. It never starts full multipass analysis, rewrite, or shadowing. The actual audio duration is verified server-side and must not exceed 180 seconds.",
         "security": [
           {
             "bearerAuth": []
@@ -648,7 +648,7 @@
           "Recordings"
         ],
         "summary": "Create a recording from ready media assets",
-        "description": "Atomically attaches owned ready audio and optional photo assets, reserves quota, and enqueues durable processing. A user access token and an Idempotency-Key are required; guest identities cannot start paid processing.",
+        "description": "Atomically attaches owned ready audio and optional photo assets, enforces the 600-second per-recording account limit, and enqueues durable processing. A user access token and an Idempotency-Key are required; guest identities cannot start paid processing.",
         "security": [
           {
             "bearerAuth": []
@@ -1526,7 +1526,7 @@
         "tags": [
           "User"
         ],
-        "summary": "Read subscription and recording quota",
+        "summary": "Read subscription and recording limits",
         "responses": {
           "200": {
             "$ref": "#/components/responses/V1SubscriptionOK"
@@ -2771,7 +2771,7 @@
         }
       },
       "V1SubscriptionOK": {
-        "description": "Subscription and quota.",
+        "description": "Subscription state and recording limits.",
         "content": {
           "application/json": {
             "schema": {
@@ -3155,7 +3155,7 @@
             "enum": [
               "quota_exceeded"
             ],
-            "description": "Machine-readable reason, present only when status is not_promoted."
+            "description": "Legacy compatibility field for a previous weekly-quota policy. New valid guest previews are promoted regardless of prior weekly account usage."
           }
         }
       },
@@ -3418,7 +3418,7 @@
           "duration": {
             "type": "integer",
             "minimum": 1,
-            "maximum": 60,
+            "maximum": 180,
             "description": "Client estimate in seconds. The backend replaces it with the measured audio duration before publishing the preview."
           },
           "timestamp": {
@@ -3487,7 +3487,7 @@
           "duration": {
             "type": "integer",
             "minimum": 1,
-            "maximum": 60
+            "maximum": 180
           },
           "timestamp": {
             "type": "string",
@@ -3604,7 +3604,8 @@
           "duration": {
             "type": "integer",
             "minimum": 1,
-            "description": "Recording duration in seconds. Quota is reserved atomically when the recording is created."
+            "maximum": 600,
+            "description": "Client estimate in seconds. Every authenticated account may save up to 600 seconds per recording; the backend replaces this estimate with the measured audio duration before processing."
           },
           "timestamp": {
             "type": "string",
@@ -3708,7 +3709,7 @@
             "type": "integer",
             "format": "int64",
             "minimum": 1,
-            "description": "Exact whole-object size. Recording audio is limited to 80 MiB, interview turn WAV audio to 24 MiB, and photos to 4 MiB; guest final audio remains limited to 10 MiB. All answer WAV uploads for an interview together are limited to 24 MiB for an account or 4 MiB for a guest."
+            "description": "Exact whole-object size. Recording audio is limited to 80 MiB, interview turn WAV audio to 24 MiB, and photos to 4 MiB; guest final audio remains limited to 10 MiB. All answer WAV uploads for an interview together are limited to 24 MiB for an account or 8 MiB for a guest."
           },
           "interviewSessionId": {
             "type": "string",
@@ -4468,22 +4469,27 @@
               "integer",
               "null"
             ],
-            "minimum": 0
+            "minimum": 0,
+            "description": "Always null. Authenticated accounts have no weekly recording quota."
           },
           "weeklyUsedSeconds": {
             "type": "integer",
-            "minimum": 0
+            "minimum": 0,
+            "description": "Informational seconds recorded during the current week; this value is not an admission limit."
           },
           "weeklyRemainingSeconds": {
             "type": [
               "integer",
               "null"
             ],
-            "minimum": 0
+            "minimum": 0,
+            "description": "Always null. Authenticated accounts have no weekly recording quota."
           },
           "maxSessionSeconds": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 600,
+            "description": "Per-recording limit for every authenticated account, independent of subscription state."
           }
         }
       },
@@ -4852,7 +4858,8 @@
           "maxDurationSeconds": {
             "type": "integer",
             "minimum": 1,
-            "maximum": 600
+            "maximum": 600,
+            "description": "Persisted interview limit: 180 seconds for a guest and 600 seconds for an authenticated account."
           },
           "error": {
             "type": "string",

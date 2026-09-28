@@ -35,7 +35,7 @@ export async function authenticateAndNavigate(
       if (guestPreviewId) {
         const promotion = user.guestPreviewPromotion;
         const promotionMessage = promotion?.status === "not_promoted"
-          ? "Your account is ready, but this preview was not saved because your weekly free quota is exhausted."
+          ? "Your account is ready, but this preview could not be saved. Please try recording it again."
           : promotion?.status === "no_preview"
             ? "Your account is ready, but the guest preview had already expired and could not be saved."
             : null;

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
-	"time"
 
 	"daily-speaking-practice/backend/internal/db"
 	"daily-speaking-practice/backend/internal/quota"
@@ -63,21 +62,19 @@ func (r *SQLProcessingRepository) VerifyDuration(ctx context.Context, job Proces
 	if err := requireRecordingLease(ctx, tx, job); err != nil {
 		return err
 	}
-	var userID string
-	var declared int
-	var createdAt time.Time
+	var recordingID string
 	err = tx.QueryRow(ctx, `
-		SELECT user_id, duration, created_at
-		FROM recordings
-		WHERE id = $1 AND status = 'processing' AND processing_job_id = $2
-		FOR UPDATE`, job.ResourceID, job.ID).Scan(&userID, &declared, &createdAt)
+			SELECT id
+			FROM recordings
+			WHERE id = $1 AND status = 'processing' AND processing_job_id = $2
+			FOR UPDATE`, job.ResourceID, job.ID).Scan(&recordingID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return errors.New("recording is no longer active")
 	}
 	if err != nil {
 		return err
 	}
-	if err := verifyAccountDuration(ctx, tx, userID, createdAt, declared, actualSeconds); err != nil {
+	if err := validateVerifiedDuration(actualSeconds); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `UPDATE recordings SET duration = $2 WHERE id = $1`, job.ResourceID, actualSeconds); err != nil {
@@ -95,15 +92,13 @@ func (r *SQLProcessingRepository) VerifyInterviewDuration(ctx context.Context, j
 	if err := requireRecordingLease(ctx, tx, job); err != nil {
 		return err
 	}
-	var userID string
-	var declared, maximum int
-	var createdAt time.Time
+	var maximum int
 	err = tx.QueryRow(ctx, `
-		SELECT r.user_id, r.duration, s.max_duration_seconds, r.created_at
-		FROM recordings r JOIN interview_sessions s ON s.recording_id = r.id
-		WHERE r.id = $1 AND r.status = 'processing' AND r.processing_job_id = $2 AND s.id = $3
-		FOR UPDATE OF r`, job.ResourceID, job.ID, sessionID).
-		Scan(&userID, &declared, &maximum, &createdAt)
+			SELECT s.max_duration_seconds
+			FROM recordings r JOIN interview_sessions s ON s.recording_id = r.id
+			WHERE r.id = $1 AND r.status = 'processing' AND r.processing_job_id = $2 AND s.id = $3
+			FOR UPDATE OF r`, job.ResourceID, job.ID, sessionID).
+		Scan(&maximum)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return errors.New("interview recording is no longer active")
 	}
@@ -112,9 +107,6 @@ func (r *SQLProcessingRepository) VerifyInterviewDuration(ctx context.Context, j
 	}
 	if actualSeconds < 1 || actualSeconds > maximum {
 		return errors.New("interview audio exceeds its duration limit")
-	}
-	if err := verifyAccountDuration(ctx, tx, userID, createdAt, declared, actualSeconds); err != nil {
-		return err
 	}
 	if _, err := tx.Exec(ctx, `UPDATE recordings SET duration = $2 WHERE id = $1`, job.ResourceID, actualSeconds); err != nil {
 		return err
@@ -140,27 +132,9 @@ func requireRecordingLease(ctx context.Context, tx pgx.Tx, job ProcessingJob) er
 	return err
 }
 
-func verifyAccountDuration(ctx context.Context, tx pgx.Tx, userID string, createdAt time.Time, declared, actualSeconds int) error {
-	current, err := quota.LockRecordingQuota(ctx, tx, userID, createdAt)
-	if err != nil {
-		return err
-	}
-	return validateVerifiedDuration(current, declared, actualSeconds)
-}
-
-func validateVerifiedDuration(current quota.RecordingQuota, declared, actualSeconds int) error {
-	if actualSeconds < 1 || actualSeconds > quota.SubscriberMaxSessionSeconds {
+func validateVerifiedDuration(actualSeconds int) error {
+	if actualSeconds < 1 || actualSeconds > quota.AccountMaxSessionSeconds {
 		return errors.New("recording audio exceeds its duration limit")
-	}
-	if current.IsSubscriber {
-		return nil
-	}
-	remaining := 0
-	if current.WeeklyRemainingSeconds != nil {
-		remaining = *current.WeeklyRemainingSeconds
-	}
-	if actualSeconds > declared+remaining {
-		return errors.New("recording audio exceeds the weekly quota")
 	}
 	return nil
 }

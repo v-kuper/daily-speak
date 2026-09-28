@@ -47,6 +47,8 @@ export type QuestionsStatus = "idle" | "loading" | "ready" | "failed";
 export { INTEREST_OPTIONS, MAX_SELECTED_INTERESTS };
 export type { InterestOption };
 
+export const MAX_AUTHENTICATED_RECORDING_SECONDS = 10 * 60;
+
 export type AppState = {
   speakState: SpeakMode;
   selectedTopic: string | null;
@@ -150,8 +152,6 @@ export type RecordingSaveDraft = {
 const today = new Date();
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PASSWORD_LENGTH = 8;
-const FREE_WEEKLY_LIMIT_SECONDS = 10 * 60;
-const SESSION_LIMIT_SECONDS = 10 * 60;
 const MIN_DAILY_QUESTIONS = 3;
 const MIN_TOPIC_GUIDANCE_QUESTIONS = 10;
 const MIN_TOPIC_GUIDANCE_WORDS = 8;
@@ -284,22 +284,12 @@ type SubscriptionState = {
 };
 
 const buildDefaultRecordingQuota = (isSubscriber: boolean): RecordingQuota => {
-  if (isSubscriber) {
-    return {
-      isSubscriber: true,
-      weeklyLimitSeconds: null,
-      weeklyUsedSeconds: 0,
-      weeklyRemainingSeconds: null,
-      maxSessionSeconds: SESSION_LIMIT_SECONDS
-    };
-  }
-
   return {
-    isSubscriber: false,
-    weeklyLimitSeconds: FREE_WEEKLY_LIMIT_SECONDS,
+    isSubscriber,
+    weeklyLimitSeconds: null,
     weeklyUsedSeconds: 0,
-    weeklyRemainingSeconds: FREE_WEEKLY_LIMIT_SECONDS,
-    maxSessionSeconds: SESSION_LIMIT_SECONDS
+    weeklyRemainingSeconds: null,
+    maxSessionSeconds: MAX_AUTHENTICATED_RECORDING_SECONDS
   };
 };
 
@@ -318,7 +308,7 @@ const parseRecordingQuota = (value: unknown): RecordingQuota | null => {
   const payload = value as Record<string, unknown>;
   const isSubscriber = Boolean(payload.isSubscriber);
   const weeklyUsedSeconds = Number.parseInt(String(payload.weeklyUsedSeconds ?? 0), 10);
-  const maxSessionSeconds = Number.parseInt(String(payload.maxSessionSeconds ?? SESSION_LIMIT_SECONDS), 10);
+  const maxSessionSeconds = Number.parseInt(String(payload.maxSessionSeconds ?? MAX_AUTHENTICATED_RECORDING_SECONDS), 10);
   const weeklyLimitRaw = payload.weeklyLimitSeconds;
   const weeklyRemainingRaw = payload.weeklyRemainingSeconds;
 
@@ -1021,10 +1011,7 @@ export const saveRecording = createAsyncThunk<
       pendingRecordingAudioDataUrl,
       pendingPhotoDataUrl,
       pendingPhotoObjectDraft,
-      recordingDuration,
-      isSubscriber,
-      weeklyRemainingSeconds,
-      maxSessionSeconds
+      recordingDuration
     } = getState().app;
 
     if (!draft && speakState !== "recorded") {
@@ -1041,17 +1028,9 @@ export const saveRecording = createAsyncThunk<
     }
 
     const normalizedDuration = Math.max(0, Math.floor(draft ? draft.duration : recordingDuration));
-    const normalizedMaxSession = Math.max(0, Math.floor(maxSessionSeconds));
-    const normalizedWeeklyRemaining = Math.max(0, Math.floor(weeklyRemainingSeconds ?? 0));
 
-    if (isSubscriber) {
-      if (normalizedDuration > normalizedMaxSession) {
-        return rejectWithValue(`Subscribers can save recordings up to ${formatTime(normalizedMaxSession)} per session.`);
-      }
-    } else if (normalizedDuration > normalizedWeeklyRemaining) {
-      return rejectWithValue(
-        `Weekly free limit exceeded. You have ${formatTime(normalizedWeeklyRemaining)} left this week.`
-      );
+    if (normalizedDuration > MAX_AUTHENTICATED_RECORDING_SECONDS) {
+      return rejectWithValue(`Recordings can be up to ${formatTime(MAX_AUTHENTICATED_RECORDING_SECONDS)} per session.`);
     }
 
     const practiceType = draft ? draft.practiceType : recordingPracticeType;
@@ -1657,12 +1636,7 @@ const resolveCurrentSessionLimit = (state: AppState): number => {
   if (!state.isAuthenticated) {
     return MAX_GUEST_PREVIEW_SECONDS;
   }
-  if (state.isSubscriber) {
-    return Math.max(0, state.maxSessionSeconds);
-  }
-
-  const weeklyRemaining = Math.max(0, state.weeklyRemainingSeconds ?? 0);
-  return Math.min(Math.max(0, state.maxSessionSeconds), weeklyRemaining);
+  return MAX_AUTHENTICATED_RECORDING_SECONDS;
 };
 
 const completeAuthSuccess = (

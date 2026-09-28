@@ -80,7 +80,7 @@ func (p *Processor) Process(ctx context.Context, job Job) error {
 		return fmt.Errorf("verify guest preview duration: %w", err)
 	}
 	if actualDuration <= 0 || actualDuration > MaxDuration {
-		return errors.New("guest preview audio exceeds the 60 second limit")
+		return errors.New("guest preview audio exceeds the 180 second limit")
 	}
 	verifiedSeconds := int(math.Ceil(actualDuration.Seconds()))
 	actualMS := int(math.Ceil(float64(actualDuration) / float64(time.Millisecond)))

@@ -10,11 +10,12 @@ import (
 	"strings"
 	"time"
 
+	"daily-speaking-practice/backend/internal/quota"
 	"daily-speaking-practice/backend/internal/recording"
 )
 
 const (
-	MaxDuration          = 60 * time.Second
+	MaxDuration          = time.Duration(quota.GuestMaxSessionSeconds) * time.Second
 	MaxAudioBytes        = 10 * 1024 * 1024
 	Retention            = 24 * time.Hour
 	ProcessingTimeout    = 10 * time.Minute
@@ -70,7 +71,7 @@ func NormalizeCreate(input CreateRequest, now time.Time) (CreateRequest, time.Ti
 		return input, time.Time{}, errors.New("topic must contain between 1 and 300 characters")
 	}
 	if input.Duration < 1 || input.Duration > int(MaxDuration/time.Second) {
-		return input, time.Time{}, errors.New("duration must be between 1 and 60 seconds")
+		return input, time.Time{}, errors.New("duration must be between 1 and 180 seconds")
 	}
 	if input.PracticeType != "free_talk" && input.PracticeType != "topic" {
 		return input, time.Time{}, errors.New("practiceType must be free_talk or topic")

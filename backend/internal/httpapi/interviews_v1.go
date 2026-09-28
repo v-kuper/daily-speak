@@ -78,11 +78,15 @@ func (s *Server) handleCreateInterviewV1(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	userID := ""
-	if identity.Kind == "user" && identity.User != nil {
-		userID = identity.User.ID
+	if identity.Kind == "user" {
+		if identity.User == nil || strings.TrimSpace(identity.User.ID) == "" {
+			writeV1Error(w, r, http.StatusInternalServerError, "internal_error", "Authenticated account identity is incomplete")
+			return
+		}
+		userID = strings.TrimSpace(identity.User.ID)
 	}
 	created, err := s.interviewService.Create(r.Context(), interview.CreateInput{
-		OwnerPrincipalID: identity.PrincipalID, UserID: userID,
+		OwnerPrincipalID: identity.PrincipalID, OwnerKind: identity.Kind, UserID: userID,
 		Topic: payload.Topic, OpeningQuestion: payload.OpeningQuestion,
 		EnglishLevel: payload.EnglishLevel, Interests: payload.Interests,
 		IdempotencyKey: firstInterviewKey(payload.IdempotencyKey, r.Header.Get("Idempotency-Key")),
@@ -231,7 +235,7 @@ func (s *Server) writeInterviewError(w http.ResponseWriter, r *http.Request, err
 	case errors.Is(err, interview.ErrNotFound):
 		writeV1Error(w, r, http.StatusNotFound, "not_found", "Interview or turn not found")
 	case errors.Is(err, interview.ErrQuota):
-		writeV1Error(w, r, http.StatusForbidden, "quota_exceeded", "Interview duration or quota is exhausted")
+		writeV1Error(w, r, http.StatusForbidden, "quota_exceeded", "Interview duration limit is exhausted")
 	case errors.Is(err, interview.ErrNotReady):
 		writeV1Error(w, r, http.StatusConflict, "interview_not_ready", "A next question is not ready")
 	case errors.Is(err, interview.ErrConflict):

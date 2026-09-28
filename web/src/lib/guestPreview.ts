@@ -13,7 +13,7 @@ import { parseInterviewTurns, type SavedInterviewTurn } from "./interviewTimelin
 const GUEST_SESSION_KEY = "daily-speaking.guest-preview.v1";
 const GUEST_OPERATION_KEY = "daily-speaking.guest-operation.v1";
 const MAX_GUEST_AUDIO_BYTES = 10 * 1024 * 1024;
-export const MAX_GUEST_PREVIEW_SECONDS = 60;
+export const MAX_GUEST_PREVIEW_SECONDS = 3 * 60;
 
 export type GuestPreviewSession = {
   principalId: string;
@@ -224,7 +224,7 @@ export const createGuestPreview = async (draft: GuestPreviewDraft): Promise<Gues
   }
   const duration = Math.floor(draft.duration);
   if (duration < 1 || duration > MAX_GUEST_PREVIEW_SECONDS) {
-    throw new GuestPreviewError("Guest previews can be between 1 and 60 seconds.", "invalid_duration");
+    throw new GuestPreviewError("Guest previews can be between 1 second and 3 minutes.", "invalid_duration");
   }
   const blob = dataURLToBlob(draft.audioDataUrl);
   const audioChecksum = await sha256Blob(blob);

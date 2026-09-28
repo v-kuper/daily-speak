@@ -110,33 +110,11 @@ func promoteGuestPreview(ctx context.Context, tx pgx.Tx, guestPrincipalID string
 	}
 
 	// A ready preview already contains the server-verified duration. When auth
-	// wins the race with the preview worker, reserve the full guest maximum so a
-	// client-declared one-second duration cannot temporarily evade weekly quota.
+	// wins the race with the preview worker, persist the full guest maximum until
+	// the account worker probes the audio and replaces it with the measured value.
 	recordingDuration := preview.Duration
 	if preview.State != "ready" {
-		recordingDuration = 60
-	}
-	eligible, reason, err := lockGuestPreviewPromotionEligibility(ctx, tx, userPrincipalID, recordingDuration, now)
-	if err != nil {
-		return nil, err
-	}
-	if !eligible {
-		if _, err := tx.Exec(ctx, `
-			UPDATE processing_jobs
-			SET state = 'cancelled', completed_at = $2, updated_at = $2,
-			    lease_token = NULL, lease_owner = NULL, lease_expires_at = NULL,
-			    heartbeat_at = NULL
-			WHERE id = $1 AND kind = 'guest.preview'
-			  AND state IN ('queued', 'retry_wait')`, preview.PreviewJobID, now); err != nil {
-			return nil, err
-		}
-		if _, err := tx.Exec(ctx, `
-			UPDATE guest_previews
-			SET state = 'failed', processing_error = $2, updated_at = $3
-			WHERE id = $1 AND state <> 'promoted'`, preview.ID, "Guest preview was not promoted: "+reason, now); err != nil {
-			return nil, err
-		}
-		return &GuestPreviewPromotion{Status: "not_promoted", PreviewID: preview.ID, Reason: reason}, nil
+		recordingDuration = quota.GuestMaxSessionSeconds
 	}
 
 	// A queued/retrying preview can be cancelled without racing a lease holder.
@@ -221,18 +199,4 @@ func promoteGuestPreview(ctx context.Context, tx pgx.Tx, guestPrincipalID string
 		return nil, err
 	}
 	return &GuestPreviewPromotion{Status: "promoted", PreviewID: preview.ID, RecordingID: preview.ID}, nil
-}
-
-func lockGuestPreviewPromotionEligibility(ctx context.Context, tx pgx.Tx, userID string, duration int, now time.Time) (bool, string, error) {
-	recordingQuota, err := quota.LockRecordingQuota(ctx, tx, userID, now)
-	if err != nil {
-		return false, "", err
-	}
-	if recordingQuota.IsSubscriber {
-		return true, "", nil
-	}
-	if recordingQuota.WeeklyRemainingSeconds == nil || duration > *recordingQuota.WeeklyRemainingSeconds {
-		return false, "quota_exceeded", nil
-	}
-	return true, "", nil
 }

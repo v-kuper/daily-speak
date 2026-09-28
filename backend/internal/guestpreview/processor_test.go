@@ -121,6 +121,23 @@ func TestProcessorResumesPersistedTranscriptWithoutRetranscribing(t *testing.T) 
 	}
 }
 
+func TestProcessorRejectsGuestAudioBeyondMeasuredThreeMinuteLimit(t *testing.T) {
+	store := &processorStore{work: ProcessingWork{AudioAssetID: "asset-1", DeclaredDuration: 180}, found: true}
+	processor := NewProcessor(ProcessorDependencies{
+		Store: store, Materializer: &processorMaterializer{},
+		ProbeAudioDuration: func(context.Context, string) (time.Duration, error) {
+			return 180*time.Second + time.Millisecond, nil
+		},
+		Transcribe: func(context.Context, string) (string, error) {
+			t.Fatal("over-limit guest audio must not be transcribed")
+			return "", nil
+		},
+	})
+	if err := processor.Process(context.Background(), Job{ID: "job-1", ResourceID: "preview-1"}); err == nil {
+		t.Fatal("guest audio beyond three minutes was accepted")
+	}
+}
+
 func TestGuestInterviewUsesWholeAudioAndKeepsAnswerTimeline(t *testing.T) {
 	end := 1000
 	sessionID := "session-1"

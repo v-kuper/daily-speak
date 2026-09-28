@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"daily-speaking-practice/backend/internal/db"
-	"daily-speaking-practice/backend/internal/quota"
 	"daily-speaking-practice/backend/internal/workqueue"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -20,18 +19,6 @@ import (
 type SQLRepository struct{ db *db.DB }
 
 func NewSQLRepository(database *db.DB) *SQLRepository { return &SQLRepository{db: database} }
-
-func (r *SQLRepository) MaxDuration(ctx context.Context, userID string) (int, error) {
-	result, err := quota.GetRecordingQuota(ctx, r.db, userID, nil)
-	if err != nil {
-		return 0, fmt.Errorf("read interview quota: %w", err)
-	}
-	seconds := result.MaxSessionSeconds
-	if result.WeeklyRemainingSeconds != nil && *result.WeeklyRemainingSeconds < seconds {
-		seconds = *result.WeeklyRemainingSeconds
-	}
-	return seconds, nil
-}
 
 func (r *SQLRepository) FindByCreateKey(ctx context.Context, ownerPrincipalID, key, digest string) (Session, bool, error) {
 	var id, storedDigest string

@@ -91,10 +91,7 @@ func (repository *SQLRepository) InsertUpload(ctx context.Context, asset Asset, 
 			AND a.deleted_at IS NULL AND a.state<>'failed'`, sessionID).Scan(&usedBytes); err != nil {
 			return err
 		}
-		maxTotal := int64(24 * 1024 * 1024)
-		if principalKind == "guest" {
-			maxTotal = 4 * 1024 * 1024
-		}
+		maxTotal := interviewTurnAudioTotalLimit(principalKind)
 		if usedBytes+asset.ExpectedSizeBytes > maxTotal {
 			return ErrPayloadTooLarge
 		}
@@ -127,6 +124,13 @@ func (repository *SQLRepository) InsertUpload(ctx context.Context, asset Asset, 
 		return mapRepositoryError(err)
 	}
 	return tx.Commit(ctx)
+}
+
+func interviewTurnAudioTotalLimit(principalKind string) int64 {
+	if principalKind == "guest" {
+		return MaxGuestInterviewTurnAudioTotalBytes
+	}
+	return MaxAccountInterviewTurnAudioTotalBytes
 }
 
 func (repository *SQLRepository) GetUpload(ctx context.Context, ownerPrincipalID string, uploadID string) (UploadResource, error) {

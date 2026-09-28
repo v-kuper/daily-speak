@@ -10,9 +10,8 @@ import (
 )
 
 type serviceRepositoryFake struct {
-	maxDuration   int
-	maxCalled     bool
 	createCalled  bool
+	createdMax    int
 	createdInput  CreateInput
 	findSession   Session
 	find          bool
@@ -20,15 +19,12 @@ type serviceRepositoryFake struct {
 	advanceCalled bool
 }
 
-func (f *serviceRepositoryFake) MaxDuration(context.Context, string) (int, error) {
-	f.maxCalled = true
-	return f.maxDuration, nil
-}
 func (f *serviceRepositoryFake) FindByCreateKey(_ context.Context, _, _, _ string) (Session, bool, error) {
 	return f.findSession, f.find, f.findErr
 }
-func (f *serviceRepositoryFake) Create(_ context.Context, input CreateInput, _ int) (Session, error) {
+func (f *serviceRepositoryFake) Create(_ context.Context, input CreateInput, maxSeconds int) (Session, error) {
 	f.createCalled = true
+	f.createdMax = maxSeconds
 	f.createdInput = input
 	return Session{ID: "session", OpeningQuestion: input.OpeningQuestion}, nil
 }
@@ -54,12 +50,12 @@ func (f *serviceRepositoryFake) Finalize(context.Context, FinalizeInput) (Sessio
 }
 
 func validCreate() CreateInput {
-	return CreateInput{OwnerPrincipalID: "principal", UserID: "user", IdempotencyKey: "create-12345678",
+	return CreateInput{OwnerPrincipalID: "principal", OwnerKind: "user", UserID: "user", IdempotencyKey: "create-12345678",
 		Topic: "Travel", OpeningQuestion: "Travel", EnglishLevel: "b1"}
 }
 
 func TestCreateNormalizesTopicToBroadOpeningQuestion(t *testing.T) {
-	repo := &serviceRepositoryFake{maxDuration: 600}
+	repo := &serviceRepositoryFake{}
 	got, err := NewService(repo).Create(context.Background(), validCreate())
 	if err != nil {
 		t.Fatal(err)
@@ -75,16 +71,35 @@ func TestCreateNormalizesTopicToBroadOpeningQuestion(t *testing.T) {
 func TestCreateIdempotentRetryReturnsExistingBeforeQuota(t *testing.T) {
 	repo := &serviceRepositoryFake{find: true, findSession: Session{ID: "existing", Status: StatusReady}}
 	got, err := NewService(repo).Create(context.Background(), validCreate())
-	if err != nil || got.ID != "existing" || repo.maxCalled || repo.createCalled {
-		t.Fatalf("retry got=%+v err=%v maxCalled=%v createCalled=%v", got, err, repo.maxCalled, repo.createCalled)
+	if err != nil || got.ID != "existing" || repo.createCalled {
+		t.Fatalf("retry got=%+v err=%v createCalled=%v", got, err, repo.createCalled)
 	}
 }
 
-func TestCreateRejectsExhaustedQuota(t *testing.T) {
-	repo := &serviceRepositoryFake{maxDuration: 0}
-	_, err := NewService(repo).Create(context.Background(), validCreate())
-	if !errors.Is(err, ErrQuota) || repo.createCalled {
-		t.Fatalf("quota result err=%v createCalled=%v", err, repo.createCalled)
+func TestCreateDistinguishesAccountAndGuestDurationPolicies(t *testing.T) {
+	accountRepo := &serviceRepositoryFake{}
+	if _, err := NewService(accountRepo).Create(context.Background(), validCreate()); err != nil {
+		t.Fatal(err)
+	}
+	if accountRepo.createdMax != 600 {
+		t.Fatalf("account max duration = %d", accountRepo.createdMax)
+	}
+
+	guestRepo := &serviceRepositoryFake{}
+	guest := validCreate()
+	guest.OwnerKind = "guest"
+	guest.UserID = ""
+	if _, err := NewService(guestRepo).Create(context.Background(), guest); err != nil {
+		t.Fatal(err)
+	}
+	if guestRepo.createdMax != 180 {
+		t.Fatalf("guest max duration = %d", guestRepo.createdMax)
+	}
+
+	invalid := validCreate()
+	invalid.UserID = ""
+	if _, err := NewService(&serviceRepositoryFake{}).Create(context.Background(), invalid); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("incomplete account identity err=%v", err)
 	}
 }
 

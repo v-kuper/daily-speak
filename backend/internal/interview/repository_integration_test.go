@@ -42,10 +42,10 @@ func TestInterviewSessionSQLLifecycle(t *testing.T) {
 	})
 	repo := NewSQLRepository(database)
 	service := NewService(repo)
-	input := CreateInput{OwnerPrincipalID: principalID, IdempotencyKey: "create-12345678",
+	input := CreateInput{OwnerPrincipalID: principalID, OwnerKind: "guest", IdempotencyKey: "create-12345678",
 		Topic: "Travel", OpeningQuestion: "Travel"}
 	created, err := service.Create(ctx, input)
-	if err != nil || created.Status != StatusPreparing || created.MaxDurationSeconds != 60 {
+	if err != nil || created.Status != StatusPreparing || created.MaxDurationSeconds != 180 {
 		t.Fatalf("create = %+v, err=%v", created, err)
 	}
 	retried, err := service.Create(ctx, input)

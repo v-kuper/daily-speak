@@ -57,6 +57,7 @@ type Session struct {
 
 type CreateInput struct {
 	OwnerPrincipalID string
+	OwnerKind        string
 	UserID           string
 	Topic            string
 	OpeningQuestion  string

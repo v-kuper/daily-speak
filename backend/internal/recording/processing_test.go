@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	"daily-speaking-practice/backend/internal/quota"
 )
 
 type processorRepository struct {
@@ -206,7 +208,7 @@ func TestProcessorRejectsAccountAudioBeyondServerMeasuredLimit(t *testing.T) {
 	processor := NewProcessor(ProcessingDependencies{
 		Repository: repository, Materializer: &processorMaterializer{},
 		ProbeAudioDuration: func(context.Context, string) (time.Duration, error) {
-			return accountMaxDuration + time.Millisecond, nil
+			return time.Duration(quota.AccountMaxSessionSeconds)*time.Second + time.Millisecond, nil
 		},
 		Transcribe: func(context.Context, string) (string, error) {
 			t.Fatal("over-limit audio must not be transcribed")

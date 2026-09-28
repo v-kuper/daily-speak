@@ -9,12 +9,12 @@ import (
 	"strings"
 
 	"daily-speaking-practice/backend/internal/learner"
+	"daily-speaking-practice/backend/internal/quota"
 )
 
 var keyPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$`)
 
 type Repository interface {
-	MaxDuration(context.Context, string) (int, error)
 	FindByCreateKey(context.Context, string, string, string) (Session, bool, error)
 	EnsureRefill(context.Context, string, string) error
 	Create(context.Context, CreateInput, int) (Session, error)
@@ -33,9 +33,15 @@ func NewService(repository Repository) *Service { return &Service{repository: re
 func (s *Service) Create(ctx context.Context, input CreateInput) (Session, error) {
 	input.Topic = strings.TrimSpace(input.Topic)
 	input.OpeningQuestion = strings.TrimSpace(input.OpeningQuestion)
+	input.OwnerKind = strings.ToLower(strings.TrimSpace(input.OwnerKind))
 	if !keyPattern.MatchString(input.IdempotencyKey) || input.OwnerPrincipalID == "" ||
 		len([]rune(input.Topic)) < 2 || len([]rune(input.Topic)) > 300 ||
 		len([]rune(input.OpeningQuestion)) > 300 {
+		return Session{}, ErrInvalid
+	}
+	if input.OwnerKind != "guest" && input.OwnerKind != "user" ||
+		input.OwnerKind == "user" && strings.TrimSpace(input.UserID) == "" ||
+		input.OwnerKind == "guest" && strings.TrimSpace(input.UserID) != "" {
 		return Session{}, ErrInvalid
 	}
 	if !strings.Contains(input.OpeningQuestion, "?") {
@@ -58,16 +64,9 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Session, error
 	} else if found {
 		return existing, nil
 	}
-	maxSeconds := 60
-	if input.UserID != "" {
-		var err error
-		maxSeconds, err = s.repository.MaxDuration(ctx, input.UserID)
-		if err != nil {
-			return Session{}, err
-		}
-		if maxSeconds <= 0 {
-			return Session{}, ErrQuota
-		}
+	maxSeconds := quota.GuestMaxSessionSeconds
+	if input.OwnerKind == "user" {
+		maxSeconds = quota.AccountMaxSessionSeconds
 	}
 	return s.repository.Create(ctx, input, maxSeconds)
 }

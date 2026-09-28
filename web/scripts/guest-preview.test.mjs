@@ -301,7 +301,7 @@ test("a declined promotion keeps the account active and explains why the preview
   const navigation = router();
   await flows.authenticateAndNavigate(store, navigation, "signIn", "/preview/preview-123");
   assert.equal(store.getState().app.isAuthenticated, true);
-  assert.match(store.getState().app.recordingInputError, /quota/i);
+  assert.match(store.getState().app.recordingInputError, /could not be saved/i);
   assert.deepEqual(navigation.visits, [["replace", "/speak"]]);
 });
 
@@ -313,16 +313,33 @@ test("guest preview rejects unsupported and overlong drafts before spending back
     practiceType: "photo_description", audioDataUrl: "data:audio/webm;base64,YWJj",
   }), /require an account/i);
   await assert.rejects(() => guest.createGuestPreview({
-    topic: "Long", duration: 61, timestamp: "2026-09-27T09:00:00Z",
+    topic: "Long", duration: 181, timestamp: "2026-09-27T09:00:00Z",
     practiceType: "topic", audioDataUrl: "data:audio/webm;base64,YWJj",
-  }), /between 1 and 60 seconds/i);
+  }), /between 1 second and 3 minutes/i);
   assert.equal(requests, 0);
 });
 
 test("guest recording stops at the backend preview limit", () => {
   let state = app.default(undefined, { type: "test/init" });
   state = app.default(state, app.startFreeTalk());
-  for (let second = 0; second < 65; second += 1) state = app.default(state, app.tickRecording());
-  assert.equal(state.recordingDuration, 60);
+  for (let second = 0; second < 185; second += 1) state = app.default(state, app.tickRecording());
+  assert.equal(state.recordingDuration, 180);
   assert.equal(state.speakState, "recorded");
+});
+
+test("authenticated recording ignores weekly quota and stops at the per-recording limit", () => {
+  for (const weeklyRemainingSeconds of [180, 0]) {
+    let state = app.default(undefined, { type: "test/init" });
+    state = {
+      ...state,
+      isAuthenticated: true,
+      isSubscriber: false,
+      weeklyRemainingSeconds,
+      maxSessionSeconds: 600,
+    };
+    state = app.default(state, app.startFreeTalk());
+    for (let second = 0; second < 605; second += 1) state = app.default(state, app.tickRecording());
+    assert.equal(state.recordingDuration, 600);
+    assert.equal(state.speakState, "recorded");
+  }
 });

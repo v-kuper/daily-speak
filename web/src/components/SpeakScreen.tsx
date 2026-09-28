@@ -38,6 +38,7 @@ import {
   advanceInterviewTimeline,
   MAX_LIVE_SEGMENT_ATTEMPTS,
   MIN_ANSWER_MS,
+  resolveInterviewRecordingLimitSeconds,
   rotateFailedInterviewSegment,
   withoutInterviewTimeline,
 } from "../lib/interviewFlow";
@@ -51,6 +52,7 @@ import {
   clearStudyError,
   fetchDailyQuestions,
   fetchStudyWords,
+  MAX_AUTHENTICATED_RECORDING_SECONDS,
   PHOTO_PRACTICE_MAX_BYTES,
   reRecord,
   type RecordingSaveDraft,
@@ -233,11 +235,6 @@ export default function SpeakScreen() {
     studyError,
     recordingSaveStatus,
     recordingSaveError,
-    isSubscriber,
-    weeklyLimitSeconds,
-    weeklyUsedSeconds,
-    weeklyRemainingSeconds,
-    maxSessionSeconds,
     recordingPracticeType,
     pendingRecordingAudioDataUrl,
     recordingInputError,
@@ -246,22 +243,10 @@ export default function SpeakScreen() {
     pendingPhotoError
   } = useAppSelector((state) => state.app);
 
-  const normalizedMaxSessionSeconds = Math.max(0, maxSessionSeconds);
-  const normalizedWeeklyLimitSeconds = Math.max(0, weeklyLimitSeconds ?? 0);
-  const normalizedWeeklyUsedSeconds = Math.max(0, weeklyUsedSeconds);
-  const normalizedWeeklyRemainingSeconds = Math.max(0, weeklyRemainingSeconds ?? 0);
-  const sessionLimitSeconds = isSubscriber
-    ? normalizedMaxSessionSeconds
-    : Math.min(normalizedMaxSessionSeconds, normalizedWeeklyRemainingSeconds);
-  const freeLimitReached = isAuthenticated && !isSubscriber && sessionLimitSeconds <= 0;
-  const hasRecordingBudget = !isAuthenticated || sessionLimitSeconds > 0;
+  const sessionLimitSeconds = MAX_AUTHENTICATED_RECORDING_SECONDS;
 
   const quotaHint = isAuthenticated
-    ? isSubscriber
-      ? `Subscriber: unlimited per week, up to ${formatTime(normalizedMaxSessionSeconds)} per recording.`
-      : `Free: ${formatTime(normalizedWeeklyRemainingSeconds)} left this week (${formatTime(
-          normalizedWeeklyUsedSeconds
-        )} of ${formatTime(normalizedWeeklyLimitSeconds)} used).`
+    ? `Account recording limit: ${formatTime(MAX_AUTHENTICATED_RECORDING_SECONDS)} per recording.`
     : null;
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
@@ -979,8 +964,13 @@ export default function SpeakScreen() {
     beginRecordingFromMicrophone(() => {
       dispatch(startRecording());
       const localLimitSeconds = isAuthenticated ? sessionLimitSeconds : MAX_GUEST_PREVIEW_SECONDS;
-      const limitSeconds = recordingPracticeType === "topic" && session?.maxDurationSeconds
-        ? Math.min(localLimitSeconds, session.maxDurationSeconds)
+      const limitSeconds = recordingPracticeType === "topic"
+        ? resolveInterviewRecordingLimitSeconds({
+            isAuthenticated,
+            authenticatedLimitSeconds: MAX_AUTHENTICATED_RECORDING_SECONDS,
+            guestLimitSeconds: MAX_GUEST_PREVIEW_SECONDS,
+            interviewLimitSeconds: session?.maxDurationSeconds ?? null,
+          })
         : localLimitSeconds;
       armRecordingLimit(limitSeconds);
       if (!session || recordingPracticeType !== "topic") return;
@@ -1384,13 +1374,10 @@ export default function SpeakScreen() {
           <div className="heading-sm">Daily practice</div>
           <h2 className="heading-xl speak-heading-tight">Start a new speaking session</h2>
           {quotaHint && <div className="notice">{quotaHint}</div>}
-          {freeLimitReached && (
-            <div className="auth-error">Free weekly limit reached. New quota will be available next week.</div>
-          )}
           <button
             className="btn btn-primary btn-large speak-primary-btn"
             onClick={onStartFreeTalk}
-            disabled={!hasRecordingBudget || recordingStarting}
+            disabled={recordingStarting}
           >
             {recordingStarting ? "Starting..." : "Start speaking"}
           </button>
@@ -1468,7 +1455,7 @@ export default function SpeakScreen() {
           <button
             className="btn btn-primary"
             onClick={() => dispatch(startPhotoDescription())}
-            disabled={!pendingPhotoDataUrl || !hasRecordingBudget}
+            disabled={!pendingPhotoDataUrl}
           >
             Start photo session
           </button>
@@ -1590,16 +1577,12 @@ export default function SpeakScreen() {
           {!isPhotoPractice && <div className="profile-value">The next questions are prepared privately and will appear one at a time while you speak.</div>}
 
           {quotaHint && <div className="notice">{quotaHint}</div>}
-          {freeLimitReached && (
-            <div className="auth-error">Free weekly limit reached. New quota will be available next week.</div>
-          )}
 
           <button
             className="btn btn-primary btn-large speak-primary-btn"
             onClick={onStartTopicRecording}
             disabled={
-              !hasRecordingBudget ||
-                recordingStarting ||
+              recordingStarting ||
                 (isPhotoPractice && !pendingPhotoDataUrl) ||
                 isTopicGuidancePreparing ||
                 (!isPhotoPractice && interview?.status !== "ready")
@@ -1734,11 +1717,6 @@ export default function SpeakScreen() {
         {quotaHint && <div className="notice">{quotaHint}</div>}
         {interviewStopNotice && <div className="notice top-spaced">{interviewStopNotice}</div>}
         {interviewLiveWarning && <div className="notice top-spaced">{interviewLiveWarning}</div>}
-        {isAuthenticated && !isSubscriber && normalizedWeeklyRemainingSeconds <= 0 && (
-          <div className="auth-error">
-            You spent all free minutes for this week. Additional recordings will unlock next week.
-          </div>
-        )}
 
         {!isAuthenticated && !isPhotoPractice && (
           <div className="notice">

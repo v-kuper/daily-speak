@@ -101,7 +101,7 @@ the same bounded maintenance loop rather than during user requests.
 Interview answer WAV files are temporary media with a 24-hour retention time.
 The regular media sweep enqueues their deletion after expiry; it does not delete
 the complete recording or its separate question timeline. A guest may upload
-at most 4 MiB of answer WAV data per interview; an account may upload 24 MiB.
+at most 8 MiB of answer WAV data per interview; an account may upload 24 MiB.
 The final audio is transcribed independently as one file. Monitor media cleanup
 age as well as interview job age if live transcription is heavily used.
 

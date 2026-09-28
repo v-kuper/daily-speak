@@ -10,8 +10,8 @@ import (
 )
 
 const (
-	FreeWeeklyLimitSeconds      = 10 * 60
-	SubscriberMaxSessionSeconds = 10 * 60
+	GuestMaxSessionSeconds   = 3 * 60
+	AccountMaxSessionSeconds = 10 * 60
 )
 
 func nonNegative(value int) int {
@@ -38,9 +38,8 @@ type RecordingQuota struct {
 	MaxSessionSeconds      int  `json:"maxSessionSeconds"`
 }
 
-// LockRecordingQuota is the shared admission boundary for every code path
-// that creates a recording. Holding the user row lock until the caller commits
-// makes the read-and-insert decision atomic across API replicas and clients.
+// LockRecordingQuota returns the account recording policy and informational
+// weekly usage while holding the user row lock used by recording creation.
 func LockRecordingQuota(ctx context.Context, tx pgx.Tx, userID string, now time.Time) (RecordingQuota, error) {
 	var isSubscriber bool
 	if err := tx.QueryRow(ctx, `
@@ -60,19 +59,12 @@ func LockRecordingQuota(ctx context.Context, tx pgx.Tx, userID string, now time.
 		return RecordingQuota{}, err
 	}
 	usedSeconds = nonNegative(usedSeconds)
-	if isSubscriber {
-		return RecordingQuota{IsSubscriber: true, WeeklyUsedSeconds: usedSeconds, MaxSessionSeconds: SubscriberMaxSessionSeconds}, nil
-	}
-	limit := FreeWeeklyLimitSeconds
-	remaining := limit - usedSeconds
-	if remaining < 0 {
-		remaining = 0
-	}
 	return RecordingQuota{
-		WeeklyLimitSeconds:     &limit,
+		IsSubscriber:           isSubscriber,
+		WeeklyLimitSeconds:     nil,
 		WeeklyUsedSeconds:      usedSeconds,
-		WeeklyRemainingSeconds: &remaining,
-		MaxSessionSeconds:      SubscriberMaxSessionSeconds,
+		WeeklyRemainingSeconds: nil,
+		MaxSessionSeconds:      AccountMaxSessionSeconds,
 	}, nil
 }
 
@@ -100,26 +92,11 @@ func GetRecordingQuota(ctx context.Context, database *db.DB, userID string, know
 		return RecordingQuota{}, err
 	}
 
-	if isSubscriber {
-		return RecordingQuota{
-			IsSubscriber:           true,
-			WeeklyLimitSeconds:     nil,
-			WeeklyUsedSeconds:      nonNegative(usedSeconds),
-			WeeklyRemainingSeconds: nil,
-			MaxSessionSeconds:      SubscriberMaxSessionSeconds,
-		}, nil
-	}
-
-	limit := FreeWeeklyLimitSeconds
-	remaining := limit - nonNegative(usedSeconds)
-	if remaining < 0 {
-		remaining = 0
-	}
 	return RecordingQuota{
-		IsSubscriber:           false,
-		WeeklyLimitSeconds:     &limit,
+		IsSubscriber:           isSubscriber,
+		WeeklyLimitSeconds:     nil,
 		WeeklyUsedSeconds:      nonNegative(usedSeconds),
-		WeeklyRemainingSeconds: &remaining,
-		MaxSessionSeconds:      SubscriberMaxSessionSeconds,
+		WeeklyRemainingSeconds: nil,
+		MaxSessionSeconds:      AccountMaxSessionSeconds,
 	}, nil
 }

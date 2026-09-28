@@ -6,12 +6,12 @@ import (
 	"math"
 	"strings"
 	"time"
+
+	"daily-speaking-practice/backend/internal/quota"
 )
 
 const (
-	ProcessingTimeout       = 30 * time.Minute
-	guestPreviewMaxDuration = 60 * time.Second
-	accountMaxDuration      = 10 * time.Minute
+	ProcessingTimeout = 30 * time.Minute
 )
 
 type ProcessingJob struct {
@@ -112,11 +112,11 @@ func (p *Processor) Process(ctx context.Context, job ProcessingJob, logger Analy
 			return errors.New("recording audio duration could not be verified")
 		}
 		actualSeconds := int(math.Ceil(actualDuration.Seconds()))
-		if actualDuration <= 0 || actualDuration > accountMaxDuration || actualSeconds < 1 {
+		if actualDuration <= 0 || actualDuration > time.Duration(quota.AccountMaxSessionSeconds)*time.Second || actualSeconds < 1 {
 			return errors.New("recording audio exceeds its duration limit")
 		}
-		if work.PromotedGuestPreview && actualDuration > guestPreviewMaxDuration {
-			return errors.New("guest preview audio exceeds the 60 second limit")
+		if work.PromotedGuestPreview && actualDuration > time.Duration(quota.GuestMaxSessionSeconds)*time.Second {
+			return errors.New("guest preview audio exceeds the 180 second limit")
 		}
 		actualMS := int(math.Ceil(float64(actualDuration) / float64(time.Millisecond)))
 		if work.InterviewSessionID != nil {

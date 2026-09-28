@@ -181,7 +181,11 @@ test("authenticated save immediately opens the local recording and replaces it a
 });
 
 test("terminal save failure keeps a retryable local recording until upload succeeds", async (t) => {
-  const run = flow("saveAndNavigate"), store = storeFor({ isAuthenticated: true }), router = routerFor();
+  const run = flow("saveAndNavigate"), store = storeFor({
+    isAuthenticated: true,
+    isSubscriber: false,
+    weeklyRemainingSeconds: 0,
+  }), router = routerFor();
   let unavailable = true;
   server(t, async (url) => {
     if (url.endsWith("/api/v1/media/uploads")) return readyMedia();

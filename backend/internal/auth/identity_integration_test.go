@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"daily-speaking-practice/backend/internal/db"
-	"daily-speaking-practice/backend/internal/quota"
 	"daily-speaking-practice/backend/internal/workqueue"
 	"github.com/google/uuid"
 )
@@ -78,7 +77,7 @@ func TestMobileIdentityLifecycle(t *testing.T) {
 		INSERT INTO interview_sessions
 		  (id, owner_principal_id, create_key, request_digest, topic, opening_question, status, max_duration_seconds,
 		   guest_preview_id)
-		VALUES ($1, $2, 'integration-interview', $3, 'First impression', 'How did it go?', 'finalized', 60, $4)`,
+		VALUES ($1, $2, 'integration-interview', $3, 'First impression', 'How did it go?', 'finalized', 180, $4)`,
 		interviewSessionID, guest.Identity.PrincipalID, strings.Repeat("c", 64), readyPreviewID); err != nil {
 		t.Fatalf("insert guest interview timeline: %v", err)
 	}
@@ -311,7 +310,7 @@ func TestMobileIdentityLifecycle(t *testing.T) {
 	}
 }
 
-func TestGuestPreviewPromotionReservesAccountQuota(t *testing.T) {
+func TestGuestPreviewPromotionIgnoresPriorWeeklyUsage(t *testing.T) {
 	databaseURL := strings.TrimSpace(os.Getenv("TEST_DATABASE_URL"))
 	if databaseURL == "" {
 		t.Skip("TEST_DATABASE_URL is not configured")
@@ -338,10 +337,10 @@ func TestGuestPreviewPromotionReservesAccountQuota(t *testing.T) {
 		_, _ = database.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, account.Identity.PrincipalID)
 	})
 	if _, err := database.Exec(ctx, `
-		INSERT INTO recordings (id, user_id, topic, duration, timestamp, transcript)
-		VALUES ($1, $2, 'Existing usage', $3, NOW(), '')`,
-		uuid.NewString(), account.Identity.PrincipalID, quota.FreeWeeklyLimitSeconds-5); err != nil {
-		t.Fatalf("insert existing quota usage: %v", err)
+			INSERT INTO recordings (id, user_id, topic, duration, timestamp, transcript)
+			VALUES ($1, $2, 'Existing usage', $3, NOW(), '')`,
+		uuid.NewString(), account.Identity.PrincipalID, 3600); err != nil {
+		t.Fatalf("insert prior weekly usage: %v", err)
 	}
 
 	guest, err := CreateAnonymousIdentity(ctx, database, config, DeviceInfo{Name: "Quota preview", Platform: "android"})
@@ -382,11 +381,11 @@ func TestGuestPreviewPromotionReservesAccountQuota(t *testing.T) {
 	if err != nil {
 		t.Fatalf("login with quota-bound preview: %v", err)
 	}
-	if loggedIn.GuestPreviewPromotion == nil || loggedIn.GuestPreviewPromotion.Status != "not_promoted" || loggedIn.GuestPreviewPromotion.Reason != "quota_exceeded" {
-		t.Fatalf("unexpected quota promotion result: %+v", loggedIn.GuestPreviewPromotion)
+	if loggedIn.GuestPreviewPromotion == nil || loggedIn.GuestPreviewPromotion.Status != "promoted" || loggedIn.GuestPreviewPromotion.RecordingID != previewID {
+		t.Fatalf("unexpected promotion result: %+v", loggedIn.GuestPreviewPromotion)
 	}
 	var promotedRecordings int
-	if err := database.QueryRow(ctx, `SELECT COUNT(*) FROM recordings WHERE id = $1`, previewID).Scan(&promotedRecordings); err != nil || promotedRecordings != 0 {
-		t.Fatalf("quota rejection created recordings=%d err=%v", promotedRecordings, err)
+	if err := database.QueryRow(ctx, `SELECT COUNT(*) FROM recordings WHERE id = $1`, previewID).Scan(&promotedRecordings); err != nil || promotedRecordings != 1 {
+		t.Fatalf("promotion created recordings=%d err=%v", promotedRecordings, err)
 	}
 }

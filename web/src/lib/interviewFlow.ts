@@ -9,6 +9,24 @@ export type InterviewAdvance = {
 export const MIN_ANSWER_MS = 300;
 export const MAX_LIVE_SEGMENT_ATTEMPTS = 3;
 
+export const resolveInterviewRecordingLimitSeconds = ({
+  isAuthenticated,
+  authenticatedLimitSeconds,
+  guestLimitSeconds,
+  interviewLimitSeconds,
+}: {
+  isAuthenticated: boolean;
+  authenticatedLimitSeconds: number;
+  guestLimitSeconds: number;
+  interviewLimitSeconds: number | null;
+}): number => {
+  const localLimitSeconds = isAuthenticated ? authenticatedLimitSeconds : guestLimitSeconds;
+  if (interviewLimitSeconds === null || !Number.isFinite(interviewLimitSeconds) || interviewLimitSeconds <= 0) {
+    return localLimitSeconds;
+  }
+  return Math.min(localLimitSeconds, Math.floor(interviewLimitSeconds));
+};
+
 export const rotateFailedInterviewSegment = <T extends { attempts: number }>(
   queue: T[],
   failed: T,

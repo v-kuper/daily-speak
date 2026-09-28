@@ -58,7 +58,7 @@ func validateCreateInput(input CreateUploadInput) (string, error) {
 		if input.ContentType != "audio/wav" && input.ContentType != "audio/x-wav" && input.ContentType != "audio/vnd.wave" {
 			return "", ErrUnsupportedType
 		}
-		if input.SizeBytes > 24*1024*1024 {
+		if input.SizeBytes > MaxInterviewTurnAudioBytes {
 			return "", ErrPayloadTooLarge
 		}
 		return "wav", nil

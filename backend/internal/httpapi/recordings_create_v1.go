@@ -59,12 +59,13 @@ func (s *Server) handleCreateRecordingV1(w http.ResponseWriter, r *http.Request)
 		writeV1Error(w, r, http.StatusConflict, "idempotency_conflict", "Idempotency-Key was already used with a different request")
 	case errors.Is(err, recording.ErrInterviewSessionUnavailable):
 		writeV1Error(w, r, http.StatusConflict, "interview_session_conflict", "Interview session is unavailable")
-	case errors.As(err, &quotaViolation) && quotaViolation.SubscriberLimit:
-		writeV1Error(w, r, http.StatusBadRequest, "quota_exceeded", "Subscribers can save recordings up to 10:00 per session.")
 	case errors.As(err, &quotaViolation):
-		message := "Weekly free limit exceeded. You have " + quota.FormatSeconds(quotaViolation.Remaining) +
-			" left out of " + quota.FormatSeconds(quota.FreeWeeklyLimitSeconds) + " this week."
-		writeV1Error(w, r, http.StatusForbidden, "quota_exceeded", message)
+		maximum := quotaViolation.MaxSessionSeconds
+		if maximum <= 0 {
+			maximum = quota.AccountMaxSessionSeconds
+		}
+		writeV1Error(w, r, http.StatusBadRequest, "quota_exceeded",
+			"Accounts can save recordings up to "+quota.FormatSeconds(maximum)+" per recording.")
 	case err != nil:
 		writeV1Error(w, r, http.StatusInternalServerError, "internal_error", "Failed to create recording")
 	default:

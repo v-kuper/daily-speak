@@ -36,7 +36,7 @@ func TestNormalizeCreateUsesTheSameTopicLimitAsInterviews(t *testing.T) {
 
 func TestNormalizeCreateRejectsUnsupportedRequests(t *testing.T) {
 	for name, input := range map[string]CreateRequest{
-		"too long": {AudioAssetID: "asset", Topic: "Topic", Duration: 61, PracticeType: "free_talk"},
+		"too long": {AudioAssetID: "asset", Topic: "Topic", Duration: 181, PracticeType: "free_talk"},
 		"photo":    {AudioAssetID: "asset", Topic: "Topic", Duration: 10, PracticeType: "photo_description"},
 		"no asset": {Topic: "Topic", Duration: 10, PracticeType: "topic"},
 	} {

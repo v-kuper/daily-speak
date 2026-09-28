@@ -1,6 +1,9 @@
 package migrations
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestRejectTransactionControl(t *testing.T) {
 	allowed := []string{
@@ -27,6 +30,31 @@ func TestRejectTransactionControl(t *testing.T) {
 	for _, sql := range blocked {
 		if err := rejectTransactionControl(sql); err == nil {
 			t.Fatalf("accepted transaction control: %q", sql)
+		}
+	}
+}
+
+func TestRecordingDurationPolicyMigrationUpdatesActiveGuestAndAccountSessions(t *testing.T) {
+	items, err := All()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var policy Migration
+	for _, item := range items {
+		if item.Name == "0013_recording_duration_policy.sql" {
+			policy = item
+			break
+		}
+	}
+	if policy.Name == "" {
+		t.Fatal("recording duration policy migration is missing")
+	}
+	for _, fragment := range []string{
+		"WHEN user_id IS NULL THEN 180 ELSE 600 END",
+		"'preparing', 'ready', 'recording', 'finalizing'",
+	} {
+		if !strings.Contains(policy.SQL, fragment) {
+			t.Fatalf("duration policy migration is missing %q", fragment)
 		}
 	}
 }

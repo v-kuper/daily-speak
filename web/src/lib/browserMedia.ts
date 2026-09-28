@@ -2,7 +2,7 @@ export const AUDIO_MIME_CANDIDATES = ["audio/webm;codecs=opus", "audio/webm", "a
 
 // Stop slightly before the contractual limit. MediaRecorder may include a
 // small final encoder frame after stop(), while guest audio is verified
-// against the exact 60 second backend limit.
+// against the exact server-side duration limit.
 export const RECORDING_LIMIT_HEADROOM_MS = 1000;
 
 export const resolveRecordingHardLimitMs = (limitSeconds: number): number => {

@@ -61,8 +61,7 @@ func (s *createTransactionStub) LinkInterview(_ context.Context, sessionID, prin
 }
 
 func TestCreatorOrchestratesAtomicRecordingCreation(t *testing.T) {
-	remaining := 120
-	tx := &createTransactionStub{quota: quota.RecordingQuota{WeeklyRemainingSeconds: &remaining}}
+	tx := &createTransactionStub{quota: quota.RecordingQuota{MaxSessionSeconds: quota.AccountMaxSessionSeconds}}
 	creator := NewCreator(createUnitOfWorkStub{tx: tx})
 	photoID := "photo"
 	input := CreateInput{
@@ -79,40 +78,41 @@ func TestCreatorOrchestratesAtomicRecordingCreation(t *testing.T) {
 	if len(tx.lockedPurposes) != 2 || tx.lockedPurposes[0] != "recording_audio" || tx.lockedPurposes[1] != "recording_photo" {
 		t.Fatalf("locked purposes = %v", tx.lockedPurposes)
 	}
-	if updatedQuota.WeeklyUsedSeconds != 30 || updatedQuota.WeeklyRemainingSeconds == nil || *updatedQuota.WeeklyRemainingSeconds != 90 {
+	if updatedQuota.WeeklyUsedSeconds != 30 || updatedQuota.WeeklyLimitSeconds != nil || updatedQuota.WeeklyRemainingSeconds != nil {
 		t.Fatalf("updated quota = %+v", updatedQuota)
 	}
 }
 
-func TestCreatorRejectsQuotaBeforeMediaOrPersistence(t *testing.T) {
-	remaining := 10
-	tx := &createTransactionStub{quota: quota.RecordingQuota{WeeklyRemainingSeconds: &remaining}}
+func TestCreatorRejectsPerRecordingLimitBeforeMediaOrPersistence(t *testing.T) {
+	tx := &createTransactionStub{quota: quota.RecordingQuota{MaxSessionSeconds: quota.AccountMaxSessionSeconds}}
 	creator := NewCreator(createUnitOfWorkStub{tx: tx})
 	_, _, err := creator.Create(context.Background(), "principal", "user", "request", CreateInput{
-		Topic: "Talk", Duration: 30, Timestamp: time.Now().UTC(), PracticeType: "free_talk", AudioAssetID: "audio",
+		Topic: "Talk", Duration: quota.AccountMaxSessionSeconds + 1,
+		Timestamp: time.Now().UTC(), PracticeType: "free_talk", AudioAssetID: "audio",
 	})
 	var violation *QuotaViolation
-	if !errors.As(err, &violation) || violation.Remaining != 10 {
+	if !errors.As(err, &violation) || violation.MaxSessionSeconds != quota.AccountMaxSessionSeconds {
 		t.Fatalf("err=%v", err)
 	}
 	if tx.inserted || tx.attached || tx.enqueued || len(tx.lockedPurposes) != 0 {
 		t.Fatalf("quota failure reached persistence: %+v", tx)
 	}
+}
 
-	tx = &createTransactionStub{quota: quota.RecordingQuota{IsSubscriber: true}}
-	creator = NewCreator(createUnitOfWorkStub{tx: tx})
-	_, _, err = creator.Create(context.Background(), "principal", "user", "long", CreateInput{
-		Topic: "Talk", Duration: quota.SubscriberMaxSessionSeconds + 1,
-		Timestamp: time.Now().UTC(), PracticeType: "free_talk", AudioAssetID: "audio",
-	})
-	if !errors.As(err, &violation) || !violation.SubscriberLimit {
-		t.Fatalf("subscriber err=%v", err)
+func TestValidateQuotaIgnoresWeeklyUsageAndSubscription(t *testing.T) {
+	zero := 0
+	for _, current := range []quota.RecordingQuota{
+		{IsSubscriber: false, WeeklyRemainingSeconds: &zero, MaxSessionSeconds: quota.AccountMaxSessionSeconds},
+		{IsSubscriber: true, MaxSessionSeconds: quota.AccountMaxSessionSeconds},
+	} {
+		if violation := ValidateQuota(current, quota.AccountMaxSessionSeconds); violation != nil {
+			t.Fatalf("account recording at limit rejected for quota %+v: %v", current, violation)
+		}
 	}
 }
 
 func TestCreatorLinksInterviewBeforeEnqueueAndRejectsChangedRetry(t *testing.T) {
-	remaining := 120
-	tx := &createTransactionStub{quota: quota.RecordingQuota{WeeklyRemainingSeconds: &remaining}}
+	tx := &createTransactionStub{quota: quota.RecordingQuota{MaxSessionSeconds: quota.AccountMaxSessionSeconds}}
 	creator := NewCreator(createUnitOfWorkStub{tx: tx})
 	sessionID := "session-1"
 	input := CreateInput{Topic: "Travel", Duration: 30, Timestamp: time.Now().UTC().Truncate(time.Microsecond),

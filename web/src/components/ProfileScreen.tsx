@@ -10,7 +10,6 @@ import {
 } from "../store/slices/appSlice";
 import { ENGLISH_LEVEL_OPTIONS, parseEnglishLevel } from "../lib/englishLevel";
 import { useAppDispatch, useAppSelector } from "../store/hooks";
-import { formatTime } from "../lib/utils";
 
 type ProfileSection = "home" | "subscription" | "english-level";
 
@@ -24,9 +23,6 @@ export default function ProfileScreen({ section }: { section: ProfileSection }) 
     userEmail,
     selectedInterestIds,
     isSubscriber,
-    weeklyLimitSeconds,
-    weeklyUsedSeconds,
-    weeklyRemainingSeconds,
     subscriptionExpiresAt,
     subscriptionCancelled,
     subscriptionActionStatus,
@@ -36,9 +32,6 @@ export default function ProfileScreen({ section }: { section: ProfileSection }) 
     englishLevelSaveError
   } = useAppSelector((state) => state.app);
 
-  const freeLimit = Math.max(0, weeklyLimitSeconds ?? 0);
-  const freeUsed = Math.max(0, weeklyUsedSeconds);
-  const freeRemaining = Math.max(0, weeklyRemainingSeconds ?? 0);
   const isSubscriptionLoading = subscriptionActionStatus === "loading";
   const isEnglishLevelSaving = englishLevelSaveStatus === "loading";
   const subscriptionEndsLabel = subscriptionExpiresAt
@@ -63,7 +56,7 @@ export default function ProfileScreen({ section }: { section: ProfileSection }) 
     ? subscriptionCancelled
       ? `Pro до ${subscriptionEndsLabel ?? "даты окончания"}, отменено`
       : `Pro до ${subscriptionEndsLabel ?? "даты окончания"}`
-    : `Free: ${formatTime(freeRemaining)} из ${formatTime(freeLimit)} осталось`;
+    : "Free account";
 
   if (section === "subscription") {
     return (
@@ -77,18 +70,9 @@ export default function ProfileScreen({ section }: { section: ProfileSection }) 
           <div className="profile-row">
             <div className="profile-label">Plan</div>
             <div className="profile-value">
-              {isSubscriber ? "Subscriber: unlimited per week (max 10:00 per session)." : "Free: 10:00 per week."}
+              Account recordings are limited to 10:00 per session.
             </div>
           </div>
-
-          {!isSubscriber && (
-            <div className="profile-row">
-              <div className="profile-label">Weekly usage</div>
-              <div className="profile-value">
-                {formatTime(freeUsed)} / {formatTime(freeLimit)} used, {formatTime(freeRemaining)} left
-              </div>
-            </div>
-          )}
 
           <div className="profile-row">
             <div className="profile-label">Подписка</div>

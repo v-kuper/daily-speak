@@ -83,10 +83,12 @@ retry with bounded exponential backoff, and publish terminal failure. Stable
 idempotency keys prevent client retries and worker redelivery from duplicating
 user-visible or billable work.
 
-A guest may submit one bounded preview. The guest path performs transcription
-and at most two high-confidence corrections; it does not run full multipass
-analysis or TTS. Account promotion queues full processing while reusing work
-that already succeeded.
+A guest may submit one preview bounded to 180 seconds. The guest path performs
+transcription and at most two high-confidence corrections; it does not run
+full multipass analysis or TTS. Account promotion queues full processing while
+reusing work that already succeeded. Every authenticated account may save up
+to 600 seconds per recording, independent of subscription state, and has no
+weekly recording quota.
 
 Recording, guest-preview, shadowing, and cleanup jobs have independent worker
 concurrency controls. Increasing API replicas never implicitly increases paid
@@ -155,11 +157,12 @@ otherwise the full transcript stays separate from questions rather than
 presenting uncertain answer boundaries as fact.
 
 Every account recording is duration-probed by the recording worker before
-transcription. The repository reconciles the measured duration against the
-session limit and the quota reserved from the client-declared duration while
-holding the user quota lock, then stores the measured value. Interview workers
-also replace the last question boundary with the measured full-audio end. This
-keeps free talk and topic recordings on the same server-owned duration policy.
+transcription. The repository verifies the measured duration against the
+600-second per-recording account limit and stores the measured value.
+Interview workers also replace the last question boundary with the measured
+full-audio end. Guest previews are independently probed against their
+180-second limit. This keeps free talk and topic recordings on the same
+server-owned identity policy without relying on client-declared duration.
 
 ```text
 web/                         standalone Next.js application
@@ -175,7 +178,7 @@ backend/internal/learner     shared learner level and interest vocabulary
 backend/internal/media       authorized media lifecycle
 backend/internal/practice    speaking-practice generation application service
 backend/internal/practice/ollamaadapter  Ollama adapter for the practice port
-backend/internal/quota       recording quota policy and formatting
+backend/internal/quota       recording duration policy, usage reporting, and formatting
 backend/internal/recording   recording creation, deletion, processing, analysis
 backend/internal/guestpreview     bounded anonymous preview lifecycle
 backend/internal/shadowing        pronunciation generation lifecycle

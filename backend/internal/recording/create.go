@@ -232,30 +232,20 @@ func deterministicCreateIdentity(principalID string, idempotencyKey string, scop
 }
 
 type QuotaViolation struct {
-	SubscriberLimit bool
-	Remaining       int
+	MaxSessionSeconds int
 }
 
 func (e *QuotaViolation) Error() string {
-	if e.SubscriberLimit {
-		return "recording exceeds subscriber session limit"
-	}
-	return "recording exceeds weekly quota"
+	return "recording exceeds account session limit"
 }
 
 func ValidateQuota(current quota.RecordingQuota, duration int) *QuotaViolation {
-	if current.IsSubscriber {
-		if duration > quota.SubscriberMaxSessionSeconds {
-			return &QuotaViolation{SubscriberLimit: true}
-		}
-		return nil
+	maximum := current.MaxSessionSeconds
+	if maximum <= 0 {
+		maximum = quota.AccountMaxSessionSeconds
 	}
-	remaining := 0
-	if current.WeeklyRemainingSeconds != nil {
-		remaining = *current.WeeklyRemainingSeconds
-	}
-	if duration > remaining {
-		return &QuotaViolation{Remaining: remaining}
+	if duration > maximum {
+		return &QuotaViolation{MaxSessionSeconds: maximum}
 	}
 	return nil
 }
@@ -264,13 +254,6 @@ func QuotaAfterCreate(before quota.RecordingQuota, duration int) quota.Recording
 	after := before
 	savedSeconds := NormalizeDurationSeconds(duration)
 	after.WeeklyUsedSeconds = NormalizeDurationSeconds(before.WeeklyUsedSeconds) + savedSeconds
-	if before.WeeklyRemainingSeconds != nil {
-		remaining := NormalizeDurationSeconds(*before.WeeklyRemainingSeconds) - savedSeconds
-		if remaining < 0 {
-			remaining = 0
-		}
-		after.WeeklyRemainingSeconds = &remaining
-	}
 	return after
 }
 

@@ -42,7 +42,7 @@ func TestGuestPreviewRequestValidationAndIdempotencyDigest(t *testing.T) {
 		t.Fatal("an idempotent retry without an explicit timestamp must keep the same digest")
 	}
 	for name, input := range map[string]guestPreviewCreateRequest{
-		"too long": {AudioAssetID: "asset", Topic: "Topic", Duration: 61, PracticeType: "free_talk"},
+		"too long": {AudioAssetID: "asset", Topic: "Topic", Duration: 181, PracticeType: "free_talk"},
 		"photo":    {AudioAssetID: "asset", Topic: "Topic", Duration: 10, PracticeType: "photo_description"},
 		"no asset": {Topic: "Topic", Duration: 10, PracticeType: "topic"},
 	} {

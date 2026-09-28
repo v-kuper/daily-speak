@@ -368,9 +368,17 @@ test("mobile media contract keeps mutations idempotent and storage requests opaq
 
   const guestPreview = openapi.components.schemas.GuestPreview;
   assert.equal(guestPreview.properties.corrections.maxItems, 2);
+  assert.equal(guestPreview.properties.duration.maximum, 180);
+  assert.equal(openapi.components.schemas.CreateGuestPreviewRequest.properties.duration.maximum, 180);
   assert.deepEqual(guestPreview.properties.state.$ref, "#/components/schemas/GuestPreviewState");
   assert.equal(openapi.paths["/api/v1/guest/previews"].post.responses["503"].$ref, "#/components/responses/V1CapacityUnavailable");
   assert.deepEqual(openapi.components.schemas.IdentityGrantResponse.properties.guestPreviewPromotion.$ref, "#/components/schemas/GuestPreviewPromotion");
   assert.deepEqual(openapi.components.schemas.GuestPreviewPromotion.properties.status.enum, ["promoted", "not_promoted", "no_preview"]);
   assert.deepEqual(openapi.components.schemas.GuestPreviewPromotion.properties.reason.enum, ["quota_exceeded"]);
+
+  const accountDuration = openapi.components.schemas.CreateRecordingFromAssetsRequest.properties.duration;
+  assert.equal(accountDuration.maximum, 600);
+  assert.equal(openapi.components.schemas.RecordingQuota.properties.maxSessionSeconds.maximum, 600);
+  assert.equal(openapi.components.schemas.InterviewSession.properties.maxDurationSeconds.maximum, 600);
+  assert.match(openapi.components.schemas.CreateMediaUploadRequest.properties.sizeBytes.description, /8 MiB for a guest/);
 });

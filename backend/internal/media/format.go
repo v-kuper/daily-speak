@@ -6,8 +6,11 @@ import (
 )
 
 const (
-	MaxAudioUploadBytes = 80 * 1024 * 1024
-	MaxPhotoUploadBytes = 4 * 1024 * 1024
+	MaxAudioUploadBytes                    = 80 * 1024 * 1024
+	MaxPhotoUploadBytes                    = 4 * 1024 * 1024
+	MaxInterviewTurnAudioBytes             = 24 * 1024 * 1024
+	MaxAccountInterviewTurnAudioTotalBytes = 24 * 1024 * 1024
+	MaxGuestInterviewTurnAudioTotalBytes   = 8 * 1024 * 1024
 )
 
 var audioExtensionByMIME = map[string]string{

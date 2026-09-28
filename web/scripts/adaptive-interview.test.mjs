@@ -11,6 +11,7 @@ const sourcePath = (relativePath) => fileURLToPath(new URL(relativePath, import.
 const {
   advanceInterviewTimeline,
   MAX_LIVE_SEGMENT_ATTEMPTS,
+  resolveInterviewRecordingLimitSeconds,
   rotateFailedInterviewSegment,
   withoutInterviewTimeline,
 } = load(sourcePath("../src/lib/interviewFlow.ts"));
@@ -142,7 +143,7 @@ test("Next keeps the current answer open when no question is ready", () => {
   const session = {
     id: "session-1", status: "recording", topic: "Travel", usefulWords: [],
     turns: [{ seq: 1, question: "Travel", askedAtMs: 0, endedAtMs: null, provisionalTranscript: "" }],
-    candidates: [], currentTurnSeq: 1, maxDurationSeconds: 60,
+    candidates: [], currentTurnSeq: 1, maxDurationSeconds: 180,
   };
   assert.equal(advanceInterviewTimeline(session, new Set(), 5000), null);
   assert.equal(session.turns[0].endedAtMs, null);
@@ -154,6 +155,27 @@ test("Next keeps the current answer open when no question is ready", () => {
   assert.equal(advance.session.turns[1].askedAtMs, 5000);
   assert.equal(advance.session.turns[1].question, "Where would you go first?");
   assert.equal(session.turns[0].endedAtMs, null);
+});
+
+test("interview recording limits use the account cap and the server session cap", () => {
+  assert.equal(resolveInterviewRecordingLimitSeconds({
+    isAuthenticated: true,
+    authenticatedLimitSeconds: 600,
+    guestLimitSeconds: 180,
+    interviewLimitSeconds: 600,
+  }), 600);
+  assert.equal(resolveInterviewRecordingLimitSeconds({
+    isAuthenticated: false,
+    authenticatedLimitSeconds: 600,
+    guestLimitSeconds: 180,
+    interviewLimitSeconds: 180,
+  }), 180);
+  assert.equal(resolveInterviewRecordingLimitSeconds({
+    isAuthenticated: true,
+    authenticatedLimitSeconds: 600,
+    guestLimitSeconds: 180,
+    interviewLimitSeconds: 300,
+  }), 300, "the server session cap remains authoritative");
 });
 
 test("a failed live WAV rotates behind later answers and is eventually dropped", () => {
@@ -206,7 +228,7 @@ test("interview create retries use the same key in body and cancellation uses th
     return new Response(JSON.stringify({ interview: {
       id: "interview-1", status: requests.length === 1 ? "preparing" : "cancelled",
       topic: "My dog", openingQuestion: "What would you like to share about your dog?",
-      usefulWords: [], candidates: [], turns: [], currentTurnSeq: null, maxDurationSeconds: 60,
+      usefulWords: [], candidates: [], turns: [], currentTurnSeq: null, maxDurationSeconds: 180,
     } }), { status: requests.length === 1 ? 202 : 200, headers: { "Content-Type": "application/json" } });
   };
   try {
