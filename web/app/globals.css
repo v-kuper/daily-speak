@@ -323,16 +323,14 @@ button {
 
 .btn-group,
 .auth-buttons,
-.modal-buttons,
-.topic-input-buttons {
+.modal-buttons {
   display: flex;
   gap: 10px;
 }
 
 .btn-group .btn,
 .auth-buttons .btn,
-.modal-buttons .btn,
-.topic-input-buttons .btn {
+.modal-buttons .btn {
   flex: 1;
   min-width: 0;
 }
@@ -398,6 +396,65 @@ button {
 
 .speak-hero-card {
   gap: 16px;
+}
+
+.speak-preparing-card {
+  min-height: 320px;
+  gap: 0;
+}
+
+.speak-preparing-back {
+  align-self: flex-start;
+}
+
+.speak-preparing-content {
+  flex: 1;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 24px 8px;
+  text-align: center;
+}
+
+.main-content .speak-preparing-content h2 {
+  margin: 0;
+  font-size: 24px;
+}
+
+.speak-preparing-spinner {
+  width: 36px;
+  height: 36px;
+  border: 3px solid var(--border-soft);
+  border-top-color: var(--text-main);
+  border-radius: 50%;
+  animation: speak-preparing-spin 800ms linear infinite;
+}
+
+@keyframes speak-preparing-spin {
+  to { transform: rotate(360deg); }
+}
+
+.speak-preparing-topic {
+  max-width: 520px;
+  margin-top: 6px;
+  color: var(--text-muted);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.speak-preparing-actions {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.speak-preparing-content .auth-error {
+  width: 100%;
+  max-width: 520px;
 }
 
 .speak-center-card {
@@ -598,6 +655,85 @@ button {
   background: rgba(255, 255, 255, 0.72);
 }
 
+.topic-btn-custom {
+  font-weight: 600;
+}
+
+.custom-topic-form {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: text;
+}
+
+.custom-topic-form input {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.custom-topic-form input:focus,
+.custom-topic-form input:focus-visible {
+  border: 0;
+  outline: none;
+  box-shadow: none;
+}
+
+.custom-topic-form:focus-within,
+.topic-btn-custom:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.custom-topic-form .btn {
+  flex: none;
+  min-height: 34px;
+}
+
+.speak-free-start {
+  align-self: flex-start;
+}
+
+.speak-choice-header {
+  margin-top: 4px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.photo-topic-btn {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  overflow: hidden;
+  font-weight: 600;
+}
+
+.photo-topic-btn .profile-value {
+  font-weight: 400;
+}
+
+.photo-topic-btn input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.photo-topic-btn:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .question-item,
 .word-item,
 .study-text-card {
@@ -621,7 +757,6 @@ button {
 
 .study-text-card,
 .study-pack-skeleton,
-.guidance-skeleton,
 .speak-empty-state {
   border: 1px solid var(--border-soft);
   background: rgba(255, 255, 255, 0.42);
@@ -638,15 +773,6 @@ button {
   padding: 0 3px;
 }
 
-.add-topic-input,
-.photo-object-input {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.add-topic-input input,
-.photo-object-input input,
 .auth-form input,
 .profile-select {
   width: 100%;
@@ -660,24 +786,9 @@ button {
 }
 
 .auth-form input:focus,
-.profile-select:focus,
-.add-topic-input input:focus,
-.photo-object-input input:focus {
+.profile-select:focus {
   outline: 2px solid rgba(240, 95, 47, 0.26);
   border-color: rgba(240, 95, 47, 0.42);
-}
-
-.photo-upload-btn {
-  position: relative;
-  overflow: hidden;
-  width: fit-content;
-}
-
-.photo-upload-btn input {
-  position: absolute;
-  inset: 0;
-  opacity: 0;
-  cursor: pointer;
 }
 
 .photo-practice-preview,
@@ -802,8 +913,7 @@ button {
 }
 
 .topic-skeleton,
-.study-pack-skeleton,
-.guidance-skeleton {
+.study-pack-skeleton {
   border-radius: 18px;
   padding: 14px;
 }
@@ -1824,8 +1934,7 @@ button {
 
   .btn-group,
   .auth-buttons,
-  .modal-buttons,
-  .topic-input-buttons {
+  .modal-buttons {
     flex-direction: column;
   }
 }
@@ -2396,6 +2505,10 @@ body {
   .interview-live-caption {
     animation: none;
     transition: none;
+  }
+
+  .speak-preparing-spinner {
+    animation: none;
   }
 }
 

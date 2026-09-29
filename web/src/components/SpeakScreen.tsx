@@ -67,9 +67,7 @@ import {
   backToQuestionsList,
   clearPhotoForPractice,
   clearQuestionsError,
-  clearStudyError,
   fetchDailyQuestions,
-  fetchStudyWords,
   MAX_AUTHENTICATED_RECORDING_SECONDS,
   PHOTO_PRACTICE_MAX_BYTES,
   reRecord,
@@ -163,77 +161,6 @@ const readFileAsDataUrl = (file: File): Promise<string> => {
   });
 };
 
-type StudyTextSegment = {
-  text: string;
-  isStudyWord: boolean;
-};
-
-const escapeRegExp = (value: string): string => {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-};
-
-const buildStudyTextSegments = (text: string, words: string[]): StudyTextSegment[] => {
-  if (!text) {
-    return [];
-  }
-
-  const uniqueWords = Array.from(
-    new Set(
-      words
-        .map((item) => item.trim())
-        .filter((item) => item.length > 0)
-    )
-  );
-  if (uniqueWords.length === 0) {
-    return [{ text, isStudyWord: false }];
-  }
-
-  const pattern = uniqueWords
-    .sort((a, b) => b.length - a.length)
-    .map((item) => escapeRegExp(item))
-    .join("|");
-  if (!pattern) {
-    return [{ text, isStudyWord: false }];
-  }
-
-  const regex = new RegExp(`\\b(?:${pattern})\\b`, "gi");
-  const segments: StudyTextSegment[] = [];
-  let cursor = 0;
-  let match = regex.exec(text);
-
-  while (match) {
-    const start = match.index;
-    const end = start + match[0].length;
-
-    if (start > cursor) {
-      segments.push({
-        text: text.slice(cursor, start),
-        isStudyWord: false
-      });
-    }
-
-    segments.push({
-      text: text.slice(start, end),
-      isStudyWord: true
-    });
-
-    cursor = end;
-    if (regex.lastIndex === start) {
-      regex.lastIndex += 1;
-    }
-    match = regex.exec(text);
-  }
-
-  if (cursor < text.length) {
-    segments.push({
-      text: text.slice(cursor),
-      isStudyWord: false
-    });
-  }
-
-  return segments.length > 0 ? segments : [{ text, isStudyWord: false }];
-};
-
 export default function SpeakScreen() {
   const dispatch = useAppDispatch();
   const store = useAppStore();
@@ -257,6 +184,8 @@ export default function SpeakScreen() {
   const [questionSpeechState, setQuestionSpeechState] = useState<QuestionSpeechState>("idle");
   const [questionSpeechError, setQuestionSpeechError] = useState<string | null>(null);
   const [questionSpeechMuted, setQuestionSpeechMuted] = useState(false);
+  const [openingAudioError, setOpeningAudioError] = useState<string | null>(null);
+  const [openingAudioRetryToken, setOpeningAudioRetryToken] = useState(0);
   const [interviewRefreshToken, setInterviewRefreshToken] = useState(0);
   const {
     speakState,
@@ -272,10 +201,6 @@ export default function SpeakScreen() {
     selectedEnglishLevel,
     recordings,
     userDataStatus,
-    studyWords,
-    studyText,
-    studyStatus,
-    studyError,
     recordingSaveStatus,
     recordingSaveError,
     recordingPracticeType,
@@ -303,6 +228,11 @@ export default function SpeakScreen() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const recordingStartingRef = useRef(false);
+  const customTopicInputRef = useRef<HTMLInputElement | null>(null);
+  const autoStartTopicRef = useRef<string | null>(null);
+  const autoStartPhotoRef = useRef(false);
+  const photoSelectionAttemptRef = useRef(0);
+  const startTopicRecordingRef = useRef<() => void>(() => undefined);
   const mountedRef = useRef(false);
   const recordingAttemptRef = useRef(0);
   const interviewRef = useRef<InterviewSession | null>(null);
@@ -1402,6 +1332,34 @@ export default function SpeakScreen() {
     }, recordingPracticeType === "topic");
   };
 
+  useEffect(() => {
+    startTopicRecordingRef.current = onStartTopicRecording;
+  });
+
+  const prepareTopicForRecording = (topic: string) => {
+    if (!topic) return;
+    if (!questionSpeechMuted) {
+      const player = questionSpeechPlayerRef.current ?? new QuestionSpeechPlayer();
+      questionSpeechPlayerRef.current = player;
+      player.unlock();
+    }
+    autoStartTopicRef.current = topic;
+    setOpeningAudioError(null);
+    setInterviewPreparationError(null);
+  };
+
+  const onSelectTopic = (topic: string) => {
+    prepareTopicForRecording(topic);
+    dispatch(selectTopic(topic));
+  };
+
+  const onStartCustomTopic = () => {
+    const topic = customTopicDraft.trim();
+    if (!topic) return;
+    prepareTopicForRecording(topic);
+    dispatch(applyCustomTopic());
+  };
+
   const onStopRecording = () => {
     finishActiveRecording();
   };
@@ -1750,6 +1708,59 @@ export default function SpeakScreen() {
     });
   }, [cancelCurrentInterview, clearInterviewLiveCaption, interviewRefreshToken, isAuthenticated, mergeInterview, recordingPracticeType, selectedEnglishLevel, selectedInterestIds, selectedTopic, speakState, stopQuestionSpeech, updateCurrentAnswerSpeech, updateInterview]);
 
+  const openingInterviewId = interview?.id ?? null;
+  const openingInterviewStatus = interview?.status ?? null;
+  const openingQuestion = interview?.openingQuestion ?? null;
+
+  useEffect(() => {
+    if (speakState !== "readyToRecord" || recordingPracticeType !== "topic" || !selectedTopic ||
+      autoStartTopicRef.current || recordingStarting || recordingStartingRef.current ||
+      recordingInputError || openingAudioError || interviewPreparationError || openingInterviewStatus === "failed") return;
+    // A restored or interrupted ready state still needs a way out of the loading screen.
+    autoStartTopicRef.current = selectedTopic;
+    setOpeningAudioRetryToken((value) => value + 1);
+  }, [interviewPreparationError, openingAudioError, openingInterviewStatus, recordingInputError, recordingPracticeType, recordingStarting, selectedTopic, speakState]);
+
+  useEffect(() => {
+    const pendingTopic = autoStartTopicRef.current;
+    if (!pendingTopic || speakState !== "readyToRecord" || recordingPracticeType !== "topic" ||
+      selectedTopic !== pendingTopic || openingInterviewStatus !== "ready" || !openingInterviewId || !openingQuestion) return;
+    if (questionSpeechMuted) {
+      autoStartTopicRef.current = null;
+      setOpeningAudioError(null);
+      startTopicRecordingRef.current();
+      return;
+    }
+
+    let active = true;
+    const player = questionSpeechPlayerRef.current ?? new QuestionSpeechPlayer();
+    questionSpeechPlayerRef.current = player;
+    setOpeningAudioError(null);
+    void player.preload(
+      openingQuestion,
+      async () => fetchQuestionSpeech(
+        await getInterviewQuestionSpeechToken(openingInterviewId),
+        openingQuestion,
+      ),
+    ).then(() => {
+      if (!active || autoStartTopicRef.current !== pendingTopic || interviewRef.current?.id !== openingInterviewId) return;
+      autoStartTopicRef.current = null;
+      startTopicRecordingRef.current();
+    }).catch(() => {
+      if (active && autoStartTopicRef.current === pendingTopic) {
+        setOpeningAudioError("The first question's audio could not be prepared.");
+      }
+    });
+    return () => { active = false; };
+  }, [openingAudioRetryToken, openingInterviewId, openingInterviewStatus, openingQuestion, questionSpeechMuted, recordingPracticeType, selectedTopic, speakState]);
+
+  useEffect(() => {
+    if (!autoStartPhotoRef.current || speakState !== "readyToRecord" ||
+      recordingPracticeType !== "photo_description" || !pendingPhotoDataUrl) return;
+    autoStartPhotoRef.current = false;
+    startTopicRecordingRef.current();
+  }, [pendingPhotoDataUrl, recordingPracticeType, speakState]);
+
   useEffect(() => {
     if (!interview?.id || (speakState !== "readyToRecord" && speakState !== "recording" && speakState !== "recorded")) return;
     let active = true;
@@ -1794,6 +1805,12 @@ export default function SpeakScreen() {
   }, [finishActiveRecording, finishInterviewCapture, releaseMedia, speakState]);
 
   useEffect(() => {
+    if (speakState === "idle" && showAddTopicInput) {
+      customTopicInputRef.current?.focus();
+    }
+  }, [showAddTopicInput, speakState]);
+
+  useEffect(() => {
     return () => {
       finishInterviewCapture();
       if (recordingLimitTimerRef.current !== null) window.clearTimeout(recordingLimitTimerRef.current);
@@ -1821,28 +1838,20 @@ export default function SpeakScreen() {
     if (!selectedTopic || recordingPracticeType === "photo_description") {
       return;
     }
+    setOpeningAudioError(null);
     setInterviewRefreshToken((value) => value + 1);
   };
 
   const onBackToQuestionsList = () => {
+    autoStartTopicRef.current = null;
+    autoStartPhotoRef.current = false;
+    photoSelectionAttemptRef.current += 1;
     cancelCurrentInterview();
     recordingAttemptRef.current += 1;
     recordingStartingRef.current = false;
     setRecordingStarting(false);
+    if (recordingPracticeType === "photo_description") dispatch(clearPhotoForPractice());
     dispatch(backToQuestionsList());
-  };
-
-  const onGenerateStudyWords = () => {
-    dispatch(clearStudyError());
-    void dispatch(
-      fetchStudyWords({
-        force: true,
-        refreshToken: String(Date.now()),
-        interestIds: selectedInterestIds,
-        avoidWords: studyWords,
-        englishLevel: selectedEnglishLevel
-      })
-    );
   };
 
   const onPhotoSelected = (event: ChangeEvent<HTMLInputElement>) => {
@@ -1852,6 +1861,7 @@ export default function SpeakScreen() {
     if (!file) {
       return;
     }
+    const selectionAttempt = ++photoSelectionAttemptRef.current;
 
     if (!PHOTO_ACCEPTED_TYPES.has(file.type.toLowerCase())) {
       dispatch(setPhotoUploadError("Supported formats: JPG, PNG, WEBP, GIF."));
@@ -1865,290 +1875,178 @@ export default function SpeakScreen() {
 
     void readFileAsDataUrl(file)
       .then((dataUrl) => {
+        if (selectionAttempt !== photoSelectionAttemptRef.current || store.getState().app.speakState !== "idle" || recordingStartingRef.current) return;
+        dispatch(setPhotoObjectDraft(""));
         dispatch(setPhotoForPractice(dataUrl));
+        const photoState = store.getState().app;
+        if (photoState.pendingPhotoDataUrl !== dataUrl.trim() || photoState.pendingPhotoError) return;
+        autoStartPhotoRef.current = true;
+        dispatch(startPhotoDescription());
       })
       .catch(() => {
+        if (selectionAttempt !== photoSelectionAttemptRef.current) return;
         dispatch(setPhotoUploadError("Failed to read selected photo."));
       });
   };
 
   if (speakState === "idle") {
     const shouldShowQuestionsSkeleton = questionsStatus === "loading" && topics.length === 0;
-    const shouldShowStudySkeleton = studyStatus === "loading" && studyWords.length === 0 && !studyText;
-    const studyParagraphs = studyText
-      ? studyText
-          .split(/\n{2,}/)
-          .map((item) => item.trim())
-          .filter((item) => item.length > 0)
-      : [];
 
     return (
       <section className="speak-screen">
-        <div className="speak-card speak-hero-card">
-          <div className="heading-sm">Daily practice</div>
-          <h2 className="heading-xl speak-heading-tight">Start a new speaking session</h2>
-          {quotaHint && <div className="notice">{quotaHint}</div>}
-          <button
-            className="btn btn-primary btn-large speak-primary-btn"
-            onClick={onStartFreeTalk}
-            disabled={recordingStarting}
-          >
-            {recordingStarting ? "Starting..." : "Start speaking"}
-          </button>
-          {recordingInputError && <div className="auth-error top-spaced">{recordingInputError}</div>}
-        </div>
-
         <div className="speak-card">
-          <div className="speak-section-header">
-            <div className="section-title speak-section-title">Today&apos;s questions</div>
+          <button className="btn btn-primary speak-free-start" onClick={onStartFreeTalk} disabled={recordingStarting}>
+            {recordingStarting ? "Starting..." : "Start free recording"}
+          </button>
+          <p className="profile-value">Talk about anything, read aloud, or practice a rule. No question needed.</p>
+          {recordingInputError && <div className="auth-error">{recordingInputError}</div>}
+
+          <div className="speak-section-header speak-choice-header">
+            <div className="section-title speak-section-title">Or pick one of today&apos;s questions</div>
             <button
               className="btn btn-secondary btn-small"
               onClick={onRefreshQuestions}
               disabled={questionsStatus === "loading"}
             >
-              {questionsStatus === "loading" ? "Generating..." : "↻ Regenerate"}
+              {questionsStatus === "loading" ? "Finding..." : "↻ New questions"}
             </button>
           </div>
 
-          {shouldShowQuestionsSkeleton ? (
-            <div className="topics-grid topics-grid-skeleton" aria-hidden="true">
-              {Array.from({ length: 3 }).map((_, index) => (
-                <div key={`topic-skeleton-${index}`} className="topic-skeleton">
+          <div className="topics-grid">
+            {shouldShowQuestionsSkeleton ? (
+              Array.from({ length: 3 }).map((_, index) => (
+                <div key={`topic-skeleton-${index}`} className="topic-skeleton" aria-hidden="true">
                   <div className="skeleton-line skeleton-line-wide" />
                   <div className="skeleton-line skeleton-line-medium" />
                 </div>
-              ))}
-            </div>
-          ) : topics.length === 0 && questionsStatus !== "loading" ? (
-            <div className="empty-state speak-empty-state">No daily questions yet.</div>
-          ) : (
-            <div className="topics-grid">
-              {topics.map((topic) => (
-                <button key={topic} className="topic-btn" onClick={() => dispatch(selectTopic(topic))}>
-                  {topic}
-                </button>
-              ))}
-            </div>
-          )}
-
-          {questionsError && <div className="auth-error top-spaced">{questionsError}</div>}
-        </div>
-
-        <div className="speak-card">
-          <div className="speak-section-header">
-            <div className="section-title speak-section-title">Photo description</div>
-            {pendingPhotoDataUrl && (
-              <button className="btn btn-secondary btn-small" onClick={() => dispatch(clearPhotoForPractice())}>
-                Remove photo
+              ))
+            ) : topics.map((topic) => (
+              <button key={topic} className="topic-btn" onClick={() => onSelectTopic(topic)}>
+                {topic}
+              </button>
+            ))}
+            {showAddTopicInput ? (
+              <form
+                className="topic-btn custom-topic-form"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  onStartCustomTopic();
+                }}
+              >
+                <input
+                  id="custom-topic-question"
+                  ref={customTopicInputRef}
+                  type="text"
+                  aria-label="Your question"
+                  placeholder="Write your question..."
+                  value={customTopicDraft}
+                  onChange={(event) => dispatch(setCustomTopicDraft(event.target.value))}
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") dispatch(toggleAddTopicInput());
+                  }}
+                />
+                {Boolean(customTopicDraft.trim()) && <button type="submit" className="btn btn-primary btn-small">Start</button>}
+              </form>
+            ) : (
+              <button type="button" className="topic-btn topic-btn-custom" onClick={() => dispatch(toggleAddTopicInput())}>
+                <span aria-hidden="true">+ </span>Add your own question
               </button>
             )}
           </div>
 
-          <div className="profile-value">Upload an image and practice describing what you see.</div>
-
-          <label className="btn btn-secondary btn-small photo-upload-btn">
-            Upload photo
-            <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" onChange={onPhotoSelected} />
-          </label>
-
-          {pendingPhotoDataUrl ? (
-            <img src={pendingPhotoDataUrl} alt="Selected for speaking practice" className="photo-practice-preview" />
-          ) : (
-            <div className="empty-state speak-empty-state">No photo selected yet.</div>
+          {topics.length === 0 && questionsStatus !== "loading" && (
+            <div className="profile-value">No daily questions yet. You can still add your own.</div>
           )}
-
-          <div className="photo-object-input">
+          {questionsError && <div className="auth-error top-spaced">{questionsError}</div>}
+          <label className="topic-btn photo-topic-btn">
+            <span>Describe a photo</span>
+            <span className="profile-value">Choose an image and start recording</span>
             <input
-              type="text"
-              placeholder="Optional object name (example: red bicycle)"
-              value={pendingPhotoObjectDraft}
-              onChange={(event) => dispatch(setPhotoObjectDraft(event.target.value))}
+              type="file"
+              accept="image/jpeg,image/png,image/webp,image/gif"
+              aria-label="Choose a photo to describe"
+              onChange={onPhotoSelected}
             />
-          </div>
-
-          <button
-            className="btn btn-primary"
-            onClick={() => dispatch(startPhotoDescription())}
-            disabled={!pendingPhotoDataUrl}
-          >
-            Start photo session
-          </button>
-
-          {pendingPhotoError && <div className="auth-error top-spaced">{pendingPhotoError}</div>}
-        </div>
-
-        <div className="speak-card">
-          <div className="speak-section-header">
-            <div className="section-title speak-section-title">Words for study</div>
-            <button className="btn btn-secondary btn-small" onClick={onGenerateStudyWords} disabled={studyStatus === "loading"}>
-              {studyStatus === "loading" ? "Generating..." : studyWords.length === 10 ? "↻ Regenerate" : "Generate"}
-            </button>
-          </div>
-
-          <div className="profile-value">
-            Generate 10 words and a practical context text for level {selectedEnglishLevel.toUpperCase()}.
-          </div>
-
-          {shouldShowStudySkeleton && (
-            <div className="study-pack-skeleton" aria-hidden="true">
-              <div className="skeleton-line skeleton-line-wide" />
-              <div className="skeleton-line skeleton-line-wide" />
-              <div className="skeleton-line skeleton-line-medium" />
-            </div>
-          )}
-
-          {!shouldShowStudySkeleton && studyWords.length > 0 && (
-            <div className="study-words-grid">
-              {studyWords.map((word) => (
-                <div key={word.toLowerCase()} className="study-word-chip">
-                  {word}
-                </div>
-              ))}
-            </div>
-          )}
-
-          {!shouldShowStudySkeleton && studyParagraphs.length > 0 && (
-            <div className="study-text-card">
-              {studyParagraphs.map((paragraph, index) => (
-                <p key={`study-paragraph-${index}`}>
-                  {buildStudyTextSegments(paragraph, studyWords).map((segment, segmentIndex) =>
-                    segment.isStudyWord ? (
-                      <mark key={`study-segment-${index}-${segmentIndex}`} className="study-word-mark">
-                        {segment.text}
-                      </mark>
-                    ) : (
-                      <span key={`study-segment-${index}-${segmentIndex}`}>{segment.text}</span>
-                    )
-                  )}
-                </p>
-              ))}
-            </div>
-          )}
-
-          {!shouldShowStudySkeleton && studyWords.length === 0 && (
-            <div className="empty-state speak-empty-state">Generate vocabulary set to start learning words in context.</div>
-          )}
-
-          {studyError && <div className="auth-error top-spaced">{studyError}</div>}
-        </div>
-
-        <div className="speak-card">
-          <div className="speak-section-header">
-            <div className="section-title speak-section-title">Custom topic</div>
-            <button className="btn btn-secondary btn-small" onClick={() => dispatch(toggleAddTopicInput())}>
-              {showAddTopicInput ? "Hide" : "+ Add topic"}
-            </button>
-          </div>
-
-          {showAddTopicInput && (
-            <div className="add-topic-input visible">
-              <input
-                type="text"
-                placeholder="Write your topic..."
-                value={customTopicDraft}
-                onChange={(event) => dispatch(setCustomTopicDraft(event.target.value))}
-              />
-              <div className="topic-input-buttons">
-                <button className="btn btn-secondary" onClick={() => dispatch(toggleAddTopicInput())}>
-                  Cancel
-                </button>
-                <button className="btn btn-primary" onClick={() => dispatch(applyCustomTopic())}>
-                  Use this topic
-                </button>
-              </div>
-            </div>
-          )}
+          </label>
+          {pendingPhotoError && <div className="auth-error" role="alert">{pendingPhotoError}</div>}
         </div>
       </section>
     );
   }
 
   if (speakState === "readyToRecord") {
-    const isPhotoPractice = recordingPracticeType === "photo_description";
-    const preparationFailure = interviewPreparationError
-      ?? (interview?.status === "failed" ? interview.error || "Could not prepare this interview." : null);
-    const isTopicGuidancePreparing =
-      !isPhotoPractice && !preparationFailure && interview?.status !== "ready";
-    const shouldShowGuidanceSkeleton = !isPhotoPractice && isTopicGuidancePreparing;
+    if (recordingPracticeType === "topic") {
+      const preparationFailure = interviewPreparationError
+        ?? (interview?.status === "failed" ? interview.error || "Could not prepare your question." : null)
+        ?? (interview?.status === "ready" && (!interview.id || !interview.openingQuestion.trim())
+          ? "The first question is unavailable. Please try again."
+          : null);
+      const startupError = preparationFailure ?? openingAudioError ?? recordingInputError;
 
+      return (
+        <section className="speak-screen">
+          <div className="speak-card speak-preparing-card">
+            <button className="btn btn-secondary btn-small speak-preparing-back" onClick={onBackToQuestionsList} disabled={recordingStarting}>
+              ← Back to questions
+            </button>
+            {startupError ? (
+              <div className="speak-preparing-content">
+                <h2 className="heading-xl">We couldn&apos;t start yet</h2>
+                <p className="auth-error" role="alert">{startupError}</p>
+                <div className="speak-preparing-actions">
+                  {preparationFailure ? (
+                    <button className="btn btn-primary" onClick={onRefreshTopicGuidance}>Try again</button>
+                  ) : openingAudioError ? (
+                    <>
+                      <button className="btn btn-primary" onClick={() => setOpeningAudioRetryToken((value) => value + 1)}>Try audio again</button>
+                      <button className="btn btn-secondary" onClick={() => setQuestionSpeechMuted(true)}>Start without audio</button>
+                    </>
+                  ) : (
+                    <button className="btn btn-primary" onClick={onStartTopicRecording}>Try recording again</button>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="speak-preparing-content" role="status" aria-live="polite">
+                <span className="speak-preparing-spinner" aria-hidden="true" />
+                <h2 className="heading-xl">Starting in a moment</h2>
+                <p className="profile-value">
+                  {recordingStarting
+                    ? "Turning on your microphone..."
+                    : interview?.status === "ready"
+                      ? "Getting the first question ready to play..."
+                      : "Preparing your first question and helpful words..."}
+                </p>
+                {selectedTopic && <p className="speak-preparing-topic">{selectedTopic}</p>}
+              </div>
+            )}
+          </div>
+        </section>
+      );
+    }
+
+    const photoStartupError = recordingInputError ?? pendingPhotoError ?? (!pendingPhotoDataUrl ? "Choose a photo to begin." : null);
     return (
       <section className="speak-screen">
-        <div className="speak-card speak-hero-card">
-          <button
-            className="btn btn-secondary btn-small"
-            onClick={onBackToQuestionsList}
-            disabled={recordingStarting}
-          >
+        <div className="speak-card speak-preparing-card">
+          <button className="btn btn-secondary btn-small speak-preparing-back" onClick={onBackToQuestionsList} disabled={recordingStarting}>
             ← Back to questions
           </button>
-          <div className="heading-sm">Selected question</div>
-          {isPhotoPractice && pendingPhotoDataUrl && (
-            <img src={pendingPhotoDataUrl} alt="Photo to describe" className="photo-practice-preview" />
-          )}
-          <h2 className="heading-xl speak-heading-tight">{isPhotoPractice ? selectedTopic : interview?.openingQuestion ?? selectedTopic}</h2>
-          {!isPhotoPractice && <div className="profile-value">One next question and its answer words are prepared privately while you speak.</div>}
-
-          {quotaHint && <div className="notice">{quotaHint}</div>}
-
-          <button
-            className="btn btn-primary btn-large speak-primary-btn"
-            onClick={onStartTopicRecording}
-            disabled={
-              recordingStarting ||
-                (isPhotoPractice && !pendingPhotoDataUrl) ||
-                isTopicGuidancePreparing ||
-                (!isPhotoPractice && interview?.status !== "ready")
-            }
-          >
-            {recordingStarting ? "Starting..." : preparationFailure ? "Preparation failed" : isTopicGuidancePreparing ? "Preparing interview..." : "Start speaking"}
-          </button>
-          {recordingInputError && <div className="auth-error top-spaced">{recordingInputError}</div>}
-          {pendingPhotoError && <div className="auth-error top-spaced">{pendingPhotoError}</div>}
-        </div>
-
-        {isPhotoPractice ? (
-          <div className="speak-card">
-            <div className="section-title speak-section-title">Photo focus</div>
-            <div className="question-item">Describe the object and what details you notice.</div>
-            <div className="question-item">Mention color, shape, material, and where it is located.</div>
-            <div className="question-item">Say how this object could be used in real life.</div>
-          </div>
-        ) : (
-          <div className="speak-card">
-            <div className="speak-section-header">
-              <div className="section-title speak-section-title">Interview preparation</div>
-              <button
-                className="btn btn-secondary btn-small"
-                onClick={onRefreshTopicGuidance}
-                disabled={recordingStarting}
-              >
-                {recordingStarting ? "Starting..." : isTopicGuidancePreparing ? "Preparing..." : "↻ Regenerate"}
-              </button>
+          {photoStartupError ? (
+            <div className="speak-preparing-content">
+              <h2 className="heading-xl">We couldn&apos;t start yet</h2>
+              <p className="auth-error" role="alert">{photoStartupError}</p>
+              {pendingPhotoDataUrl && <button className="btn btn-primary" onClick={onStartTopicRecording}>Try recording again</button>}
             </div>
-
-            {shouldShowGuidanceSkeleton && (
-              <div className="guidance-skeleton" aria-hidden="true">
-                <div className="guidance-skeleton-title skeleton-line skeleton-line-short" />
-                <div className="guidance-skeleton-item skeleton-line skeleton-line-wide" />
-                <div className="guidance-skeleton-item skeleton-line skeleton-line-wide" />
-                <div className="guidance-skeleton-item skeleton-line skeleton-line-medium" />
-              </div>
-            )}
-
-            {!isTopicGuidancePreparing && !preparationFailure && (
-              <div className="profile-value">
-                Ready. Helpful words will appear only while you answer each question.
-              </div>
-            )}
-
-            {preparationFailure && (
-              <div className="auth-error top-spaced">
-                {preparationFailure}
-                <button className="btn btn-secondary btn-small top-spaced" onClick={onRefreshTopicGuidance}>Retry preparation</button>
-              </div>
-            )}
-          </div>
-        )}
+          ) : (
+            <div className="speak-preparing-content" role="status" aria-live="polite">
+              <span className="speak-preparing-spinner" aria-hidden="true" />
+              <h2 className="heading-xl">Starting your photo recording</h2>
+              <p className="profile-value">Turning on your microphone...</p>
+              {pendingPhotoDataUrl && <img src={pendingPhotoDataUrl} alt="Photo to describe" className="photo-practice-preview" />}
+            </div>
+          )}
+        </div>
       </section>
     );
   }
@@ -2263,6 +2161,12 @@ export default function SpeakScreen() {
             setInterviewBoundaryPending(false);
             updateCurrentAnswerSpeech(false);
             updateInterview(() => null);
+            if (recordingPracticeType === "topic" && selectedTopic) {
+              prepareTopicForRecording(selectedTopic);
+            }
+            if (recordingPracticeType === "photo_description" && pendingPhotoDataUrl) {
+              autoStartPhotoRef.current = true;
+            }
             dispatch(reRecord());
           }} disabled={guestSaveStatus === "uploading" || interviewSaveStatus === "uploading"}>
             Re-record
