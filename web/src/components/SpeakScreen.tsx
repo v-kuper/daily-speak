@@ -161,6 +161,12 @@ const readFileAsDataUrl = (file: File): Promise<string> => {
   });
 };
 
+const MICROPHONE_AUDIO_CONSTRAINTS: MediaTrackConstraints = {
+  echoCancellation: true,
+  noiseSuppression: true,
+  autoGainControl: true,
+};
+
 export default function SpeakScreen() {
   const dispatch = useAppDispatch();
   const store = useAppStore();
@@ -185,7 +191,6 @@ export default function SpeakScreen() {
   const [questionSpeechError, setQuestionSpeechError] = useState<string | null>(null);
   const [questionSpeechMuted, setQuestionSpeechMuted] = useState(false);
   const [openingAudioError, setOpeningAudioError] = useState<string | null>(null);
-  const [openingAudioRetryToken, setOpeningAudioRetryToken] = useState(0);
   const [interviewRefreshToken, setInterviewRefreshToken] = useState(0);
   const {
     speakState,
@@ -233,6 +238,9 @@ export default function SpeakScreen() {
   const autoStartPhotoRef = useRef(false);
   const photoSelectionAttemptRef = useRef(0);
   const startTopicRecordingRef = useRef<() => void>(() => undefined);
+  const microphonePermissionTopicRef = useRef<string | null>(null);
+  const microphonePermissionPromiseRef = useRef<Promise<void> | null>(null);
+  const interviewActivationRef = useRef<{ sessionId: string; atMs: number } | null>(null);
   const mountedRef = useRef(false);
   const recordingAttemptRef = useRef(0);
   const interviewRef = useRef<InterviewSession | null>(null);
@@ -815,7 +823,12 @@ export default function SpeakScreen() {
   }, [mergeInterview, runInterviewSync, waitForInterviewSegmentsBeforeSave]);
 
   const createRecordingFromMicrophone = useCallback(
-    async (onRecordingStarted: () => void, captureInterview: boolean, attempt: number) => {
+    async (
+      onRecordingStarted: () => void,
+      captureInterview: boolean,
+      attempt: number,
+      beforeRecordingStart?: (isCurrent: () => boolean) => Promise<boolean>,
+    ) => {
       const isCurrent = () => mountedRef.current && recordingAttemptRef.current === attempt;
       if (!isCurrent()) return;
       dispatch(setRecordingInputError(null));
@@ -853,8 +866,13 @@ export default function SpeakScreen() {
           return;
         }
 
+        if (captureInterview && microphonePermissionPromiseRef.current) {
+          await microphonePermissionPromiseRef.current;
+          if (!isCurrent()) return;
+        }
+
         stream = await getUserMedia({
-          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+          audio: MICROPHONE_AUDIO_CONSTRAINTS,
         });
         if (!isCurrent()) {
           stopLocalStream();
@@ -902,6 +920,16 @@ export default function SpeakScreen() {
             }
             turnCaptureRef.current = null;
             setLiveTranscriptionAvailable(false);
+          }
+        }
+
+        if (beforeRecordingStart && (!captureInterview || localCapture)) {
+          const ready = await beforeRecordingStart(isCurrent);
+          if (!ready || !isCurrent() || (captureInterview && turnCaptureRef.current !== localCapture)) {
+            if (turnCaptureRef.current === localCapture) turnCaptureRef.current = null;
+            if (localCapture) await localCapture.stop().catch(() => null);
+            stopLocalStream();
+            return;
           }
         }
 
@@ -1256,7 +1284,11 @@ export default function SpeakScreen() {
     void saveAndNavigate(store, router, draft, () => window.location.pathname);
   }, [buildRecordingSaveDraft, dispatch, finishInterviewCapture, interviewCaptureFailure, isAuthenticated, recordingPracticeType, router, store, synchronizeInterviewBeforeSave]);
 
-  const beginRecordingFromMicrophone = (onRecordingStarted: () => void, captureInterview = false) => {
+  const beginRecordingFromMicrophone = (
+    onRecordingStarted: () => void,
+    captureInterview = false,
+    beforeRecordingStart?: (isCurrent: () => boolean) => Promise<boolean>,
+  ) => {
     if (recordingStartingRef.current) {
       return;
     }
@@ -1283,7 +1315,7 @@ export default function SpeakScreen() {
     recordingStartingRef.current = true;
     setRecordingStarting(true);
     const attempt = ++recordingAttemptRef.current;
-    void createRecordingFromMicrophone(onRecordingStarted, captureInterview, attempt).finally(() => {
+    void createRecordingFromMicrophone(onRecordingStarted, captureInterview, attempt, beforeRecordingStart).finally(() => {
       if (mountedRef.current && recordingAttemptRef.current === attempt) {
         recordingStartingRef.current = false;
         setRecordingStarting(false);
@@ -1298,14 +1330,49 @@ export default function SpeakScreen() {
     });
   };
 
-  const onStartTopicRecording = () => {
+  const onStartTopicRecording = (skipOpeningAudio = false) => {
     const session = interviewRef.current;
-    if (recordingPracticeType === "topic" && (!session || session.status !== "ready")) return;
-    if (recordingPracticeType === "topic" && !questionSpeechMuted) {
+    if (recordingPracticeType === "topic" && (!session || (session.status !== "ready" && session.status !== "recording"))) return;
+    setOpeningAudioError(null);
+    if (recordingPracticeType === "topic" && !questionSpeechMuted && !skipOpeningAudio) {
       const player = questionSpeechPlayerRef.current ?? new QuestionSpeechPlayer();
       questionSpeechPlayerRef.current = player;
       player.unlock();
     }
+    const prepareOpeningAudio = recordingPracticeType === "topic" && session
+      ? async (isCurrent: () => boolean): Promise<boolean> => {
+          try {
+            // The TTS grant is available only after the owned interview becomes active.
+            // Activate it after microphone permission, but before capturing an answer.
+            const activationStartedAt = Date.now();
+            await startInterview(session.id, `interview:${session.id}:start`);
+            if (isCurrent() && interviewActivationRef.current?.sessionId !== session.id) {
+              interviewActivationRef.current = { sessionId: session.id, atMs: activationStartedAt };
+            }
+          } catch (error) {
+            if (isCurrent()) dispatch(setRecordingInputError(
+              error instanceof Error ? error.message : "Could not start the interview. Please try again.",
+            ));
+            return false;
+          }
+          if (!isCurrent() || questionSpeechMuted || skipOpeningAudio) return isCurrent();
+          const player = questionSpeechPlayerRef.current ?? new QuestionSpeechPlayer();
+          questionSpeechPlayerRef.current = player;
+          try {
+            await player.preload(
+              session.openingQuestion,
+              async () => fetchQuestionSpeech(
+                await getInterviewQuestionSpeechToken(session.id),
+                session.openingQuestion,
+              ),
+            );
+            return isCurrent();
+          } catch {
+            if (isCurrent()) setOpeningAudioError("The first question's audio could not be prepared.");
+            return false;
+          }
+        }
+      : undefined;
     beginRecordingFromMicrophone(() => {
       dispatch(startRecording());
       const localLimitSeconds = isAuthenticated ? sessionLimitSeconds : MAX_GUEST_PREVIEW_SECONDS;
@@ -1317,7 +1384,11 @@ export default function SpeakScreen() {
             interviewLimitSeconds: session?.maxDurationSeconds ?? null,
           })
         : localLimitSeconds;
-      armRecordingLimit(limitSeconds);
+      const activation = interviewActivationRef.current?.sessionId === session?.id
+        ? interviewActivationRef.current
+        : null;
+      const preparationSeconds = activation ? Math.ceil((Date.now() - activation.atMs) / 1000) : 0;
+      armRecordingLimit(recordingPracticeType === "topic" ? Math.max(1, limitSeconds - preparationSeconds) : limitSeconds);
       if (!session || recordingPracticeType !== "topic") return;
       const opening: InterviewTurn = {
         seq: 1,
@@ -1328,8 +1399,7 @@ export default function SpeakScreen() {
         provisionalTranscript: "",
       };
       updateInterview((current) => current ? { ...current, status: "recording", turns: [opening], currentTurnSeq: 1 } : current);
-      queueInterviewSync(session.id, () => startInterview(session.id, `interview:${session.id}:start`));
-    }, recordingPracticeType === "topic");
+    }, recordingPracticeType === "topic", prepareOpeningAudio);
   };
 
   useEffect(() => {
@@ -1713,46 +1783,42 @@ export default function SpeakScreen() {
   const openingQuestion = interview?.openingQuestion ?? null;
 
   useEffect(() => {
+    if (speakState !== "readyToRecord" || recordingPracticeType !== "topic" || !selectedTopic) {
+      microphonePermissionTopicRef.current = null;
+      return;
+    }
+    if (microphonePermissionTopicRef.current === selectedTopic) return;
+    microphonePermissionTopicRef.current = selectedTopic;
+    const getUserMedia = navigator.mediaDevices?.getUserMedia?.bind(navigator.mediaDevices);
+    if (!getUserMedia) return;
+
+    // Ask while the loading screen is visible. A second getUserMedia call opens
+    // the recording stream only after the interview and its audio are ready.
+    const permission = Promise.resolve()
+      .then(() => getUserMedia({ audio: MICROPHONE_AUDIO_CONSTRAINTS }))
+      .then((stream) => { for (const track of stream.getTracks()) track.stop(); })
+      .catch(() => undefined);
+    microphonePermissionPromiseRef.current = permission;
+    void permission.finally(() => {
+      if (microphonePermissionPromiseRef.current === permission) microphonePermissionPromiseRef.current = null;
+    });
+  }, [recordingPracticeType, selectedTopic, speakState]);
+
+  useEffect(() => {
     if (speakState !== "readyToRecord" || recordingPracticeType !== "topic" || !selectedTopic ||
       autoStartTopicRef.current || recordingStarting || recordingStartingRef.current ||
       recordingInputError || openingAudioError || interviewPreparationError || openingInterviewStatus === "failed") return;
     // A restored or interrupted ready state still needs a way out of the loading screen.
     autoStartTopicRef.current = selectedTopic;
-    setOpeningAudioRetryToken((value) => value + 1);
   }, [interviewPreparationError, openingAudioError, openingInterviewStatus, recordingInputError, recordingPracticeType, recordingStarting, selectedTopic, speakState]);
 
   useEffect(() => {
     const pendingTopic = autoStartTopicRef.current;
     if (!pendingTopic || speakState !== "readyToRecord" || recordingPracticeType !== "topic" ||
       selectedTopic !== pendingTopic || openingInterviewStatus !== "ready" || !openingInterviewId || !openingQuestion) return;
-    if (questionSpeechMuted) {
-      autoStartTopicRef.current = null;
-      setOpeningAudioError(null);
-      startTopicRecordingRef.current();
-      return;
-    }
-
-    let active = true;
-    const player = questionSpeechPlayerRef.current ?? new QuestionSpeechPlayer();
-    questionSpeechPlayerRef.current = player;
-    setOpeningAudioError(null);
-    void player.preload(
-      openingQuestion,
-      async () => fetchQuestionSpeech(
-        await getInterviewQuestionSpeechToken(openingInterviewId),
-        openingQuestion,
-      ),
-    ).then(() => {
-      if (!active || autoStartTopicRef.current !== pendingTopic || interviewRef.current?.id !== openingInterviewId) return;
-      autoStartTopicRef.current = null;
-      startTopicRecordingRef.current();
-    }).catch(() => {
-      if (active && autoStartTopicRef.current === pendingTopic) {
-        setOpeningAudioError("The first question's audio could not be prepared.");
-      }
-    });
-    return () => { active = false; };
-  }, [openingAudioRetryToken, openingInterviewId, openingInterviewStatus, openingQuestion, questionSpeechMuted, recordingPracticeType, selectedTopic, speakState]);
+    autoStartTopicRef.current = null;
+    startTopicRecordingRef.current();
+  }, [openingInterviewId, openingInterviewStatus, openingQuestion, recordingPracticeType, selectedTopic, speakState]);
 
   useEffect(() => {
     if (!autoStartPhotoRef.current || speakState !== "readyToRecord" ||
@@ -1998,11 +2064,15 @@ export default function SpeakScreen() {
                     <button className="btn btn-primary" onClick={onRefreshTopicGuidance}>Try again</button>
                   ) : openingAudioError ? (
                     <>
-                      <button className="btn btn-primary" onClick={() => setOpeningAudioRetryToken((value) => value + 1)}>Try audio again</button>
-                      <button className="btn btn-secondary" onClick={() => setQuestionSpeechMuted(true)}>Start without audio</button>
+                      <button className="btn btn-primary" onClick={() => onStartTopicRecording()}>Try audio again</button>
+                      <button className="btn btn-secondary" onClick={() => {
+                        setQuestionSpeechMuted(true);
+                        setOpeningAudioError(null);
+                        onStartTopicRecording(true);
+                      }}>Start without audio</button>
                     </>
                   ) : (
-                    <button className="btn btn-primary" onClick={onStartTopicRecording}>Try recording again</button>
+                    <button className="btn btn-primary" onClick={() => onStartTopicRecording()}>Try recording again</button>
                   )}
                 </div>
               </div>
@@ -2012,10 +2082,10 @@ export default function SpeakScreen() {
                 <h2 className="heading-xl">Starting in a moment</h2>
                 <p className="profile-value">
                   {recordingStarting
-                    ? "Turning on your microphone..."
+                    ? "Opening your microphone and preparing the first question..."
                     : interview?.status === "ready"
                       ? "Getting the first question ready to play..."
-                      : "Preparing your first question and helpful words..."}
+                      : "Preparing your first question and helpful words. Allow microphone access when prompted."}
                 </p>
                 {selectedTopic && <p className="speak-preparing-topic">{selectedTopic}</p>}
               </div>
@@ -2036,7 +2106,7 @@ export default function SpeakScreen() {
             <div className="speak-preparing-content">
               <h2 className="heading-xl">We couldn&apos;t start yet</h2>
               <p className="auth-error" role="alert">{photoStartupError}</p>
-              {pendingPhotoDataUrl && <button className="btn btn-primary" onClick={onStartTopicRecording}>Try recording again</button>}
+              {pendingPhotoDataUrl && <button className="btn btn-primary" onClick={() => onStartTopicRecording()}>Try recording again</button>}
             </div>
           ) : (
             <div className="speak-preparing-content" role="status" aria-live="polite">

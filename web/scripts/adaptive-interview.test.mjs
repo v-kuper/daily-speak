@@ -570,6 +570,22 @@ test("question playback uses a TTS-only bearer token and native English settings
   }, "Question?"), /unavailable/);
 });
 
+test("opening question audio waits until microphone access activates the interview", () => {
+  const screen = readFileSync(resolve("src/components/SpeakScreen.tsx"), "utf8");
+  const startup = screen.slice(
+    screen.indexOf("const prepareOpeningAudio ="),
+    screen.indexOf("beginRecordingFromMicrophone(() =>", screen.indexOf("const prepareOpeningAudio =")),
+  );
+  assert.ok(startup.indexOf("await startInterview(") >= 0);
+  assert.ok(startup.indexOf("await startInterview(") < startup.indexOf("await getInterviewQuestionSpeechToken("));
+  assert.match(screen, /stream = await getUserMedia\([\s\S]*?await beforeRecordingStart\(isCurrent\)/);
+  const readyScreenEffects = screen.slice(screen.indexOf("const openingInterviewId ="), screen.indexOf("if (!autoStartPhotoRef.current"));
+  assert.doesNotMatch(readyScreenEffects, /getInterviewQuestionSpeechToken\(/);
+  assert.match(readyScreenEffects, /getUserMedia\(\{ audio: MICROPHONE_AUDIO_CONSTRAINTS \}\)/);
+  assert.match(screen, /if \(captureInterview && microphonePermissionPromiseRef\.current\) \{\s*await microphonePermissionPromiseRef\.current/);
+  assert.match(readyScreenEffects, /startTopicRecordingRef\.current\(\)/);
+});
+
 test("visible interview questions autoplay once and expose a persistent mute control", () => {
   const card = readFileSync(resolve("src/components/InterviewQuestionCard.tsx"), "utf8");
   const screen = readFileSync(resolve("src/components/SpeakScreen.tsx"), "utf8");
