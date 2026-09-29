@@ -4903,6 +4903,24 @@
           }
         }
       },
+      "InterviewVocabularyItem": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "word",
+          "translation"
+        ],
+        "properties": {
+          "word": {
+            "type": "string",
+            "description": "English word or short phrase suitable for the learner's profile level."
+          },
+          "translation": {
+            "type": "string",
+            "description": "Concise Russian translation shown during interview preparation."
+          }
+        }
+      },
       "InterviewSession": {
         "type": "object",
         "additionalProperties": false,
@@ -4946,7 +4964,16 @@
             "items": {
               "type": "string"
             },
-            "maxItems": 8
+            "maxItems": 12,
+            "description": "English-only vocabulary used by clients during the live interview."
+          },
+          "usefulVocabulary": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InterviewVocabularyItem"
+            },
+            "maxItems": 12,
+            "description": "Vocabulary with Russian translations for the preparation screen. Older sessions may return an empty array."
           },
           "candidates": {
             "type": "array",

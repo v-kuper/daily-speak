@@ -40,6 +40,7 @@ import {
 import { dataURLToBlob, MediaUploadError, uploadMedia } from "../../lib/mediaUpload";
 import { finalizeInterview } from "../../lib/interviewSession";
 import { parseInterviewTurns, type SavedInterviewTurn } from "../../lib/interviewTimeline";
+import { questionHistoryKey } from "../../lib/dailyQuestionHistory";
 
 export type SpeakMode = "idle" | "readyToRecord" | "recording" | "recorded";
 export type AuthStatus = "idle" | "loading";
@@ -81,6 +82,7 @@ export type AppState = {
   questionsDate: string | null;
   questionsInterestsKey: string;
   questionsEnglishLevel: EnglishLevel;
+  questionsAvoidKey: string;
   topicGuidanceQuestions: string[];
   topicGuidanceWords: string[];
   topicGuidanceStatus: QuestionsStatus;
@@ -624,7 +626,7 @@ export const fetchDailyQuestions = createAsyncThunk<
     }
   },
   {
-    condition: ({ dateKey, force, interestIds = [], englishLevel = DEFAULT_ENGLISH_LEVEL }, { getState }) => {
+    condition: ({ dateKey, force, interestIds = [], avoidQuestions = [], englishLevel = DEFAULT_ENGLISH_LEVEL }, { getState }) => {
       if (force) {
         return true;
       }
@@ -633,10 +635,12 @@ export const fetchDailyQuestions = createAsyncThunk<
         return false;
       }
       const interestKey = buildInterestsKey(interestIds);
+      const avoidKey = questionHistoryKey(avoidQuestions);
       if (
         app.questionsDate === dateKey &&
         app.questionsInterestsKey === interestKey &&
         app.questionsEnglishLevel === englishLevel &&
+        app.questionsAvoidKey === avoidKey &&
         app.topics.length === MIN_DAILY_QUESTIONS
       ) {
         return false;
@@ -1430,6 +1434,7 @@ const initialState: AppState = {
   questionsDate: null,
   questionsInterestsKey: "",
   questionsEnglishLevel: DEFAULT_ENGLISH_LEVEL,
+  questionsAvoidKey: "",
   topicGuidanceQuestions: [],
   topicGuidanceWords: [],
   topicGuidanceStatus: "idle",
@@ -1675,6 +1680,7 @@ const completeAuthSuccess = (
   }
   state.selectedInterestIds = [];
   state.questionsEnglishLevel = englishLevel;
+  state.questionsAvoidKey = "";
   state.recordings = [];
   state.deletedRecordingIds = [];
   state.backgroundSaveRecordingId = null;
@@ -1706,6 +1712,7 @@ const clearAuthenticatedState = (state: AppState): void => {
   state.questionsInterestsKey = "";
   state.questionsDate = null;
   state.questionsEnglishLevel = DEFAULT_ENGLISH_LEVEL;
+  state.questionsAvoidKey = "";
   state.topics = [];
   state.questionsStatus = "idle";
   state.questionsError = null;
@@ -2542,6 +2549,7 @@ const appSlice = createSlice({
         state.questionsDate = action.payload.dateKey;
         state.questionsInterestsKey = buildInterestsKey(action.meta.arg.interestIds ?? []);
         state.questionsEnglishLevel = action.meta.arg.englishLevel ?? DEFAULT_ENGLISH_LEVEL;
+        state.questionsAvoidKey = questionHistoryKey(action.meta.arg.avoidQuestions ?? []);
         state.questionsStatus = "ready";
         state.questionsError = null;
       })

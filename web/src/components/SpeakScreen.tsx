@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type ChangeEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { useRouter } from "next/navigation";
 import { saveAndNavigate, startGuestSave } from "../lib/routeFlows";
 import {
@@ -51,6 +51,7 @@ import {
   rotateFailedInterviewSegment,
 } from "../lib/interviewFlow";
 import { newIdempotencyKey } from "../lib/mediaUpload";
+import { collectRecentAnsweredQuestions, questionHistoryKey } from "../lib/dailyQuestionHistory";
 import { formatTime, toDateKey } from "../lib/utils";
 import { useAppDispatch, useAppSelector, useAppStore } from "../store/hooks";
 import {
@@ -259,6 +260,8 @@ export default function SpeakScreen() {
     questionsError,
     selectedInterestIds,
     selectedEnglishLevel,
+    recordings,
+    userDataStatus,
     studyWords,
     studyText,
     studyStatus,
@@ -272,6 +275,15 @@ export default function SpeakScreen() {
     pendingPhotoObjectDraft,
     pendingPhotoError
   } = useAppSelector((state) => state.app);
+
+  const recentAnsweredQuestions = useMemo(
+    () => collectRecentAnsweredQuestions(recordings),
+    [recordings],
+  );
+  const recentAnsweredQuestionsKey = useMemo(
+    () => questionHistoryKey(recentAnsweredQuestions),
+    [recentAnsweredQuestions],
+  );
 
   const sessionLimitSeconds = MAX_AUTHENTICATED_RECORDING_SECONDS;
 
@@ -422,6 +434,7 @@ export default function SpeakScreen() {
       return {
         ...server,
         usefulWords: server.usefulWords.length ? server.usefulWords : current.usefulWords,
+        usefulVocabulary: server.usefulVocabulary.length ? server.usefulVocabulary : current.usefulVocabulary,
         turns,
         candidates,
         currentTurnSeq: turns.length ? turns[turns.length - 1].seq : server.currentTurnSeq,
@@ -1415,9 +1428,23 @@ export default function SpeakScreen() {
   }, [finishActiveRecording, speakState]);
 
   useEffect(() => {
+    if (isAuthenticated && userDataStatus !== "ready" && userDataStatus !== "failed") return;
     const dateKey = toDateKey(new Date());
-    void dispatch(fetchDailyQuestions({ dateKey, interestIds: selectedInterestIds, englishLevel: selectedEnglishLevel }));
-  }, [dispatch, selectedEnglishLevel, selectedInterestIds]);
+    void dispatch(fetchDailyQuestions({
+      dateKey,
+      interestIds: selectedInterestIds,
+      avoidQuestions: recentAnsweredQuestions,
+      englishLevel: selectedEnglishLevel,
+    }));
+  }, [
+    dispatch,
+    isAuthenticated,
+    recentAnsweredQuestions,
+    recentAnsweredQuestionsKey,
+    selectedEnglishLevel,
+    selectedInterestIds,
+    userDataStatus,
+  ]);
 
   useEffect(() => {
     if (speakState === "idle") {
@@ -1629,7 +1656,7 @@ export default function SpeakScreen() {
         force: true,
         refreshToken: String(Date.now()),
         interestIds: selectedInterestIds,
-        avoidQuestions: topics,
+        avoidQuestions: [...topics, ...recentAnsweredQuestions],
         englishLevel: selectedEnglishLevel
       })
     );
@@ -1887,9 +1914,9 @@ export default function SpeakScreen() {
       ?? (interview?.status === "failed" ? interview.error || "Could not prepare this interview." : null);
     const isTopicGuidancePreparing =
       !isPhotoPractice && !preparationFailure && interview?.status !== "ready";
-    const shouldShowWords = !isPhotoPractice && showWords && Boolean(interview?.usefulWords.length);
+    const shouldShowWords = !isPhotoPractice && showWords && Boolean(interview?.usefulVocabulary.length);
     const shouldShowGuidanceSkeleton =
-      !isPhotoPractice && isTopicGuidancePreparing && !interview?.usefulWords.length;
+      !isPhotoPractice && isTopicGuidancePreparing && !interview?.usefulVocabulary.length;
 
     return (
       <section className="speak-screen">
@@ -1955,16 +1982,17 @@ export default function SpeakScreen() {
               </div>
             )}
 
-            {Boolean(interview?.usefulWords.length) && (
+            {Boolean(interview?.usefulVocabulary.length) && (
               <div className="collapsible-section">
                 <button className="collapsible-header" onClick={() => dispatch(toggleWords())}>
                   <span>Useful words</span>
                   <span className={`toggle-arrow ${showWords ? "open" : ""}`}>↓</span>
                 </button>
                 <div className={`collapsible-content ${shouldShowWords ? "open" : ""}`}>
-                  {interview?.usefulWords.map((word) => (
-                    <div key={word} className="word-item">
-                      {word}
+                  {interview?.usefulVocabulary.map((item) => (
+                    <div key={item.word.toLocaleLowerCase()} className="word-item vocabulary-item">
+                      <span className="vocabulary-word">{item.word}</span>
+                      {item.translation && <span className="vocabulary-translation">{item.translation}</span>}
                     </div>
                   ))}
                 </div>

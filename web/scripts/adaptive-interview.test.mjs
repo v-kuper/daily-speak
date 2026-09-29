@@ -17,7 +17,7 @@ const {
   rotateFailedInterviewSegment,
 } = load(sourcePath("../src/lib/interviewFlow.ts"));
 const { encodeWav, InterviewTurnCapture, pcmHasSpeechActivity } = load(sourcePath("../src/lib/interviewTurnCapture.ts"));
-const { mergeInterviewTranscriptStatus, preserveLiveInterviewTurn } = load(sourcePath("../src/lib/interviewSession.ts"));
+const { mergeInterviewTranscriptStatus, parseInterviewVocabulary, preserveLiveInterviewTurn } = load(sourcePath("../src/lib/interviewSession.ts"));
 const { parseInterviewTurns } = load(sourcePath("../src/lib/interviewTimeline.ts"));
 const { createInterviewRecovery, mayAbandonInterview, recoverPreviousInterview } = load(sourcePath("../src/lib/interviewRecovery.ts"));
 
@@ -81,6 +81,20 @@ test("server polling preserves local captions until a canonical transcript is re
   assert.equal(mergeInterviewTranscriptStatus("ready", "failed"), "ready");
   assert.equal(mergeInterviewTranscriptStatus("queued", "failed"), "failed");
   assert.equal(mergeInterviewTranscriptStatus("queued", "pending"), "queued");
+});
+
+test("interview preparation keeps translated vocabulary while older sessions fall back to English words", () => {
+  assert.deepEqual(parseInterviewVocabulary([
+    { word: "  book a room ", translation: " забронировать номер " },
+    { word: "route", translation: "маршрут" },
+  ], ["route", "ticket"]), [
+    { word: "book a room", translation: "забронировать номер" },
+    { word: "route", translation: "маршрут" },
+    { word: "ticket", translation: "" },
+  ]);
+  assert.deepEqual(parseInterviewVocabulary(undefined, ["journey"]), [
+    { word: "journey", translation: "" },
+  ]);
 });
 
 test("navigation cancels an unsaved interview but protects an ongoing or completed save", () => {

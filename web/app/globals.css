@@ -747,6 +747,22 @@ button {
   gap: 8px;
 }
 
+.vocabulary-item {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  align-items: baseline;
+  gap: 16px;
+}
+
+.vocabulary-word {
+  color: var(--text-main);
+  font-weight: 700;
+}
+
+.vocabulary-translation {
+  color: var(--text-muted);
+}
+
 .toggle-arrow {
   transition: transform 0.2s;
   color: var(--accent);
@@ -2237,6 +2253,11 @@ textarea:focus {
 
   .main-content {
     padding-inline: 14px;
+  }
+
+  .vocabulary-item {
+    grid-template-columns: 1fr;
+    gap: 3px;
   }
 }
 /* Preserve existing navigation styles when using route links. */

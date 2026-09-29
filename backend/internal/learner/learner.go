@@ -42,6 +42,27 @@ func EnglishLevelPromptGuidance(level string) string {
 	}
 }
 
+// EnglishQuestionPromptGuidance gives generators concrete limits for spoken
+// questions. The selected profile level is treated as a ceiling by callers;
+// adaptive flows may simplify below it when the learner's recent answer shows
+// that a shorter question would keep the conversation moving.
+func EnglishQuestionPromptGuidance(level string) string {
+	switch NormalizeEnglishLevel(level) {
+	case "a1":
+		return "Use at most 10 words, one simple idea, common everyday words, and simple present or basic past tense. Avoid idioms, abstract nouns, hypotheticals, and multi-part questions."
+	case "a2":
+		return "Use at most 14 words, one clear idea, everyday vocabulary, and simple present, past, or future forms. Avoid nested clauses, idioms, and multi-part questions."
+	case "b2":
+		return "Use at most 24 words, one main idea, natural wider vocabulary, and no more than one dependent clause. Avoid academic wording and stacked hypotheticals."
+	case "c1":
+		return "Use at most 28 words and one focused idea. Nuance and abstract topics are allowed, but keep the wording natural for speech and avoid stacked questions."
+	case "c2":
+		return "Use at most 30 words and one focused idea. Sophisticated or idiomatic wording is allowed when natural, but avoid dense academic phrasing and stacked questions."
+	default:
+		return "Use at most 18 words, one main idea, familiar vocabulary, and a clear spoken structure. You may ask for one reason or example, but avoid nested hypotheticals and multi-part questions."
+	}
+}
+
 func NormalizeInterests(values []string, limit int) []string {
 	seen := map[string]struct{}{}
 	out := []string{}

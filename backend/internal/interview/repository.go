@@ -513,6 +513,7 @@ type sessionRow struct {
 	ID, OwnerPrincipalID, UserID, Topic, OpeningQuestion, EnglishLevel, Status string
 	Interests                                                                  []string
 	UsefulWords                                                                []string
+	UsefulVocabulary                                                           []VocabularyItem
 	MaxDurationSeconds, EndedAtMs                                              int
 	RecordingID, GuestPreviewID, FinalizeKey, Error                            string
 	StartedAt                                                                  *time.Time
@@ -529,7 +530,7 @@ func (r *SQLRepository) sessionRow(ctx context.Context, q sessionQuerier, ownerP
 		return sessionRow{}, ErrNotFound
 	}
 	sqlText := `SELECT id,owner_principal_id,COALESCE(user_id,''),topic,opening_question,english_level,
-		interests,useful_words,status,max_duration_seconds,started_at,COALESCE(ended_at_ms,0),
+		interests,useful_words,useful_vocabulary,status,max_duration_seconds,started_at,COALESCE(ended_at_ms,0),
 		COALESCE(recording_id,''),COALESCE(guest_preview_id,''),COALESCE(finalize_key,''),
 		COALESCE(error_message,''),created_at,expires_at
 		FROM interview_sessions WHERE id=$1 AND owner_principal_id=$2`
@@ -537,11 +538,11 @@ func (r *SQLRepository) sessionRow(ctx context.Context, q sessionQuerier, ownerP
 		sqlText += " FOR UPDATE"
 	}
 	var result sessionRow
-	var interests, words []byte
+	var interests, words, vocabulary []byte
 	var started sql.NullTime
 	err := q.QueryRow(ctx, sqlText, sessionID, ownerPrincipalID).Scan(
 		&result.ID, &result.OwnerPrincipalID, &result.UserID, &result.Topic, &result.OpeningQuestion,
-		&result.EnglishLevel, &interests, &words, &result.Status, &result.MaxDurationSeconds,
+		&result.EnglishLevel, &interests, &words, &vocabulary, &result.Status, &result.MaxDurationSeconds,
 		&started, &result.EndedAtMs, &result.RecordingID, &result.GuestPreviewID,
 		&result.FinalizeKey, &result.Error, &result.CreatedAt, &result.ExpiresAt,
 	)
@@ -560,17 +561,23 @@ func (r *SQLRepository) sessionRow(ctx context.Context, q sessionQuerier, ownerP
 	if err := json.Unmarshal(words, &result.UsefulWords); err != nil {
 		return sessionRow{}, err
 	}
+	if err := json.Unmarshal(vocabulary, &result.UsefulVocabulary); err != nil {
+		return sessionRow{}, err
+	}
 	return result, nil
 }
 
 func (r *SQLRepository) view(ctx context.Context, row sessionRow) (Session, error) {
 	view := Session{ID: row.ID, Status: row.Status, Topic: row.Topic,
-		OpeningQuestion: row.OpeningQuestion, UsefulWords: row.UsefulWords,
+		OpeningQuestion: row.OpeningQuestion, UsefulWords: row.UsefulWords, UsefulVocabulary: row.UsefulVocabulary,
 		Candidates: []Candidate{}, Turns: []Turn{}, MaxDurationSeconds: row.MaxDurationSeconds,
 		Error: row.Error, CreatedAt: row.CreatedAt.UTC(), StartedAt: row.StartedAt,
 		ExpiresAt: row.ExpiresAt.UTC()}
 	if view.UsefulWords == nil {
 		view.UsefulWords = []string{}
+	}
+	if view.UsefulVocabulary == nil {
+		view.UsefulVocabulary = []VocabularyItem{}
 	}
 	rows, err := r.db.Query(ctx, `SELECT id,question,source FROM interview_candidates
 		WHERE session_id=$1 AND consumed_by_turn_seq IS NULL

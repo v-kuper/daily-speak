@@ -87,6 +87,24 @@ func TestDailyQuestionsRetriesInvalidProviderOutput(t *testing.T) {
 	}
 }
 
+func TestDailyQuestionsPromptUsesProfileLevelAsHardCeiling(t *testing.T) {
+	provider := &fakeCompletionProvider{responses: []Completion{{
+		Content: `{"questions":["Where do you go after work?","What food do you like?","Who do you often call?"]}`,
+	}}}
+	_, err := newTestService(provider).DailyQuestions(context.Background(), DailyQuestionsInput{
+		DateKey: "2026-09-27", EnglishLevel: "A1", AvoidQuestions: []string{"What do you do on weekends?"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	prompt := provider.requests[0].UserPrompt
+	for _, required := range []string{"A1", "at most 10 words", "hard maximum", "What do you do on weekends?"} {
+		if !strings.Contains(prompt, required) {
+			t.Fatalf("daily question prompt does not contain %q: %s", required, prompt)
+		}
+	}
+}
+
 func TestDailyQuestionsRejectsInvalidInputBeforeProviderCall(t *testing.T) {
 	provider := &fakeCompletionProvider{}
 	_, err := newTestService(provider).DailyQuestions(context.Background(), DailyQuestionsInput{DateKey: "27-09-2026"})

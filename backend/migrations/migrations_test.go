@@ -58,3 +58,20 @@ func TestRecordingDurationPolicyMigrationUpdatesActiveGuestAndAccountSessions(t 
 		}
 	}
 }
+
+func TestInterviewVocabularyMigrationKeepsTranslationsSeparate(t *testing.T) {
+	items, err := All()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range items {
+		if item.Name != "0015_interview_vocabulary_translations.sql" {
+			continue
+		}
+		if !strings.Contains(item.SQL, "useful_vocabulary JSONB NOT NULL DEFAULT '[]'::jsonb") {
+			t.Fatalf("vocabulary migration does not add the translated vocabulary column: %s", item.SQL)
+		}
+		return
+	}
+	t.Fatal("interview vocabulary migration is missing")
+}

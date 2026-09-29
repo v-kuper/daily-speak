@@ -22,6 +22,10 @@ var questionFillerWords = map[string]struct{}{
 	"you": {}, "your": {},
 }
 
+var questionIntentWords = map[string]struct{}{
+	"what": {}, "when": {}, "where": {}, "which": {}, "who": {}, "why": {}, "how": {},
+}
+
 // Keep word order so reversing cause and effect remains a distinct question.
 func questionKey(value string) string {
 	words := questionTokenPattern.FindAllString(strings.ToLower(value), -1)
@@ -42,12 +46,67 @@ func questionKey(value string) string {
 }
 
 func anyQuestionOverlap(items []string, avoid []string) bool {
-	keys := make(map[string]struct{}, len(avoid))
-	for _, question := range avoid {
-		keys[questionKey(question)] = struct{}{}
-	}
 	for _, question := range items {
-		if _, exists := keys[questionKey(question)]; exists {
+		for _, previous := range avoid {
+			if questionsOverlap(question, previous) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func questionsContainOverlap(items []string) bool {
+	for i := range items {
+		for j := 0; j < i; j++ {
+			if questionsOverlap(items[i], items[j]) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func questionsOverlap(a, b string) bool {
+	aKey, bKey := questionKey(a), questionKey(b)
+	if aKey == bKey {
+		return true
+	}
+	aWords, bWords := strings.Fields(aKey), strings.Fields(bKey)
+	if len(aWords) < 3 || len(bWords) < 3 {
+		return false
+	}
+	_, aHasIntent := questionIntentWords[aWords[0]]
+	_, bHasIntent := questionIntentWords[bWords[0]]
+	aIntent, bIntent := aWords[0], bWords[0]
+	if aIntent == "which" {
+		aIntent = "what"
+	}
+	if bIntent == "which" {
+		bIntent = "what"
+	}
+	if aHasIntent && bHasIntent && aIntent != bIntent {
+		return false
+	}
+	sharedWords := 0
+	bSet := make(map[string]struct{}, len(bWords))
+	for _, word := range bWords {
+		bSet[word] = struct{}{}
+	}
+	for _, word := range aWords {
+		if _, ok := bSet[word]; ok {
+			sharedWords++
+		}
+	}
+	if float64(sharedWords)/float64(minInt(len(aWords), len(bWords))) < 0.66 {
+		return false
+	}
+	bigrams := make(map[string]struct{}, len(bWords)-1)
+	for i := 1; i < len(bWords); i++ {
+		bigrams[bWords[i-1]+"\x00"+bWords[i]] = struct{}{}
+	}
+	for i := 1; i < len(aWords); i++ {
+		if _, ok := bigrams[aWords[i-1]+"\x00"+aWords[i]]; ok {
 			return true
 		}
 	}

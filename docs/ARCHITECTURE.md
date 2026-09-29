@@ -139,10 +139,21 @@ client owns the selectable interest catalog and maps saved interest IDs to
 theme names before calling the practice API. The API response counts are
 documented in OpenAPI.
 
+Daily question generation receives recent answered questions from the loaded
+recording history so the existing generation call can choose new themes and
+angles. Adaptive interview generation uses the English level stored on the
+session as a hard CEFR ceiling. The same generation call may simplify below
+that ceiling when the latest answer is short, fragmented, or disconnected; it
+does not run a second model call to classify or validate difficulty.
+
 Adaptive topic interviews use a separate `/api/v1/interviews` lifecycle. The
 selected opening question starts a durable session; three hidden prepared
 questions keep navigation responsive while completed answers are transcribed
-and used to generate later questions. During an answer, the browser sends raw
+and used to generate later questions. The same preparation job creates twelve
+level-appropriate English words or short phrases with concise Russian
+translations. The API keeps the English-only list for live interview prompts
+and older clients, while the preparation screen uses the translated pairs.
+During an answer, the browser sends raw
 PCM to Cartesia over a realtime WebSocket using a short-lived, STT-scoped token
 issued by the API. The browser persists each final answer transcript through
 the interview API and records one continuous audio file for playback. Presented

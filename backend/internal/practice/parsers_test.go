@@ -94,6 +94,12 @@ func TestQuestionOverlapKeepsDifferentAnglesDistinct(t *testing.T) {
 	if anyQuestionOverlap([]string{"How does health affect work?"}, []string{"How does work affect health?"}) {
 		t.Fatal("questions with reversed cause and effect should be distinct")
 	}
+	if !anyQuestionOverlap([]string{"Tell me about your favorite trip?"}, []string{"What was your favorite trip?"}) {
+		t.Fatal("questions with the same central phrase should overlap")
+	}
+	if !anyQuestionOverlap([]string{"Which food do you enjoy most?"}, []string{"What food do you enjoy most?"}) {
+		t.Fatal("what and which versions of the same question should overlap")
+	}
 }
 
 func TestParseTopicGuidancePlainTextKeepsNumberedWordsOutOfQuestions(t *testing.T) {

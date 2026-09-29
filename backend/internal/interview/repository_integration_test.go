@@ -70,13 +70,24 @@ func TestInterviewSessionSQLLifecycle(t *testing.T) {
 	}
 	if err := repo.SavePreparation(ctx, preparationJob, created.ID, Preparation{
 		Questions: []string{"Where would you travel first?", "What would you pack for the trip?", "How do you plan your route?"},
-		Words:     []string{"journey", "route", "map", "visit", "ticket", "pack", "train", "trip"},
+		Vocabulary: []VocabularyItem{
+			{Word: "journey", Translation: "путешествие"}, {Word: "route", Translation: "маршрут"},
+			{Word: "map", Translation: "карта"}, {Word: "visit", Translation: "посетить"},
+			{Word: "ticket", Translation: "билет"}, {Word: "pack", Translation: "собирать вещи"},
+			{Word: "train", Translation: "поезд"}, {Word: "trip", Translation: "поездка"},
+			{Word: "luggage", Translation: "багаж"}, {Word: "hotel", Translation: "отель"},
+			{Word: "explore", Translation: "исследовать"}, {Word: "sightseeing", Translation: "осмотр достопримечательностей"},
+		},
 	}); err != nil {
 		t.Fatal(err)
 	}
 	started, err := service.Start(ctx, principalID, created.ID)
 	if err != nil || started.CurrentTurnSeq != 1 || len(started.Candidates) != 3 {
 		t.Fatalf("start = %+v, err=%v", started, err)
+	}
+	if len(started.UsefulWords) != 12 || len(started.UsefulVocabulary) != 12 ||
+		started.UsefulVocabulary[0].Translation != "путешествие" {
+		t.Fatalf("prepared vocabulary = words:%v vocabulary:%+v", started.UsefulWords, started.UsefulVocabulary)
 	}
 	advance := AdvanceInput{OwnerPrincipalID: principalID, SessionID: created.ID,
 		IdempotencyKey: "advance-12345678", CurrentTurnSeq: 1,

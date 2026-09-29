@@ -40,7 +40,7 @@ func (s *Service) TopicGuidance(ctx context.Context, input TopicGuidanceInput) (
 			return TopicGuidanceResult{}, fmt.Errorf("generate topic guidance: %w", err)
 		}
 		guidance, ok := parseTopicGuidance(completion.Content)
-		if !ok || anyQuestionOverlap(guidance.Questions, topicQuestion) ||
+		if !ok || questionsContainOverlap(guidance.Questions) || anyQuestionOverlap(guidance.Questions, topicQuestion) ||
 			anyQuestionOverlap(guidance.Questions, avoidQuestionsRaw) || anyLowerOverlap(guidance.Words, avoidWords) {
 			continue
 		}

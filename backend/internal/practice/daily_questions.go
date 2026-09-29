@@ -49,7 +49,7 @@ func (s *Service) DailyQuestions(ctx context.Context, input DailyQuestionsInput)
 			return DailyQuestionsResult{}, fmt.Errorf("generate daily questions: %w", err)
 		}
 		questions, ok := parseQuestions(completion.Content, dailyQuestionsCount)
-		if !ok || anyQuestionOverlap(questions, avoidQuestions) {
+		if !ok || questionsContainOverlap(questions) || anyQuestionOverlap(questions, avoidQuestions) {
 			continue
 		}
 		return DailyQuestionsResult{

@@ -20,16 +20,16 @@ type PreparationWork struct {
 }
 
 type TurnWork struct {
-	TurnID, SessionID, AudioAssetID, Topic, Transcript, Status, SessionStatus string
-	Seq                                                                       int
-	History                                                                   []ContextTurn
-	AvoidQuestions                                                            []string
+	TurnID, SessionID, AudioAssetID, Topic, EnglishLevel, Transcript, Status, SessionStatus string
+	Seq                                                                                     int
+	History                                                                                 []ContextTurn
+	AvoidQuestions                                                                          []string
 }
 
 type RefillWork struct {
-	SessionID, Topic string
-	History          []ContextTurn
-	AvoidQuestions   []string
+	SessionID, Topic, EnglishLevel string
+	History                        []ContextTurn
+	AvoidQuestions                 []string
 }
 
 func (r *SQLRepository) LoadPreparation(ctx context.Context, sessionID string) (PreparationWork, bool, error) {
@@ -55,7 +55,7 @@ func (r *SQLRepository) LoadPreparation(ctx context.Context, sessionID string) (
 }
 
 func (r *SQLRepository) SavePreparation(ctx context.Context, job workqueue.Job, sessionID string, prepared Preparation) error {
-	if len(prepared.Questions) != 3 || len(prepared.Words) != 8 {
+	if len(prepared.Questions) != 3 || len(prepared.Vocabulary) != preparationVocabularyCount {
 		return ErrInvalid
 	}
 	tx, err := r.db.Begin(ctx)
@@ -73,15 +73,20 @@ func (r *SQLRepository) SavePreparation(ctx context.Context, job workqueue.Job, 
 	if status != StatusPreparing {
 		return nil
 	}
-	wordsJSON, _ := json.Marshal(prepared.Words)
+	words := make([]string, 0, len(prepared.Vocabulary))
+	for _, item := range prepared.Vocabulary {
+		words = append(words, item.Word)
+	}
+	wordsJSON, _ := json.Marshal(words)
+	vocabularyJSON, _ := json.Marshal(prepared.Vocabulary)
 	for _, question := range prepared.Questions {
 		if _, err := tx.Exec(ctx, `INSERT INTO interview_candidates(id,session_id,question,source)
 			VALUES($1,$2,$3,'prepared')`, uuid.NewString(), sessionID, question); err != nil {
 			return err
 		}
 	}
-	if _, err := tx.Exec(ctx, `UPDATE interview_sessions SET useful_words=$2::jsonb,status='ready',updated_at=NOW()
-		WHERE id=$1`, sessionID, string(wordsJSON)); err != nil {
+	if _, err := tx.Exec(ctx, `UPDATE interview_sessions SET useful_words=$2::jsonb,useful_vocabulary=$3::jsonb,status='ready',updated_at=NOW()
+		WHERE id=$1`, sessionID, string(wordsJSON), string(vocabularyJSON)); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
@@ -91,10 +96,10 @@ func (r *SQLRepository) LoadTurn(ctx context.Context, turnID string) (TurnWork, 
 	var work TurnWork
 	var nullableTranscript sql.NullString
 	err := r.db.QueryRow(ctx, `SELECT t.id,t.session_id,t.seq,COALESCE(t.audio_asset_id,''),
-		COALESCE(t.final_transcript,t.provisional_transcript,''),t.transcript_status,s.topic,s.status
+		COALESCE(t.final_transcript,t.provisional_transcript,''),t.transcript_status,s.topic,s.english_level,s.status
 		FROM interview_turns t JOIN interview_sessions s ON s.id=t.session_id WHERE t.id=$1`, turnID).
 		Scan(&work.TurnID, &work.SessionID, &work.Seq, &work.AudioAssetID,
-			&nullableTranscript, &work.Status, &work.Topic, &work.SessionStatus)
+			&nullableTranscript, &work.Status, &work.Topic, &work.EnglishLevel, &work.SessionStatus)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return TurnWork{}, false, nil
 	}
@@ -136,8 +141,8 @@ func (r *SQLRepository) LoadTurn(ctx context.Context, turnID string) (TurnWork, 
 func (r *SQLRepository) LoadRefill(ctx context.Context, sessionID string) (RefillWork, bool, error) {
 	var work RefillWork
 	var status string
-	err := r.db.QueryRow(ctx, `SELECT id,topic,status FROM interview_sessions WHERE id=$1`, sessionID).
-		Scan(&work.SessionID, &work.Topic, &status)
+	err := r.db.QueryRow(ctx, `SELECT id,topic,english_level,status FROM interview_sessions WHERE id=$1`, sessionID).
+		Scan(&work.SessionID, &work.Topic, &work.EnglishLevel, &status)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return RefillWork{}, false, nil
 	}
