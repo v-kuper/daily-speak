@@ -130,6 +130,33 @@ func TestCartesiaCreatesSTTOnlyAccessToken(t *testing.T) {
 	}
 }
 
+func TestCartesiaCreatesTTSOnlyAccessToken(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Grants struct {
+				STT bool `json:"stt"`
+				TTS bool `json:"tts"`
+			} `json:"grants"`
+			ExpiresIn int `json:"expires_in"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+		}
+		if body.Grants.STT || !body.Grants.TTS || body.ExpiresIn != 60 {
+			t.Errorf("unexpected access token payload: %#v", body)
+		}
+		_, _ = io.WriteString(w, `{"token":"short-lived-tts-token"}`)
+	}))
+	defer server.Close()
+
+	token, err := NewCartesia(CartesiaConfig{
+		APIKey: "test-key", AccessTokenEndpoint: server.URL,
+	}).CreateTTSAccessToken(context.Background(), time.Minute)
+	if err != nil || token != "short-lived-tts-token" {
+		t.Fatalf("unexpected token %q, error %v", token, err)
+	}
+}
+
 func TestCartesiaAccessTokenValidationAndErrorsAreSanitized(t *testing.T) {
 	var requests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

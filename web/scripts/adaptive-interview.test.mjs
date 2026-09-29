@@ -19,6 +19,7 @@ const {
 } = load(sourcePath("../src/lib/interviewFlow.ts"));
 const { encodeWav, InterviewTurnCapture, pcmHasSpeechActivity } = load(sourcePath("../src/lib/interviewTurnCapture.ts"));
 const { mergeInterviewTranscriptStatus, parseInterviewVocabulary, preserveLiveInterviewTurn } = load(sourcePath("../src/lib/interviewSession.ts"));
+const { buildQuestionSpeechRequest, QuestionSpeechPlayer } = load(sourcePath("../src/lib/questionSpeech.ts"));
 const { parseInterviewTurns } = load(sourcePath("../src/lib/interviewTimeline.ts"));
 const { createInterviewRecovery, mayAbandonInterview, recoverPreviousInterview } = load(sourcePath("../src/lib/interviewRecovery.ts"));
 
@@ -549,6 +550,72 @@ test("the question card is the stable next control and allows an unanswered skip
   assert.doesNotMatch(card, /interview-next-btn|Next question →/);
   assert.match(card, /tap the question to skip it/i);
   assert.doesNotMatch(screen, /Say an answer before moving to the next question/);
+});
+
+test("question playback uses a TTS-only bearer token and native English settings", () => {
+  const request = buildQuestionSpeechRequest({
+    token: "short-lived-token",
+    expiresAt: "2026-09-29T12:00:00Z",
+    endpoint: "https://api.cartesia.ai/tts/bytes",
+    apiVersion: "2026-08-14",
+    model: "sonic-3.6",
+    voiceId: "voice-1",
+  }, "  How was your trip?  ");
+  assert.equal(request.url, "https://api.cartesia.ai/tts/bytes");
+  assert.equal(request.init.headers.Authorization, "Bearer short-lived-token");
+  const body = JSON.parse(request.init.body);
+  assert.equal(body.transcript, "How was your trip?");
+  assert.equal(body.language, "en");
+  assert.equal(body.model_id, "sonic-3.6");
+  assert.equal(body.voice, "voice-1");
+  assert.equal(body.output_format.container, "mp3");
+  assert.throws(() => buildQuestionSpeechRequest({
+    token: "token", expiresAt: "later", endpoint: "http://unsafe.test/tts",
+    apiVersion: "version", model: "model", voiceId: "voice",
+  }, "Question?"), /unavailable/);
+});
+
+test("question playback generates identical audio once and replays the cached bytes", async (t) => {
+  const previousAudioContext = globalThis.AudioContext;
+  class AudioContextFake {
+    destination = {};
+    resume() { return Promise.resolve(); }
+    close() { return Promise.resolve(); }
+    decodeAudioData() { return Promise.resolve({}); }
+    createBufferSource() {
+      return {
+        buffer: null,
+        onended: null,
+        connect() {},
+        disconnect() {},
+        stop() {},
+        start() { queueMicrotask(() => this.onended?.()); },
+      };
+    }
+  }
+  globalThis.AudioContext = AudioContextFake;
+  t.after(() => {
+    if (previousAudioContext === undefined) delete globalThis.AudioContext;
+    else globalThis.AudioContext = previousAudioContext;
+  });
+
+  const player = new QuestionSpeechPlayer();
+  let resolveAudio;
+  let generations = 0;
+  const load = () => {
+    generations += 1;
+    return new Promise((resolve) => { resolveAudio = resolve; });
+  };
+  const first = player.play("How was your trip?", load, () => undefined);
+  await new Promise((resolve) => setImmediate(resolve));
+  player.stop();
+  const second = player.play("  How was   your trip? ", load, () => undefined);
+  assert.equal(generations, 1, "a second click must share the in-flight generation");
+  resolveAudio(new Uint8Array([1, 2, 3]).buffer);
+  await Promise.all([first, second]);
+  await player.play("How was your trip?", load, () => undefined);
+  assert.equal(generations, 1, "a replay must use the cached audio bytes");
+  player.dispose();
 });
 
 test("a delayed answer boundary remains queueable without leaking PCM into the next WAV", async () => {

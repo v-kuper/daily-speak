@@ -163,6 +163,12 @@ issued by the API. The browser persists each final answer transcript through
 the interview API and records one continuous audio file for playback. Presented
 question text and answer boundaries remain session data rather than learner
 speech.
+Displayed questions can be pronounced on demand through Cartesia's bytes TTS
+endpoint. The API issues a separate short-lived, TTS-only token for an owned,
+active interview; the browser requests and caches that question's audio, pauses
+microphone capture while it plays, and never exposes the long-lived provider
+key. Pronunciation does not add work to question generation or the durable
+interview worker.
 The learner may move past an unanswered question or stop on it. The interview
 repository marks that turn as skipped in the same state transition that opens
 the next question, or through the final-turn skip endpoint when recording

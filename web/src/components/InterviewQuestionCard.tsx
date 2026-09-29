@@ -1,11 +1,15 @@
 "use client";
 
 import type { InterviewTurn } from "../lib/interviewSession";
+import type { QuestionSpeechState } from "../lib/questionSpeech";
 
 type InterviewQuestionCardProps = {
   turns: InterviewTurn[];
   canAdvance: boolean;
   onNext: () => void;
+  onListen: (question: string) => void;
+  speechState: QuestionSpeechState;
+  speechError: string | null;
   liveTranscriptionAvailable: boolean;
   liveCaption: string | null;
   hasAnswerEvidence: boolean;
@@ -16,6 +20,9 @@ export default function InterviewQuestionCard({
   turns,
   canAdvance,
   onNext,
+  onListen,
+  speechState,
+  speechError,
   liveTranscriptionAvailable,
   liveCaption,
   hasAnswerEvidence,
@@ -28,16 +35,37 @@ export default function InterviewQuestionCard({
 
   return (
     <div className="interview-question-panel">
-      <button
-        className="interview-question-card"
-        type="button"
-        onClick={onNext}
-        disabled={!canAdvance}
-        aria-label={canAdvance ? `Go to the next question. Current question: ${current.question}` : undefined}
-      >
-        <span className="interview-question-count">Question {current.seq}</span>
-        <span aria-live="polite">{current.question}</span>
-      </button>
+      <div className="interview-question-card">
+        <button
+          className="interview-question-advance"
+          type="button"
+          onClick={onNext}
+          disabled={!canAdvance}
+          aria-label={canAdvance ? `Go to the next question. Current question: ${current.question}` : undefined}
+        >
+          <span className="interview-question-count">Question {current.seq}</span>
+          <span aria-live="polite">{current.question}</span>
+        </button>
+        <button
+          className="interview-question-listen"
+          type="button"
+          onClick={() => onListen(current.question)}
+          aria-label={speechState === "playing" || speechState === "loading"
+            ? "Stop question audio"
+            : `Listen to the question: ${current.question}`}
+        >
+          <span aria-hidden="true">{speechState === "playing" ? "■" : "▶"}</span>
+          {speechState === "loading"
+            ? "Loading…"
+            : speechState === "playing"
+              ? "Stop"
+              : speechState === "error"
+                ? "Try again"
+                : "Listen"}
+        </button>
+      </div>
+
+      {speechError && <div className="interview-question-speech-error" role="status">{speechError}</div>}
 
       {liveTranscriptionAvailable && liveCaption && (
         <div className="interview-live-caption" role="status" aria-live="polite" aria-atomic="true">

@@ -41,3 +41,18 @@ func TestWriteInterviewErrorDistinguishesGuestPreviewAndDurationLimits(t *testin
 		})
 	}
 }
+
+func TestWriteInterviewErrorDistinguishesQuestionSpeechFailure(t *testing.T) {
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/interviews/session/question-speech-token", nil)
+	(&Server{}).writeInterviewError(response, request, interview.ErrSpeechUnavailable)
+
+	var body v1ErrorEnvelope
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if response.Code != http.StatusServiceUnavailable || body.Error.Code != "interview_speech_unavailable" ||
+		body.Error.Message != "Question audio is unavailable" {
+		t.Fatalf("response=%d body=%+v", response.Code, body)
+	}
+}

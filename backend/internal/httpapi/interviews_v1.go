@@ -41,6 +41,8 @@ func (s *Server) routeInterviewV1(w http.ResponseWriter, r *http.Request, path s
 		s.handleFinalizeInterviewV1(w, r, id)
 	case len(parts) == 2 && parts[1] == "transcription-token" && r.Method == http.MethodPost:
 		s.handleInterviewTranscriptionTokenV1(w, r, id)
+	case len(parts) == 2 && parts[1] == "question-speech-token" && r.Method == http.MethodPost:
+		s.handleInterviewQuestionSpeechTokenV1(w, r, id)
 	case len(parts) == 4 && parts[1] == "turns" && parts[3] == "audio" && r.Method == http.MethodPost:
 		seq, err := strconv.Atoi(parts[2])
 		if err != nil || seq < 1 {
@@ -76,6 +78,20 @@ func (s *Server) handleInterviewTranscriptionTokenV1(w http.ResponseWriter, r *h
 		return
 	}
 	credential, err := s.interviewService.RealtimeTranscriptionCredential(r.Context(), identity.PrincipalID, id)
+	if err != nil {
+		s.writeInterviewError(w, r, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "private, no-store")
+	writeJSON(w, http.StatusOK, credential)
+}
+
+func (s *Server) handleInterviewQuestionSpeechTokenV1(w http.ResponseWriter, r *http.Request, id string) {
+	identity, ok := s.requiredIdentityV1(w, r)
+	if !ok || !s.interviewReady(w, r) {
+		return
+	}
+	credential, err := s.interviewService.QuestionSpeechCredential(r.Context(), identity.PrincipalID, id)
 	if err != nil {
 		s.writeInterviewError(w, r, err)
 		return
@@ -320,6 +336,8 @@ func (s *Server) writeInterviewError(w http.ResponseWriter, r *http.Request, err
 		writeV1Error(w, r, http.StatusConflict, "interview_not_ready", "A next question is not ready")
 	case errors.Is(err, interview.ErrUnavailable):
 		writeV1Error(w, r, http.StatusServiceUnavailable, "interview_transcription_unavailable", "Live transcription is unavailable")
+	case errors.Is(err, interview.ErrSpeechUnavailable):
+		writeV1Error(w, r, http.StatusServiceUnavailable, "interview_speech_unavailable", "Question audio is unavailable")
 	case errors.Is(err, interview.ErrConflict):
 		writeV1Error(w, r, http.StatusConflict, "interview_conflict", "Interview state conflicts with this request")
 	default:

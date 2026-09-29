@@ -7,13 +7,14 @@ import (
 )
 
 var (
-	ErrInvalid       = errors.New("invalid interview request")
-	ErrNotFound      = errors.New("interview not found")
-	ErrConflict      = errors.New("interview state conflict")
-	ErrQuota         = errors.New("guest interview preview unavailable")
-	ErrDurationLimit = errors.New("interview duration limit exhausted")
-	ErrNotReady      = errors.New("interview preparation is not ready")
-	ErrUnavailable   = errors.New("interview transcription is unavailable")
+	ErrInvalid           = errors.New("invalid interview request")
+	ErrNotFound          = errors.New("interview not found")
+	ErrConflict          = errors.New("interview state conflict")
+	ErrQuota             = errors.New("guest interview preview unavailable")
+	ErrDurationLimit     = errors.New("interview duration limit exhausted")
+	ErrNotReady          = errors.New("interview preparation is not ready")
+	ErrUnavailable       = errors.New("interview transcription is unavailable")
+	ErrSpeechUnavailable = errors.New("interview question speech is unavailable")
 )
 
 const (
@@ -123,6 +124,24 @@ type RealtimeTranscriptionCredential struct {
 
 type RealtimeCredentialIssuer interface {
 	IssueRealtimeCredential(context.Context, time.Duration) (RealtimeTranscriptionCredential, error)
+}
+
+type QuestionSpeechCredential struct {
+	Token      string    `json:"token"`
+	ExpiresAt  time.Time `json:"expiresAt"`
+	Endpoint   string    `json:"endpoint"`
+	APIVersion string    `json:"apiVersion"`
+	Model      string    `json:"model"`
+	VoiceID    string    `json:"voiceId"`
+}
+
+type QuestionSpeechCredentialIssuer interface {
+	IssueQuestionSpeechCredential(context.Context, time.Duration) (QuestionSpeechCredential, error)
+}
+
+type CredentialIssuer interface {
+	RealtimeCredentialIssuer
+	QuestionSpeechCredentialIssuer
 }
 
 type FinalizeInput struct {

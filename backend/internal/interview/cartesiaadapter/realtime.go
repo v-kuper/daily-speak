@@ -2,6 +2,7 @@ package cartesiaadapter
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/url"
 	"strings"
@@ -14,6 +15,8 @@ import (
 const (
 	defaultAPIVersion   = "2026-08-14"
 	defaultWebSocketURL = "wss://api.cartesia.ai/stt/websocket"
+	defaultTTSAPIURL    = "https://api.cartesia.ai/tts/bytes"
+	defaultTTSModel     = "sonic-3.6"
 	realtimeModel       = "ink-2"
 	realtimeEncoding    = "pcm_s16le"
 	realtimeSampleRate  = 16000
@@ -24,6 +27,9 @@ type Config struct {
 	APIKey              string
 	APIVersion          string
 	WebSocketURL        string
+	TTSAPIURL           string
+	TTSModel            string
+	VoiceID             string
 	AccessTokenEndpoint string
 	HTTPClient          *http.Client
 	Now                 func() time.Time
@@ -33,6 +39,9 @@ type Issuer struct {
 	client       *transcription.Cartesia
 	websocketURL string
 	apiVersion   string
+	ttsAPIURL    string
+	ttsModel     string
+	voiceID      string
 	now          func() time.Time
 }
 
@@ -44,6 +53,14 @@ func New(config Config) *Issuer {
 	websocketURL := strings.TrimSpace(config.WebSocketURL)
 	if websocketURL == "" {
 		websocketURL = defaultWebSocketURL
+	}
+	ttsAPIURL := strings.TrimSpace(config.TTSAPIURL)
+	if ttsAPIURL == "" {
+		ttsAPIURL = defaultTTSAPIURL
+	}
+	ttsModel := strings.TrimSpace(config.TTSModel)
+	if ttsModel == "" {
+		ttsModel = defaultTTSModel
 	}
 	now := config.Now
 	if now == nil {
@@ -58,8 +75,33 @@ func New(config Config) *Issuer {
 		}),
 		websocketURL: websocketURL,
 		apiVersion:   apiVersion,
+		ttsAPIURL:    ttsAPIURL,
+		ttsModel:     ttsModel,
+		voiceID:      strings.TrimSpace(config.VoiceID),
 		now:          now,
 	}
+}
+
+func (i *Issuer) IssueQuestionSpeechCredential(ctx context.Context, ttl time.Duration) (interview.QuestionSpeechCredential, error) {
+	if ttl > maxTokenTTL {
+		ttl = maxTokenTTL
+	}
+	if i.voiceID == "" {
+		return interview.QuestionSpeechCredential{}, errors.New("Cartesia question voice is not configured")
+	}
+	endpoint, err := url.Parse(i.ttsAPIURL)
+	if err != nil || endpoint.Scheme != "https" || endpoint.Host == "" {
+		return interview.QuestionSpeechCredential{}, errors.New("Cartesia question speech endpoint is invalid")
+	}
+	issuedAt := i.now().UTC()
+	token, err := i.client.CreateTTSAccessToken(ctx, ttl)
+	if err != nil {
+		return interview.QuestionSpeechCredential{}, err
+	}
+	return interview.QuestionSpeechCredential{
+		Token: token, ExpiresAt: issuedAt.Add(ttl), Endpoint: endpoint.String(),
+		APIVersion: i.apiVersion, Model: i.ttsModel, VoiceID: i.voiceID,
+	}, nil
 }
 
 func (i *Issuer) IssueRealtimeCredential(ctx context.Context, ttl time.Duration) (interview.RealtimeTranscriptionCredential, error) {
@@ -89,3 +131,4 @@ func (i *Issuer) IssueRealtimeCredential(ctx context.Context, ttl time.Duration)
 }
 
 var _ interview.RealtimeCredentialIssuer = (*Issuer)(nil)
+var _ interview.QuestionSpeechCredentialIssuer = (*Issuer)(nil)

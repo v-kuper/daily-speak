@@ -40,6 +40,15 @@ export type InterviewTranscriptionSocketConfig = {
   sampleRate: number;
 };
 
+export type InterviewQuestionSpeechConfig = {
+  token: string;
+  expiresAt: string;
+  endpoint: string;
+  apiVersion: string;
+  model: string;
+  voiceId: string;
+};
+
 type ErrorBody = { error?: { message?: unknown } };
 
 export const mergeInterviewTranscriptStatus = (
@@ -280,6 +289,31 @@ export const getInterviewTranscriptionToken = async (
     model: value.model,
     encoding: value.encoding,
     sampleRate,
+  };
+};
+
+export const getInterviewQuestionSpeechToken = async (
+  id: string,
+): Promise<InterviewQuestionSpeechConfig> => {
+  const response = await apiFetch(`${interviewPath(id)}/question-speech-token`, postJSON({}));
+  const payload = await readApiJSON<unknown>(response).catch(() => null);
+  if (!response.ok) {
+    const error = payload && typeof payload === "object" ? (payload as ErrorBody).error : null;
+    throw new Error(typeof error?.message === "string" ? error.message : "Question audio is unavailable.");
+  }
+  const value = payload && typeof payload === "object" ? payload as Record<string, unknown> : {};
+  for (const field of ["token", "expiresAt", "endpoint", "apiVersion", "model", "voiceId"] as const) {
+    if (typeof value[field] !== "string" || !value[field]) {
+      throw new Error("The speech service returned an invalid playback token.");
+    }
+  }
+  return {
+    token: value.token as string,
+    expiresAt: value.expiresAt as string,
+    endpoint: value.endpoint as string,
+    apiVersion: value.apiVersion as string,
+    model: value.model as string,
+    voiceId: value.voiceId as string,
   };
 };
 

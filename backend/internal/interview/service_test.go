@@ -183,16 +183,26 @@ func TestSaveTurnTranscriptNormalizesRealtimeText(t *testing.T) {
 }
 
 type credentialIssuerFake struct {
-	credential RealtimeTranscriptionCredential
-	err        error
-	ttl        time.Duration
-	calls      int
+	credential  RealtimeTranscriptionCredential
+	speech      QuestionSpeechCredential
+	err         error
+	speechErr   error
+	ttl         time.Duration
+	speechTTL   time.Duration
+	calls       int
+	speechCalls int
 }
 
 func (f *credentialIssuerFake) IssueRealtimeCredential(_ context.Context, ttl time.Duration) (RealtimeTranscriptionCredential, error) {
 	f.ttl = ttl
 	f.calls++
 	return f.credential, f.err
+}
+
+func (f *credentialIssuerFake) IssueQuestionSpeechCredential(_ context.Context, ttl time.Duration) (QuestionSpeechCredential, error) {
+	f.speechTTL = ttl
+	f.speechCalls++
+	return f.speech, f.speechErr
 }
 
 func TestRealtimeCredentialRequiresOwnedActiveSession(t *testing.T) {
@@ -252,6 +262,30 @@ func TestRealtimeCredentialActivatesReadySessionAndRejectsExpiredDuration(t *tes
 	}
 	if issuer.calls != calls {
 		t.Fatal("expired session called credential issuer")
+	}
+}
+
+func TestQuestionSpeechCredentialRequiresOwnedRecordingAndUsesShortTTSGrant(t *testing.T) {
+	now := time.Now().UTC()
+	startedAt := now.Add(-time.Minute)
+	repo := &serviceRepositoryFake{getSession: Session{
+		ID: "session", Status: StatusRecording, StartedAt: &startedAt,
+		ExpiresAt: now.Add(time.Hour), MaxDurationSeconds: 600,
+	}}
+	want := QuestionSpeechCredential{Token: "tts-token", VoiceID: "voice", Model: "sonic-3.6"}
+	issuer := &credentialIssuerFake{speech: want}
+	got, err := NewService(repo, issuer).QuestionSpeechCredential(context.Background(), "principal", "session")
+	if err != nil || got.Token != want.Token || issuer.speechCalls != 1 {
+		t.Fatalf("credential=%+v calls=%d err=%v", got, issuer.speechCalls, err)
+	}
+	if issuer.speechTTL < 59*time.Second || issuer.speechTTL > time.Minute {
+		t.Fatalf("speech credential ttl = %s", issuer.speechTTL)
+	}
+	repo.getSession.Status = StatusFinalized
+	if _, err := NewService(repo, issuer).QuestionSpeechCredential(
+		context.Background(), "principal", "session",
+	); !errors.Is(err, ErrConflict) {
+		t.Fatalf("finalized session credential err=%v", err)
 	}
 }
 

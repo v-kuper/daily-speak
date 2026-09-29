@@ -31,10 +31,10 @@ type Repository interface {
 
 type Service struct {
 	repository       Repository
-	credentialIssuer RealtimeCredentialIssuer
+	credentialIssuer CredentialIssuer
 }
 
-func NewService(repository Repository, issuer ...RealtimeCredentialIssuer) *Service {
+func NewService(repository Repository, issuer ...CredentialIssuer) *Service {
 	service := &Service{repository: repository}
 	if len(issuer) > 0 {
 		service.credentialIssuer = issuer[0]
@@ -171,6 +171,36 @@ func (s *Service) RealtimeTranscriptionCredential(ctx context.Context, ownerPrin
 	credential, err := s.credentialIssuer.IssueRealtimeCredential(ctx, ttl)
 	if err != nil || strings.TrimSpace(credential.Token) == "" {
 		return RealtimeTranscriptionCredential{}, ErrUnavailable
+	}
+	return credential, nil
+}
+
+func (s *Service) QuestionSpeechCredential(ctx context.Context, ownerPrincipalID, sessionID string) (QuestionSpeechCredential, error) {
+	if strings.TrimSpace(ownerPrincipalID) == "" || strings.TrimSpace(sessionID) == "" {
+		return QuestionSpeechCredential{}, ErrInvalid
+	}
+	session, err := s.repository.Get(ctx, ownerPrincipalID, sessionID)
+	if err != nil {
+		return QuestionSpeechCredential{}, err
+	}
+	if s.credentialIssuer == nil {
+		return QuestionSpeechCredential{}, ErrSpeechUnavailable
+	}
+	if session.Status != StatusRecording || session.StartedAt == nil || session.MaxDurationSeconds <= 0 {
+		return QuestionSpeechCredential{}, ErrConflict
+	}
+	now := time.Now().UTC()
+	deadline := session.StartedAt.UTC().Add(time.Duration(session.MaxDurationSeconds) * time.Second)
+	if !session.ExpiresAt.IsZero() && session.ExpiresAt.Before(deadline) {
+		deadline = session.ExpiresAt
+	}
+	ttl := min(time.Minute, deadline.Sub(now).Truncate(time.Second))
+	if ttl < time.Second {
+		return QuestionSpeechCredential{}, ErrDurationLimit
+	}
+	credential, err := s.credentialIssuer.IssueQuestionSpeechCredential(ctx, ttl)
+	if err != nil || strings.TrimSpace(credential.Token) == "" || strings.TrimSpace(credential.VoiceID) == "" {
+		return QuestionSpeechCredential{}, ErrSpeechUnavailable
 	}
 	return credential, nil
 }

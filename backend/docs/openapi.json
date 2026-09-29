@@ -1892,6 +1892,48 @@
         }
       }
     },
+    "/api/v1/interviews/{interviewId}/question-speech-token": {
+      "post": {
+        "tags": [
+          "Interviews"
+        ],
+        "summary": "Create a short-lived Cartesia TTS credential",
+        "description": "Returns a TTS-only access token, bounded to 60 seconds and the remaining active interview duration, plus the configured Cartesia /tts/bytes parameters. The server keeps CARTESIA_API_KEY private.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RequestIdHeader"
+          },
+          {
+            "$ref": "#/components/parameters/InterviewIdPath"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/V1InterviewQuestionSpeechCredentialOK"
+          },
+          "401": {
+            "$ref": "#/components/responses/V1Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/V1Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/V1NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/V1Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/V1ServiceUnavailable"
+          }
+        }
+      }
+    },
     "/api/v1/interviews/{interviewId}/turns/{sequence}/audio": {
       "post": {
         "tags": [
@@ -3072,6 +3114,21 @@
           "application/json": {
             "schema": {
               "$ref": "#/components/schemas/InterviewTranscriptionCredential"
+            }
+          }
+        }
+      },
+      "V1InterviewQuestionSpeechCredentialOK": {
+        "description": "Short-lived question pronunciation credential.",
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestID"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/InterviewQuestionSpeechCredential"
             }
           }
         }
@@ -5235,6 +5292,40 @@
           "sampleRate": {
             "type": "integer",
             "const": 16000
+          }
+        }
+      },
+      "InterviewQuestionSpeechCredential": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "token",
+          "expiresAt",
+          "endpoint",
+          "apiVersion",
+          "model",
+          "voiceId"
+        ],
+        "properties": {
+          "token": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "endpoint": {
+            "type": "string",
+            "format": "uri"
+          },
+          "apiVersion": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "voiceId": {
+            "type": "string"
           }
         }
       },

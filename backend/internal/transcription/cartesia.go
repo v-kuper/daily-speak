@@ -72,6 +72,17 @@ func (c *Cartesia) Check(ctx context.Context) error {
 // access. Cartesia does not return token metadata, so callers must track the
 // requested lifetime themselves.
 func (c *Cartesia) CreateSTTAccessToken(ctx context.Context, ttl time.Duration) (string, error) {
+	return c.createAccessToken(ctx, ttl, false, true)
+}
+
+// CreateTTSAccessToken creates a browser-safe token that grants only TTS
+// access. Keeping the grants separate prevents a leaked playback credential
+// from opening another transcription stream.
+func (c *Cartesia) CreateTTSAccessToken(ctx context.Context, ttl time.Duration) (string, error) {
+	return c.createAccessToken(ctx, ttl, true, false)
+}
+
+func (c *Cartesia) createAccessToken(ctx context.Context, ttl time.Duration, ttsGrant, sttGrant bool) (string, error) {
 	if err := c.validateKey(); err != nil {
 		return "", err
 	}
@@ -80,13 +91,15 @@ func (c *Cartesia) CreateSTTAccessToken(ctx context.Context, ttl time.Duration) 
 	}
 	payload, err := json.Marshal(struct {
 		Grants struct {
+			TTS bool `json:"tts"`
 			STT bool `json:"stt"`
 		} `json:"grants"`
 		ExpiresIn int64 `json:"expires_in"`
 	}{
 		Grants: struct {
+			TTS bool `json:"tts"`
 			STT bool `json:"stt"`
-		}{STT: true},
+		}{TTS: ttsGrant, STT: sttGrant},
 		ExpiresIn: int64(ttl / time.Second),
 	})
 	if err != nil {

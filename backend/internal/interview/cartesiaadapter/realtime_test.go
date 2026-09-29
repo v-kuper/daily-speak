@@ -64,3 +64,41 @@ func TestIssuerMapsCartesiaProtocolToInterviewCredential(t *testing.T) {
 		t.Fatalf("unexpected audio contract: %+v", credential)
 	}
 }
+
+func TestIssuerCreatesTTSOnlyQuestionSpeechCredential(t *testing.T) {
+	fixedNow := time.Date(2026, time.September, 29, 9, 0, 0, 0, time.UTC)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload struct {
+			Grants struct {
+				TTS bool `json:"tts"`
+				STT bool `json:"stt"`
+			} `json:"grants"`
+			ExpiresIn int64 `json:"expires_in"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Errorf("decode token request: %v", err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		if !payload.Grants.TTS || payload.Grants.STT || payload.ExpiresIn != 60 {
+			t.Fatalf("unexpected grant payload: %+v", payload)
+		}
+		_, _ = w.Write([]byte(`{"token":"tts-token"}`))
+	}))
+	defer server.Close()
+
+	issuer := New(Config{
+		APIKey: "secret", APIVersion: "test-version", AccessTokenEndpoint: server.URL,
+		TTSAPIURL: "https://speech.example.test/tts/bytes", TTSModel: "sonic-test", VoiceID: "voice-test",
+		HTTPClient: server.Client(), Now: func() time.Time { return fixedNow },
+	})
+	credential, err := issuer.IssueQuestionSpeechCredential(context.Background(), time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if credential.Token != "tts-token" || credential.Endpoint != "https://speech.example.test/tts/bytes" ||
+		credential.APIVersion != "test-version" || credential.Model != "sonic-test" || credential.VoiceID != "voice-test" ||
+		!credential.ExpiresAt.Equal(fixedNow.Add(time.Minute)) {
+		t.Fatalf("unexpected credential: %+v", credential)
+	}
+}
