@@ -7,15 +7,18 @@ import {
 
 type SuggestionCardProps = {
   suggestion: Suggestion;
+  id?: string;
+  active?: boolean;
+  onShowInTranscript?: () => void;
 };
 
-export default function SuggestionCard({ suggestion }: SuggestionCardProps) {
+export default function SuggestionCard({ suggestion, id, active = false, onShowInTranscript }: SuggestionCardProps) {
   const categoryLabel = suggestionCategoryLabel(suggestion.category);
   const severityLabel = suggestionSeverityLabel(suggestion.severity);
   const severityClass = suggestionSeverityClass(suggestion.severity);
 
   return (
-    <article className={`suggestion-item${severityClass ? ` ${severityClass}` : ""}`}>
+    <article id={id} tabIndex={-1} className={`suggestion-item${severityClass ? ` ${severityClass}` : ""}${active ? " feedback-card-active" : ""}`}>
       {(categoryLabel || severityLabel) && (
         <div className="suggestion-badges">
           {categoryLabel && <span className="suggestion-badge suggestion-category-badge">{categoryLabel}</span>}
@@ -45,6 +48,11 @@ export default function SuggestionCard({ suggestion }: SuggestionCardProps) {
             </a>
           )}
         </div>
+      )}
+      {onShowInTranscript && (
+        <button className="feedback-locate" type="button" onClick={onShowInTranscript}>
+          Show in transcript
+        </button>
       )}
     </article>
   );

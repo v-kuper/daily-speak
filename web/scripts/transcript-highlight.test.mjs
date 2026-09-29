@@ -96,3 +96,16 @@ test("corrected conversation keeps each question and renders the natural answer 
   assert.equal(turn.hasAnswer, true);
   assert.deepEqual(turn.answerSegments, [{ text: "I went home.", isError: false, severity: null }]);
 });
+
+test("strengths link to their card index and corrections win on overlap", () => {
+  const segments = highlight.buildTranscriptSegments(
+    "I have lived here for five years.",
+    [{ wrong: "lived", severity: "medium" }],
+    [{ excerpt: "I have lived here for five years" }],
+  );
+  const correction = segments.find((part) => part.isError);
+  const strengths = segments.filter((part) => part.isStrength);
+  assert.equal(correction.feedbackIndex, 0);
+  assert.equal(strengths.some((part) => part.text.includes("lived")), false);
+  assert.equal(strengths.every((part) => part.feedbackIndex === 0), true);
+});

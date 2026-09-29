@@ -30,6 +30,7 @@ const (
 type learningReference = recording.LearningReference
 
 type suggestion = recording.Suggestion
+type strength = recording.Strength
 
 type recordingMediaResponse struct {
 	Audio     *recordingMediaAssetResponse `json:"audio,omitempty"`
@@ -89,6 +90,10 @@ func stringAny(value any) string {
 
 func normalizeSuggestions(input []byte, limit int) []suggestion {
 	return recording.NormalizeSuggestions(input, limit)
+}
+
+func normalizeStrengths(input []byte, limit int) []strength {
+	return recording.NormalizeStrengths(input, limit)
 }
 
 func parseSuggestionCategory(value string) (suggestionCategory, bool) {

@@ -233,18 +233,28 @@ func (r *SQLProcessingRepository) SaveInterviewTranscript(ctx context.Context, j
 	return true, nil
 }
 
-func (r *SQLProcessingRepository) SaveSuggestions(ctx context.Context, job ProcessingJob, suggestions []Suggestion) (bool, error) {
-	payload, _ := json.Marshal(withoutReferences(suggestions))
+func (r *SQLProcessingRepository) SaveAnalysis(ctx context.Context, job ProcessingJob, analysis AnalysisResult) (bool, error) {
+	suggestionsPayload, _ := json.Marshal(withoutReferences(analysis.Suggestions))
+	strengthsPayload, _ := json.Marshal(withoutStrengthReferences(analysis.Strengths))
 	result, err := r.db.Exec(ctx, `
 		UPDATE recordings
-		SET suggestions = $2::jsonb, processing_stage = 'rewriting', processing_error = NULL
-		WHERE id = $1 AND status = 'processing' AND processing_job_id = $3
-		  AND EXISTS (SELECT 1 FROM processing_jobs WHERE id = $3 AND state = 'running' AND lease_token = $4)`,
-		job.ResourceID, string(payload), job.ID, job.LeaseToken)
+		SET suggestions = $2::jsonb, strengths = $3::jsonb,
+		    processing_stage = 'rewriting', processing_error = NULL
+		WHERE id = $1 AND status = 'processing' AND processing_job_id = $4
+		  AND EXISTS (SELECT 1 FROM processing_jobs WHERE id = $4 AND state = 'running' AND lease_token = $5)`,
+		job.ResourceID, string(suggestionsPayload), string(strengthsPayload), job.ID, job.LeaseToken)
 	if err != nil {
 		return false, err
 	}
 	return result.RowsAffected() > 0, nil
+}
+
+func withoutStrengthReferences(strengths []Strength) []Strength {
+	out := make([]Strength, 0, len(strengths))
+	for _, strength := range strengths {
+		out = append(out, WithoutStrengthLearningReference(strength))
+	}
+	return out
 }
 
 func (r *SQLProcessingRepository) CompleteRecording(ctx context.Context, job ProcessingJob, corrected RewriteResult, shadowingJobID string) (bool, error) {

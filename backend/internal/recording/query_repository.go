@@ -81,7 +81,7 @@ func (repository *SQLQueryRepository) List(ctx context.Context, userID string, o
 	}
 	rows, err := repository.db.Query(ctx, `
 		SELECT id, topic, duration, timestamp, status, transcript, corrected_transcript,
-		       suggestions, processing_stage, practice_type, photo_object,
+		       suggestions, strengths, processing_stage, practice_type, photo_object,
 		       processing_error, shadowing_status, shadowing_error, shadowing_updated_at,
 		       audio_asset_id, photo_asset_id, shadowing_asset_id
 		FROM recordings
@@ -119,7 +119,7 @@ func findRecord(ctx context.Context, querier recordQuerier, userID string, recor
 
 const recordSelectSQL = `
 	SELECT id, topic, duration, timestamp, status, transcript, corrected_transcript,
-	       suggestions, processing_stage, practice_type, photo_object,
+	       suggestions, strengths, processing_stage, practice_type, photo_object,
 	       processing_error, shadowing_status, shadowing_error, shadowing_updated_at,
 	       audio_asset_id, photo_asset_id, shadowing_asset_id
 	FROM recordings
@@ -130,7 +130,7 @@ func recordDestinations(record *Record) []any {
 	return []any{
 		&record.ID, &record.Topic, &record.Duration, &record.Timestamp,
 		&record.Status, &record.Transcript, &record.CorrectedTranscript,
-		&record.SuggestionsJSON, &record.ProcessingStage, &record.PracticeType,
+		&record.SuggestionsJSON, &record.StrengthsJSON, &record.ProcessingStage, &record.PracticeType,
 		&record.PhotoObject, &record.ProcessingError, &record.ShadowingStatus,
 		&record.ShadowingError,
 		&record.ShadowingUpdatedAt, &record.AudioAssetID, &record.PhotoAssetID,

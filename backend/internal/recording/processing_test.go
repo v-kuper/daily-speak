@@ -18,6 +18,7 @@ type processorRepository struct {
 	duration           int
 	transcript         string
 	suggestions        []Suggestion
+	strengths          []Strength
 	corrected          RewriteResult
 	shadowingID        string
 	advanceTranscript  bool
@@ -66,9 +67,10 @@ func (r *processorRepository) SaveTranscript(_ context.Context, _ ProcessingJob,
 	r.transcript = transcript
 	return r.advanceTranscript, nil
 }
-func (r *processorRepository) SaveSuggestions(_ context.Context, _ ProcessingJob, suggestions []Suggestion) (bool, error) {
+func (r *processorRepository) SaveAnalysis(_ context.Context, _ ProcessingJob, analysis AnalysisResult) (bool, error) {
 	r.steps = append(r.steps, "suggestions")
-	r.suggestions = suggestions
+	r.suggestions = analysis.Suggestions
+	r.strengths = analysis.Strengths
 	return r.advanceSuggestions, nil
 }
 func (r *processorRepository) CompleteRecording(_ context.Context, _ ProcessingJob, corrected RewriteResult, shadowingID string) (bool, error) {
@@ -80,9 +82,12 @@ func (r *processorRepository) CompleteRecording(_ context.Context, _ ProcessingJ
 
 type processorAnalyzer struct{ inputs []AnalysisInput }
 
-func (a *processorAnalyzer) Analyze(_ context.Context, input AnalysisInput, _ AnalysisLogger) ([]Suggestion, error) {
+func (a *processorAnalyzer) Analyze(_ context.Context, input AnalysisInput, _ AnalysisLogger) (AnalysisResult, error) {
 	a.inputs = append(a.inputs, input)
-	return []Suggestion{{Wrong: "go", Right: "went", Explanation: "Use past tense."}}, nil
+	return AnalysisResult{
+		Suggestions: []Suggestion{{Wrong: "go", Right: "went", Explanation: "Use past tense."}},
+		Strengths:   []Strength{{Excerpt: "I", Explanation: "Clear subject.", Category: CategorySentenceStructure, RuleID: "word-order"}},
+	}, nil
 }
 
 type processorRewriter struct {

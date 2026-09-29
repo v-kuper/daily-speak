@@ -24,6 +24,7 @@ type recordingV1Response struct {
 	Transcript          string                    `json:"transcript"`
 	CorrectedTranscript string                    `json:"correctedTranscript"`
 	Suggestions         []suggestion              `json:"suggestions"`
+	Strengths           []strength                `json:"strengths"`
 	ProcessingStage     *string                   `json:"processingStage"`
 	PracticeType        string                    `json:"practiceType"`
 	PhotoObject         *string                   `json:"photoObject"`
@@ -208,6 +209,7 @@ func recordingV1ResponseFromRecord(record recording.Record) recordingV1Response 
 		Transcript:          record.Transcript,
 		CorrectedTranscript: record.CorrectedTranscript,
 		Suggestions:         normalizeSuggestions(record.SuggestionsJSON, 0),
+		Strengths:           normalizeStrengths(record.StrengthsJSON, 3),
 		ProcessingStage:     normalizeRecordingProcessingStage(record.ProcessingStage),
 		PracticeType:        practice.NormalizeType(record.PracticeType),
 		PhotoObject:         normalizeOptionalPhotoObject(record.PhotoObject),

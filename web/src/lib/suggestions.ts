@@ -1,5 +1,6 @@
 import type {
   LearningReference,
+  Strength,
   Suggestion,
   SuggestionCategory,
   SuggestionSeverity
@@ -113,4 +114,36 @@ export const parseSuggestions = (value: unknown): Suggestion[] => {
   return value
     .map((item) => parseSuggestion(item))
     .filter((item): item is Suggestion => item !== null);
+};
+
+const parseStrength = (value: unknown): Strength | null => {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+  const candidate = value as Record<string, unknown>;
+  const excerpt = trimmedString(candidate.excerpt);
+  const explanation = trimmedString(candidate.explanation);
+  const category = parseCategory(candidate.category);
+  const ruleId = trimmedString(candidate.ruleId);
+  const learningReference = parseLearningReference(candidate.learningReference);
+  if (!excerpt || !explanation || !category || !ruleId) {
+    return null;
+  }
+  return {
+    excerpt,
+    explanation,
+    category,
+    ruleId,
+    ...(learningReference ? { learningReference } : {})
+  };
+};
+
+export const parseStrengths = (value: unknown): Strength[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((item) => parseStrength(item))
+    .filter((item): item is Strength => item !== null)
+    .slice(0, 3);
 };

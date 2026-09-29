@@ -21,7 +21,7 @@ func (s *Server) generateRecordingSuggestions(
 	englishLevel string,
 	logger logging.Logger,
 ) ([]suggestion, error) {
-	return s.recordingAnalyzer.Analyze(ctx, recording.AnalysisInput{
+	result, err := s.recordingAnalyzer.Analyze(ctx, recording.AnalysisInput{
 		RecordingID:  recordingID,
 		Transcript:   transcript,
 		Topic:        topic,
@@ -30,4 +30,5 @@ func (s *Server) generateRecordingSuggestions(
 		PhotoObject:  photoObject,
 		EnglishLevel: englishLevel,
 	}, logger)
+	return result.Suggestions, err
 }

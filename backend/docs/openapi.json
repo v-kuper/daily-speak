@@ -4439,6 +4439,53 @@
           "explanation": "Use the irregular past-tense form `went`."
         }
       },
+      "Strength": {
+        "type": "object",
+        "required": [
+          "excerpt",
+          "explanation",
+          "category",
+          "ruleId"
+        ],
+        "properties": {
+          "excerpt": {
+            "type": "string",
+            "description": "Exact verified excerpt from the learner transcript."
+          },
+          "explanation": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string"
+          },
+          "ruleId": {
+            "type": "string"
+          },
+          "learningReference": {
+            "type": "object",
+            "required": [
+              "id",
+              "title",
+              "summary"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "summary": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string",
+                "format": "uri"
+              }
+            }
+          }
+        }
+      },
       "RecordingMediaAsset": {
         "type": "object",
         "required": [
@@ -4519,6 +4566,14 @@
               "$ref": "#/components/schemas/Suggestion"
             }
           },
+          "strengths": {
+            "type": "array",
+            "maxItems": 3,
+            "description": "Verified examples of English the learner used well. New recordings return an empty array when no strength is available.",
+            "items": {
+              "$ref": "#/components/schemas/Strength"
+            }
+          },
           "practiceType": {
             "$ref": "#/components/schemas/PracticeType"
           },
@@ -4585,6 +4640,7 @@
               "explanation": "Use the irregular past tense."
             }
           ],
+          "strengths": [],
           "practiceType": "free_talk",
           "photoObject": null,
           "processingStage": null,

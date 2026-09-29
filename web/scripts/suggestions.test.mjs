@@ -84,3 +84,26 @@ test("unsafe reference URL is dropped without dropping the correction", () => {
   assert.equal(parsed.wrong, "she go");
   assert.equal(parsed.learningReference, undefined);
 });
+
+test("verified strengths keep supported metadata and are capped at three", () => {
+  const input = Array.from({ length: 4 }, (_, index) => ({
+    excerpt: `Useful phrase ${index}`,
+    explanation: `Explanation ${index}`,
+    category: "naturalness",
+    ruleId: "collocations",
+    learningReference: {
+      id: "collocations",
+      title: "Collocations",
+      summary: "Use words that naturally occur together.",
+    },
+  }));
+  const parsed = suggestions.parseStrengths(input);
+  assert.equal(parsed.length, 3);
+  assert.equal(parsed[0].excerpt, "Useful phrase 0");
+  assert.equal(parsed[0].learningReference.id, "collocations");
+});
+
+test("legacy recordings and malformed strengths safely become an empty list", () => {
+  assert.deepEqual(suggestions.parseStrengths(undefined), []);
+  assert.deepEqual(suggestions.parseStrengths([{ excerpt: "Missing metadata" }]), []);
+});

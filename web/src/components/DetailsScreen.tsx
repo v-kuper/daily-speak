@@ -6,6 +6,7 @@ import { deleteAndNavigate, reconcileRecordingSaveRoute, recordingDetailState, s
 
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { buildTranscriptSegments } from "../lib/transcriptHighlight";
+import { feedbackCardId, transcriptMarkId, type ReviewKind } from "../lib/feedbackAnchors";
 import {
   recordingProcessingLabel,
   recordingRetryLabel,
@@ -32,6 +33,7 @@ import SuggestionCard from "./SuggestionCard";
 import RecordingLoadError from "./RecordingLoadError";
 import ProtectedMediaImage from "./ProtectedMediaImage";
 import ConversationTranscript from "./ConversationTranscript";
+import StrengthCard from "./StrengthCard";
 
 const formatPracticeLabel = (value: "free_talk" | "topic" | "photo_description"): string => {
   switch (value) {
@@ -88,10 +90,14 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
   const store = useAppStore();
   const router = useRouter();
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const shadowingAudioRef = useRef<HTMLAudioElement | null>(null);
   const autoShadowingRequestedRef = useRef(new Set<string>());
   const [localAudioSrc, setLocalAudioSrc] = useState<string | null>(null);
   const [playbackError, setPlaybackError] = useState<string | null>(null);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [originalTranscriptOpen, setOriginalTranscriptOpen] = useState(true);
+  const [correctedTranscriptOpen, setCorrectedTranscriptOpen] = useState(false);
+  const [selectedReview, setSelectedReview] = useState<string | null>(null);
   const {
     isPlaying,
     playbackPosition,
@@ -167,12 +173,14 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
   );
   const hasCorrectedTranscript = recording ? recording.correctedTranscript.trim().length > 0 : false;
   const hasSuggestions = recording ? recording.suggestions.length > 0 : false;
+  const recordingStrengths = recording?.strengths ?? [];
+  const hasStrengths = recordingStrengths.length > 0;
   const transcriptSegments = useMemo(() => {
     if (!recording) {
       return [];
     }
 
-    return buildTranscriptSegments(recording.transcript, recording.suggestions);
+    return buildTranscriptSegments(recording.transcript, recording.suggestions, recording.strengths ?? []);
   }, [recording]);
   const isDeleteLoading = recordingDeleteStatus === "loading";
   const isRecordingRetryLoading = recordingId
@@ -273,6 +281,7 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
 
     const handlePlay = () => {
       setPlaybackError(null);
+      shadowingAudioRef.current?.pause();
       dispatch(setPlaybackPlaying(true));
     };
 
@@ -354,6 +363,27 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
     }
 
     audio.pause();
+  };
+
+  const scrollBehavior = (): ScrollBehavior =>
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
+
+  const showReviewCard = (kind: ReviewKind, index: number) => {
+    const id = feedbackCardId(kind, index);
+    setSelectedReview(id);
+    const card = document.getElementById(id);
+    card?.scrollIntoView({ behavior: scrollBehavior(), block: "center" });
+    card?.focus({ preventScroll: true });
+  };
+
+  const showTranscriptMark = (kind: ReviewKind, index: number) => {
+    setOriginalTranscriptOpen(true);
+    setSelectedReview(feedbackCardId(kind, index));
+    window.requestAnimationFrame(() => {
+      const mark = document.getElementById(transcriptMarkId(kind, index));
+      mark?.scrollIntoView({ behavior: scrollBehavior(), block: "center" });
+      mark?.focus({ preventScroll: true });
+    });
   };
 
   const onSeek = (event: MouseEvent<HTMLDivElement>) => {
@@ -470,6 +500,41 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
     );
   }
 
+  const renderedTranscriptTargets = new Set<string>();
+  const renderTranscriptSegment = (segment: (typeof transcriptSegments)[number], index: number) => {
+    if (!segment.isError && !segment.isStrength) {
+      return <span key={`segment-${index}`}>{segment.text}</span>;
+    }
+    const kind: ReviewKind = segment.isError ? "correction" : "strength";
+    const feedbackIndex = segment.feedbackIndex ?? 0;
+    const targetKey = `${kind}-${feedbackIndex}`;
+    const firstOccurrence = !renderedTranscriptTargets.has(targetKey);
+    renderedTranscriptTargets.add(targetKey);
+    return (
+      <mark
+        key={`segment-${index}`}
+        id={firstOccurrence ? transcriptMarkId(kind, feedbackIndex) : undefined}
+        data-feedback-kind={kind}
+        data-feedback-index={feedbackIndex}
+        className={segment.isError
+          ? `transcript-error-mark${segment.severity ? ` transcript-error-mark-${segment.severity}` : ""}`
+          : "transcript-strength-mark"}
+        role="button"
+        tabIndex={0}
+        aria-controls={feedbackCardId(kind, feedbackIndex)}
+        onClick={() => showReviewCard(kind, feedbackIndex)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            showReviewCard(kind, feedbackIndex);
+          }
+        }}
+      >
+        {segment.text}
+      </mark>
+    );
+  };
+
   return (
     <section>
       <Link className="back-btn" href="/history">
@@ -521,165 +586,181 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
         <div>{formatPracticeLabel(recording.practiceType)}</div>
       </div>
 
-      {recordingMediaLoading ? (
-        <div className="notice">Preparing protected recording audio...</div>
-      ) : hasAudio ? (
-        <audio ref={audioRef} src={audioSrc ?? undefined} preload="metadata" />
-      ) : (
-        <div className="notice">Audio is unavailable for this recording.</div>
-      )}
-      {playbackError && <div className="auth-error top-spaced">{playbackError}</div>}
-      {recordingMediaError && (
-        <div className="processing-retry top-spaced">
-          <div className="auth-error">{recordingMediaError}</div>
-          <button className="btn btn-secondary" onClick={retryRecordingMedia}>
-            Reload audio
-          </button>
-        </div>
-      )}
-
-      <div className="player">
-        <div className="player-controls">
-          <button className="play-btn" onClick={onTogglePlayback} disabled={!hasAudio} aria-label={isPlaying ? "Pause" : "Play"}>
-            {isPlaying ? "Pause" : "Play"}
-          </button>
-          <div className={`progress-bar ${hasAudio ? "" : "disabled-progress"}`} onClick={onSeek}>
-            <div className="progress-bar-fill" style={{ width: `${playbackPercent}%` }} />
-          </div>
-          <div className="time-display">
-            {formatTime(playbackPosition)} / {formatTime(recordingDuration)}
-          </div>
-        </div>
-      </div>
-
-      <div className="transcript-section">
-        <div className="section-title">{hasConversationTranscript ? "Conversation transcript" : "Transcript"}</div>
-        {hasConversationTranscript ? (
-          <ConversationTranscript
-            turns={recording.interviewTurns}
-            suggestions={recording.suggestions}
-            processing={isProcessing}
-          />
-        ) : hasTranscript ? (
-          <div className="transcript-text">
-            {transcriptSegments.map((segment, index) =>
-              segment.isError ? (
-                <mark
-                  key={`segment-${index}`}
-                  className={`transcript-error-mark${segment.severity ? ` transcript-error-mark-${segment.severity}` : ""}`}
-                >
-                  {segment.text}
-                </mark>
-              ) : (
-                <span key={`segment-${index}`}>{segment.text}</span>
-              )
+      <div className="details-workbench">
+        <div className="details-materials">
+          <section className="details-material-card details-original-material">
+            <div className="material-heading">
+              <div>
+                <div className="material-kicker">Your recording</div>
+                <h3>Original conversation</h3>
+              </div>
+            </div>
+            {recordingMediaLoading ? (
+              <div className="notice">Preparing protected recording audio...</div>
+            ) : hasAudio ? (
+              <audio ref={audioRef} src={audioSrc ?? undefined} preload="metadata" />
+            ) : (
+              <div className="notice">Audio is unavailable for this recording.</div>
             )}
-          </div>
-        ) : isProcessing ? (
-          <div className="empty-state">
-            {recording.processingStage === "transcribing"
-              ? "Transcribing audio. The transcript will appear here automatically."
-              : "The transcript will appear here automatically."}
-          </div>
-        ) : (
-          <div className="empty-state">Transcript is unavailable for this recording.</div>
-        )}
-        {renderProcessingRetry("transcribing")}
-      </div>
-
-      <div className="suggestions-section">
-        <div className="section-title">AI Suggestions</div>
-        {hasSuggestions ? (
-          recording.suggestions.map((suggestion, index) => (
-            <SuggestionCard
-              key={`${suggestion.wrong}-${suggestion.right}-${suggestion.category ?? "uncategorized"}-${index}`}
-              suggestion={suggestion}
-            />
-          ))
-        ) : isProcessing && recording.processingStage !== "rewriting" ? (
-          <div className="empty-state">
-            AI error analysis will appear here after transcription.
-          </div>
-        ) : isFailed && recording.processingStage !== "rewriting" ? (
-          <div className="empty-state">AI suggestions are unavailable for this recording.</div>
-        ) : (
-          <div className="empty-state">No clear corrections were needed.</div>
-        )}
-        {renderProcessingRetry("suggestions")}
-      </div>
-
-      <div className="shadowing-section">
-        <div className="section-title">Shadowing practice</div>
-        <p className="shadowing-hint">Listen, then repeat with the same rhythm and pronunciation.</p>
-        {hasCorrectedConversation ? (
-          <ConversationTranscript
-            turns={recording.interviewTurns}
-            suggestions={[]}
-            processing={isProcessing}
-            answerKind="corrected"
-          />
-        ) : hasCorrectedTranscript ? (
-          <div className="transcript-text">{recording.correctedTranscript}</div>
-        ) : isProcessing ? (
-          <div className="empty-state">
-            {recording.processingStage === "rewriting"
-              ? "Creating a natural conversational version for your English level."
-              : "This version will appear after the transcript and AI suggestions are ready."}
-          </div>
-        ) : isFailed ? (
-          <div className="empty-state">The natural version is unavailable, but completed results above are still saved.</div>
-        ) : (
-          <div className="empty-state">The natural version is unavailable for this recording.</div>
-        )}
-        {renderProcessingRetry("rewriting")}
-        {recording.shadowingStatus === "ready" && shadowingMediaLoading && (
-          <div className="empty-state">Preparing protected pronunciation audio...</div>
-        )}
-        {recording.shadowingStatus === "ready" && shadowingMediaURL && (
-          <audio
-            className="shadowing-audio"
-            controls
-            preload="metadata"
-            src={shadowingMediaURL}
-            onCanPlay={reportShadowingMediaReady}
-            onError={reportShadowingMediaError}
-          />
-        )}
-        {recording.shadowingStatus === "ready" && !shadowingDownloadPath && (
-          <div className="auth-error">The protected pronunciation audio reference is unavailable.</div>
-        )}
-        {recording.shadowingStatus === "ready" && shadowingMediaError && (
-          <div className="processing-retry">
-            <div className="auth-error">{shadowingMediaError}</div>
-            <button className="btn btn-secondary" onClick={retryShadowingMedia}>
-              Reload audio
+            <div className="player material-player">
+              <div className="player-controls">
+                <button className="play-btn" onClick={onTogglePlayback} disabled={!hasAudio} aria-label={isPlaying ? "Pause" : "Play"}>
+                  {isPlaying ? "Pause" : "Play"}
+                </button>
+                <div className={`progress-bar ${hasAudio ? "" : "disabled-progress"}`} onClick={onSeek}>
+                  <div className="progress-bar-fill" style={{ width: `${playbackPercent}%` }} />
+                </div>
+                <div className="time-display">{formatTime(playbackPosition)} / {formatTime(recordingDuration)}</div>
+              </div>
+            </div>
+            {playbackError && <div className="auth-error top-spaced">{playbackError}</div>}
+            {recordingMediaError && (
+              <div className="processing-retry top-spaced">
+                <div className="auth-error">{recordingMediaError}</div>
+                <button className="btn btn-secondary" onClick={retryRecordingMedia}>Reload audio</button>
+              </div>
+            )}
+            <button
+              className="transcript-disclosure"
+              type="button"
+              aria-expanded={originalTranscriptOpen}
+              aria-controls="original-transcript-panel"
+              onClick={() => setOriginalTranscriptOpen((open) => !open)}
+            >
+              <span>{hasConversationTranscript ? "Conversation transcription" : "Transcription"}</span>
+              <span aria-hidden="true">{originalTranscriptOpen ? "−" : "+"}</span>
             </button>
+            {originalTranscriptOpen && (
+              <div id="original-transcript-panel" className="material-transcript-scroll">
+                {hasConversationTranscript ? (
+                  <ConversationTranscript
+                    turns={recording.interviewTurns}
+                    suggestions={recording.suggestions}
+                    strengths={recordingStrengths}
+                    processing={isProcessing}
+                    onReviewSelect={showReviewCard}
+                  />
+                ) : hasTranscript ? (
+                  <div className="transcript-text">{transcriptSegments.map(renderTranscriptSegment)}</div>
+                ) : isProcessing ? (
+                  <div className="empty-state">{recording.processingStage === "transcribing" ? "Transcribing audio. The transcript will appear here automatically." : "The transcript will appear here automatically."}</div>
+                ) : (
+                  <div className="empty-state">Transcript is unavailable for this recording.</div>
+                )}
+                {renderProcessingRetry("transcribing")}
+              </div>
+            )}
+          </section>
+
+          <section className="details-material-card details-shadowing-material">
+            <div className="material-heading">
+              <div>
+                <div className="material-kicker">Practice version</div>
+                <h3>Shadowing practice</h3>
+              </div>
+            </div>
+            <p className="shadowing-hint">Listen, then repeat with the same rhythm and pronunciation.</p>
+            {recording.shadowingStatus === "ready" && shadowingMediaLoading && <div className="empty-state">Preparing protected pronunciation audio...</div>}
+            {recording.shadowingStatus === "ready" && shadowingMediaURL && (
+              <audio
+                ref={shadowingAudioRef}
+                className="shadowing-audio"
+                controls
+                preload="metadata"
+                src={shadowingMediaURL}
+                onPlay={() => {
+                  audioRef.current?.pause();
+                  dispatch(setPlaybackPlaying(false));
+                }}
+                onCanPlay={reportShadowingMediaReady}
+                onError={reportShadowingMediaError}
+              />
+            )}
+            {recording.shadowingStatus === "ready" && !shadowingDownloadPath && <div className="auth-error">The protected pronunciation audio reference is unavailable.</div>}
+            {recording.shadowingStatus === "ready" && shadowingMediaError && (
+              <div className="processing-retry">
+                <div className="auth-error">{shadowingMediaError}</div>
+                <button className="btn btn-secondary" onClick={retryShadowingMedia}>Reload audio</button>
+              </div>
+            )}
+            {showShadowingProgress && !shadowingRequestError && (
+              <div className={shadowingIsStale ? "auth-error" : "empty-state"}>{shadowingProgressLabel(recording.shadowingStatus, shadowingIsStale)}</div>
+            )}
+            {recordingStatus === "ready" && hasCorrectedTranscript && (recording.shadowingStatus === "failed" || shadowingRequestError) && (
+              <div className="auth-error">{shadowingRequestError ?? recording.shadowingError ?? "Pronunciation audio could not be generated. Please try again."}</div>
+            )}
+            {canRetryShadowing && (
+              <div className="shadowing-actions">
+                <button className="btn btn-secondary" onClick={onRetryShadowing} disabled={isShadowingRequestLoading}>
+                  {isShadowingRequestLoading ? "Retrying..." : "Retry"}
+                </button>
+              </div>
+            )}
+            <button
+              className="transcript-disclosure"
+              type="button"
+              aria-expanded={correctedTranscriptOpen}
+              aria-controls="corrected-transcript-panel"
+              onClick={() => setCorrectedTranscriptOpen((open) => !open)}
+            >
+              <span>Corrected transcription</span>
+              <span aria-hidden="true">{correctedTranscriptOpen ? "−" : "+"}</span>
+            </button>
+            <div id="corrected-transcript-panel" className="material-transcript-scroll" hidden={!correctedTranscriptOpen}>
+              {hasCorrectedConversation ? (
+                <ConversationTranscript turns={recording.interviewTurns} suggestions={[]} processing={isProcessing} answerKind="corrected" />
+              ) : hasCorrectedTranscript ? (
+                <div className="transcript-text">{recording.correctedTranscript}</div>
+              ) : isProcessing ? (
+                <div className="empty-state">{recording.processingStage === "rewriting" ? "Creating a natural conversational version for your English level." : "This version will appear after the transcript and feedback are ready."}</div>
+              ) : isFailed ? (
+                <div className="empty-state">The natural version is unavailable, but completed results are still saved.</div>
+              ) : (
+                <div className="empty-state">The natural version is unavailable for this recording.</div>
+              )}
+              {renderProcessingRetry("rewriting")}
+            </div>
+          </section>
+        </div>
+
+        <section className="details-feedback">
+          <div className="feedback-heading">
+            <div className="material-kicker">Your feedback</div>
+            <h3>Corrections and strengths</h3>
+            <p>Choose a highlight in the transcript to open its explanation.</p>
           </div>
-        )}
-        {showShadowingProgress && !shadowingRequestError && (
-            <div className={shadowingIsStale ? "auth-error" : "empty-state"}>
-              {shadowingProgressLabel(recording.shadowingStatus, shadowingIsStale)}
+          {hasStrengths && (
+            <div className="feedback-group">
+              <div className="feedback-group-title">What you did well</div>
+              {recordingStrengths.map((strength, index) => {
+                const id = feedbackCardId("strength", index);
+                return <StrengthCard key={`${strength.excerpt}-${index}`} id={id} active={selectedReview === id} strength={strength} onShowInTranscript={() => showTranscriptMark("strength", index)} />;
+              })}
             </div>
           )}
-        {recordingStatus === "ready" && hasCorrectedTranscript &&
-          (recording.shadowingStatus === "failed" || shadowingRequestError) && (
-          <div className="auth-error">
-            {shadowingRequestError ??
-              recording.shadowingError ??
-              "Pronunciation audio could not be generated. Please try again."}
+          <div className="feedback-group">
+            <div className="feedback-group-title">Corrections</div>
+            {hasSuggestions ? recording.suggestions.map((suggestion, index) => {
+              const id = feedbackCardId("correction", index);
+              return (
+                <SuggestionCard
+                  key={`${suggestion.wrong}-${suggestion.right}-${suggestion.category ?? "uncategorized"}-${index}`}
+                  id={id}
+                  active={selectedReview === id}
+                  suggestion={suggestion}
+                  onShowInTranscript={() => showTranscriptMark("correction", index)}
+                />
+              );
+            }) : isProcessing && recording.processingStage !== "rewriting" ? (
+              <div className="empty-state">AI feedback will appear here after transcription.</div>
+            ) : isFailed && recording.processingStage !== "rewriting" ? (
+              <div className="empty-state">AI feedback is unavailable for this recording.</div>
+            ) : (
+              <div className="empty-state">No clear corrections were needed.</div>
+            )}
           </div>
-          )}
-        {canRetryShadowing && (
-          <div className="shadowing-actions">
-            <button
-              className="btn btn-secondary"
-              onClick={onRetryShadowing}
-              disabled={isShadowingRequestLoading}
-            >
-              {isShadowingRequestLoading ? "Retrying..." : "Retry"}
-            </button>
-          </div>
-        )}
+          {renderProcessingRetry("suggestions")}
+        </section>
       </div>
 
       <button className="btn btn-danger btn-large delete-recording-btn" onClick={onOpenDeleteModal} disabled={!canDelete || isDeleteLoading}>

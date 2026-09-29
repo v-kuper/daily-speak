@@ -120,6 +120,7 @@ type scriptedProvider struct {
 	mu             sync.Mutex
 	byCategoryCall map[suggestionCategory]int
 	reviewerCalls  int
+	strengthCalls  int
 	respond        func(suggestionCategory, int) (string, error)
 	review         func() string
 	fullTextSeen   bool
@@ -131,6 +132,10 @@ func (p *scriptedProvider) Complete(_ context.Context, request AnalysisCompletio
 	if strings.Contains(request.UserPrompt, "adjudicator, not an error detector") {
 		p.reviewerCalls++
 		return p.review(), nil
+	}
+	if strings.Contains(request.UserPrompt, "Identify up to three genuine strengths") {
+		p.strengthCalls++
+		return `{"strengths":[]}`, nil
 	}
 	category := categoryFromPrompt(request.UserPrompt)
 	p.byCategoryCall[category]++
@@ -174,7 +179,7 @@ func TestAnalysisServiceRetriesThenReviews(t *testing.T) {
 	}
 	service := NewAnalysisService(provider, AnalysisConfig{Concurrency: 3})
 	got, err := service.Analyze(context.Background(), AnalysisInput{RecordingID: "recording-1", Transcript: "I went home.", EnglishLevel: "b1"}, discardAnalysisLogger{})
-	if err != nil || len(got) != 0 {
+	if err != nil || len(got.Suggestions) != 0 || len(got.Strengths) != 0 {
 		t.Fatalf("got=%#v err=%v", got, err)
 	}
 	if provider.byCategoryCall[categoryVerbGrammar] != 2 || provider.reviewerCalls != 1 {
@@ -212,8 +217,8 @@ func TestAnalysisServiceKeepsAllCandidatesAndFullTranscript(t *testing.T) {
 	transcript := strings.Repeat("a", 6001) + " капуста " + strings.Join(englishWrong, " ")
 	service := NewAnalysisService(provider, AnalysisConfig{Concurrency: 3})
 	got, err := service.Analyze(context.Background(), AnalysisInput{RecordingID: "recording-1", Transcript: transcript, EnglishLevel: "b1"}, discardAnalysisLogger{})
-	if err != nil || len(got) != 26 {
-		t.Fatalf("count=%d err=%v", len(got), err)
+	if err != nil || len(got.Suggestions) != 26 {
+		t.Fatalf("count=%d err=%v", len(got.Suggestions), err)
 	}
 	if !provider.fullTextSeen {
 		t.Fatal("full transcript was truncated")

@@ -24,7 +24,7 @@ import {
   type InterestOption
 } from "../../lib/interestCatalog";
 import { formatTime } from "../../lib/utils";
-import { parseSuggestions } from "../../lib/suggestions";
+import { parseStrengths, parseSuggestions } from "../../lib/suggestions";
 import {
   completeGuestPromotion,
   GuestPreviewError,
@@ -515,6 +515,7 @@ const parseRecording = (value: unknown): Recording | null => {
   const timestamp = new Date(timestampRaw);
   const duration = Number.parseInt(String(candidate.duration ?? 0), 10);
   const suggestions = parseSuggestions(candidate.suggestions);
+  const strengths = parseStrengths(candidate.strengths);
   const photoObject = normalizePhotoObject(candidate.photoObject);
   const processingError = typeof candidate.processingError === "string" ? candidate.processingError.trim() || null : null;
   const shadowingStatus = parseShadowingStatus(candidate.shadowingStatus);
@@ -544,6 +545,7 @@ const parseRecording = (value: unknown): Recording | null => {
     interviewTurns: parseInterviewTurns(candidate.interviewTurns),
     correctedTranscript,
     suggestions,
+    strengths,
     processingStage,
     practiceType,
     localAudioStorageKey: null,
@@ -1853,6 +1855,7 @@ const appSlice = createSlice({
         interviewTurns: parseInterviewTurns(draft.interviewTurns),
         correctedTranscript: "",
         suggestions: [],
+        strengths: [],
         processingStage: null,
         practiceType: draft.practiceType,
         localAudioStorageKey: isRecordingDraftAudioKey(draft.audioStorageKey) ? draft.audioStorageKey : null,

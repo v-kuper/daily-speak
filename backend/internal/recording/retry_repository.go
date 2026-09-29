@@ -40,6 +40,7 @@ func (transaction *sqlRetryTransaction) Claim(ctx context.Context, userID string
 		    processing_job_id = $3,
 		    transcript = CASE WHEN processing_stage = 'transcribing' THEN '' ELSE transcript END,
 		    suggestions = CASE WHEN processing_stage IN ('transcribing', 'suggestions') THEN '[]'::jsonb ELSE suggestions END,
+		    strengths = CASE WHEN processing_stage IN ('transcribing', 'suggestions') THEN '[]'::jsonb ELSE strengths END,
 		    corrected_transcript = '',
 		    shadowing_status = 'pending',
 		    shadowing_asset_id = NULL,

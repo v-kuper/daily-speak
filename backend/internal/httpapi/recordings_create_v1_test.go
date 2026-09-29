@@ -88,6 +88,18 @@ func TestRecordingV1ResponseIncludesPerTurnCorrectedAnswers(t *testing.T) {
 	}
 }
 
+func TestRecordingV1ResponseIncludesVerifiedStrengths(t *testing.T) {
+	response := recordingV1ResponseFromRecord(recording.Record{
+		ID: "recording-1", Topic: "Travel", Timestamp: time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC),
+		Status: "ready", PracticeType: "free_talk", ShadowingStatus: "ready",
+		ShadowingUpdatedAt: time.Date(2026, 9, 27, 12, 1, 0, 0, time.UTC),
+		StrengthsJSON:      []byte(`[{"excerpt":"I have lived here for five years","explanation":"Correct present perfect use.","category":"verb_grammar","ruleId":"past-simple-vs-present-perfect"}]`),
+	})
+	if len(response.Strengths) != 1 || response.Strengths[0].Excerpt != "I have lived here for five years" || response.Strengths[0].LearningReference == nil {
+		t.Fatalf("strengths=%#v", response.Strengths)
+	}
+}
+
 func TestCreateRecordingV1AttachesReadyMediaAndIsIdempotent(t *testing.T) {
 	fixture := newRecordingCreateV1Fixture(t)
 	audioID := fixture.insertAsset(t, fixture.owner.Identity.PrincipalID, "recording_audio")

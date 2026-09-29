@@ -43,6 +43,16 @@ type Suggestion struct {
 	LearningReference *LearningReference `json:"learningReference,omitempty"`
 }
 
+// Strength is a verified excerpt that demonstrates correct, useful English.
+// Learning references are resolved by the server from the rule catalog.
+type Strength struct {
+	Excerpt           string             `json:"excerpt"`
+	Explanation       string             `json:"explanation"`
+	Category          SuggestionCategory `json:"category"`
+	RuleID            string             `json:"ruleId"`
+	LearningReference *LearningReference `json:"learningReference,omitempty"`
+}
+
 // Record is the persistence-neutral representation shared by recording use
 // cases. Delivery adapters are responsible for their own response formatting.
 type Record struct {
@@ -54,6 +64,7 @@ type Record struct {
 	Transcript          string
 	CorrectedTranscript string
 	SuggestionsJSON     []byte
+	StrengthsJSON       []byte
 	ProcessingStage     *string
 	PracticeType        string
 	PhotoObject         *string
@@ -150,6 +161,41 @@ func NormalizeSuggestions(input []byte, limit int) []Suggestion {
 	return out
 }
 
+func NormalizeStrengths(input []byte, limit int) []Strength {
+	if len(input) == 0 {
+		return []Strength{}
+	}
+	var raw []map[string]any
+	if err := json.Unmarshal(input, &raw); err != nil {
+		return []Strength{}
+	}
+	out := []Strength{}
+	seen := map[string]struct{}{}
+	for _, item := range raw {
+		excerpt := strings.TrimSpace(stringValue(item["excerpt"]))
+		explanation := strings.TrimSpace(stringValue(item["explanation"]))
+		category, validCategory := ParseSuggestionCategory(stringValue(item["category"]))
+		ruleID := strings.TrimSpace(stringValue(item["ruleId"]))
+		reference := ReferenceFor(ruleID, category)
+		key := strings.ToLower(excerpt)
+		if excerpt == "" || explanation == "" || !validCategory || reference == nil || len([]rune(excerpt)) > 300 || len([]rune(explanation)) > 800 {
+			continue
+		}
+		if _, duplicate := seen[key]; duplicate {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, Strength{
+			Excerpt: excerpt, Explanation: explanation, Category: category,
+			RuleID: ruleID, LearningReference: reference,
+		})
+		if limit > 0 && len(out) >= limit {
+			break
+		}
+	}
+	return out
+}
+
 func ParseSuggestionCategory(value string) (SuggestionCategory, bool) {
 	category := SuggestionCategory(strings.TrimSpace(value))
 	return category, ValidSuggestionCategory(category)
@@ -181,6 +227,11 @@ func ValidSuggestionSeverity(severity SuggestionSeverity) bool {
 }
 
 func WithoutLearningReference(item Suggestion) Suggestion {
+	item.LearningReference = nil
+	return item
+}
+
+func WithoutStrengthLearningReference(item Strength) Strength {
 	item.LearningReference = nil
 	return item
 }

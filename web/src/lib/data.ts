@@ -34,6 +34,14 @@ export type Suggestion = {
   learningReference?: LearningReference;
 };
 
+export type Strength = {
+  excerpt: string;
+  explanation: string;
+  category: SuggestionCategory;
+  ruleId: string;
+  learningReference?: LearningReference;
+};
+
 export type PracticeType = "free_talk" | "topic" | "photo_description";
 export type RecordingStatus = "processing" | "ready" | "failed";
 export type RecordingProcessingStage = "transcribing" | "suggestions" | "rewriting";
@@ -56,6 +64,7 @@ export type Recording = {
   interviewTurns: SavedInterviewTurn[];
   correctedTranscript: string;
   suggestions: Suggestion[];
+  strengths: Strength[];
   processingStage: RecordingProcessingStage | null;
   practiceType: PracticeType;
   localAudioStorageKey: string | null;

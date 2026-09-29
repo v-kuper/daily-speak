@@ -22,6 +22,16 @@ func TestNormalizeSuggestionsEnrichesKnownCompatibleRule(t *testing.T) {
 	}
 }
 
+func TestNormalizeStrengthsRebuildsServerOwnedReference(t *testing.T) {
+	got := normalizeStrengths([]byte(`[{"excerpt":"I have lived here for five years","explanation":"You used the present perfect correctly.","category":"verb_grammar","ruleId":"past-simple-vs-present-perfect","learningReference":{"url":"https://evil.example"}}]`), 3)
+	if len(got) != 1 || got[0].LearningReference == nil || got[0].LearningReference.ID != "past-simple-vs-present-perfect" {
+		t.Fatalf("strengths=%#v", got)
+	}
+	if got[0].LearningReference.URL == "https://evil.example" {
+		t.Fatal("persisted strength supplied its own learning reference")
+	}
+}
+
 func TestLearningReferenceRejectsUnknownAndCategoryIncompatibleRules(t *testing.T) {
 	if learningReferenceFor("unknown-rule", categoryVerbGrammar) != nil {
 		t.Fatal("unknown rules must be omitted")

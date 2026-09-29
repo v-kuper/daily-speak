@@ -30,6 +30,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
     router.replace("/speak");
   };
   const historyActive = pathname === "/history" || pathname.startsWith("/history/");
+  const recordingDetailActive = /^\/history\/[^/]+$/.test(pathname);
 
   return (
     <div className="app-container">
@@ -62,7 +63,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
           )}
         </div>
       </header>
-      <main className="main-content">{children}</main>
+      <main className={`main-content${recordingDetailActive ? " main-content-recording-detail" : ""}`}>{children}</main>
     </div>
   );
 }

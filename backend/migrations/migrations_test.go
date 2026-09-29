@@ -98,3 +98,19 @@ func TestInterviewSkippedTurnsMigrationPreservesSequenceHistory(t *testing.T) {
 	}
 	t.Fatal("interview skipped-turn migration is missing")
 }
+
+func TestRecordingStrengthsMigrationAddsDurableResult(t *testing.T) {
+	items, err := All()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range items {
+		if item.Name == "0017_recording_strengths.sql" {
+			if !strings.Contains(item.SQL, "strengths JSONB NOT NULL DEFAULT '[]'::jsonb") {
+				t.Fatalf("strengths migration is incomplete: %s", item.SQL)
+			}
+			return
+		}
+	}
+	t.Fatal("recording strengths migration is missing")
+}

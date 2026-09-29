@@ -15,7 +15,12 @@ import (
 var ErrAnalysis = errors.New("AI suggestions could not be generated. Please try again later.")
 
 type Analyzer interface {
-	Analyze(context.Context, AnalysisInput, AnalysisLogger) ([]Suggestion, error)
+	Analyze(context.Context, AnalysisInput, AnalysisLogger) (AnalysisResult, error)
+}
+
+type AnalysisResult struct {
+	Suggestions []Suggestion
+	Strengths   []Strength
 }
 
 type AnalysisInput struct {
@@ -69,10 +74,10 @@ func NewAnalysisService(provider AnalysisProvider, config AnalysisConfig) *Analy
 	return &AnalysisService{provider: provider, concurrency: concurrency}
 }
 
-func (s *AnalysisService) Analyze(ctx context.Context, request AnalysisInput, logger AnalysisLogger) ([]Suggestion, error) {
+func (s *AnalysisService) Analyze(ctx context.Context, request AnalysisInput, logger AnalysisLogger) (AnalysisResult, error) {
 	transcript := recordingTranscriptForPrompt(request.Transcript)
 	if transcript == "" {
-		return []Suggestion{}, nil
+		return AnalysisResult{Suggestions: []Suggestion{}, Strengths: []Strength{}}, nil
 	}
 	input := recordingAnalysisInput{
 		Transcript:     transcript,
@@ -84,15 +89,40 @@ func (s *AnalysisService) Analyze(ctx context.Context, request AnalysisInput, lo
 		EnglishLevel:   learner.FormatEnglishLevel(request.EnglishLevel),
 		Russian:        extractRussianPhrases(transcript),
 	}
-	candidates, err := s.runDetectors(ctx, input, request.RecordingID, logger)
-	if err != nil {
-		return nil, ErrAnalysis
+	analysisCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	type strengthResult struct {
+		strengths []Strength
+		err       error
 	}
-	suggestions, err := s.requestReview(ctx, transcript, candidates, input.Russian, input.InterviewTurns, request.RecordingID, logger)
+	strengthsChannel := make(chan strengthResult, 1)
+	go func() {
+		strengths, err := s.requestStrengths(analysisCtx, input, request.RecordingID, logger)
+		strengthsChannel <- strengthResult{strengths: strengths, err: err}
+	}()
+
+	candidates, err := s.runDetectors(analysisCtx, input, request.RecordingID, logger)
 	if err != nil {
-		return nil, ErrAnalysis
+		cancel()
+		<-strengthsChannel
+		return AnalysisResult{}, ErrAnalysis
 	}
-	return suggestions, nil
+	suggestions, err := s.requestReview(analysisCtx, transcript, candidates, input.Russian, input.InterviewTurns, request.RecordingID, logger)
+	if err != nil {
+		cancel()
+		<-strengthsChannel
+		return AnalysisResult{}, ErrAnalysis
+	}
+	strengthResultValue := <-strengthsChannel
+	strengths := strengthResultValue.strengths
+	if strengthResultValue.err != nil {
+		logger.Warn("recording.analysis_strengths", map[string]any{
+			"recordingId": request.RecordingID, "outcome": "unavailable",
+		})
+		strengths = []Strength{}
+	}
+	strengths = strengthsWithoutCorrectionOverlap(strengths, suggestions)
+	return AnalysisResult{Suggestions: suggestions, Strengths: strengths}, nil
 }
 
 type detectorPassResult struct {

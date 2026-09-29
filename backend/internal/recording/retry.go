@@ -129,8 +129,10 @@ func afterRetryClaim(record Record, startedAt time.Time) Record {
 		case "transcribing":
 			record.Transcript = ""
 			record.SuggestionsJSON = []byte("[]")
+			record.StrengthsJSON = []byte("[]")
 		case "suggestions":
 			record.SuggestionsJSON = []byte("[]")
+			record.StrengthsJSON = []byte("[]")
 		}
 	}
 	return record

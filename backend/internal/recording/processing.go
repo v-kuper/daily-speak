@@ -41,7 +41,7 @@ type ProcessingRepository interface {
 	VerifyDuration(context.Context, ProcessingJob, int) error
 	UserInterests(context.Context, string) ([]string, error)
 	SaveTranscript(context.Context, ProcessingJob, string) (bool, error)
-	SaveSuggestions(context.Context, ProcessingJob, []Suggestion) (bool, error)
+	SaveAnalysis(context.Context, ProcessingJob, AnalysisResult) (bool, error)
 	CompleteRecording(context.Context, ProcessingJob, RewriteResult, string) (bool, error)
 }
 
@@ -232,7 +232,7 @@ func (p *Processor) analyzeWithInterests(ctx context.Context, job ProcessingJob,
 	if p.dependencies.Analyzer == nil {
 		return errors.New("recording analysis is not configured")
 	}
-	suggestions, err := p.dependencies.Analyzer.Analyze(ctx, AnalysisInput{
+	analysis, err := p.dependencies.Analyzer.Analyze(ctx, AnalysisInput{
 		RecordingID: job.ResourceID, Transcript: work.Transcript, Topic: work.Topic,
 		Interests: interests, PracticeType: work.PracticeType, PhotoObject: work.PhotoObject,
 		EnglishLevel: work.EnglishLevel, InterviewTurns: dialogue,
@@ -240,11 +240,11 @@ func (p *Processor) analyzeWithInterests(ctx context.Context, job ProcessingJob,
 	if err != nil {
 		return err
 	}
-	advanced, err := p.dependencies.Repository.SaveSuggestions(ctx, job, suggestions)
+	advanced, err := p.dependencies.Repository.SaveAnalysis(ctx, job, analysis)
 	if err != nil || !advanced {
 		return err
 	}
-	work.Suggestions = suggestions
+	work.Suggestions = analysis.Suggestions
 	return p.rewrite(ctx, job, work, logger)
 }
 

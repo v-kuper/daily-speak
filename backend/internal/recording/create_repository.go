@@ -42,7 +42,7 @@ func (t *sqlCreateTransaction) Find(ctx context.Context, userID string, recordin
 	var created Created
 	err := t.tx.QueryRow(ctx, `
 		SELECT id, topic, duration, timestamp, status, transcript,
-		       corrected_transcript, suggestions, processing_stage, practice_type,
+		       corrected_transcript, suggestions, strengths, processing_stage, practice_type,
 		       photo_object, processing_error, shadowing_status, shadowing_error,
 		       shadowing_updated_at, audio_asset_id, photo_asset_id,
 		       (SELECT s.id FROM interview_sessions s WHERE s.recording_id = recordings.id)
@@ -73,13 +73,13 @@ func (t *sqlCreateTransaction) Insert(ctx context.Context, command CreateCommand
 	err := t.tx.QueryRow(ctx, `
 		INSERT INTO recordings
 		  (id, user_id, topic, duration, timestamp, transcript, corrected_transcript,
-		   suggestions, practice_type, photo_object,
+		   suggestions, strengths, practice_type, photo_object,
 		   status, processing_stage, processing_job_id, audio_asset_id, photo_asset_id)
 		VALUES
-		  ($1, $2, $3, $4, $5, '', '', '[]'::jsonb, $6, $10,
+		  ($1, $2, $3, $4, $5, '', '', '[]'::jsonb, '[]'::jsonb, $6, $10,
 		   'processing', 'transcribing', $7, $8, $9)
 		RETURNING id, topic, duration, timestamp, status, transcript,
-		          corrected_transcript, suggestions, processing_stage, practice_type,
+		          corrected_transcript, suggestions, strengths, processing_stage, practice_type,
 		          photo_object, processing_error, shadowing_status, shadowing_error,
 		          shadowing_updated_at, audio_asset_id, photo_asset_id, NULL::text`,
 		command.RecordingID, command.UserID, command.Input.Topic, command.Input.Duration,
@@ -140,7 +140,7 @@ func createdDestinations(created *Created) []any {
 	return []any{
 		&created.ID, &created.Topic, &created.Duration, &created.Timestamp,
 		&created.Status, &created.Transcript, &created.CorrectedTranscript,
-		&created.SuggestionsJSON, &created.ProcessingStage, &created.PracticeType,
+		&created.SuggestionsJSON, &created.StrengthsJSON, &created.ProcessingStage, &created.PracticeType,
 		&created.PhotoObject, &created.ProcessingError, &created.ShadowingStatus,
 		&created.ShadowingError,
 		&created.ShadowingUpdatedAt, &created.AudioAssetID, &created.PhotoAssetID,

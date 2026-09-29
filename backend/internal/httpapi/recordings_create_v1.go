@@ -97,6 +97,7 @@ func recordingV1ResponseFromCreated(created recording.Created) recordingV1Respon
 		Timestamp: created.Timestamp.UTC().Format(time.RFC3339Nano), Status: normalizeRecordingStatus(created.Status),
 		Transcript: created.Transcript, CorrectedTranscript: created.CorrectedTranscript,
 		Suggestions:        normalizeSuggestions(created.SuggestionsJSON, 0),
+		Strengths:          normalizeStrengths(created.StrengthsJSON, 3),
 		ProcessingStage:    normalizeRecordingProcessingStage(created.ProcessingStage),
 		PracticeType:       practice.NormalizeType(created.PracticeType),
 		PhotoObject:        normalizeOptionalPhotoObject(created.PhotoObject),

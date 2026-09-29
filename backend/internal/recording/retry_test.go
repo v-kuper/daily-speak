@@ -14,6 +14,7 @@ func TestRetryServiceSchedulesFailedStageAtomically(t *testing.T) {
 	records := &recordRepositoryStub{found: true, record: Record{
 		ID: "recording-id", Status: "failed", ProcessingStage: &stage,
 		Transcript: "I go yesterday.", SuggestionsJSON: []byte("[{\"wrong\":\"go\"}]"),
+		StrengthsJSON:       []byte("[{\"excerpt\":\"yesterday\"}]"),
 		CorrectedTranscript: "stale", ProcessingError: &processingError,
 		ShadowingStatus: "failed", ShadowingAssetID: &shadowingAssetID,
 		InterviewTurns: []InterviewTurn{{Sequence: 1, CorrectedAnswerText: "I went yesterday."}},
@@ -34,7 +35,7 @@ func TestRetryServiceSchedulesFailedStageAtomically(t *testing.T) {
 	if result.Record.Status != "processing" || result.Record.ProcessingError != nil {
 		t.Fatalf("processing state was not reset: %#v", result.Record)
 	}
-	if result.Record.Transcript != "I go yesterday." || string(result.Record.SuggestionsJSON) != "[]" {
+	if result.Record.Transcript != "I go yesterday." || string(result.Record.SuggestionsJSON) != "[]" || string(result.Record.StrengthsJSON) != "[]" {
 		t.Fatalf("stage inputs were not preserved correctly: %#v", result.Record)
 	}
 	if result.Record.CorrectedTranscript != "" || result.Record.ShadowingStatus != "pending" || result.Record.ShadowingAssetID != nil {
@@ -114,10 +115,11 @@ func TestAfterRetryClaimPreservesOnlyInputsNeededByStage(t *testing.T) {
 		stage           string
 		wantTranscript  string
 		wantSuggestions string
+		wantStrengths   string
 	}{
-		{stage: "transcribing", wantTranscript: "", wantSuggestions: "[]"},
-		{stage: "suggestions", wantTranscript: "I go yesterday.", wantSuggestions: "[]"},
-		{stage: "rewriting", wantTranscript: "I go yesterday.", wantSuggestions: "[{\"wrong\":\"go\"}]"},
+		{stage: "transcribing", wantTranscript: "", wantSuggestions: "[]", wantStrengths: "[]"},
+		{stage: "suggestions", wantTranscript: "I go yesterday.", wantSuggestions: "[]", wantStrengths: "[]"},
+		{stage: "rewriting", wantTranscript: "I go yesterday.", wantSuggestions: "[{\"wrong\":\"go\"}]", wantStrengths: "[{\"excerpt\":\"yesterday\"}]"},
 	} {
 		t.Run(test.stage, func(t *testing.T) {
 			stage := test.stage
@@ -125,11 +127,12 @@ func TestAfterRetryClaimPreservesOnlyInputsNeededByStage(t *testing.T) {
 			record := Record{
 				Status: "failed", ProcessingStage: &stage, ProcessingError: &errorMessage,
 				Transcript: "I go yesterday.", SuggestionsJSON: []byte("[{\"wrong\":\"go\"}]"),
+				StrengthsJSON:       []byte("[{\"excerpt\":\"yesterday\"}]"),
 				CorrectedTranscript: "stale", ShadowingStatus: "failed", ShadowingError: &errorMessage,
 			}
 
 			updated := afterRetryClaim(record, startedAt)
-			if updated.Transcript != test.wantTranscript || string(updated.SuggestionsJSON) != test.wantSuggestions {
+			if updated.Transcript != test.wantTranscript || string(updated.SuggestionsJSON) != test.wantSuggestions || string(updated.StrengthsJSON) != test.wantStrengths {
 				t.Fatalf("unexpected stage inputs: %#v", updated)
 			}
 			if updated.Status != "processing" || updated.ProcessingError != nil || updated.CorrectedTranscript != "" || updated.ShadowingStatus != "pending" || updated.ShadowingError != nil {

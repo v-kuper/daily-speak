@@ -1,6 +1,6 @@
 # Architecture
 
-Last reviewed: 2026-09-27
+Last reviewed: 2026-09-29
 
 ## System boundary
 
@@ -198,6 +198,16 @@ the corrected interview transcript from the immutable questions and corrected
 answers in chronological order. Shadowing speaks that complete dialogue without
 synthetic role labels. Free-talk and photo-description corrected transcripts
 continue to contain learner speech only.
+
+Full recording analysis is owned by `internal/recording`. Its application
+service runs the correction detector and reviewer pipeline alongside one
+bounded positive-strength pass through the provider port. The strength parser
+accepts at most three exact learner excerpts backed by the server-owned rule
+catalog; correction spans take precedence over overlapping strengths. A
+strength-provider failure is nonblocking and produces an empty strength list.
+The worker persists suggestions and strengths together under its active lease
+before advancing to rewriting. HTTP only normalizes the stored values and
+serializes them through the shared v1 recording contract.
 
 Free-talk recordings and non-interview guest previews use Cartesia's batch
 transcription API. Audio remains in backend-owned storage; the worker sends a
