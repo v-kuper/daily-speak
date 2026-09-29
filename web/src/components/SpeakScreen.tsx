@@ -13,7 +13,6 @@ import {
 import { browserIdentity, restoreBrowserIdentity } from "../lib/identity";
 import { browserInterviewRecovery, mayAbandonInterview, recoverPreviousInterview } from "../lib/interviewRecovery";
 import {
-  readBlobAsDataUrl,
   recordingElapsedMs,
   recordingMustStop,
   resolveBrowserRecordingSupportError,
@@ -22,6 +21,7 @@ import {
   resolvePreferredAudioMimeType,
   stopMediaRecorderSafely
 } from "../lib/browserMedia";
+import { storeRecordingDraftAudio } from "../lib/recordingDraftAudio";
 import {
   advanceInterview,
   cancelInterview,
@@ -71,7 +71,7 @@ import {
   type RecordingSaveDraft,
   selectTopic,
   setCustomTopicDraft,
-  setRecordingAudioDataUrl,
+  setRecordingAudioStorageKey,
   setRecordingInputError,
   setPhotoForPractice,
   setPhotoObjectDraft,
@@ -274,7 +274,7 @@ export default function SpeakScreen() {
     recordingSaveStatus,
     recordingSaveError,
     recordingPracticeType,
-    pendingRecordingAudioDataUrl,
+    pendingRecordingAudioStorageKey,
     recordingInputError,
     pendingPhotoDataUrl,
     pendingPhotoObjectDraft,
@@ -823,7 +823,7 @@ export default function SpeakScreen() {
       const isCurrent = () => mountedRef.current && recordingAttemptRef.current === attempt;
       if (!isCurrent()) return;
       dispatch(setRecordingInputError(null));
-      dispatch(setRecordingAudioDataUrl(null));
+      dispatch(setRecordingAudioStorageKey(null));
 
       const recordingSupportError = resolveBrowserRecordingSupportError();
       if (recordingSupportError) {
@@ -934,9 +934,9 @@ export default function SpeakScreen() {
           }
 
           const blob = new Blob(chunks, { type: resultingType });
-          void readBlobAsDataUrl(blob)
-            .then((dataUrl) => {
-              if (isCurrent()) dispatch(setRecordingAudioDataUrl(dataUrl));
+          void storeRecordingDraftAudio(blob)
+            .then((storageKey) => {
+              if (isCurrent()) dispatch(setRecordingAudioStorageKey(storageKey));
             })
             .catch(() => {
               if (isCurrent()) dispatch(setRecordingInputError("Failed to process recorded audio."));
@@ -1067,13 +1067,13 @@ export default function SpeakScreen() {
   );
 
   const buildRecordingSaveDraft = useCallback((): RecordingSaveDraft | null => {
-    const audioDataUrl = pendingRecordingAudioDataUrl?.trim() || null;
-    if (!audioDataUrl) {
+    const audioStorageKey = pendingRecordingAudioStorageKey?.trim() || null;
+    if (!audioStorageKey) {
       return null;
     }
     if (recordingPracticeType === "topic" && interviewRef.current?.id
       && interviewSaveDraftRef.current?.interviewSessionId === interviewRef.current.id
-      && interviewSaveDraftRef.current.audioDataUrl === audioDataUrl) {
+      && interviewSaveDraftRef.current.audioStorageKey === audioStorageKey) {
       return interviewSaveDraftRef.current;
     }
 
@@ -1096,7 +1096,7 @@ export default function SpeakScreen() {
       duration: Math.max(1, Math.ceil((recordingEndedAtMsRef.current ?? recordingDuration * 1000) / 1000)),
       timestamp,
       practiceType: recordingPracticeType,
-      audioDataUrl,
+      audioStorageKey,
       photoDataUrl: recordingPracticeType === "photo_description" ? pendingPhotoDataUrl : null,
       photoObject,
       ...(recordingPracticeType === "topic" && interviewRef.current?.id ? {
@@ -1110,7 +1110,7 @@ export default function SpeakScreen() {
   }, [
     pendingPhotoDataUrl,
     pendingPhotoObjectDraft,
-    pendingRecordingAudioDataUrl,
+    pendingRecordingAudioStorageKey,
     recordingDuration,
     recordingPracticeType,
     selectedTopic
@@ -1190,7 +1190,7 @@ export default function SpeakScreen() {
             duration: readyDraft.duration,
             timestamp: readyDraft.timestamp,
             practiceType: readyDraft.practiceType,
-            audioDataUrl: readyDraft.audioDataUrl ?? "",
+            audioStorageKey: readyDraft.audioStorageKey ?? "",
             interviewSessionId,
           });
           previewId = preview.id;
@@ -1238,7 +1238,7 @@ export default function SpeakScreen() {
         duration: draft.duration,
         timestamp: draft.timestamp,
         practiceType: draft.practiceType,
-        audioDataUrl: draft.audioDataUrl ?? "",
+        audioStorageKey: draft.audioStorageKey ?? "",
       })
         .then((preview) => {
           setGuestSaveStatus("ready");
@@ -2197,7 +2197,7 @@ export default function SpeakScreen() {
           <button
             className="btn btn-primary"
             onClick={onSaveRecording}
-            disabled={recordingSaveStatus === "loading" || guestSaveStatus === "uploading" || interviewSaveStatus === "uploading" || !pendingRecordingAudioDataUrl || Boolean(interviewCaptureFailure)}
+            disabled={recordingSaveStatus === "loading" || guestSaveStatus === "uploading" || interviewSaveStatus === "uploading" || !pendingRecordingAudioStorageKey || Boolean(interviewCaptureFailure)}
           >
             {isAuthenticated
               ? recordingSaveStatus === "loading" || interviewSaveStatus === "uploading"
@@ -2210,10 +2210,10 @@ export default function SpeakScreen() {
                   : "View guest preview"}
           </button>
         </div>
-        {!pendingRecordingAudioDataUrl && !recordingInputError && (
+        {!pendingRecordingAudioStorageKey && !recordingInputError && (
           <div className="notice top-spaced">Preparing audio, please wait a moment before saving.</div>
         )}
-        {pendingRecordingAudioDataUrl && (
+        {pendingRecordingAudioStorageKey && (
           <div className="notice top-spaced">
             {recordingPracticeType === "topic"
               ? "Audio is ready. Saving will wait for each answer transcript."

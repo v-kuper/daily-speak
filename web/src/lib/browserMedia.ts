@@ -206,19 +206,3 @@ export const stopMediaRecorderSafely = (
     recorder.stop();
   }
 };
-
-export const readBlobAsDataUrl = (blob: Blob): Promise<string> => {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = typeof reader.result === "string" ? reader.result : "";
-      if (!result) {
-        reject(new Error("Failed to read recorded audio."));
-        return;
-      }
-      resolve(result);
-    };
-    reader.onerror = () => reject(new Error("Failed to read recorded audio."));
-    reader.readAsDataURL(blob);
-  });
-};

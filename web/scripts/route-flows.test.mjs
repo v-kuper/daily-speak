@@ -12,16 +12,17 @@ const load = createTypeScriptLoader();
 const app = load("src/store/slices/appSlice.ts");
 const api = load("src/lib/apiClient.ts");
 const identityClient = load("src/lib/identity.ts");
+const recordingDraftAudio = load("src/lib/recordingDraftAudio.ts");
 // Keep missing behavior an assertion failure during RED, rather than a module-load error.
 const flows = existsSync("src/lib/routeFlows.ts") ? load("src/lib/routeFlows.ts") : {};
 const initial = () => app.default(undefined, { type: "test/init" });
 const storeFor = (overrides = {}) => configureStore({
   reducer: { app: app.default }, preloadedState: { app: { ...initial(), ...overrides } },
 });
-const draft = {
+let draft = {
   localRecordingId: "local-123", topic: "Travel",
   duration: 20, timestamp: "2026-09-21T10:00:00Z", practiceType: "topic",
-  audioDataUrl: "data:audio/webm;base64,YWJj", photoDataUrl: null, photoObject: null,
+  audioStorageKey: "recording-audio:test-placeholder", photoDataUrl: null, photoObject: null,
 };
 const saved = {
   id: "permanent-123", topic: "Travel", duration: 20, timestamp: draft.timestamp,
@@ -34,11 +35,18 @@ const saved = {
     shadowing: null,
   },
 };
-const guest = {
+let guest = {
   authInitialized: true, authEmailDraft: "person@example.test", authPasswordDraft: "password123",
   speakState: "recorded", selectedTopic: "Travel", recordingDuration: 20,
-  pendingRecordingAudioDataUrl: draft.audioDataUrl, pendingSaveAfterAuth: true,
+  pendingRecordingAudioStorageKey: draft.audioStorageKey, pendingSaveAfterAuth: true,
 };
+test.beforeEach(async () => {
+  const audioStorageKey = await recordingDraftAudio.storeRecordingDraftAudio(
+    new Blob(["abc"], { type: "audio/webm" }),
+  );
+  draft = { ...draft, audioStorageKey };
+  guest = { ...guest, pendingRecordingAudioStorageKey: audioStorageKey };
+});
 const routerFor = () => {
   const visits = [];
   let pathname = "/speak";
@@ -102,7 +110,7 @@ for (const mode of ["signIn", "signUp"]) {
     assert.equal(requests.length, 3);
     assert.deepEqual(router.visits, [["replace", "/history/permanent-123"]]);
     assert.equal(store.getState().app.pendingSaveAfterAuth, false);
-    assert.equal(store.getState().app.pendingRecordingAudioDataUrl, null);
+    assert.equal(store.getState().app.pendingRecordingAudioStorageKey, null);
   });
 }
 
@@ -134,7 +142,7 @@ test("rejected post-auth save remains on auth with a visible error and a retryab
   assert.deepEqual(router.visits, []);
   assert.equal(saveCalls, 1);
   assert.equal(store.getState().app.recordingSaveError, "Storage unavailable");
-  assert.equal(store.getState().app.pendingRecordingAudioDataUrl, draft.audioDataUrl);
+  assert.equal(store.getState().app.pendingRecordingAudioStorageKey, draft.audioStorageKey);
   assert.equal(store.getState().app.pendingSaveAfterAuth, true);
 });
 
@@ -142,7 +150,7 @@ test("guest save retains the recording and cancel clears both auth drafts and re
   const store = storeFor({ ...guest, pendingSaveAfterAuth: false }), router = routerFor();
   flow("startGuestSave")(store, router);
   assert.deepEqual(router.visits, [["push", "/auth?returnTo=%2Fspeak"]]);
-  assert.equal(store.getState().app.pendingRecordingAudioDataUrl, draft.audioDataUrl);
+  assert.equal(store.getState().app.pendingRecordingAudioStorageKey, draft.audioStorageKey);
   assert.equal(store.getState().app.pendingSaveAfterAuth, true);
   flow("cancelAuthentication")(store, router);
   assert.equal(store.getState().app.authEmailDraft, "");
@@ -198,7 +206,7 @@ test("terminal save failure keeps a retryable local recording until upload succe
   assert.equal(store.getState().app.recordingSaveError, "Storage unavailable");
   assert.equal(store.getState().app.recordings[0].status, "failed");
   assert.equal(store.getState().app.backgroundSaveRecordingId, null);
-  assert.equal(store.getState().app.recordingSaveDrafts["local-123"].audioDataUrl, draft.audioDataUrl);
+  assert.equal(store.getState().app.recordingSaveDrafts["local-123"].audioStorageKey, draft.audioStorageKey);
 
   unavailable = false;
   await run(store, router, store.getState().app.recordingSaveDrafts["local-123"], router.currentPath);
@@ -245,7 +253,7 @@ test("session expiry preserves a failed upload draft for re-authentication", () 
   store.dispatch(app.saveInterests.rejected(null, "expire", undefined, "Unauthorized"));
   assert.equal(store.getState().app.pendingSaveAfterAuth, true);
   assert.equal(store.getState().app.pendingAuthSaveDraft?.localRecordingId, "local-123");
-  assert.equal(store.getState().app.pendingAuthSaveDraft?.audioDataUrl, draft.audioDataUrl);
+  assert.equal(store.getState().app.pendingAuthSaveDraft?.audioStorageKey, draft.audioStorageKey);
 });
 
 test("user bootstrap loads recordings only from the v1 collection", async (t) => {
@@ -425,7 +433,7 @@ test("the local topic processing route immediately renders its saved conversatio
     id: "local-topic",
     status: "processing",
     processingStage: null,
-    localAudioDataUrl: draft.audioDataUrl,
+    localAudioStorageKey: draft.audioStorageKey,
     media: null,
     interviewTurns: [{
       sequence: 1,
@@ -602,7 +610,7 @@ test("post-auth save 401 invalidates the session, preserves guest audio, and all
   await flow("authenticateAndNavigate")(store, router, "signIn", "/speak");
   const expired = store.getState().app;
   assert.equal(expired.isAuthenticated, false);
-  assert.equal(expired.pendingRecordingAudioDataUrl, draft.audioDataUrl);
+  assert.equal(expired.pendingRecordingAudioStorageKey, draft.audioStorageKey);
   assert.equal(expired.pendingSaveAfterAuth, true);
   assert.ok(expired.recordingSaveError);
   assert.ok(expired.authError);
@@ -617,7 +625,9 @@ test("post-auth save 401 invalidates the session, preserves guest audio, and all
 
 test("background save 401 preserves both its retry draft and a newer speaking draft without an unauthorized fallback", async (t) => {
   const store = storeFor({ isAuthenticated: true, userEmail: "person@example.test" }), router = routerFor(), primary = deferred();
-  const secondAudio = "data:audio/webm;base64,ZGVm";
+  const secondAudio = await recordingDraftAudio.storeRecordingDraftAudio(
+    new Blob(["def"], { type: "audio/webm" }),
+  );
   const requests = [];
   server(t, async (url, init) => {
     requests.push(url);
@@ -635,21 +645,21 @@ test("background save 401 preserves both its retry draft and a newer speaking dr
   store.dispatch(app.startFreeTalk());
   store.dispatch(app.tickRecording());
   store.dispatch(app.stopRecording());
-  store.dispatch(app.setRecordingAudioDataUrl(secondAudio));
+  store.dispatch(app.setRecordingAudioStorageKey(secondAudio));
   primary.resolve(response({ error: { code: "unauthorized", message: "Unauthorized" } }, 401));
   await attempt;
   const expired = store.getState().app;
   assert.equal(expired.isAuthenticated, false);
   assert.ok(requests.some((url) => url.endsWith("/api/v1/recordings")));
-  assert.equal(expired.pendingRecordingAudioDataUrl, secondAudio);
-  assert.equal(expired.pendingAuthSaveDraft.audioDataUrl, draft.audioDataUrl);
+  assert.equal(expired.pendingRecordingAudioStorageKey, secondAudio);
+  assert.equal(expired.pendingAuthSaveDraft.audioStorageKey, draft.audioStorageKey);
   assert.equal(router.currentPath(), "/speak");
   store.dispatch(app.setAuthPasswordDraft("password123"));
   await flow("authenticateAndNavigate")(store, router, "signIn", "/speak");
   assert.ok(requests.some((url) => url.endsWith("/api/v1/auth/login")));
   assert.equal(requests.filter((url) => url.endsWith("/api/v1/recordings")).length, 2);
   assert.equal(store.getState().app.pendingAuthSaveDraft, null);
-  assert.equal(store.getState().app.pendingRecordingAudioDataUrl, secondAudio);
+  assert.equal(store.getState().app.pendingRecordingAudioStorageKey, secondAudio);
   assert.equal(store.getState().app.speakState, "recorded");
 });
 
@@ -661,7 +671,7 @@ test("a later user-data 401 preserves the already recovered background audio and
   const recovery = store.getState().app.pendingAuthSaveDraft;
   userData.resolve(response({ error: "Unauthorized" }, 401));
   await fetching;
-  assert.equal(store.getState().app.pendingAuthSaveDraft?.audioDataUrl, draft.audioDataUrl);
+  assert.equal(store.getState().app.pendingAuthSaveDraft?.audioStorageKey, draft.audioStorageKey);
   assert.deepEqual(store.getState().app.pendingAuthSaveDraft, recovery);
   assert.equal(store.getState().app.pendingSaveAfterAuth, true);
   assert.ok(store.getState().app.recordingSaveError);
@@ -671,7 +681,7 @@ test("late resource 401 responses never erase a guest save awaiting re-authentic
   for (const name of ["fetchUserData", "saveInterests", "retryRecordingProcessing", "generateShadowingAudio", "deleteRecording", "subscribeMonthly", "cancelSubscription", "saveEnglishLevel"]) {
     const before = { ...initial(), ...guest, isAuthenticated: false, recordingSaveError: "Session expired" };
     const after = app.default(before, app[name].rejected(null, "late-request", "recording-1", "Unauthorized"));
-    assert.equal(after.pendingRecordingAudioDataUrl, draft.audioDataUrl, name);
+    assert.equal(after.pendingRecordingAudioStorageKey, draft.audioStorageKey, name);
     assert.equal(after.pendingSaveAfterAuth, true, name);
     assert.equal(after.recordingSaveError, "Session expired", name);
   }
@@ -700,7 +710,7 @@ for (const outcome of ["success", "failure"]) {
     reconcile(store, router, "local-123", () => pathname);
     assert.equal(pathname, outcome === "success" ? "/history/permanent-123" : "/history/local-123");
     if (outcome === "failure") {
-      assert.equal(store.getState().app.recordingSaveDrafts["local-123"].audioDataUrl, draft.audioDataUrl);
+      assert.equal(store.getState().app.recordingSaveDrafts["local-123"].audioStorageKey, draft.audioStorageKey);
     }
   });
 }
@@ -711,10 +721,10 @@ test("detail session expiry preserves an unsent speaking draft through re-authen
     ? response(identityResponse())
     : response({ error: "Unauthorized" }, 401));
   await store.dispatch(app.fetchRecording("other-recording"));
-  assert.equal(store.getState().app.pendingRecordingAudioDataUrl, draft.audioDataUrl);
+  assert.equal(store.getState().app.pendingRecordingAudioStorageKey, draft.audioStorageKey);
   store.dispatch(app.setAuthPasswordDraft("password123"));
   await flow("authenticateAndNavigate")(store, router, "signIn", "/history");
-  assert.equal(store.getState().app.pendingRecordingAudioDataUrl, draft.audioDataUrl);
+  assert.equal(store.getState().app.pendingRecordingAudioStorageKey, draft.audioStorageKey);
   assert.equal(store.getState().app.speakState, "recorded");
 });
 

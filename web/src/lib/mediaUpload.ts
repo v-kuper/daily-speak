@@ -1,5 +1,7 @@
 import { apiFetch, readApiJSON, resolveApiURL } from "./apiClient";
 
+const MAX_CONCURRENT_PART_UPLOADS = 3;
+
 export type MediaPurpose = "recording_audio" | "recording_photo" | "interview_turn_audio";
 
 export type MediaRequest = (path: string, init: RequestInit) => Promise<Response>;
@@ -115,35 +117,68 @@ export const uploadMedia = async ({
   if (!Array.isArray(signed?.parts) || signed.parts.length !== blobs.length) {
     throw new MediaUploadError("The signed upload response is invalid.");
   }
-
-  const completed: Array<{ partNumber: number; etag: string; checksumSha256: string }> = [];
-  for (const part of signed.parts) {
+  const signedParts = signed.parts;
+  const seenPartNumbers = new Set<number>();
+  const uploadJobs = signedParts.map((part) => {
     const partNumber = Number(part.partNumber);
     const descriptor = descriptors[partNumber - 1];
     const body = blobs[partNumber - 1];
     const signedRequest = part.request;
-    if (!descriptor || !body || signedRequest?.method !== "PUT" || typeof signedRequest.url !== "string" || !signedRequest.url) {
+    const signedURL = signedRequest?.url;
+    if (
+      !Number.isSafeInteger(partNumber)
+      || seenPartNumbers.has(partNumber)
+      || !descriptor
+      || !body
+      || signedRequest?.method !== "PUT"
+      || typeof signedURL !== "string"
+      || !signedURL
+    ) {
       throw new MediaUploadError("A signed upload part is invalid.");
     }
-    const headers = signedRequest.headers && typeof signedRequest.headers === "object"
-      ? signedRequest.headers as Record<string, string>
-      : {};
-    const uploadResponse = await globalThis.fetch(resolveApiURL(signedRequest.url), {
-      method: "PUT",
-      headers,
-      body,
-      credentials: "omit",
-    });
-    if (!uploadResponse.ok) throw new MediaUploadError("Media upload failed. Please try again.");
-    const etag = uploadResponse.headers.get("ETag")?.trim();
-    if (!etag) throw new MediaUploadError("The media service did not confirm the uploaded part.", "missing_etag");
-    completed.push({ partNumber, etag, checksumSha256: descriptor.checksumSha256 });
+    seenPartNumbers.add(partNumber);
+    return { partNumber, descriptor, body, signedURL, headers: signedRequest.headers };
+  });
+
+  const completed: Array<{ partNumber: number; etag: string; checksumSha256: string } | undefined> = new Array(uploadJobs.length);
+  let nextPartIndex = 0;
+  const uploadNextPart = async (): Promise<void> => {
+    while (nextPartIndex < uploadJobs.length) {
+      const partIndex = nextPartIndex;
+      nextPartIndex += 1;
+      const { partNumber, descriptor, body, signedURL, headers: signedHeaders } = uploadJobs[partIndex];
+      const headers = signedHeaders && typeof signedHeaders === "object"
+        ? signedHeaders as Record<string, string>
+        : {};
+      const uploadResponse = await globalThis.fetch(resolveApiURL(signedURL), {
+        method: "PUT",
+        headers,
+        body,
+        credentials: "omit",
+      });
+      if (!uploadResponse.ok) throw new MediaUploadError("Media upload failed. Please try again.");
+      const etag = uploadResponse.headers.get("ETag")?.trim();
+      if (!etag) throw new MediaUploadError("The media service did not confirm the uploaded part.", "missing_etag");
+      completed[partIndex] = { partNumber, etag, checksumSha256: descriptor.checksumSha256 };
+    }
+  };
+  await Promise.all(
+    Array.from(
+      { length: Math.min(MAX_CONCURRENT_PART_UPLOADS, uploadJobs.length) },
+      () => uploadNextPart(),
+    ),
+  );
+  const completedParts = completed.filter(
+    (part): part is { partNumber: number; etag: string; checksumSha256: string } => Boolean(part),
+  ).sort((left, right) => left.partNumber - right.partNumber);
+  if (completedParts.length !== uploadJobs.length) {
+    throw new MediaUploadError("Media upload did not complete every part.");
   }
 
   const completeResponse = await request(`/api/v1/media/uploads/${encodeURIComponent(uploadId)}/complete`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ parts: completed }),
+    body: JSON.stringify({ parts: completedParts }),
   });
   if (!completeResponse.ok) throw await responseError(completeResponse, "Cannot finalize the media upload.");
   const completedResource = await readApiJSON<{ asset?: { id?: unknown; state?: unknown } }>(completeResponse);

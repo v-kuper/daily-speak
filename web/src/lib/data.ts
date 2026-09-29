@@ -58,7 +58,7 @@ export type Recording = {
   suggestions: Suggestion[];
   processingStage: RecordingProcessingStage | null;
   practiceType: PracticeType;
-  localAudioDataUrl: string | null;
+  localAudioStorageKey: string | null;
   localPhotoDataUrl: string | null;
   photoObject: string | null;
   processingError: string | null;

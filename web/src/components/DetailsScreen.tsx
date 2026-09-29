@@ -18,6 +18,7 @@ import {
 } from "../lib/shadowing";
 import { useProtectedMediaURL } from "../lib/useProtectedMediaURL";
 import { formatTime } from "../lib/utils";
+import { loadRecordingDraftAudio } from "../lib/recordingDraftAudio";
 import { useAppDispatch, useAppSelector, useAppStore } from "../store/hooks";
 import {
   clearRecordingDeleteError,
@@ -40,35 +41,6 @@ const formatPracticeLabel = (value: "free_talk" | "topic" | "photo_description")
       return "Photo description";
     default:
       return "Topic";
-  }
-};
-
-const createAudioObjectUrl = (audioDataUrl: string): string | null => {
-  if (!audioDataUrl.startsWith("data:audio/") && !audioDataUrl.startsWith("data:video/")) {
-    return null;
-  }
-
-  const commaIndex = audioDataUrl.indexOf(",");
-  if (commaIndex <= 0) {
-    return null;
-  }
-
-  const metadata = audioDataUrl.slice(5, commaIndex);
-  const payload = audioDataUrl.slice(commaIndex + 1);
-  if (!metadata.toLowerCase().endsWith(";base64") || !payload) {
-    return null;
-  }
-
-  try {
-    const mimeType = metadata.slice(0, -";base64".length) || "audio/webm";
-    const binary = window.atob(payload);
-    const bytes = new Uint8Array(binary.length);
-    for (let index = 0; index < binary.length; index += 1) {
-      bytes[index] = binary.charCodeAt(index);
-    }
-    return URL.createObjectURL(new Blob([bytes], { type: mimeType }));
-  } catch {
-    return null;
   }
 };
 
@@ -152,7 +124,7 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
     return startRecordingDetailLifecycle(store, routeRecordingId);
   }, [store, routeRecordingId]);
   const recordingId = recording?.id ?? null;
-  const recordingAudioDataUrl = recording?.localAudioDataUrl ?? null;
+  const recordingAudioStorageKey = recording?.localAudioStorageKey ?? null;
   const recordingAudioDownloadPath = recording?.media?.audio?.downloadPath ?? null;
   const recordingStatus = recording?.status;
   const correctedTranscript = recording?.correctedTranscript ?? "";
@@ -249,22 +221,33 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
   useEffect(() => {
     setPlaybackError(null);
 
-    if (recordingAudioDownloadPath || !recordingAudioDataUrl) {
+    if (recordingAudioDownloadPath) {
       setLocalAudioSrc(null);
       return;
     }
 
-    const objectUrl = createAudioObjectUrl(recordingAudioDataUrl);
-    if (!objectUrl) {
-      setLocalAudioSrc(recordingAudioDataUrl);
-      return;
+    if (recordingAudioStorageKey) {
+      let cancelled = false;
+      let objectUrl: string | null = null;
+      setLocalAudioSrc(null);
+      void loadRecordingDraftAudio(recordingAudioStorageKey)
+        .then((blob) => {
+          if (cancelled) return;
+          objectUrl = URL.createObjectURL(blob);
+          setLocalAudioSrc(objectUrl);
+        })
+        .catch((error: unknown) => {
+          if (cancelled) return;
+          setPlaybackError(error instanceof Error ? error.message : "Recorded audio is no longer available.");
+        });
+      return () => {
+        cancelled = true;
+        if (objectUrl) URL.revokeObjectURL(objectUrl);
+      };
     }
 
-    setLocalAudioSrc(objectUrl);
-    return () => {
-      URL.revokeObjectURL(objectUrl);
-    };
-  }, [recordingAudioDataUrl, recordingAudioDownloadPath, recordingId]);
+    setLocalAudioSrc(null);
+  }, [recordingAudioDownloadPath, recordingAudioStorageKey, recordingId]);
 
   useEffect(() => {
     if (!recordingId) {

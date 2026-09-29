@@ -6,9 +6,17 @@ import { createTypeScriptLoader } from "./helpers/load-typescript.mjs";
 const load = createTypeScriptLoader();
 const api = load("src/lib/apiClient.ts");
 const guest = load("src/lib/guestPreview.ts");
+const recordingDraftAudio = load("src/lib/recordingDraftAudio.ts");
 const identityClient = load("src/lib/identity.ts");
 const app = load("src/store/slices/appSlice.ts");
 const flows = load("src/lib/routeFlows.ts");
+let audioStorageKey = "";
+
+test.beforeEach(async () => {
+  audioStorageKey = await recordingDraftAudio.storeRecordingDraftAudio(
+    new Blob(["abc"], { type: "audio/webm" }),
+  );
+});
 
 const json = (body, status = 200, headers = {}) => new Response(JSON.stringify(body), {
   status,
@@ -142,7 +150,7 @@ test("guest recording uses the v1 identity, multipart media contract, and opaque
     duration: 3,
     timestamp: "2026-09-27T09:00:00Z",
     practiceType: "topic",
-    audioDataUrl: "data:audio/webm;base64,YWJj",
+    audioStorageKey: audioStorageKey,
   });
   assert.equal(result.id, "preview-123");
   assert.equal(guest.readGuestPreviewSession().previewId, "preview-123");
@@ -176,7 +184,7 @@ test("guest preview survives navigation, polls with its owner token, and limits 
   });
   await guest.createGuestPreview({
     topic: "Travel", duration: 3, timestamp: "2026-09-27T09:00:00Z",
-    practiceType: "topic", audioDataUrl: "data:audio/webm;base64,YWJj",
+    practiceType: "topic", audioStorageKey: audioStorageKey,
   });
   assert.equal((await guest.fetchGuestPreview("preview-123")).state, "queued");
   ready = true;
@@ -210,7 +218,7 @@ for (const mode of ["signIn", "signUp"]) {
     });
     await guest.createGuestPreview({
       topic: "Travel", duration: 3, timestamp: "2026-09-27T09:00:00Z",
-      practiceType: "topic", audioDataUrl: "data:audio/webm;base64,YWJj",
+      practiceType: "topic", audioStorageKey: audioStorageKey,
     });
 
     const initial = app.default(undefined, { type: "test/init" });
@@ -227,7 +235,7 @@ for (const mode of ["signIn", "signUp"]) {
     await flows.authenticateAndNavigate(store, navigation, mode, "/preview/preview-123");
     assert.equal(store.getState().app.isAuthenticated, true);
     assert.equal(store.getState().app.speakState, "idle");
-    assert.equal(store.getState().app.pendingRecordingAudioDataUrl, null);
+    assert.equal(store.getState().app.pendingRecordingAudioStorageKey, null);
     assert.deepEqual(navigation.visits, [["replace", "/history/preview-123"]]);
     assert.equal(guest.readGuestPreviewSession(), null);
   });
@@ -255,7 +263,7 @@ test("a lost upload-create response retries with the same idempotency key", asyn
   });
   const draft = {
     topic: "Travel", duration: 3, timestamp: "2026-09-27T09:00:00Z",
-    practiceType: "topic", audioDataUrl: "data:audio/webm;base64,YWJj",
+    practiceType: "topic", audioStorageKey: audioStorageKey,
   };
   await assert.rejects(() => guest.createGuestPreview(draft));
   assert.equal((await guest.createGuestPreview(draft)).id, "preview-123");
@@ -310,11 +318,11 @@ test("guest preview rejects unsupported and overlong drafts before spending back
   browser(t, async () => { requests += 1; throw new Error("network should not be reached"); });
   await assert.rejects(() => guest.createGuestPreview({
     topic: "Photo", duration: 10, timestamp: "2026-09-27T09:00:00Z",
-    practiceType: "photo_description", audioDataUrl: "data:audio/webm;base64,YWJj",
+    practiceType: "photo_description", audioStorageKey: audioStorageKey,
   }), /require an account/i);
   await assert.rejects(() => guest.createGuestPreview({
     topic: "Long", duration: 181, timestamp: "2026-09-27T09:00:00Z",
-    practiceType: "topic", audioDataUrl: "data:audio/webm;base64,YWJj",
+    practiceType: "topic", audioStorageKey: audioStorageKey,
   }), /between 1 second and 3 minutes/i);
   assert.equal(requests, 0);
 });

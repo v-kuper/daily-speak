@@ -292,7 +292,8 @@ test("recording requests use v1 media references and ignore retired public media
   });
   apiClient.configureApiClient("https://api.example.com");
   const parsed = await store.dispatch(slice.fetchRecording("recording-1")).unwrap();
-  assert.equal(parsed.localAudioDataUrl, null);
+  assert.equal(parsed.localAudioStorageKey, null);
+  assert.equal("localAudioDataUrl" in parsed, false);
   assert.equal(parsed.localPhotoDataUrl, null);
   assert.equal("shadowingAudioUrl" in parsed, false);
   assert.deepEqual(parsed.media, {

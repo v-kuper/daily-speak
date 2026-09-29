@@ -16,8 +16,9 @@ test("legacy live recording sessions are absent from the web flow", () => {
   assert.doesNotMatch(speakScreen + appSlice, /recording-sessions|recordingUploadSessionId/);
 });
 
-test("SpeakScreen prepares local playback before the explicit save", () => {
-  assert.match(speakScreen, /void readBlobAsDataUrl\(blob\)/);
+test("SpeakScreen stores the audio blob outside Redux before the explicit save", () => {
+  assert.match(speakScreen, /void storeRecordingDraftAudio\(blob\)/);
+  assert.doesNotMatch(speakScreen, /readBlobAsDataUrl/);
   assert.doesNotMatch(speakScreen, /finalAudioUploadPromiseRef/);
 });
 

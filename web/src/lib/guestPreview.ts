@@ -6,7 +6,8 @@ import {
   restoreBrowserIdentity,
   type IdentityPromotion,
 } from "./identity";
-import { dataURLToBlob, newIdempotencyKey, sha256Blob, uploadMedia } from "./mediaUpload";
+import { newIdempotencyKey, sha256Blob, uploadMedia } from "./mediaUpload";
+import { deleteRecordingDraftAudio, loadRecordingDraftAudio } from "./recordingDraftAudio";
 import { parseSuggestions } from "./suggestions";
 import { parseInterviewTurns, type SavedInterviewTurn } from "./interviewTimeline";
 
@@ -39,7 +40,7 @@ export type GuestPreviewDraft = {
   duration: number;
   timestamp: string;
   practiceType: PracticeType;
-  audioDataUrl: string;
+  audioStorageKey: string;
   interviewSessionId?: string;
 };
 
@@ -226,7 +227,7 @@ export const createGuestPreview = async (draft: GuestPreviewDraft): Promise<Gues
   if (duration < 1 || duration > MAX_GUEST_PREVIEW_SECONDS) {
     throw new GuestPreviewError("Guest previews can be between 1 second and 3 minutes.", "invalid_duration");
   }
-  const blob = dataURLToBlob(draft.audioDataUrl);
+  const blob = await loadRecordingDraftAudio(draft.audioStorageKey);
   const audioChecksum = await sha256Blob(blob);
   const previousOperation = readGuestOperation();
   const operation: GuestPreviewOperation = previousOperation?.audioChecksum === audioChecksum
@@ -265,6 +266,7 @@ export const createGuestPreview = async (draft: GuestPreviewDraft): Promise<Gues
   session.previewId = preview.id;
   writeGuestPreviewSession(session);
   writeGuestOperation(null);
+  await deleteRecordingDraftAudio(draft.audioStorageKey);
   return preview;
 };
 

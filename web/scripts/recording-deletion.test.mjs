@@ -17,7 +17,7 @@ const firstRecording = {
   suggestions: [],
   processingStage: null,
   practiceType: "topic",
-  localAudioDataUrl: null,
+  localAudioStorageKey: null,
   localPhotoDataUrl: null,
   photoObject: null,
   processingError: null,
