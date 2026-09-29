@@ -149,10 +149,14 @@ does not run a second model call to classify or validate difficulty.
 Adaptive topic interviews use a separate `/api/v1/interviews` lifecycle. The
 selected opening question starts a durable session; three hidden prepared
 questions keep navigation responsive while completed answers are transcribed
-and used to generate later questions. The same preparation job creates twelve
-level-appropriate English words or short phrases with concise Russian
-translations. The API keeps the English-only list for live interview prompts
-and older clients, while the preparation screen uses the translated pairs.
+and used to generate later questions. Adaptive candidates are served before
+older prepared candidates when ready. Answered turns replenish the reserve one
+contextual question at a time; the three-question batch refill runs only as an
+emergency when one candidate remains, such as after consecutive skips. This
+avoids overlapping model calls for the same reserve. The same preparation job
+creates twelve level-appropriate English words or short phrases with concise
+Russian translations. The API keeps the English-only list for live interview
+prompts and older clients, while the preparation screen uses the translated pairs.
 During an answer, the browser sends raw
 PCM to Cartesia over a realtime WebSocket using a short-lived, STT-scoped token
 issued by the API. The browser persists each final answer transcript through

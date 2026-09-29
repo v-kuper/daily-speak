@@ -8,7 +8,9 @@ class InterviewCaptureProcessor extends AudioWorkletProcessor {
     this.sourceFrames = 0;
     this.sum = 0;
     this.count = 0;
-    this.buffer = new Int16Array(2048);
+    // Send 64 ms of 16 kHz PCM at a time so live captions reach Cartesia more
+    // often without creating an excessive main-thread message rate.
+    this.buffer = new Int16Array(1024);
     this.length = 0;
     this.port.onmessage = (event) => {
       if (event.data?.type !== "boundary") return;

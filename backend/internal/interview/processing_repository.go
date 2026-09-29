@@ -157,7 +157,10 @@ func (r *SQLRepository) LoadRefill(ctx context.Context, sessionID string) (Refil
 		AND consumed_by_turn_seq IS NULL`, sessionID).Scan(&remaining); err != nil {
 		return RefillWork{}, false, err
 	}
-	if remaining >= 3 {
+	// Normal answered turns replenish the reserve with one adaptive question.
+	// Batch generation is only needed when that path cannot keep two questions
+	// ready (for example, after consecutive skipped turns).
+	if remaining > 1 {
 		return RefillWork{}, false, nil
 	}
 	rows, err := r.db.Query(ctx, `SELECT seq,question,COALESCE(final_transcript,provisional_transcript,'')

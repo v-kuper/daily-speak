@@ -314,7 +314,10 @@ func (r *SQLRepository) Advance(ctx context.Context, input AdvanceInput) (Sessio
 		AND consumed_by_turn_seq IS NULL`, input.SessionID).Scan(&remaining); err != nil {
 		return Session{}, err
 	}
-	if remaining <= 2 {
+	// A completed answer enqueues a higher-priority adaptive question. Keep the
+	// batch refill as an emergency reserve only, otherwise both jobs pay to
+	// generate questions for the same newly opened turn.
+	if remaining <= 1 {
 		if err := workqueue.Enqueue(ctx, tx, workqueue.NewJob{
 			ID: uuid.NewString(), Kind: JobKind, ResourceID: input.SessionID,
 			IdempotencyKey: fmt.Sprintf("interview.refill:%s:%d", input.SessionID, currentSeq+1),
