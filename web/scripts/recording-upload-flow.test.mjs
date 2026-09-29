@@ -34,3 +34,10 @@ test("Redux supports optimistic background recording save", () => {
   assert.match(appSlice, /backgroundSaveRecordingId/);
   assert.match(appSlice, /status: "processing"/);
 });
+
+test("the recording screen depends on a provider-neutral realtime transcription boundary", () => {
+  const liveTranscription = readFileSync("src/lib/liveTranscription.ts", "utf8");
+  assert.match(speakScreen, /connectLiveTranscription/);
+  assert.doesNotMatch(speakScreen, /Cartesia/);
+  assert.match(liveTranscription, /CartesiaRealtimeTranscriber/);
+});

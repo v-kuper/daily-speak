@@ -494,7 +494,7 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
           <button className="btn btn-secondary" onClick={onRetryRecordingUpload} disabled={recordingSaveStatus === "loading"}>
             {recordingSaveStatus === "loading" ? "Uploading..." : "Retry upload"}
           </button>
-          <div className="hint">Keep this tab open until the upload succeeds; this unsaved audio is held in browser memory.</div>
+          <div className="hint">This unsaved audio is stored in this browser until the upload succeeds.</div>
         </div>
       )}
       {isFailed && !failedUploadDraft && !retryLabel && (

@@ -315,3 +315,9 @@ test("application network calls use the shared API client", () => {
     assert.doesNotMatch(source, /\.json\(\)\.catch/, `${filename} bypasses readApiJSON`);
   }
 });
+
+test("web state and screens do not expose the replaceable language-model provider", () => {
+  for (const filename of ["src/store/slices/appSlice.ts", "src/components/SpeakScreen.tsx"]) {
+    assert.doesNotMatch(readFileSync(filename, "utf8"), /Ollama/i, `${filename} leaks a backend provider`);
+  }
+});

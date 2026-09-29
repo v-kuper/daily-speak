@@ -3,6 +3,7 @@ package recording
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -93,6 +94,37 @@ func TestRewriteInterviewReturnsCorrectedAnswersAndFullDialogue(t *testing.T) {
 		if !strings.Contains(prompt, fragment) {
 			t.Fatalf("prompt missing %q: %s", fragment, prompt)
 		}
+	}
+}
+
+func TestRewriteInterviewPreservesSequencesAcrossSkippedTurns(t *testing.T) {
+	provider := &rewriteProvider{responses: []string{`{
+		"correctedAnswers":[
+			{"sequence":1,"correctedAnswerText":"First corrected answer."},
+			{"sequence":4,"correctedAnswerText":"Fourth corrected answer."}
+		]
+	}`}}
+	service := NewAnalysisService(provider, AnalysisConfig{Concurrency: 1})
+	got, err := service.Rewrite(context.Background(), RewriteInput{
+		Transcript: "First answer. Fourth answer.",
+		InterviewTurns: []InterviewDialogueTurn{
+			{Sequence: 1, Question: "First question?", Answer: "First answer."},
+			{Sequence: 4, Question: "Fourth question?", Answer: "Fourth answer."},
+		},
+		EnglishLevel: "b1",
+	}, discardAnalysisLogger{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := RewriteResult{
+		CorrectedTranscript: "First question? First corrected answer. Fourth question? Fourth corrected answer.",
+		CorrectedAnswers: []CorrectedInterviewAnswer{
+			{Sequence: 1, CorrectedAnswerText: "First corrected answer."},
+			{Sequence: 4, CorrectedAnswerText: "Fourth corrected answer."},
+		},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got=%#v want=%#v", got, want)
 	}
 }
 

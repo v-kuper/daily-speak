@@ -89,3 +89,17 @@ tokens to local/session storage. The rotating web refresh token is a
 backend-owned, scoped HttpOnly cookie sent through `credentials: "include"`.
 Native clients receive the refresh token in JSON and must keep it in
 Keychain/Keystore-class storage. Never add signing secrets to the web project.
+
+## Browser media boundary
+
+The browser records audio as a `Blob` and stages it in IndexedDB behind an
+opaque draft key. Redux and route flows keep only that key and recording
+metadata; they never carry Base64 audio. Failed uploads and authentication
+round trips reuse the same staged blob. Successful recording or guest-preview
+creation removes it. Draft storage prunes abandoned blobs older than seven days
+the next time it is used.
+
+`recordingDraftAudio.ts` owns temporary browser persistence, `mediaUpload.ts`
+owns the versioned multipart upload contract, and UI components do not know
+signed-part details. The backend media resource remains the only durable copy
+after a successful upload.

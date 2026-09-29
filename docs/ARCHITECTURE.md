@@ -112,6 +112,12 @@ policy rather than HTTP rules. Storage responses are mapped to media-owned
 application types before they reach HTTP. Multipart uploads and signed requests
 are bounded and expire.
 
+Before upload, the web client stages a captured audio `Blob` in IndexedDB and
+keeps only an opaque draft key in Redux. This browser copy supports local
+playback, authentication handoff, and retry; it is deleted after successful
+resource creation, while draft-storage access prunes abandoned blobs older than
+seven days. IndexedDB is temporary client storage and is never a source of truth.
+
 The current Windows test host mounts one persistent local directory into API
 and worker. A multi-host deployment must switch to shared object storage before
 API and workers are placed on different machines.
@@ -206,9 +212,11 @@ the browser speaks the configured provider's WebSocket protocol. Realtime
 connection mapping lives in `interview/cartesiaadapter`, the shared Cartesia
 HTTP client lives in `transcription`, and `internal/app` only supplies
 configuration and wires the adapter to the provider-neutral interview port.
-Replacing this direct realtime provider requires a coordinated backend-adapter
-and web-client change, but does not change interview state, persistence, or
-final processing.
+The web provider protocol is isolated in `cartesiaRealtime.ts` behind the
+provider-neutral `liveTranscription.ts` boundary consumed by screens. Replacing
+this direct realtime provider requires coordinated backend and web adapter
+changes, but it does not change screen orchestration, interview state,
+persistence, or final processing.
 
 Every account recording is duration-probed by the recording worker before
 transcription. The repository verifies the measured duration against the

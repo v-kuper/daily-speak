@@ -226,7 +226,7 @@ func TestProcessorComposesReadyInterviewTurnsWithoutRetranscribingAudio(t *testi
 		},
 		turns: []InterviewTurn{
 			{Sequence: 1, Question: "First question?", TranscriptStatus: "ready", FinalText: &first},
-			{Sequence: 2, Question: "Second question?", TranscriptStatus: "ready", Provisional: &second},
+			{Sequence: 4, Question: "Second question?", TranscriptStatus: "ready", Provisional: &second},
 		},
 	}
 	analyzer := &processorAnalyzer{}
@@ -234,7 +234,7 @@ func TestProcessorComposesReadyInterviewTurnsWithoutRetranscribingAudio(t *testi
 		CorrectedTranscript: "First question? First corrected answer. Second question? Second corrected answer.",
 		CorrectedAnswers: []CorrectedInterviewAnswer{
 			{Sequence: 1, CorrectedAnswerText: "First corrected answer."},
-			{Sequence: 2, CorrectedAnswerText: "Second corrected answer."},
+			{Sequence: 4, CorrectedAnswerText: "Second corrected answer."},
 		},
 	}}
 	processor := NewProcessor(ProcessingDependencies{
@@ -250,12 +250,12 @@ func TestProcessorComposesReadyInterviewTurnsWithoutRetranscribingAudio(t *testi
 		t.Fatal(err)
 	}
 	if repository.verifySeconds != 2 || repository.verifyMS != 1900 || repository.transcript != "First answer. Second answer." ||
-		repository.answers[1] != first || repository.answers[2] != second {
+		repository.answers[1] != first || repository.answers[4] != second {
 		t.Fatalf("unexpected interview processing: %#v", repository)
 	}
 	wantDialogue := []InterviewDialogueTurn{
 		{Sequence: 1, Question: "First question?", Answer: first},
-		{Sequence: 2, Question: "Second question?", Answer: second},
+		{Sequence: 4, Question: "Second question?", Answer: second},
 	}
 	if len(analyzer.inputs) != 1 || !reflect.DeepEqual(analyzer.inputs[0].InterviewTurns, wantDialogue) {
 		t.Fatalf("analysis=%#v", analyzer.inputs)

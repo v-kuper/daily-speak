@@ -42,6 +42,7 @@ import {
   deleteRecordingDraftAudio,
   isRecordingDraftAudioKey,
   loadRecordingDraftAudio,
+  RecordingDraftAudioError,
 } from "../../lib/recordingDraftAudio";
 import { finalizeInterview } from "../../lib/interviewSession";
 import { parseInterviewTurns, type SavedInterviewTurn } from "../../lib/interviewTimeline";
@@ -584,7 +585,7 @@ export const fetchDailyQuestions = createAsyncThunk<
       const payload = (await readApiJSON(response)) as DailyQuestionsResponse | null;
 
       if (!response.ok) {
-        return rejectWithValue(apiErrorMessage(payload, "Failed to load daily questions from Ollama."));
+        return rejectWithValue(apiErrorMessage(payload, "Failed to load daily questions."));
       }
 
       const questions = Array.isArray(payload?.questions)
@@ -595,12 +596,12 @@ export const fetchDailyQuestions = createAsyncThunk<
         : [];
 
       if (questions.length !== MIN_DAILY_QUESTIONS) {
-        return rejectWithValue(`Ollama must return exactly ${MIN_DAILY_QUESTIONS} questions.`);
+        return rejectWithValue(`The practice service must return exactly ${MIN_DAILY_QUESTIONS} questions.`);
       }
 
       return { dateKey, questions };
     } catch {
-      return rejectWithValue("Cannot connect to local Ollama. Make sure Ollama is running.");
+      return rejectWithValue("Cannot connect to the practice service.");
     }
   },
   {
@@ -678,7 +679,7 @@ export const fetchTopicGuidance = createAsyncThunk<
 
       if (questions.length < MIN_TOPIC_GUIDANCE_QUESTIONS || words.length < MIN_TOPIC_GUIDANCE_WORDS) {
         return rejectWithValue(
-          `Ollama must return ${MIN_TOPIC_GUIDANCE_QUESTIONS} follow-up questions and ${MIN_TOPIC_GUIDANCE_WORDS} useful words for this topic.`
+          `The practice service must return ${MIN_TOPIC_GUIDANCE_QUESTIONS} follow-up questions and ${MIN_TOPIC_GUIDANCE_WORDS} useful words for this topic.`
         );
       }
 
@@ -688,7 +689,7 @@ export const fetchTopicGuidance = createAsyncThunk<
         words: words.slice(0, MIN_TOPIC_GUIDANCE_WORDS)
       };
     } catch {
-      return rejectWithValue("Cannot connect to local Ollama. Make sure Ollama is running.");
+      return rejectWithValue("Cannot connect to the practice service.");
     }
   },
   {
@@ -747,12 +748,12 @@ export const fetchStudyWords = createAsyncThunk<
 
       const parsed = parseStudyWordsResponse(payload);
       if (!parsed) {
-        return rejectWithValue("Invalid words payload from Ollama.");
+        return rejectWithValue("The practice service returned invalid study words.");
       }
 
       return parsed;
     } catch {
-      return rejectWithValue("Cannot connect to local Ollama. Make sure Ollama is running.");
+      return rejectWithValue("Cannot connect to the practice service.");
     }
   },
   {
@@ -1121,7 +1122,7 @@ export const saveRecording = createAsyncThunk<
       if (error instanceof MediaUploadError && error.code === "unauthorized") {
         return rejectWithValue("Unauthorized");
       }
-      if (error instanceof Error && error.message.startsWith("Recorded audio")) {
+      if (error instanceof RecordingDraftAudioError) {
         return rejectWithValue(error.message);
       }
       return rejectWithValue(
@@ -1241,7 +1242,8 @@ export const deleteRecording = createAsyncThunk<
   string,
   { state: { app: AppState }; rejectValue: string }
 >("app/deleteRecording", async (recordingId, { getState, rejectWithValue }) => {
-  if (!getState().app.isAuthenticated) {
+  const state = getState().app;
+  if (!state.isAuthenticated) {
     return rejectWithValue("Unauthorized");
   }
 
@@ -1250,6 +1252,11 @@ export const deleteRecording = createAsyncThunk<
     return rejectWithValue("Recording is missing.");
   }
   if (normalizedRecordingId.startsWith("local-")) {
+    const draft = state.recordingSaveDrafts[normalizedRecordingId]
+      ?? (state.pendingAuthSaveDraft?.localRecordingId === normalizedRecordingId
+        ? state.pendingAuthSaveDraft
+        : null);
+    await deleteRecordingDraftAudio(draft?.audioStorageKey);
     return { recordingId: normalizedRecordingId, quota: null };
   }
 
@@ -2420,6 +2427,17 @@ const appSlice = createSlice({
       })
       .addCase(deleteRecording.fulfilled, (state, action) => {
         const { recordingId, quota } = action.payload;
+        const deletedDraft = state.recordingSaveDrafts[recordingId]
+          ?? (state.pendingAuthSaveDraft?.localRecordingId === recordingId ? state.pendingAuthSaveDraft : null);
+        delete state.recordingSaveDrafts[recordingId];
+        delete state.recordingSaveResults[recordingId];
+        if (state.pendingAuthSaveDraft?.localRecordingId === recordingId) {
+          state.pendingAuthSaveDraft = null;
+          state.pendingSaveAfterAuth = false;
+        }
+        if (deletedDraft?.audioStorageKey === state.pendingRecordingAudioStorageKey) {
+          state.pendingRecordingAudioStorageKey = null;
+        }
         if (!state.deletedRecordingIds.includes(recordingId)) {
           state.deletedRecordingIds.push(recordingId);
         }

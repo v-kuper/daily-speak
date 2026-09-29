@@ -353,6 +353,22 @@ test("deletion waits for success before leaving details and stays on rejection",
   assert.equal(store.getState().app.recordingDeleteError, "Cannot delete");
 });
 
+test("deleting a failed local upload removes its retry draft and staged audio", async () => {
+  const store = storeFor({ isAuthenticated: true }), router = routerFor();
+  store.dispatch(app.showBackgroundRecordingSave(draft));
+  store.dispatch(app.saveRecording.rejected(null, "save", draft, "Storage unavailable"));
+
+  await flow("deleteAndNavigate")(store, router, draft.localRecordingId);
+
+  assert.deepEqual(router.visits, [["replace", "/history"]]);
+  assert.equal(store.getState().app.recordings.some(({ id }) => id === draft.localRecordingId), false);
+  assert.equal(store.getState().app.recordingSaveDrafts[draft.localRecordingId], undefined);
+  await assert.rejects(
+    () => recordingDraftAudio.loadRecordingDraftAudio(draft.audioStorageKey),
+    /no longer available/i,
+  );
+});
+
 // These exercise the same lifecycle controllers that the screen effects mount.
 const settle = () => new Promise((resolve) => setImmediate(resolve));
 const schedulerFor = () => {

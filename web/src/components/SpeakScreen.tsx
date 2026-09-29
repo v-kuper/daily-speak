@@ -39,7 +39,7 @@ import {
   type InterviewSession,
   type InterviewTurn,
 } from "../lib/interviewSession";
-import { CartesiaRealtimeTranscriber } from "../lib/cartesiaRealtime";
+import { connectLiveTranscription, type LiveTranscriptionConnection } from "../lib/liveTranscription";
 import { EphemeralCaptionController } from "../lib/ephemeralCaption";
 import { InterviewTurnCapture, type CapturedInterviewTurn } from "../lib/interviewTurnCapture";
 import { fetchQuestionSpeech, QuestionSpeechPlayer, type QuestionSpeechState } from "../lib/questionSpeech";
@@ -318,7 +318,7 @@ export default function SpeakScreen() {
   const interviewSegmentRunPromiseRef = useRef<Promise<void> | null>(null);
   const runInterviewSegmentsRef = useRef<(() => Promise<void>) | null>(null);
   const turnCaptureRef = useRef<InterviewTurnCapture | null>(null);
-  const interviewRealtimeRef = useRef<CartesiaRealtimeTranscriber | null>(null);
+  const interviewRealtimeRef = useRef<LiveTranscriptionConnection | null>(null);
   const turnCaptureStopRef = useRef<Promise<void> | null>(null);
   const recordingStartedAtRef = useRef<number | null>(null);
   const recordingEndedAtMsRef = useRef<number | null>(null);
@@ -834,7 +834,7 @@ export default function SpeakScreen() {
       let stream: MediaStream | null = null;
       let recorder: MediaRecorder | null = null;
       let localCapture: InterviewTurnCapture | null = null;
-      let localRealtime: CartesiaRealtimeTranscriber | null = null;
+      let localRealtime: LiveTranscriptionConnection | null = null;
       const stopLocalStream = () => {
         if (stream) for (const track of stream.getTracks()) track.stop();
         if (mediaStreamRef.current === stream) mediaStreamRef.current = null;
@@ -947,9 +947,8 @@ export default function SpeakScreen() {
           try {
             const session = interviewRef.current;
             if (!session) throw new Error("The interview session is unavailable.");
-            localRealtime = await CartesiaRealtimeTranscriber.connect(
+            localRealtime = await connectLiveTranscription(
               await getInterviewTranscriptionToken(session.id),
-              undefined,
               () => {
                 if (!mountedRef.current || interviewRef.current?.id !== session.id) return;
                 if (interviewRealtimeRef.current === localRealtime) {
@@ -1002,7 +1001,7 @@ export default function SpeakScreen() {
           try {
             // The worklet collects while the token and socket are prepared.
             // Discard that setup partition before attaching the PCM listener,
-            // so Cartesia receives only audio from the actual interview.
+            // so the realtime service receives only audio from the actual interview.
             await localCapture.closeTurn();
           } catch {
             if (turnCaptureRef.current === localCapture) turnCaptureRef.current = null;

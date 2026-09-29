@@ -111,12 +111,14 @@ func validInterviewRewriteInput(input RewriteInput) bool {
 		return false
 	}
 	parts := make([]string, 0, len(input.InterviewTurns))
-	for index, turn := range input.InterviewTurns {
+	previousSequence := 0
+	for _, turn := range input.InterviewTurns {
 		answer := NormalizeTranscript(turn.Answer)
-		if turn.Sequence != index+1 || strings.TrimSpace(turn.Question) == "" ||
+		if !validInterviewTurnSequence(previousSequence, turn.Sequence) || strings.TrimSpace(turn.Question) == "" ||
 			answer == "" || answer != strings.Join(strings.Fields(strings.TrimSpace(turn.Answer)), " ") {
 			return false
 		}
+		previousSequence = turn.Sequence
 		parts = append(parts, answer)
 	}
 	return strings.Join(parts, " ") == NormalizeTranscript(input.Transcript)

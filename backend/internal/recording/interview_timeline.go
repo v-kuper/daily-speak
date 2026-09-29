@@ -24,10 +24,17 @@ func ComposeInterviewTranscript(turns []InterviewTurn) (ComposedInterviewTranscr
 	answers := make(map[int]string, len(turns))
 	dialogue := make([]InterviewDialogueTurn, 0, len(turns))
 	parts := make([]string, 0, len(turns))
-	for index, turn := range turns {
-		if turn.Sequence != index+1 {
-			return ComposedInterviewTranscript{}, fmt.Errorf("%w: turn sequence %d is missing", ErrInterviewTranscriptNotReady, index+1)
+	previousSequence := 0
+	for _, turn := range turns {
+		if !validInterviewTurnSequence(previousSequence, turn.Sequence) {
+			return ComposedInterviewTranscript{}, fmt.Errorf(
+				"%w: turn sequence %d is invalid after %d",
+				ErrInterviewTranscriptNotReady,
+				turn.Sequence,
+				previousSequence,
+			)
 		}
+		previousSequence = turn.Sequence
 		if turn.TranscriptStatus != "ready" {
 			return ComposedInterviewTranscript{}, fmt.Errorf("%w: turn %d status is %s", ErrInterviewTranscriptNotReady, turn.Sequence, strings.TrimSpace(turn.TranscriptStatus))
 		}
@@ -62,4 +69,8 @@ func ComposeInterviewTranscript(turns []InterviewTurn) (ComposedInterviewTranscr
 		return ComposedInterviewTranscript{}, errors.New("interview transcript exceeds the supported length")
 	}
 	return ComposedInterviewTranscript{Text: text, Answers: answers, Dialogue: dialogue}, nil
+}
+
+func validInterviewTurnSequence(previous, current int) bool {
+	return current > 0 && current > previous
 }
