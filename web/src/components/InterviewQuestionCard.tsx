@@ -1,6 +1,7 @@
 "use client";
 
 import type { InterviewTurn } from "../lib/interviewSession";
+import { liveTranscriptionNotice, type RealtimeFailureReason } from "../lib/liveTranscription";
 import type { QuestionSpeechState } from "../lib/questionSpeech";
 
 type InterviewQuestionCardProps = {
@@ -13,6 +14,7 @@ type InterviewQuestionCardProps = {
   speechError: string | null;
   speechMuted: boolean;
   liveTranscriptionAvailable: boolean;
+  liveTranscriptionIssue: RealtimeFailureReason | null;
   liveCaption: string | null;
   hasAnswerEvidence: boolean;
   boundaryPending: boolean;
@@ -28,6 +30,7 @@ export default function InterviewQuestionCard({
   speechError,
   speechMuted,
   liveTranscriptionAvailable,
+  liveTranscriptionIssue,
   liveCaption,
   hasAnswerEvidence,
   boundaryPending,
@@ -93,7 +96,7 @@ export default function InterviewQuestionCard({
         <div className="notice interview-live-notice">
           {hasTerminalTranscriptionFailure
             ? "An answer could not be transcribed. Re-record the interview before saving."
-            : "Live transcription is unavailable. Each completed answer will use the background transcription fallback."}
+            : liveTranscriptionNotice(liveTranscriptionIssue)}
         </div>
       )}
 

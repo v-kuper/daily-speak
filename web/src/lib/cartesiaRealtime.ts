@@ -31,7 +31,25 @@ type QueuedFinalization = Finalization & {
   audio: ArrayBuffer[];
 };
 
-const socketError = (message: string): Error => new Error(message || "Realtime transcription failed.");
+export type RealtimeFailureReason =
+  | "connect_timeout"
+  | "connect_failed"
+  | "finalize_timeout"
+  | "transport_error"
+  | "unexpected_close"
+  | "provider_error"
+  | "audio_send_failed"
+  | "unknown";
+
+export class RealtimeTranscriptionError extends Error {
+  constructor(message: string, readonly reason: RealtimeFailureReason, readonly closeCode?: number) {
+    super(message || "Realtime transcription failed.");
+    this.name = "RealtimeTranscriptionError";
+  }
+}
+
+const socketError = (message: string, reason: RealtimeFailureReason = "unknown", closeCode?: number): RealtimeTranscriptionError =>
+  new RealtimeTranscriptionError(message, reason, closeCode);
 
 const copyPCM = (pcm: Int16Array): ArrayBuffer => {
   const copy = new Int16Array(pcm.length);
@@ -105,14 +123,17 @@ export class CartesiaRealtimeTranscriber {
       await Promise.race([
         transcriber.opened,
         new Promise<never>((_, reject) => {
-          timer = setTimeout(() => reject(new Error("Realtime transcription connection timed out.")), timeoutMs);
+          timer = setTimeout(() => reject(socketError("Realtime transcription connection timed out.", "connect_timeout")), timeoutMs);
         }),
       ]);
       return transcriber;
     } catch (error) {
-      transcriber.fail(error instanceof Error ? error : socketError("Realtime transcription connection failed."));
+      const failure = error instanceof RealtimeTranscriptionError
+        ? error
+        : socketError(error instanceof Error ? error.message : "Realtime transcription connection failed.", "connect_failed");
+      transcriber.fail(failure);
       transcriber.socket.close();
-      throw error;
+      throw failure;
     } finally {
       if (timer) clearTimeout(timer);
     }
@@ -170,8 +191,7 @@ export class CartesiaRealtimeTranscriber {
       this.bufferedAudio = [];
     } else {
       this.active = finalization;
-      this.socket.send("finalize");
-      this.armFinalizeTimeout();
+      this.startFinalization();
     }
     return promise;
   }
@@ -196,15 +216,21 @@ export class CartesiaRealtimeTranscriber {
         check();
       });
       if (!drained) {
-        this.fail(socketError("Realtime transcription did not finish the last answer."));
+        this.fail(socketError("Realtime transcription did not finish the last answer.", "finalize_timeout"));
         this.socket.close();
         return;
       }
     }
     if (this.failure || this.closed || this.socket.readyState !== 1) return;
     this.flushBufferedAudio();
+    if (this.failure) return;
     this.closeSent = true;
-    this.socket.send("close");
+    try {
+      this.socket.send("close");
+    } catch {
+      this.fail(socketError("Realtime transcription close could not be sent.", "transport_error"));
+      this.socket.close();
+    }
   }
 
   private readonly handleOpen = () => {
@@ -250,7 +276,7 @@ export class CartesiaRealtimeTranscriber {
       const detail = typeof message.message === "string"
         ? message.message
         : typeof message.title === "string" ? message.title : "Realtime transcription failed.";
-      this.fail(socketError(detail));
+      this.fail(socketError(detail, "provider_error"));
       return;
     }
     if (message.type === "done") {
@@ -259,13 +285,13 @@ export class CartesiaRealtimeTranscriber {
   };
 
   private readonly handleTransportError = () => {
-    this.fail(socketError("Realtime transcription connection failed."));
+    this.fail(socketError("Realtime transcription connection failed.", "transport_error"));
   };
 
-  private readonly handleClose = () => {
+  private readonly handleClose = (event: CloseEvent) => {
     this.closed = true;
     if (!this.closeSent && !this.failure) {
-      this.fail(socketError("Realtime transcription connection closed unexpectedly."));
+      this.fail(socketError("Realtime transcription connection closed unexpectedly.", "unexpected_close", event.code));
     }
   };
 
@@ -279,11 +305,13 @@ export class CartesiaRealtimeTranscriber {
     completed.resolve(completed.text);
     const next = this.queued.shift();
     if (next) {
-      for (const audio of next.audio) this.sendRaw(audio);
       const { audio: _audio, ...finalization } = next;
       this.active = finalization;
-      this.socket.send("finalize");
-      this.armFinalizeTimeout();
+      for (const audio of next.audio) {
+        this.sendRaw(audio);
+        if (this.failure) return;
+      }
+      this.startFinalization();
       return;
     }
     this.flushBufferedAudio();
@@ -300,7 +328,16 @@ export class CartesiaRealtimeTranscriber {
     try {
       this.socket.send(audio);
     } catch {
-      this.fail(socketError("Realtime transcription audio could not be sent."));
+      this.fail(socketError("Realtime transcription audio could not be sent.", "audio_send_failed"));
+    }
+  }
+
+  private startFinalization(): void {
+    try {
+      this.socket.send("finalize");
+      this.armFinalizeTimeout();
+    } catch {
+      this.fail(socketError("Realtime transcription finalize could not be sent.", "transport_error"));
     }
   }
 
@@ -330,7 +367,7 @@ export class CartesiaRealtimeTranscriber {
     this.clearFinalizeTimeout();
     this.finalizeTimer = setTimeout(() => {
       if (!this.active || this.failure) return;
-      this.fail(socketError("Realtime transcription did not finish the answer."));
+      this.fail(socketError("Realtime transcription did not finish the answer.", "finalize_timeout"));
       this.socket.close();
     }, this.finalizeTimeoutMs);
   }

@@ -19,6 +19,9 @@ class FakeSocket {
   binaryType = "";
   sent = [];
   listeners = new Map();
+  throwOnFinalize = false;
+  throwOnBinary = false;
+  throwOnClose = false;
 
   addEventListener(type, listener) {
     const listeners = this.listeners.get(type) ?? [];
@@ -40,23 +43,27 @@ class FakeSocket {
   }
 
   send(value) {
+    if ((value === "finalize" && this.throwOnFinalize) || (value instanceof ArrayBuffer && this.throwOnBinary)
+      || (value === "close" && this.throwOnClose)) {
+      throw new Error("socket closed during send");
+    }
     this.sent.push(value);
   }
 
-  close() {
+  close(code) {
     this.readyState = 3;
-    this.emit("close");
+    this.emit("close", { code });
   }
 }
 
-const connect = async (onTranscript, finalizeTimeoutMs = 5000) => {
+const connect = async (onTranscript, finalizeTimeoutMs = 5000, onFailure) => {
   let socket;
   let url;
   const pending = CartesiaRealtimeTranscriber.connect(config, (value) => {
     url = value;
     socket = new FakeSocket();
     return socket;
-  }, undefined, onTranscript, 5000, finalizeTimeoutMs);
+  }, onFailure, onTranscript, 5000, finalizeTimeoutMs);
   socket.open();
   return { client: await pending, socket, url };
 };
@@ -179,7 +186,8 @@ test("rapid turn boundaries keep late final deltas attached to the matching answ
 });
 
 test("a missing flush rejects active and queued turns so WAV fallback can continue", async () => {
-  const { client, socket } = await connect(undefined, 5);
+  const failures = [];
+  const { client, socket } = await connect(undefined, 5, (failure) => failures.push(failure));
   client.beginTurn(1);
   const first = client.finalizeTurn(1).catch((error) => `fallback:${error.message}`);
   client.beginTurn(2);
@@ -189,4 +197,52 @@ test("a missing flush rejects active and queued turns so WAV fallback can contin
   assert.equal(await first, "fallback:Realtime transcription did not finish the answer.");
   assert.equal(await second, "fallback:Realtime transcription did not finish the answer.");
   assert.equal(socket.readyState, 3);
+  assert.deepEqual(failures.map((failure) => failure.reason), ["finalize_timeout"]);
+});
+
+test("an unexpected close reports a safe diagnostic reason and keeps the answer available for fallback", async () => {
+  const failures = [];
+  const { client, socket } = await connect(undefined, 5000, (failure) => failures.push(failure));
+  client.beginTurn(1);
+  socket.close(1006);
+
+  await assert.rejects(client.finalizeTurn(1), /closed unexpectedly/);
+  assert.deepEqual(failures.map((failure) => [failure.reason, failure.closeCode]), [["unexpected_close", 1006]]);
+});
+
+test("a failed finalize send rejects the answer instead of leaving live transcription pending", async () => {
+  const failures = [];
+  const { client, socket } = await connect(undefined, 5000, (failure) => failures.push(failure));
+  client.beginTurn(1);
+  socket.throwOnFinalize = true;
+
+  const answer = client.finalizeTurn(1);
+  await assert.rejects(answer, /finalize could not be sent/);
+  assert.deepEqual(failures.map((failure) => failure.reason), ["transport_error"]);
+});
+
+test("a failed buffered audio send rejects the queued answer", async () => {
+  const failures = [];
+  const { client, socket } = await connect(undefined, 5000, (failure) => failures.push(failure));
+  client.beginTurn(1);
+  const first = client.finalizeTurn(1);
+  client.beginTurn(2);
+  client.sendPCM(new Int16Array([101]));
+  const second = client.finalizeTurn(2);
+  socket.throwOnBinary = true;
+  socket.message({ type: "flush_done" });
+
+  assert.equal(await first, "");
+  await assert.rejects(second, /audio could not be sent/);
+  assert.deepEqual(failures.map((failure) => failure.reason), ["audio_send_failed"]);
+});
+
+test("a failed graceful close does not leave an unhandled socket error", async () => {
+  const failures = [];
+  const { client, socket } = await connect(undefined, 5000, (failure) => failures.push(failure));
+  socket.throwOnClose = true;
+
+  await client.close();
+  assert.equal(socket.readyState, 3);
+  assert.deepEqual(failures.map((failure) => failure.reason), ["transport_error"]);
 });

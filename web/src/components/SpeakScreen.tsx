@@ -39,7 +39,12 @@ import {
   type InterviewSession,
   type InterviewTurn,
 } from "../lib/interviewSession";
-import { connectLiveTranscription, type LiveTranscriptionConnection } from "../lib/liveTranscription";
+import {
+  connectLiveTranscription,
+  RealtimeTranscriptionError,
+  type LiveTranscriptionConnection,
+  type RealtimeFailureReason,
+} from "../lib/liveTranscription";
 import { EphemeralCaptionController } from "../lib/ephemeralCaption";
 import { InterviewTurnCapture, type CapturedInterviewTurn } from "../lib/interviewTurnCapture";
 import { fetchQuestionSpeech, QuestionSpeechPlayer, type QuestionSpeechState } from "../lib/questionSpeech";
@@ -242,6 +247,7 @@ export default function SpeakScreen() {
   const [interviewSaveStatus, setInterviewSaveStatus] = useState<FinalAudioUploadState>("idle");
   const [interviewSaveError, setInterviewSaveError] = useState<string | null>(null);
   const [liveTranscriptionAvailable, setLiveTranscriptionAvailable] = useState(true);
+  const [liveTranscriptionIssue, setLiveTranscriptionIssue] = useState<RealtimeFailureReason | null>(null);
   const [interviewLiveCaption, setInterviewLiveCaption] = useState<string | null>(null);
   const [interviewLiveWarning, setInterviewLiveWarning] = useState<string | null>(null);
   const [interviewCaptureFailure, setInterviewCaptureFailure] = useState<string | null>(null);
@@ -895,6 +901,16 @@ export default function SpeakScreen() {
       let recorder: MediaRecorder | null = null;
       let localCapture: InterviewTurnCapture | null = null;
       let localRealtime: LiveTranscriptionConnection | null = null;
+      let realtimeFailureReported = false;
+      const reportRealtimeFailure = (error: unknown, fallbackReason: RealtimeFailureReason = "unknown") => {
+        if (!isCurrent() || realtimeFailureReported) return;
+        realtimeFailureReported = true;
+        const reason = error instanceof RealtimeTranscriptionError ? error.reason : fallbackReason;
+        const closeCode = error instanceof RealtimeTranscriptionError ? error.closeCode : undefined;
+        // Keep provider messages, tokens, and transcripts out of diagnostics.
+        console.warn("interview.live_transcription_paused", { reason, closeCode });
+        setLiveTranscriptionIssue(reason);
+      };
       const stopLocalStream = () => {
         if (stream) for (const track of stream.getTracks()) track.stop();
         if (mediaStreamRef.current === stream) mediaStreamRef.current = null;
@@ -1009,17 +1025,15 @@ export default function SpeakScreen() {
             if (!session) throw new Error("The interview session is unavailable.");
             localRealtime = await connectLiveTranscription(
               await getInterviewTranscriptionToken(session.id),
-              () => {
+              (error) => {
                 if (!mountedRef.current || interviewRef.current?.id !== session.id) return;
                 if (interviewRealtimeRef.current === localRealtime) {
                   interviewRealtimeRef.current = null;
                   turnCaptureRef.current?.setPCMListener(null);
                 }
                 clearInterviewLiveCaption();
+                reportRealtimeFailure(error);
                 setLiveTranscriptionAvailable(false);
-                setInterviewLiveWarning(
-                  "Realtime transcription disconnected. Completed answer audio will use the background fallback.",
-                );
               },
               (snapshot) => {
                 const { turnSeq, finalText, interimText } = snapshot;
@@ -1048,12 +1062,10 @@ export default function SpeakScreen() {
               stopLocalStream();
               return;
             }
-          } catch {
+          } catch (error) {
             localRealtime = null;
             clearInterviewLiveCaption();
-            setInterviewLiveWarning(
-              "Realtime transcription is unavailable. Completed answer audio will use the background fallback.",
-            );
+            reportRealtimeFailure(error, "connect_failed");
             setLiveTranscriptionAvailable(false);
           }
         }
@@ -1084,12 +1096,13 @@ export default function SpeakScreen() {
           }
           return;
         }
-        if (localCapture && localRealtime) {
+        if (localCapture && localRealtime && !realtimeFailureReported) {
           interviewRealtimeRef.current = localRealtime;
           interviewCaptionControllerRef.current?.beginTurn(1);
           localRealtime.beginTurn(1);
           localCapture.setPCMListener((pcm) => localRealtime?.sendPCM(pcm));
           setLiveTranscriptionAvailable(true);
+          setLiveTranscriptionIssue(null);
         }
         if (!isCurrent()) {
           if (localRealtime) await localRealtime.close();
@@ -1331,6 +1344,7 @@ export default function SpeakScreen() {
     if (captureInterview) {
       stopQuestionSpeech();
       clearInterviewLiveCaption();
+      setLiveTranscriptionIssue(null);
       setInterviewCaptureFailure(null);
       interviewBoundaryPendingRef.current = false;
       setInterviewBoundaryPending(false);
@@ -1629,6 +1643,7 @@ export default function SpeakScreen() {
     setInterviewSaveError(null);
     setInterviewSaveStatus("idle");
     clearInterviewLiveCaption();
+    setLiveTranscriptionIssue(null);
     setInterviewLiveWarning(null);
     setInterviewCaptureFailure(null);
     setInterviewStopNotice(null);
@@ -2184,6 +2199,7 @@ export default function SpeakScreen() {
               speechError={questionSpeechError}
               speechMuted={questionSpeechMuted}
               liveTranscriptionAvailable={liveTranscriptionAvailable}
+              liveTranscriptionIssue={liveTranscriptionIssue}
               liveCaption={interviewLiveCaption}
               hasAnswerEvidence={hasCurrentAnswer}
               boundaryPending={interviewBoundaryPending}
