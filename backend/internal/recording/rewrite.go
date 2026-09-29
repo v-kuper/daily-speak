@@ -114,7 +114,7 @@ func validInterviewRewriteInput(input RewriteInput) bool {
 	previousSequence := 0
 	for _, turn := range input.InterviewTurns {
 		answer := NormalizeTranscript(turn.Answer)
-		if !validInterviewTurnSequence(previousSequence, turn.Sequence) || strings.TrimSpace(turn.Question) == "" ||
+		if !validInterviewDialogueSequence(previousSequence, turn.Sequence) || strings.TrimSpace(turn.Question) == "" ||
 			answer == "" || answer != strings.Join(strings.Fields(strings.TrimSpace(turn.Answer)), " ") {
 			return false
 		}

@@ -174,11 +174,11 @@ func (r *SQLProcessingRepository) SaveTranscript(ctx context.Context, job Proces
 	return result.RowsAffected() > 0, nil
 }
 
-func (r *SQLProcessingRepository) LoadInterviewTurns(ctx context.Context, sessionID string) ([]InterviewTurn, error) {
+func (r *SQLProcessingRepository) LoadInterviewTimeline(ctx context.Context, sessionID string) ([]InterviewTurn, error) {
 	rows, err := r.db.Query(ctx, `
-		SELECT seq, question, asked_at_ms, ended_at_ms, transcript_status,
+		SELECT seq, question, asked_at_ms, ended_at_ms, skipped, transcript_status,
 		       provisional_transcript, final_transcript
-		FROM interview_turns WHERE session_id = $1 AND NOT skipped ORDER BY seq`, sessionID)
+		FROM interview_turns WHERE session_id = $1 ORDER BY seq`, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -186,7 +186,7 @@ func (r *SQLProcessingRepository) LoadInterviewTurns(ctx context.Context, sessio
 	var turns []InterviewTurn
 	for rows.Next() {
 		var turn InterviewTurn
-		if err := rows.Scan(&turn.Sequence, &turn.Question, &turn.AskedAtMS, &turn.EndedAtMS,
+		if err := rows.Scan(&turn.Sequence, &turn.Question, &turn.AskedAtMS, &turn.EndedAtMS, &turn.Skipped,
 			&turn.TranscriptStatus, &turn.Provisional, &turn.FinalText); err != nil {
 			return nil, err
 		}

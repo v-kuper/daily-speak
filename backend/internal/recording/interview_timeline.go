@@ -14,9 +14,11 @@ type ComposedInterviewTranscript struct {
 	Dialogue []InterviewDialogueTurn
 }
 
-// ComposeInterviewTranscript builds the canonical learner-only transcript
-// from completed per-turn transcription. The continuous interview recording
-// remains the duration and playback source; it is not transcribed again.
+// ComposeInterviewTranscript builds the canonical learner-only transcript from
+// the complete stored timeline. Skipped turns remain in that timeline so its
+// sequence can be validated, but are excluded from answers and dialogue. The
+// continuous interview recording remains the duration and playback source; it
+// is not transcribed again.
 func ComposeInterviewTranscript(turns []InterviewTurn) (ComposedInterviewTranscript, error) {
 	if len(turns) == 0 {
 		return ComposedInterviewTranscript{}, fmt.Errorf("%w: interview has no turns", ErrInterviewTranscriptNotReady)
@@ -24,17 +26,13 @@ func ComposeInterviewTranscript(turns []InterviewTurn) (ComposedInterviewTranscr
 	answers := make(map[int]string, len(turns))
 	dialogue := make([]InterviewDialogueTurn, 0, len(turns))
 	parts := make([]string, 0, len(turns))
-	previousSequence := 0
-	for _, turn := range turns {
-		if !validInterviewTurnSequence(previousSequence, turn.Sequence) {
-			return ComposedInterviewTranscript{}, fmt.Errorf(
-				"%w: turn sequence %d is invalid after %d",
-				ErrInterviewTranscriptNotReady,
-				turn.Sequence,
-				previousSequence,
-			)
+	for index, turn := range turns {
+		if turn.Sequence != index+1 {
+			return ComposedInterviewTranscript{}, fmt.Errorf("%w: turn sequence %d is missing", ErrInterviewTranscriptNotReady, index+1)
 		}
-		previousSequence = turn.Sequence
+		if turn.Skipped {
+			continue
+		}
 		if turn.TranscriptStatus != "ready" {
 			return ComposedInterviewTranscript{}, fmt.Errorf("%w: turn %d status is %s", ErrInterviewTranscriptNotReady, turn.Sequence, strings.TrimSpace(turn.TranscriptStatus))
 		}
@@ -63,6 +61,9 @@ func ComposeInterviewTranscript(turns []InterviewTurn) (ComposedInterviewTranscr
 		parts = append(parts, answer)
 		dialogue = append(dialogue, InterviewDialogueTurn{Sequence: turn.Sequence, Question: question, Answer: answer})
 	}
+	if len(parts) == 0 {
+		return ComposedInterviewTranscript{}, fmt.Errorf("%w: interview has no answered turns", ErrInterviewTranscriptNotReady)
+	}
 	joined := strings.Join(parts, " ")
 	text := NormalizeTranscript(joined)
 	if text == "" || text != joined {
@@ -71,6 +72,6 @@ func ComposeInterviewTranscript(turns []InterviewTurn) (ComposedInterviewTranscr
 	return ComposedInterviewTranscript{Text: text, Answers: answers, Dialogue: dialogue}, nil
 }
 
-func validInterviewTurnSequence(previous, current int) bool {
+func validInterviewDialogueSequence(previous, current int) bool {
 	return current > 0 && current > previous
 }

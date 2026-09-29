@@ -38,7 +38,7 @@ func (r *interviewProcessorRepository) VerifyInterviewDuration(_ context.Context
 	r.verifyMS = milliseconds
 	return nil
 }
-func (r *interviewProcessorRepository) LoadInterviewTurns(context.Context, string) ([]InterviewTurn, error) {
+func (r *interviewProcessorRepository) LoadInterviewTimeline(context.Context, string) ([]InterviewTurn, error) {
 	r.steps = append(r.steps, "turns")
 	return r.turns, nil
 }
@@ -226,6 +226,8 @@ func TestProcessorComposesReadyInterviewTurnsWithoutRetranscribingAudio(t *testi
 		},
 		turns: []InterviewTurn{
 			{Sequence: 1, Question: "First question?", TranscriptStatus: "ready", FinalText: &first},
+			{Sequence: 2, Question: "Skipped question?", Skipped: true},
+			{Sequence: 3, Question: "Another skipped question?", Skipped: true},
 			{Sequence: 4, Question: "Second question?", TranscriptStatus: "ready", Provisional: &second},
 		},
 	}

@@ -78,6 +78,7 @@ type InterviewTurn struct {
 	CorrectedAnswerText string  `json:"correctedAnswerText,omitempty"`
 	AnswerSource        string  `json:"answerSource"`
 	AnswerAlignment     string  `json:"answerAlignment,omitempty"`
+	Skipped             bool    `json:"-"`
 	TranscriptStatus    string  `json:"-"`
 	FinalText           *string `json:"-"`
 	Provisional         *string `json:"-"`

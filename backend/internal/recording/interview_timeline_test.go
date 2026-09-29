@@ -36,6 +36,8 @@ func TestComposeInterviewTranscriptAllowsGapsFromSkippedTurns(t *testing.T) {
 	first, fourth := "First answer.", "Fourth answer."
 	result, err := ComposeInterviewTranscript([]InterviewTurn{
 		{Sequence: 1, Question: "First question?", TranscriptStatus: "ready", FinalText: &first},
+		{Sequence: 2, Question: "Second question?", Skipped: true},
+		{Sequence: 3, Question: "Third question?", Skipped: true},
 		{Sequence: 4, Question: "Fourth question?", TranscriptStatus: "ready", FinalText: &fourth},
 	})
 	if err != nil {
@@ -61,11 +63,12 @@ func TestComposeInterviewTranscriptRejectsMissingAnswer(t *testing.T) {
 		turns []InterviewTurn
 	}{
 		{"no turns", nil},
-		{"invalid sequence", []InterviewTurn{{Sequence: 0, Question: "Why?", TranscriptStatus: "ready", FinalText: &answer}}},
+		{"missing sequence", []InterviewTurn{{Sequence: 2, Question: "Why?", TranscriptStatus: "ready", FinalText: &answer}}},
 		{"out of order", []InterviewTurn{
 			{Sequence: 2, Question: "Why?", TranscriptStatus: "ready", FinalText: &answer},
 			{Sequence: 1, Question: "What next?", TranscriptStatus: "ready", FinalText: &answer},
 		}},
+		{"only skipped turns", []InterviewTurn{{Sequence: 1, Question: "Why?", Skipped: true}}},
 		{"queued", []InterviewTurn{{Sequence: 1, Question: "Why?", TranscriptStatus: "queued", FinalText: &answer}}},
 		{"missing text", []InterviewTurn{{Sequence: 1, Question: "Why?", TranscriptStatus: "ready"}}},
 		{"empty text", []InterviewTurn{{Sequence: 1, Question: "Why?", TranscriptStatus: "ready", FinalText: pointer("")}}},

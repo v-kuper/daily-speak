@@ -59,10 +59,11 @@ type ProcessingDependencies struct {
 	NewID              func() string
 }
 
-// InterviewProcessingRepository makes saving the full transcript and its
-// question alignment one fenced, atomic state transition.
+// InterviewProcessingRepository loads the complete stored timeline, including
+// skipped turns, and makes saving the answered transcript and its question
+// alignment one fenced, atomic state transition.
 type InterviewProcessingRepository interface {
-	LoadInterviewTurns(context.Context, string) ([]InterviewTurn, error)
+	LoadInterviewTimeline(context.Context, string) ([]InterviewTurn, error)
 	SaveInterviewTranscript(context.Context, ProcessingJob, string, string, map[int]string) (bool, error)
 	VerifyInterviewDuration(context.Context, ProcessingJob, string, int, int) error
 }
@@ -158,7 +159,7 @@ func (p *Processor) transcribe(ctx context.Context, job ProcessingJob, work Proc
 		if !isInterviewRepository {
 			return errors.New("interview transcript composition is not configured")
 		}
-		turns, loadErr := interviewRepository.LoadInterviewTurns(ctx, *work.InterviewSessionID)
+		turns, loadErr := interviewRepository.LoadInterviewTimeline(ctx, *work.InterviewSessionID)
 		if loadErr != nil {
 			return loadErr
 		}
@@ -213,7 +214,7 @@ func (p *Processor) interviewDialogue(ctx context.Context, work ProcessingWork) 
 	if !ok {
 		return nil, errors.New("interview transcript composition is not configured")
 	}
-	turns, err := repository.LoadInterviewTurns(ctx, *work.InterviewSessionID)
+	turns, err := repository.LoadInterviewTimeline(ctx, *work.InterviewSessionID)
 	if err != nil {
 		return nil, err
 	}
