@@ -8,8 +8,10 @@ type InterviewQuestionCardProps = {
   canAdvance: boolean;
   onNext: () => void;
   onListen: (question: string) => void;
+  onToggleSpeechMuted: () => void;
   speechState: QuestionSpeechState;
   speechError: string | null;
+  speechMuted: boolean;
   liveTranscriptionAvailable: boolean;
   liveCaption: string | null;
   hasAnswerEvidence: boolean;
@@ -21,8 +23,10 @@ export default function InterviewQuestionCard({
   canAdvance,
   onNext,
   onListen,
+  onToggleSpeechMuted,
   speechState,
   speechError,
+  speechMuted,
   liveTranscriptionAvailable,
   liveCaption,
   hasAnswerEvidence,
@@ -46,23 +50,36 @@ export default function InterviewQuestionCard({
           <span className="interview-question-count">Question {current.seq}</span>
           <span aria-live="polite">{current.question}</span>
         </button>
-        <button
-          className="interview-question-listen"
-          type="button"
-          onClick={() => onListen(current.question)}
-          aria-label={speechState === "playing" || speechState === "loading"
-            ? "Stop question audio"
-            : `Listen to the question: ${current.question}`}
-        >
-          <span aria-hidden="true">{speechState === "playing" ? "■" : "▶"}</span>
-          {speechState === "loading"
-            ? "Loading…"
-            : speechState === "playing"
-              ? "Stop"
-              : speechState === "error"
-                ? "Try again"
-                : "Listen"}
-        </button>
+        <div className="interview-question-audio-controls">
+          <button
+            className="interview-question-listen"
+            type="button"
+            onClick={() => onListen(current.question)}
+            disabled={speechMuted}
+            aria-label={speechState === "playing" || speechState === "loading"
+              ? "Stop question audio"
+              : `Listen to the question again: ${current.question}`}
+          >
+            <span aria-hidden="true">{speechState === "playing" ? "■" : "▶"}</span>
+            {speechState === "loading"
+              ? "Loading…"
+              : speechState === "playing"
+                ? "Stop"
+                : speechState === "error"
+                  ? "Try again"
+                  : "Listen again"}
+          </button>
+          <button
+            className="interview-question-mute"
+            type="button"
+            onClick={onToggleSpeechMuted}
+            aria-pressed={speechMuted}
+            aria-label={speechMuted ? "Unmute automatic question audio" : "Mute automatic question audio"}
+          >
+            <span aria-hidden="true">{speechMuted ? "🔇" : "🔊"}</span>
+            {speechMuted ? "Unmute questions" : "Mute questions"}
+          </button>
+        </div>
       </div>
 
       {speechError && <div className="interview-question-speech-error" role="status">{speechError}</div>}

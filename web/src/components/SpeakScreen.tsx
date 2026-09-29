@@ -251,6 +251,7 @@ export default function SpeakScreen() {
   const [interviewBoundaryPending, setInterviewBoundaryPending] = useState(false);
   const [questionSpeechState, setQuestionSpeechState] = useState<QuestionSpeechState>("idle");
   const [questionSpeechError, setQuestionSpeechError] = useState<string | null>(null);
+  const [questionSpeechMuted, setQuestionSpeechMuted] = useState(false);
   const [interviewRefreshToken, setInterviewRefreshToken] = useState(0);
   const {
     speakState,
@@ -335,6 +336,7 @@ export default function SpeakScreen() {
   const interviewCaptionControllerRef = useRef<EphemeralCaptionController | null>(null);
   const questionSpeechPlayerRef = useRef<QuestionSpeechPlayer | null>(null);
   const questionSpeechGenerationRef = useRef(0);
+  const automaticallySpokenQuestionRef = useRef<string | null>(null);
 
   useEffect(() => {
     const controller = new EphemeralCaptionController(setInterviewLiveCaption);
@@ -386,15 +388,11 @@ export default function SpeakScreen() {
     }
   }, [setInterviewMicrophoneMuted]);
 
-  const onListenInterviewQuestion = useCallback((question: string) => {
+  const playInterviewQuestion = useCallback((question: string) => {
     const session = interviewRef.current;
     if (!session || interviewEndedAtMsRef.current !== null) return;
     const player = questionSpeechPlayerRef.current ?? new QuestionSpeechPlayer();
     questionSpeechPlayerRef.current = player;
-    if (player.isActive()) {
-      stopQuestionSpeech();
-      return;
-    }
     const generation = ++questionSpeechGenerationRef.current;
     setQuestionSpeechError(null);
     setQuestionSpeechState("loading");
@@ -417,7 +415,48 @@ export default function SpeakScreen() {
       setQuestionSpeechState("error");
       setQuestionSpeechError("Could not play this question. Try again.");
     });
-  }, [setInterviewMicrophoneMuted, stopQuestionSpeech]);
+  }, [setInterviewMicrophoneMuted]);
+
+  const onListenInterviewQuestion = useCallback((question: string) => {
+    if (questionSpeechMuted) return;
+    if (questionSpeechPlayerRef.current?.isActive()) {
+      stopQuestionSpeech();
+      return;
+    }
+    playInterviewQuestion(question);
+  }, [playInterviewQuestion, questionSpeechMuted, stopQuestionSpeech]);
+
+  const onToggleQuestionSpeechMuted = useCallback(() => {
+    setQuestionSpeechMuted((muted) => {
+      if (!muted) stopQuestionSpeech();
+      return !muted;
+    });
+  }, [stopQuestionSpeech]);
+
+  const visibleInterviewTurn = speakState === "recording" && recordingPracticeType === "topic"
+    ? interview?.turns[interview.turns.length - 1]
+    : undefined;
+  const visibleInterviewQuestionKey = visibleInterviewTurn && interview
+    ? `${interview.id}:${visibleInterviewTurn.seq}:${visibleInterviewTurn.question}`
+    : null;
+
+  useEffect(() => {
+    if (!visibleInterviewQuestionKey || !visibleInterviewTurn || questionSpeechMuted || interviewBoundaryPending) return;
+    if (automaticallySpokenQuestionRef.current === visibleInterviewQuestionKey) return;
+    automaticallySpokenQuestionRef.current = visibleInterviewQuestionKey;
+    playInterviewQuestion(visibleInterviewTurn.question);
+  }, [
+    interviewBoundaryPending,
+    playInterviewQuestion,
+    questionSpeechMuted,
+    visibleInterviewQuestionKey,
+    visibleInterviewTurn,
+  ]);
+
+  useEffect(() => {
+    if (speakState === "recording" && recordingPracticeType === "topic") return;
+    automaticallySpokenQuestionRef.current = null;
+  }, [recordingPracticeType, speakState]);
 
   const cancelCurrentInterview = useCallback((keepalive = false) => {
     const recovery = browserInterviewRecovery();
@@ -1297,6 +1336,11 @@ export default function SpeakScreen() {
   const onStartTopicRecording = () => {
     const session = interviewRef.current;
     if (recordingPracticeType === "topic" && (!session || session.status !== "ready")) return;
+    if (recordingPracticeType === "topic" && !questionSpeechMuted) {
+      const player = questionSpeechPlayerRef.current ?? new QuestionSpeechPlayer();
+      questionSpeechPlayerRef.current = player;
+      player.unlock();
+    }
     beginRecordingFromMicrophone(() => {
       dispatch(startRecording());
       const localLimitSeconds = isAuthenticated ? sessionLimitSeconds : MAX_GUEST_PREVIEW_SECONDS;
@@ -1530,6 +1574,7 @@ export default function SpeakScreen() {
       interviewSegmentQueueRef.current = [];
       interviewBoundaryPendingRef.current = false;
       stopQuestionSpeech();
+      setQuestionSpeechMuted(false);
       setInterviewBoundaryPending(false);
       updateCurrentAnswerSpeech(false);
       updateInterview(() => null);
@@ -2123,8 +2168,10 @@ export default function SpeakScreen() {
                 && interviewElapsedMs() < (recordingLimitMsRef.current ?? Number.POSITIVE_INFINITY)}
               onNext={onNextInterviewQuestion}
               onListen={onListenInterviewQuestion}
+              onToggleSpeechMuted={onToggleQuestionSpeechMuted}
               speechState={questionSpeechState}
               speechError={questionSpeechError}
+              speechMuted={questionSpeechMuted}
               liveTranscriptionAvailable={liveTranscriptionAvailable}
               liveCaption={interviewLiveCaption}
               hasAnswerEvidence={hasCurrentAnswer}

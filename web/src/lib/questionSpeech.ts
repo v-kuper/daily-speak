@@ -108,10 +108,20 @@ export class QuestionSpeechPlayer {
     return this.active;
   }
 
+  unlock(): void {
+    try {
+      const context = this.context ?? new AudioContext();
+      this.context = context;
+      void context.resume().catch(() => undefined);
+    } catch {
+      // Playback will surface the unsupported/blocked state when it is requested.
+    }
+  }
+
   async play(question: string, load: () => Promise<ArrayBuffer>, onPlaying: () => void): Promise<void> {
     this.stop();
     const generation = this.generation;
-    const context = new AudioContext();
+    const context = this.context ?? new AudioContext();
     this.context = context;
     this.active = true;
     const resumed = context.resume();
@@ -148,6 +158,9 @@ export class QuestionSpeechPlayer {
   dispose(): void {
     this.stop();
     this.cache.clear();
+    const context = this.context;
+    this.context = null;
+    if (context) void context.close().catch(() => undefined);
   }
 
   private loadOnce(question: string, load: () => Promise<ArrayBuffer>): Promise<ArrayBuffer> {
@@ -179,8 +192,5 @@ export class QuestionSpeechPlayer {
       try { this.source.disconnect(); } catch { /* Playback already disconnected. */ }
       this.source = null;
     }
-    const context = this.context;
-    this.context = null;
-    if (context) void context.close().catch(() => undefined);
   }
 }

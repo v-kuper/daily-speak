@@ -575,12 +575,26 @@ test("question playback uses a TTS-only bearer token and native English settings
   }, "Question?"), /unavailable/);
 });
 
+test("visible interview questions autoplay once and expose a persistent mute control", () => {
+  const card = readFileSync(resolve("src/components/InterviewQuestionCard.tsx"), "utf8");
+  const screen = readFileSync(resolve("src/components/SpeakScreen.tsx"), "utf8");
+  assert.match(screen, /automaticallySpokenQuestionRef/);
+  assert.match(screen, /playInterviewQuestion\(visibleInterviewTurn\.question\)/);
+  assert.match(screen, /player\.unlock\(\)/);
+  assert.match(card, /Mute questions/);
+  assert.match(card, /Unmute questions/);
+  assert.match(card, /aria-pressed=\{speechMuted\}/);
+});
+
 test("question playback generates identical audio once and replays the cached bytes", async (t) => {
   const previousAudioContext = globalThis.AudioContext;
+  let contexts = 0;
+  let closes = 0;
   class AudioContextFake {
+    constructor() { contexts += 1; }
     destination = {};
     resume() { return Promise.resolve(); }
-    close() { return Promise.resolve(); }
+    close() { closes += 1; return Promise.resolve(); }
     decodeAudioData() { return Promise.resolve({}); }
     createBufferSource() {
       return {
@@ -600,6 +614,8 @@ test("question playback generates identical audio once and replays the cached by
   });
 
   const player = new QuestionSpeechPlayer();
+  player.unlock();
+  assert.equal(contexts, 1, "the user gesture must unlock one reusable audio context");
   let resolveAudio;
   let generations = 0;
   const load = () => {
@@ -615,7 +631,9 @@ test("question playback generates identical audio once and replays the cached by
   await Promise.all([first, second]);
   await player.play("How was your trip?", load, () => undefined);
   assert.equal(generations, 1, "a replay must use the cached audio bytes");
+  assert.equal(contexts, 1, "automatic playback must reuse the unlocked context");
   player.dispose();
+  assert.equal(closes, 1);
 });
 
 test("a delayed answer boundary remains queueable without leaking PCM into the next WAV", async () => {
