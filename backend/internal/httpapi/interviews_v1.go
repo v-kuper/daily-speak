@@ -55,6 +55,13 @@ func (s *Server) routeInterviewV1(w http.ResponseWriter, r *http.Request, path s
 		} else {
 			s.handleSaveInterviewTranscriptV1(w, r, id, seq)
 		}
+	case len(parts) == 4 && parts[1] == "turns" && parts[3] == "skip" && r.Method == http.MethodPost:
+		seq, err := strconv.Atoi(parts[2])
+		if err != nil || seq < 1 {
+			writeV1Error(w, r, http.StatusBadRequest, "invalid_request", "Turn sequence is invalid")
+		} else {
+			s.handleSkipInterviewTurnV1(w, r, id, seq)
+		}
 	case len(parts) == 1 || len(parts) == 2 || len(parts) == 4:
 		writeV1Error(w, r, http.StatusMethodNotAllowed, "method_not_allowed", "Method not allowed")
 	default:
@@ -178,13 +185,15 @@ func (s *Server) handleAdvanceInterviewV1(w http.ResponseWriter, r *http.Request
 		CurrentTurnSeq  int    `json:"currentTurnSeq"`
 		NextCandidateID string `json:"nextCandidateId"`
 		AtMs            int    `json:"atMs"`
+		SkipCurrent     bool   `json:"skipCurrent"`
 	}
 	if !decodeMediaJSON(w, r, &payload) {
 		return
 	}
 	session, err := s.interviewService.Advance(r.Context(), interview.AdvanceInput{
 		OwnerPrincipalID: identity.PrincipalID, SessionID: id, IdempotencyKey: payload.IdempotencyKey,
-		CurrentTurnSeq: payload.CurrentTurnSeq, NextCandidateID: payload.NextCandidateID, AtMs: payload.AtMs,
+		CurrentTurnSeq: payload.CurrentTurnSeq, NextCandidateID: payload.NextCandidateID,
+		AtMs: payload.AtMs, SkipCurrent: payload.SkipCurrent,
 	})
 	if err != nil {
 		s.writeInterviewError(w, r, err)
@@ -237,6 +246,29 @@ func (s *Server) handleSaveInterviewTranscriptV1(w http.ResponseWriter, r *http.
 	session, err := s.interviewService.SaveTurnTranscript(r.Context(), interview.SaveTurnTranscriptInput{
 		OwnerPrincipalID: identity.PrincipalID, SessionID: id, TurnSeq: seq,
 		IdempotencyKey: payload.IdempotencyKey, Transcript: payload.Text,
+	})
+	if err != nil {
+		s.writeInterviewError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"interview": session})
+}
+
+func (s *Server) handleSkipInterviewTurnV1(w http.ResponseWriter, r *http.Request, id string, seq int) {
+	identity, ok := s.requiredIdentityV1(w, r)
+	if !ok || !s.interviewReady(w, r) {
+		return
+	}
+	var payload struct {
+		IdempotencyKey string `json:"idempotencyKey"`
+		AtMs           int    `json:"atMs"`
+	}
+	if !decodeMediaJSON(w, r, &payload) {
+		return
+	}
+	session, err := s.interviewService.SkipTurn(r.Context(), interview.SkipTurnInput{
+		OwnerPrincipalID: identity.PrincipalID, SessionID: id, TurnSeq: seq,
+		IdempotencyKey: payload.IdempotencyKey, AtMs: payload.AtMs,
 	})
 	if err != nil {
 		s.writeInterviewError(w, r, err)

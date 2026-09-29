@@ -97,7 +97,11 @@ func (t *sqlCreateTransaction) LinkInterview(ctx context.Context, sessionID, pri
 		  AND status = 'recording' AND recording_id IS NULL AND guest_preview_id IS NULL
 		  AND NOT EXISTS (
 		    SELECT 1 FROM interview_turns t
-		    WHERE t.session_id = interview_sessions.id AND t.transcript_status <> 'ready'
+		    WHERE t.session_id = interview_sessions.id AND NOT t.skipped AND t.transcript_status <> 'ready'
+		  )
+		  AND EXISTS (
+		    SELECT 1 FROM interview_turns t
+		    WHERE t.session_id = interview_sessions.id AND NOT t.skipped AND t.transcript_status = 'ready'
 		  )`,
 		sessionID, principalID, userID, recordingID)
 	if err != nil {

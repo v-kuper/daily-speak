@@ -117,6 +117,26 @@ func TestInterviewSessionSQLLifecycle(t *testing.T) {
 	}); !errors.Is(err, ErrConflict) {
 		t.Fatalf("late realtime replacement err=%v", err)
 	}
+	third, err := service.Advance(ctx, AdvanceInput{OwnerPrincipalID: principalID,
+		SessionID: created.ID, IdempotencyKey: "advance-third-1234", CurrentTurnSeq: 2,
+		NextCandidateID: started.Candidates[1].ID, AtMs: 2200})
+	if err != nil || third.CurrentTurnSeq != 3 || len(third.Turns) != 3 {
+		t.Fatalf("advance before skip = %+v, err=%v", third, err)
+	}
+	skipped, err := service.SkipTurn(ctx, SkipTurnInput{OwnerPrincipalID: principalID,
+		SessionID: created.ID, IdempotencyKey: "skip-turn-12345678", TurnSeq: 3, AtMs: 2500})
+	if err != nil || skipped.CurrentTurnSeq != 2 || len(skipped.Turns) != 2 {
+		t.Fatalf("skip unanswered turn = %+v, err=%v", skipped, err)
+	}
+	if _, err := service.SkipTurn(ctx, SkipTurnInput{OwnerPrincipalID: principalID,
+		SessionID: created.ID, IdempotencyKey: "skip-turn-12345678", TurnSeq: 3, AtMs: 2500}); err != nil {
+		t.Fatalf("idempotent skip: %v", err)
+	}
+	if _, err := service.AttachAudio(ctx, AttachAudioInput{OwnerPrincipalID: principalID,
+		SessionID: created.ID, TurnSeq: 3, AudioAssetID: uuid.NewString(),
+		IdempotencyKey: "skipped-audio-1234"}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("skipped turn accepted audio: %v", err)
+	}
 	transcriptInput := SaveTurnTranscriptInput{OwnerPrincipalID: principalID, SessionID: created.ID,
 		TurnSeq: 1, IdempotencyKey: "transcript-12345678", Transcript: "I enjoy long train journeys."}
 	if _, err := service.SaveTurnTranscript(ctx, transcriptInput); err != nil {

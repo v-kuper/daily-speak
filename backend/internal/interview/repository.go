@@ -237,10 +237,15 @@ func (r *SQLRepository) Advance(ctx context.Context, input AdvanceInput) (Sessio
 	}
 	var existingSeq, existingAtMs int
 	var existingCandidate string
-	err = tx.QueryRow(ctx, `SELECT seq,asked_at_ms,COALESCE(source_candidate_id,'') FROM interview_turns
-		WHERE session_id=$1 AND advance_key=$2`, input.SessionID, input.IdempotencyKey).Scan(&existingSeq, &existingAtMs, &existingCandidate)
+	var existingSkipped bool
+	err = tx.QueryRow(ctx, `SELECT next.seq,next.asked_at_ms,COALESCE(next.source_candidate_id,''),previous.skipped
+		FROM interview_turns next JOIN interview_turns previous
+		  ON previous.session_id=next.session_id AND previous.seq=next.seq-1
+		WHERE next.session_id=$1 AND next.advance_key=$2`, input.SessionID, input.IdempotencyKey).
+		Scan(&existingSeq, &existingAtMs, &existingCandidate, &existingSkipped)
 	if err == nil {
-		if existingSeq != input.CurrentTurnSeq+1 || existingAtMs != input.AtMs || existingCandidate != input.NextCandidateID {
+		if existingSeq != input.CurrentTurnSeq+1 || existingAtMs != input.AtMs ||
+			existingCandidate != input.NextCandidateID || existingSkipped != input.SkipCurrent {
 			return Session{}, ErrConflict
 		}
 		return r.Get(ctx, input.OwnerPrincipalID, input.SessionID)
@@ -259,12 +264,22 @@ func (r *SQLRepository) Advance(ctx context.Context, input AdvanceInput) (Sessio
 	}
 	var currentSeq, currentAtMs int
 	var currentEnded sql.NullInt64
-	err = tx.QueryRow(ctx, `SELECT seq,asked_at_ms,ended_at_ms FROM interview_turns
-		WHERE session_id=$1 ORDER BY seq DESC LIMIT 1 FOR UPDATE`, input.SessionID).Scan(&currentSeq, &currentAtMs, &currentEnded)
+	var currentSkipped bool
+	var currentStatus string
+	var currentAudioID, currentProvisional, currentFinal sql.NullString
+	err = tx.QueryRow(ctx, `SELECT seq,asked_at_ms,ended_at_ms,skipped,transcript_status,
+		audio_asset_id,provisional_transcript,final_transcript FROM interview_turns
+		WHERE session_id=$1 ORDER BY seq DESC LIMIT 1 FOR UPDATE`, input.SessionID).
+		Scan(&currentSeq, &currentAtMs, &currentEnded, &currentSkipped, &currentStatus,
+			&currentAudioID, &currentProvisional, &currentFinal)
 	if err != nil {
 		return Session{}, err
 	}
-	if currentSeq != input.CurrentTurnSeq || currentEnded.Valid || input.AtMs-currentAtMs < 300 {
+	if currentSeq != input.CurrentTurnSeq || currentEnded.Valid || currentSkipped || input.AtMs-currentAtMs < 300 {
+		return Session{}, ErrConflict
+	}
+	if input.SkipCurrent && (currentStatus != "pending" || currentAudioID.Valid ||
+		strings.TrimSpace(currentProvisional.String) != "" || strings.TrimSpace(currentFinal.String) != "") {
 		return Session{}, ErrConflict
 	}
 	var question string
@@ -277,8 +292,8 @@ func (r *SQLRepository) Advance(ctx context.Context, input AdvanceInput) (Sessio
 	if err != nil {
 		return Session{}, err
 	}
-	_, err = tx.Exec(ctx, `UPDATE interview_turns SET ended_at_ms=$3,updated_at=NOW()
-		WHERE session_id=$1 AND seq=$2`, input.SessionID, currentSeq, input.AtMs)
+	_, err = tx.Exec(ctx, `UPDATE interview_turns SET ended_at_ms=$3,skipped=$4,updated_at=NOW()
+		WHERE session_id=$1 AND seq=$2`, input.SessionID, currentSeq, input.AtMs, input.SkipCurrent)
 	if err != nil {
 		return Session{}, err
 	}
@@ -314,6 +329,65 @@ func (r *SQLRepository) Advance(ctx context.Context, input AdvanceInput) (Sessio
 	return r.Get(ctx, input.OwnerPrincipalID, input.SessionID)
 }
 
+func (r *SQLRepository) SkipTurn(ctx context.Context, input SkipTurnInput) (Session, error) {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return Session{}, err
+	}
+	defer tx.Rollback(ctx)
+	row, err := r.sessionRow(ctx, tx, input.OwnerPrincipalID, input.SessionID, true)
+	if err != nil {
+		return Session{}, err
+	}
+	if row.Status != StatusRecording || !row.ExpiresAt.After(time.Now().UTC()) ||
+		row.RecordingID != "" || row.GuestPreviewID != "" ||
+		input.AtMs > row.MaxDurationSeconds*1000 {
+		return Session{}, ErrConflict
+	}
+	var seq, askedAtMs int
+	var endedAtMs sql.NullInt64
+	var skipped bool
+	var skipKey, audioID, provisional, final sql.NullString
+	var transcriptStatus string
+	err = tx.QueryRow(ctx, `SELECT seq,asked_at_ms,ended_at_ms,skipped,skip_key,
+		audio_asset_id,provisional_transcript,final_transcript,transcript_status
+		FROM interview_turns WHERE session_id=$1 ORDER BY seq DESC LIMIT 1 FOR UPDATE`, input.SessionID).
+		Scan(&seq, &askedAtMs, &endedAtMs, &skipped, &skipKey,
+			&audioID, &provisional, &final, &transcriptStatus)
+	if err != nil {
+		return Session{}, err
+	}
+	if seq != input.TurnSeq {
+		return Session{}, ErrConflict
+	}
+	if skipped {
+		if !skipKey.Valid || skipKey.String != input.IdempotencyKey || !endedAtMs.Valid || int(endedAtMs.Int64) != input.AtMs {
+			return Session{}, ErrConflict
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return Session{}, err
+		}
+		return r.Get(ctx, input.OwnerPrincipalID, input.SessionID)
+	}
+	if endedAtMs.Valid || input.AtMs <= askedAtMs || transcriptStatus != "pending" || audioID.Valid ||
+		strings.TrimSpace(provisional.String) != "" || strings.TrimSpace(final.String) != "" {
+		return Session{}, ErrConflict
+	}
+	_, err = tx.Exec(ctx, `UPDATE interview_turns
+		SET ended_at_ms=$3,skipped=TRUE,skip_key=$4,updated_at=NOW()
+		WHERE session_id=$1 AND seq=$2`, input.SessionID, input.TurnSeq, input.AtMs, input.IdempotencyKey)
+	if err != nil {
+		if uniqueViolation(err) {
+			return Session{}, ErrConflict
+		}
+		return Session{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Session{}, err
+	}
+	return r.Get(ctx, input.OwnerPrincipalID, input.SessionID)
+}
+
 func (r *SQLRepository) AttachAudio(ctx context.Context, input AttachAudioInput) (Session, error) {
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
@@ -330,14 +404,18 @@ func (r *SQLRepository) AttachAudio(ctx context.Context, input AttachAudioInput)
 	var turnID string
 	var endedAt sql.NullInt64
 	var existingAsset, existingKey sql.NullString
-	err = tx.QueryRow(ctx, `SELECT id,ended_at_ms,audio_asset_id,audio_idempotency_key
+	var skipped bool
+	err = tx.QueryRow(ctx, `SELECT id,ended_at_ms,audio_asset_id,audio_idempotency_key,skipped
 		FROM interview_turns WHERE session_id=$1 AND seq=$2 FOR UPDATE`, input.SessionID, input.TurnSeq).
-		Scan(&turnID, &endedAt, &existingAsset, &existingKey)
+		Scan(&turnID, &endedAt, &existingAsset, &existingKey, &skipped)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Session{}, ErrNotFound
 	}
 	if err != nil {
 		return Session{}, err
+	}
+	if skipped {
+		return Session{}, ErrConflict
 	}
 	if existingAsset.Valid {
 		if existingAsset.String != input.AudioAssetID || existingKey.String != input.IdempotencyKey {
@@ -393,14 +471,18 @@ func (r *SQLRepository) SaveTurnTranscript(ctx context.Context, input SaveTurnTr
 	}
 	var turnID string
 	var existingKey, existingTranscript, existingOrigin sql.NullString
-	err = tx.QueryRow(ctx, `SELECT id,transcript_idempotency_key,final_transcript,transcript_origin
+	var skipped bool
+	err = tx.QueryRow(ctx, `SELECT id,transcript_idempotency_key,final_transcript,transcript_origin,skipped
 		FROM interview_turns WHERE session_id=$1 AND seq=$2 FOR UPDATE`, input.SessionID, input.TurnSeq).
-		Scan(&turnID, &existingKey, &existingTranscript, &existingOrigin)
+		Scan(&turnID, &existingKey, &existingTranscript, &existingOrigin, &skipped)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Session{}, ErrNotFound
 	}
 	if err != nil {
 		return Session{}, err
+	}
+	if skipped {
+		return Session{}, ErrConflict
 	}
 	if existingKey.Valid {
 		if existingKey.String != input.IdempotencyKey || existingTranscript.String != input.Transcript {
@@ -473,7 +555,7 @@ func (r *SQLRepository) Finalize(ctx context.Context, input FinalizeInput) (Sess
 	var lastSeq, lastAtMs int
 	var ended sql.NullInt64
 	if err := tx.QueryRow(ctx, `SELECT seq,asked_at_ms,ended_at_ms FROM interview_turns
-		WHERE session_id=$1 ORDER BY seq DESC LIMIT 1 FOR UPDATE`, input.SessionID).Scan(&lastSeq, &lastAtMs, &ended); err != nil {
+		WHERE session_id=$1 AND NOT skipped ORDER BY seq DESC LIMIT 1 FOR UPDATE`, input.SessionID).Scan(&lastSeq, &lastAtMs, &ended); err != nil {
 		return Session{}, err
 	}
 	if input.EndedAtMs <= lastAtMs {
@@ -602,7 +684,7 @@ func (r *SQLRepository) view(ctx context.Context, row sessionRow) (Session, erro
 		COALESCE(t.provisional_transcript,''),t.transcript_status,
 		COALESCE(c.source,'opening') FROM interview_turns t
 		LEFT JOIN interview_candidates c ON c.id=t.source_candidate_id
-		WHERE t.session_id=$1 ORDER BY t.seq`, row.ID)
+		WHERE t.session_id=$1 AND NOT t.skipped ORDER BY t.seq`, row.ID)
 	if err != nil {
 		return Session{}, err
 	}

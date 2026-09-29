@@ -28,10 +28,16 @@ export default function InterviewQuestionCard({
 
   return (
     <div className="interview-question-panel">
-      <div className="interview-question-card" aria-live="polite">
+      <button
+        className="interview-question-card"
+        type="button"
+        onClick={onNext}
+        disabled={!canAdvance}
+        aria-label={canAdvance ? `Go to the next question. Current question: ${current.question}` : undefined}
+      >
         <span className="interview-question-count">Question {current.seq}</span>
-        <span>{current.question}</span>
-      </div>
+        <span aria-live="polite">{current.question}</span>
+      </button>
 
       {liveTranscriptionAvailable && liveCaption && (
         <div className="interview-live-caption" role="status" aria-live="polite" aria-atomic="true">
@@ -48,16 +54,13 @@ export default function InterviewQuestionCard({
 
       <div className="interview-question-hint">
         {boundaryPending
-          ? "Finishing this answer before the next question…"
-          : !hasAnswerEvidence
-            ? "Say your answer before moving to the next question or finishing."
+          ? "Finishing this turn before the next question…"
+          : canAdvance && !hasAnswerEvidence
+            ? "Answer when you want, or tap the question to skip it."
             : canAdvance
-          ? "Answer when you are ready, then continue to the next question."
+          ? "Tap the question when you are ready for the next one."
           : "Preparing another question. You can keep speaking or finish the recording."}
       </div>
-      <button className="btn btn-secondary interview-next-btn" type="button" onClick={onNext} disabled={!canAdvance}>
-        Next question →
-      </button>
     </div>
   );
 }

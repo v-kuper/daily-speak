@@ -44,6 +44,7 @@ const documentedAPIRoutes = [
   "/api/v1/interviews/{interviewId}/start", "/api/v1/interviews/{interviewId}/cancel",
   "/api/v1/interviews/{interviewId}/advance",
   "/api/v1/interviews/{interviewId}/turns/{sequence}/audio",
+  "/api/v1/interviews/{interviewId}/turns/{sequence}/skip",
   "/api/v1/interviews/{interviewId}/finalize",
   "/api/v1/recordings", "/api/v1/recordings/{recordingId}",
   "/api/v1/recordings/{recordingId}/retry", "/api/v1/recordings/{recordingId}/shadowing",
@@ -62,6 +63,7 @@ const protectedOperations = [
   ["/api/v1/interviews/{interviewId}/cancel", "post"],
   ["/api/v1/interviews/{interviewId}/advance", "post"],
   ["/api/v1/interviews/{interviewId}/turns/{sequence}/audio", "post"],
+  ["/api/v1/interviews/{interviewId}/turns/{sequence}/skip", "post"],
   ["/api/v1/interviews/{interviewId}/finalize", "post"],
   ["/api/v1/recordings", "get"], ["/api/v1/recordings/{recordingId}", "get"],
   ["/api/v1/recordings/{recordingId}", "delete"],
@@ -80,6 +82,7 @@ const mutationBodies = [
   ["/api/v1/interviews", "post", "application/json"],
   ["/api/v1/interviews/{interviewId}/advance", "post", "application/json"],
   ["/api/v1/interviews/{interviewId}/turns/{sequence}/audio", "post", "application/json"],
+  ["/api/v1/interviews/{interviewId}/turns/{sequence}/skip", "post", "application/json"],
   ["/api/v1/interviews/{interviewId}/finalize", "post", "application/json"],
   ["/api/v1/recordings", "post", "application/json"],
   ["/api/v1/media/uploads", "post", "application/json"],
@@ -166,6 +169,7 @@ test("OpenAPI inventories every supported API route", () => {
     ["/api/v1/interviews/{interviewId}/cancel", /parts\[1\] == "cancel"/],
     ["/api/v1/interviews/{interviewId}/advance", /parts\[1\] == "advance"/],
     ["/api/v1/interviews/{interviewId}/turns/{sequence}/audio", /parts\[3\] == "audio"/],
+    ["/api/v1/interviews/{interviewId}/turns/{sequence}/skip", /parts\[3\] == "skip"/],
     ["/api/v1/interviews/{interviewId}/finalize", /parts\[1\] == "finalize"/],
     ["/api/v1/recordings", /path == "\/api\/v1\/recordings"/],
     ["/api/v1/recordings/{recordingId}", /strings\.HasPrefix\(path, "\/api\/v1\/recordings\/"\)/],
@@ -221,6 +225,7 @@ test("identity and v1 resources declare bearer authentication", () => {
     ["/api/v1/interviews/{interviewId}/cancel", "post"],
     ["/api/v1/interviews/{interviewId}/advance", "post"],
     ["/api/v1/interviews/{interviewId}/turns/{sequence}/audio", "post"],
+    ["/api/v1/interviews/{interviewId}/turns/{sequence}/skip", "post"],
     ["/api/v1/interviews/{interviewId}/finalize", "post"],
     ["/api/v1/recordings", "post"], ["/api/v1/recordings/{recordingId}", "get"],
     ["/api/v1/recordings/{recordingId}", "delete"],
@@ -281,6 +286,11 @@ test("adaptive interview contract keeps final speech separate from question meta
   assert.ok(openapi.components.schemas.CreateGuestPreviewRequest.properties.interviewSessionId);
   assert.ok(openapi.components.schemas.MediaPurpose.enum.includes("interview_turn_audio"));
   assert.ok(openapi.components.schemas.CreateMediaUploadRequest.properties.interviewSessionId);
+  assert.equal(openapi.components.schemas.AdvanceInterviewRequest.properties.skipCurrent.type, "boolean");
+  assert.equal(
+    openapi.paths["/api/v1/interviews/{interviewId}/turns/{sequence}/skip"].post.requestBody.content["application/json"].schema.$ref,
+    "#/components/schemas/SkipInterviewTurnRequest",
+  );
 });
 
 test("shared externally visible schemas have representative examples", () => {

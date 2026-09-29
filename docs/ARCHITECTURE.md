@@ -159,6 +159,13 @@ issued by the API. The browser persists each final answer transcript through
 the interview API and records one continuous audio file for playback. Presented
 question text and answer boundaries remain session data rather than learner
 speech.
+The learner may move past an unanswered question or stop on it. The interview
+repository marks that turn as skipped in the same state transition that opens
+the next question, or through the final-turn skip endpoint when recording
+stops. Skipped turns remain internal sequence history for idempotency and
+question de-duplication, but are excluded from the visible timeline, final
+dialogue, analysis, and shadowing. Advancing still consumes a prefetched
+candidate and adds no extra model call to the live path.
 The existing topic-guidance contract remains available to older clients.
 
 The final recording or guest preview is created from the continuous audio when

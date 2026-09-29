@@ -54,7 +54,7 @@ func (s *Store) LoadInterviewTurns(ctx context.Context, sessionID string) ([]rec
 	rows, err := s.db.Query(ctx, `
 		SELECT seq, question, asked_at_ms, ended_at_ms, transcript_status,
 		       provisional_transcript, final_transcript
-		FROM interview_turns WHERE session_id = $1 ORDER BY seq`, sessionID)
+		FROM interview_turns WHERE session_id = $1 AND NOT skipped ORDER BY seq`, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -77,7 +77,7 @@ func (s *Store) SealInterviewLastTurn(ctx context.Context, job Job, sessionID st
 		SET ended_at_ms = GREATEST(t.asked_at_ms + 1, $4), updated_at = NOW()
 		FROM interview_sessions session
 		WHERE t.session_id = session.id AND session.id = $1 AND session.guest_preview_id = $2
-		  AND t.seq = (SELECT MAX(seq) FROM interview_turns WHERE session_id = $1)
+		  AND t.seq = (SELECT MAX(seq) FROM interview_turns WHERE session_id = $1 AND NOT skipped)
 		  AND EXISTS (SELECT 1 FROM guest_previews p
 		              WHERE p.id = $2 AND p.preview_job_id = $3 AND p.state = 'processing')
 		  AND EXISTS (SELECT 1 FROM processing_jobs j
@@ -109,7 +109,7 @@ func (s *Store) SaveInterviewTranscript(ctx context.Context, job Job, transcript
 			SET final_transcript = $3, updated_at = NOW()
 			FROM interview_sessions session
 			WHERE t.session_id = session.id AND session.id = $1 AND session.guest_preview_id = $2
-			  AND t.seq = $4`, sessionID, job.ResourceID, answer, sequence)
+			  AND t.seq = $4 AND NOT t.skipped`, sessionID, job.ResourceID, answer, sequence)
 		if err != nil {
 			return false, err
 		}

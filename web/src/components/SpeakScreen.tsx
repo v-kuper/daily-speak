@@ -31,6 +31,7 @@ import {
   mergeInterviewTranscriptStatus,
   preserveLiveInterviewTurn,
   prepareInterview,
+  skipInterviewTurn,
   startInterview,
   submitInterviewTurnTranscript,
   uploadInterviewTurnAudio,
@@ -43,6 +44,7 @@ import { InterviewTurnCapture, type CapturedInterviewTurn } from "../lib/intervi
 import type { SavedInterviewTurn } from "../lib/interviewTimeline";
 import {
   advanceInterviewTimeline,
+  closeInterviewTimeline,
   commitInterviewAdvance,
   hasInterviewAnswerEvidence,
   MAX_LIVE_SEGMENT_ATTEMPTS,
@@ -243,7 +245,6 @@ export default function SpeakScreen() {
   const [interviewLiveWarning, setInterviewLiveWarning] = useState<string | null>(null);
   const [interviewCaptureFailure, setInterviewCaptureFailure] = useState<string | null>(null);
   const [interviewStopNotice, setInterviewStopNotice] = useState<string | null>(null);
-  const [interviewAnswerWarning, setInterviewAnswerWarning] = useState<string | null>(null);
   const [currentAnswerHasSpeech, setCurrentAnswerHasSpeech] = useState(false);
   const [interviewBoundaryPending, setInterviewBoundaryPending] = useState(false);
   const [interviewRefreshToken, setInterviewRefreshToken] = useState(0);
@@ -306,6 +307,7 @@ export default function SpeakScreen() {
   const pendingInterviewCancelRef = useRef<Promise<void> | null>(null);
   const interviewCancelSessionIdRef = useRef<string | null>(null);
   const usedInterviewCandidateIdsRef = useRef(new Set<string>());
+  const skippedInterviewTurnSeqsRef = useRef(new Set<number>());
   const interviewSyncQueueRef = useRef<InterviewSyncOperation[]>([]);
   const interviewSyncRunningRef = useRef(false);
   const interviewSegmentQueueRef = useRef<InterviewSegmentOperation[]>([]);
@@ -352,7 +354,6 @@ export default function SpeakScreen() {
   const updateCurrentAnswerSpeech = useCallback((active: boolean) => {
     currentAnswerHasSpeechRef.current = active;
     setCurrentAnswerHasSpeech(active);
-    if (active) setInterviewAnswerWarning(null);
   }, []);
 
   const currentInterviewAnswerIsPresent = useCallback((session = interviewRef.current): boolean => {
@@ -407,10 +408,12 @@ export default function SpeakScreen() {
 
   const mergeInterview = useCallback((server: InterviewSession, authoritativeCandidates = false) => {
     updateInterview((current) => {
-      if (!current || current.id !== server.id) return server;
-      const serverTurns = new Map(server.turns.map((turn) => [turn.seq, turn]));
-      const turns = current.turns.length > server.turns.length
-        ? current.turns.map((turn) => {
+      const visibleServerTurns = server.turns.filter((turn) => !skippedInterviewTurnSeqsRef.current.has(turn.seq));
+      if (!current || current.id !== server.id) return { ...server, turns: visibleServerTurns };
+      const visibleCurrentTurns = current.turns.filter((turn) => !skippedInterviewTurnSeqsRef.current.has(turn.seq));
+      const serverTurns = new Map(visibleServerTurns.map((turn) => [turn.seq, turn]));
+      const turns = visibleCurrentTurns.length > visibleServerTurns.length
+        ? visibleCurrentTurns.map((turn) => {
             const latest = serverTurns.get(turn.seq);
             return latest ? {
               ...preserveLiveInterviewTurn(latest, turn),
@@ -419,8 +422,8 @@ export default function SpeakScreen() {
               transcriptStatus: mergeInterviewTranscriptStatus(latest.transcriptStatus, turn.transcriptStatus),
             } : turn;
           })
-        : server.turns.map((turn) => {
-            const local = current.turns.find((item) => item.seq === turn.seq);
+        : visibleServerTurns.map((turn) => {
+            const local = visibleCurrentTurns.find((item) => item.seq === turn.seq);
             return local ? {
               ...preserveLiveInterviewTurn(turn, local),
               askedAtMs: local.askedAtMs,
@@ -437,7 +440,7 @@ export default function SpeakScreen() {
         usefulVocabulary: server.usefulVocabulary.length ? server.usefulVocabulary : current.usefulVocabulary,
         turns,
         candidates,
-        currentTurnSeq: turns.length ? turns[turns.length - 1].seq : server.currentTurnSeq,
+        currentTurnSeq: turns.length ? turns[turns.length - 1].seq : null,
       };
     });
   }, [updateInterview]);
@@ -603,19 +606,19 @@ export default function SpeakScreen() {
     if (!session || interviewStartedAtRef.current === null || interviewEndedAtMsRef.current !== null) return;
     const last = session.turns[session.turns.length - 1];
     const answerPresent = currentInterviewAnswerIsPresent(session);
-    if (last && !answerPresent) {
-      const message = "No spoken answer was detected for the current question. Re-record this interview before saving.";
-      setInterviewAnswerWarning("Say an answer before finishing the interview.");
-      setInterviewCaptureFailure(message);
-      dispatch(setRecordingInputError(message));
-    }
     const endedAtMs = Math.max(interviewElapsedMs(), last ? last.askedAtMs + 1 : 0);
     interviewEndedAtMsRef.current = endedAtMs;
     if (last) {
-      updateInterview((current) => current ? {
-        ...current,
-        turns: current.turns.map((turn) => turn.seq === last.seq ? { ...turn, endedAtMs } : turn),
-      } : current);
+      const skipLast = !answerPresent;
+      if (skipLast) {
+        skippedInterviewTurnSeqsRef.current.add(last.seq);
+        setInterviewStopNotice("The unanswered final question was skipped. Your completed answers can still be saved.");
+        const skipKey = newIdempotencyKey(`interview-skip-${last.seq}`);
+        queueInterviewSync(session.id, () => skipInterviewTurn(session.id, last.seq, endedAtMs, skipKey));
+      }
+      updateInterview((current) => current
+        ? closeInterviewTimeline(current, endedAtMs, skipLast).session
+        : current);
     }
     const capture = turnCaptureRef.current;
     const realtime = interviewRealtimeRef.current;
@@ -636,6 +639,10 @@ export default function SpeakScreen() {
         })
         .catch((error: unknown) => {
           if (!mountedRef.current) return;
+          if (!answerPresent) {
+            setLiveTranscriptionAvailable(false);
+            return;
+          }
           const message = error instanceof Error
             ? error.message
             : "Answer capture could not finish.";
@@ -660,7 +667,7 @@ export default function SpeakScreen() {
       void realtime.close();
     }
     updateCurrentAnswerSpeech(false);
-  }, [clearInterviewLiveCaption, currentInterviewAnswerIsPresent, dispatch, interviewElapsedMs, queueInterviewSegment, updateCurrentAnswerSpeech, updateInterview]);
+  }, [clearInterviewLiveCaption, currentInterviewAnswerIsPresent, dispatch, interviewElapsedMs, queueInterviewSegment, queueInterviewSync, updateCurrentAnswerSpeech, updateInterview]);
 
   const finishActiveRecording = useCallback((notice?: string) => {
     if (recordingStartedAtRef.current !== null && recordingEndedAtMsRef.current === null) {
@@ -699,7 +706,7 @@ export default function SpeakScreen() {
     return interviewSegmentQueueRef.current.length === 0;
   }, [runInterviewSegments]);
 
-  const synchronizeInterviewBeforeSave = useCallback(async (): Promise<"ready" | "pending" | "failed"> => {
+  const synchronizeInterviewBeforeSave = useCallback(async (): Promise<"ready" | "pending" | "failed" | "empty"> => {
     const deadline = performance.now() + 15_000;
     if (turnCaptureStopRef.current) {
       const captureStopped = await waitForPromiseWithin(
@@ -732,6 +739,9 @@ export default function SpeakScreen() {
     while (performance.now() < deadline) {
       const current = interviewRef.current;
       const endedTurns = current?.turns.filter((turn) => turn.endedAtMs !== null) ?? [];
+      if (current?.id && endedTurns.length === 0) {
+        return "empty";
+      }
       if (endedTurns.length > 0 && endedTurns.every((turn) => turn.transcriptStatus === "ready")) {
         return "ready";
       }
@@ -1079,6 +1089,7 @@ export default function SpeakScreen() {
         const transcriptState = await synchronizeInterviewBeforeSave();
         if (transcriptState !== "ready") {
           const terminalMessage = "One answer could not be transcribed. Re-record the interview so every answer can be analyzed.";
+          const emptyMessage = "This interview has no answered questions. Record at least one answer before saving.";
           if (transcriptState === "failed") {
             setInterviewCaptureFailure(terminalMessage);
             dispatch(setRecordingInputError(terminalMessage));
@@ -1087,6 +1098,8 @@ export default function SpeakScreen() {
           setInterviewSaveError(
             transcriptState === "failed"
               ? terminalMessage
+              : transcriptState === "empty"
+                ? emptyMessage
               : "Your answers are still being transcribed. Keep this tab open for a moment, then retry saving.",
           );
           if (owned) recovery.update(owned.createKey, { phase: "active" });
@@ -1201,7 +1214,6 @@ export default function SpeakScreen() {
     if (captureInterview) {
       clearInterviewLiveCaption();
       setInterviewCaptureFailure(null);
-      setInterviewAnswerWarning(null);
       interviewBoundaryPendingRef.current = false;
       setInterviewBoundaryPending(false);
       updateCurrentAnswerSpeech(false);
@@ -1253,22 +1265,13 @@ export default function SpeakScreen() {
   };
 
   const onStopRecording = () => {
-    if (recordingPracticeType === "topic" && !currentInterviewAnswerIsPresent()) {
-      const message = "No spoken answer was detected for the current question. Re-record this interview before saving.";
-      setInterviewAnswerWarning("No answer was detected before Stop. Re-record this interview to continue.");
-      setInterviewCaptureFailure(message);
-      dispatch(setRecordingInputError(message));
-    }
     finishActiveRecording();
   };
 
   const onNextInterviewQuestion = () => {
     const session = interviewRef.current;
     if (!session || interviewEndedAtMsRef.current !== null || interviewBoundaryPendingRef.current) return;
-    if (!currentInterviewAnswerIsPresent(session)) {
-      setInterviewAnswerWarning("Say an answer before moving to the next question.");
-      return;
-    }
+    const answerPresent = currentInterviewAnswerIsPresent(session);
     const capture = turnCaptureRef.current;
     if (!capture) {
       const message = "Answer capture is unavailable. Re-record this interview before saving.";
@@ -1283,14 +1286,19 @@ export default function SpeakScreen() {
       onStopRecording();
       return;
     }
-    const advance = advanceInterviewTimeline(session, usedInterviewCandidateIdsRef.current, elapsedMs, maxAtMs);
+    const advance = advanceInterviewTimeline(
+      session,
+      usedInterviewCandidateIdsRef.current,
+      elapsedMs,
+      maxAtMs,
+      !answerPresent,
+    );
     if (!advance) return;
     const { candidate, previousTurn } = advance;
     const nextTurnSeq = advance.session.turns[advance.session.turns.length - 1].seq;
     interviewCaptionControllerRef.current?.beginTurn(nextTurnSeq);
     interviewBoundaryPendingRef.current = true;
     setInterviewBoundaryPending(true);
-    setInterviewAnswerWarning(null);
     const realtime = interviewRealtimeRef.current;
     const generation = interviewGenerationRef.current;
     void capture.closeTurn(realtime ? () => {
@@ -1320,6 +1328,8 @@ export default function SpeakScreen() {
         return;
       }
       usedInterviewCandidateIdsRef.current.add(candidate.id);
+      if (!answerPresent) skippedInterviewTurnSeqsRef.current.add(previousTurn.seq);
+      updateCurrentAnswerSpeech(false);
       const key = newIdempotencyKey(`interview-advance-${previousTurn.seq}`);
       queueInterviewSync(session.id, async () => {
         const result = await advanceInterview(
@@ -1328,8 +1338,9 @@ export default function SpeakScreen() {
           candidate.id,
           advance.session.turns[advance.session.turns.length - 1].askedAtMs,
           key,
+          !answerPresent,
         );
-        if (generation === interviewGenerationRef.current) {
+        if (answerPresent && generation === interviewGenerationRef.current) {
           queueInterviewSegment(session.id, previousTurn.seq, captured, generation);
         }
         return result;
@@ -1453,11 +1464,11 @@ export default function SpeakScreen() {
       interviewPreparationKeyRef.current = null;
       interviewPreparationGenerationRef.current += 1;
       interviewGenerationRef.current += 1;
+      skippedInterviewTurnSeqsRef.current.clear();
       interviewSyncQueueRef.current = [];
       interviewSegmentQueueRef.current = [];
       interviewBoundaryPendingRef.current = false;
       setInterviewBoundaryPending(false);
-      setInterviewAnswerWarning(null);
       updateCurrentAnswerSpeech(false);
       updateInterview(() => null);
       return;
@@ -1475,6 +1486,7 @@ export default function SpeakScreen() {
     const generation = ++interviewPreparationGenerationRef.current;
     interviewGenerationRef.current += 1;
     usedInterviewCandidateIdsRef.current.clear();
+    skippedInterviewTurnSeqsRef.current.clear();
     interviewSyncQueueRef.current = [];
     interviewSegmentQueueRef.current = [];
     interviewEndedAtMsRef.current = null;
@@ -1491,7 +1503,6 @@ export default function SpeakScreen() {
     setInterviewLiveWarning(null);
     setInterviewCaptureFailure(null);
     setInterviewStopNotice(null);
-    setInterviewAnswerWarning(null);
     interviewBoundaryPendingRef.current = false;
     setInterviewBoundaryPending(false);
     updateCurrentAnswerSpeech(false);
@@ -2045,7 +2056,6 @@ export default function SpeakScreen() {
             <InterviewQuestionCard
               turns={interview.turns}
               canAdvance={interview.candidates.length > 0
-                && hasCurrentAnswer
                 && !interviewBoundaryPending
                 && interviewElapsedMs() - (interview.turns[interview.turns.length - 1]?.askedAtMs ?? 0) >= MIN_ANSWER_MS
                 && interviewElapsedMs() < (recordingLimitMsRef.current ?? Number.POSITIVE_INFINITY)}
@@ -2059,7 +2069,6 @@ export default function SpeakScreen() {
 
           {isTopicInterview && interviewSyncError && <div className="notice top-spaced">{interviewSyncError}</div>}
           {isTopicInterview && interviewLiveWarning && <div className="notice top-spaced">{interviewLiveWarning}</div>}
-          {isTopicInterview && interviewAnswerWarning && <div className="auth-error top-spaced">{interviewAnswerWarning}</div>}
 
           <button className="btn btn-primary btn-large speak-primary-btn" onClick={onStopRecording}>
             Stop
@@ -2111,7 +2120,6 @@ export default function SpeakScreen() {
             interviewSaveDraftRef.current = null;
             setInterviewLiveWarning(null);
             setInterviewCaptureFailure(null);
-            setInterviewAnswerWarning(null);
             interviewBoundaryPendingRef.current = false;
             setInterviewBoundaryPending(false);
             updateCurrentAnswerSpeech(false);

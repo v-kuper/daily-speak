@@ -51,7 +51,7 @@ func (repository *SQLQueryRepository) interviewTurns(ctx context.Context, querie
 		       COALESCE(t.corrected_answer_text, '')
 		FROM interview_turns t
 		JOIN interview_sessions s ON s.id = t.session_id
-		WHERE s.recording_id = $1
+		WHERE s.recording_id = $1 AND NOT t.skipped
 		ORDER BY t.seq`, recordingID)
 	if err != nil {
 		return nil, err

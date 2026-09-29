@@ -97,7 +97,7 @@ func (r *SQLRepository) LoadTurn(ctx context.Context, turnID string) (TurnWork, 
 	var nullableTranscript sql.NullString
 	err := r.db.QueryRow(ctx, `SELECT t.id,t.session_id,t.seq,COALESCE(t.audio_asset_id,''),
 		COALESCE(t.final_transcript,t.provisional_transcript,''),t.transcript_status,s.topic,s.english_level,s.status
-		FROM interview_turns t JOIN interview_sessions s ON s.id=t.session_id WHERE t.id=$1`, turnID).
+		FROM interview_turns t JOIN interview_sessions s ON s.id=t.session_id WHERE t.id=$1 AND NOT t.skipped`, turnID).
 		Scan(&work.TurnID, &work.SessionID, &work.Seq, &work.AudioAssetID,
 			&nullableTranscript, &work.Status, &work.Topic, &work.EnglishLevel, &work.SessionStatus)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -111,7 +111,7 @@ func (r *SQLRepository) LoadTurn(ctx context.Context, turnID string) (TurnWork, 
 		return TurnWork{}, false, ErrNotFound
 	}
 	rows, err := r.db.Query(ctx, `SELECT seq,question,COALESCE(final_transcript,provisional_transcript,'')
-		FROM interview_turns WHERE session_id=$1 AND seq <= $2 ORDER BY seq DESC LIMIT 6`, work.SessionID, work.Seq)
+		FROM interview_turns WHERE session_id=$1 AND seq <= $2 AND NOT skipped ORDER BY seq DESC LIMIT 6`, work.SessionID, work.Seq)
 	if err != nil {
 		return TurnWork{}, false, err
 	}
@@ -161,7 +161,7 @@ func (r *SQLRepository) LoadRefill(ctx context.Context, sessionID string) (Refil
 		return RefillWork{}, false, nil
 	}
 	rows, err := r.db.Query(ctx, `SELECT seq,question,COALESCE(final_transcript,provisional_transcript,'')
-		FROM interview_turns WHERE session_id=$1 ORDER BY seq DESC LIMIT 6`, sessionID)
+		FROM interview_turns WHERE session_id=$1 AND NOT skipped ORDER BY seq DESC LIMIT 6`, sessionID)
 	if err != nil {
 		return RefillWork{}, false, err
 	}
@@ -223,6 +223,7 @@ func (r *SQLRepository) SaveTranscript(ctx context.Context, job workqueue.Job, t
 		SET provisional_transcript=$2,final_transcript=$2,transcript_status='ready',
 		    transcript_origin='turn_batch',updated_at=NOW()
 		WHERE id=$1 AND audio_asset_id IS NOT NULL
+		  AND NOT skipped
 		  AND COALESCE(transcript_origin,'') <> 'turn_realtime'`, turnID, transcript)
 	if err != nil {
 		return "", err
@@ -438,7 +439,7 @@ func (r *SQLRepository) FinalizeFailure(ctx context.Context, tx pgx.Tx, job work
 		return err
 	case "turn":
 		_, err := tx.Exec(ctx, `UPDATE interview_turns SET transcript_status='failed',updated_at=NOW()
-			WHERE id=$1 AND transcript_status<>'ready'`, job.ResourceID)
+			WHERE id=$1 AND NOT skipped AND transcript_status<>'ready'`, job.ResourceID)
 		return err
 	case "refill":
 		return nil

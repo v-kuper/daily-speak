@@ -10,6 +10,7 @@ const load = createTypeScriptLoader();
 const sourcePath = (relativePath) => fileURLToPath(new URL(relativePath, import.meta.url));
 const {
   advanceInterviewTimeline,
+  closeInterviewTimeline,
   commitInterviewAdvance,
   hasInterviewAnswerEvidence,
   MAX_LIVE_SEGMENT_ATTEMPTS,
@@ -258,6 +259,36 @@ test("a prepared Next commits only after its audio boundary and preserves late s
   assert.deepEqual(committed.candidates, []);
 });
 
+test("skipping a question opens the prepared next question without keeping the unanswered turn", () => {
+  const session = {
+    id: "interview-1", status: "recording", topic: "Travel", usefulWords: [],
+    turns: [{ seq: 1, question: "Where did you go?", askedAtMs: 0, endedAtMs: null, provisionalTranscript: "" }],
+    candidates: [{ id: "candidate-2", question: "How do you usually travel?" }],
+    currentTurnSeq: 1, maxDurationSeconds: 600,
+  };
+  const advance = advanceInterviewTimeline(session, new Set(), 1200, 600_000, true);
+  assert.ok(advance);
+  assert.equal(advance.skipPrevious, true);
+  const committed = commitInterviewAdvance(session, advance);
+  assert.deepEqual(committed.turns.map((turn) => turn.seq), [2]);
+  assert.equal(committed.turns[0].question, "How do you usually travel?");
+});
+
+test("stopping on an unanswered final question removes only that turn", () => {
+  const session = {
+    id: "interview-1", status: "recording", topic: "Travel", usefulWords: [], candidates: [],
+    turns: [
+      { seq: 1, question: "Where did you go?", askedAtMs: 0, endedAtMs: 2000, provisionalTranscript: "Rome." },
+      { seq: 2, question: "What did you enjoy?", askedAtMs: 2000, endedAtMs: null, provisionalTranscript: "" },
+    ],
+    currentTurnSeq: 2, maxDurationSeconds: 600,
+  };
+  const closed = closeInterviewTimeline(session, 5000, true);
+  assert.equal(closed.skippedTurn?.seq, 2);
+  assert.deepEqual(closed.session.turns.map((turn) => turn.seq), [1]);
+  assert.equal(closed.session.currentTurnSeq, 1);
+});
+
 test("interview recording limits use the account cap and the server session cap", () => {
   assert.equal(resolveInterviewRecordingLimitSeconds({
     isAuthenticated: true,
@@ -363,6 +394,40 @@ test("turn WAV upload binds the media asset to its interview session", async () 
     assert.equal(mediaBody.purpose, "interview_turn_audio");
     assert.equal(mediaBody.interviewSessionId, "interview-1");
     assert.equal(JSON.parse(requests[1].init.body).audioAssetId, "answer-asset");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("question changes carry the explicit skipped-turn state", async () => {
+  const requests = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    requests.push({ path: new URL(String(url)).pathname, init });
+    return new Response(JSON.stringify({ interview: {
+      id: "interview-1", status: "recording", topic: "Travel", openingQuestion: "Tell me about travel.",
+      error: null, usefulWords: [], turns: [], candidates: [], currentTurnSeq: null, maxDurationSeconds: 600,
+    } }), { status: 200, headers: { "Content-Type": "application/json" } });
+  };
+  try {
+    const { configureApiClient } = load(sourcePath("../src/lib/apiClient.ts"));
+    const { advanceInterview, skipInterviewTurn } = load(sourcePath("../src/lib/interviewSession.ts"));
+    configureApiClient("https://example.test");
+    await advanceInterview("interview-1", 1, "candidate-2", 1200, "advance-skip-1234", true);
+    await skipInterviewTurn("interview-1", 2, 2400, "stop-skip-123456");
+    assert.equal(requests[0].path, "/api/v1/interviews/interview-1/advance");
+    assert.deepEqual(JSON.parse(requests[0].init.body), {
+      idempotencyKey: "advance-skip-1234",
+      currentTurnSeq: 1,
+      nextCandidateId: "candidate-2",
+      atMs: 1200,
+      skipCurrent: true,
+    });
+    assert.equal(requests[1].path, "/api/v1/interviews/interview-1/turns/2/skip");
+    assert.deepEqual(JSON.parse(requests[1].init.body), {
+      idempotencyKey: "stop-skip-123456",
+      atMs: 2400,
+    });
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -474,6 +539,16 @@ test("terminal answer failure tells the learner to re-record instead of promisin
   assert.match(card, /could not be transcribed\. Re-record the interview before saving/);
   assert.match(card, /hasTerminalTranscriptionFailure/);
   assert.match(screen, /setInterviewCaptureFailure\(terminalMessage\)/);
+});
+
+test("the question card is the stable next control and allows an unanswered skip", () => {
+  const card = readFileSync(resolve("src/components/InterviewQuestionCard.tsx"), "utf8");
+  const screen = readFileSync(resolve("src/components/SpeakScreen.tsx"), "utf8");
+  assert.match(card, /className="interview-question-card"/);
+  assert.match(card, /onClick=\{onNext\}/);
+  assert.doesNotMatch(card, /interview-next-btn|Next question →/);
+  assert.match(card, /tap the question to skip it/i);
+  assert.doesNotMatch(screen, /Say an answer before moving to the next question/);
 });
 
 test("a delayed answer boundary remains queueable without leaking PCM into the next WAV", async () => {

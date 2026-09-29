@@ -75,3 +75,26 @@ func TestInterviewVocabularyMigrationKeepsTranslationsSeparate(t *testing.T) {
 	}
 	t.Fatal("interview vocabulary migration is missing")
 }
+
+func TestInterviewSkippedTurnsMigrationPreservesSequenceHistory(t *testing.T) {
+	items, err := All()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range items {
+		if item.Name != "0016_interview_skipped_turns.sql" {
+			continue
+		}
+		for _, fragment := range []string{
+			"skipped BOOLEAN NOT NULL DEFAULT FALSE",
+			"skip_key TEXT",
+			"interview_turns_skip_key_idx",
+		} {
+			if !strings.Contains(item.SQL, fragment) {
+				t.Fatalf("skipped-turn migration is missing %q: %s", fragment, item.SQL)
+			}
+		}
+		return
+	}
+	t.Fatal("interview skipped-turn migration is missing")
+}

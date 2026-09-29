@@ -120,7 +120,11 @@ func (s *Store) Create(ctx context.Context, principalID, idempotencyKey, request
 			  AND status = 'recording' AND recording_id IS NULL AND guest_preview_id IS NULL
 			  AND NOT EXISTS (
 			    SELECT 1 FROM interview_turns t
-			    WHERE t.session_id = interview_sessions.id AND t.transcript_status <> 'ready'
+			    WHERE t.session_id = interview_sessions.id AND NOT t.skipped AND t.transcript_status <> 'ready'
+			  )
+			  AND EXISTS (
+			    SELECT 1 FROM interview_turns t
+			    WHERE t.session_id = interview_sessions.id AND NOT t.skipped AND t.transcript_status = 'ready'
 			  )`,
 			*input.InterviewSessionID, principalID, previewID)
 		if err != nil {
@@ -195,7 +199,7 @@ func (s *Store) interviewTurns(ctx context.Context, previewID string) ([]recordi
 		       t.provisional_transcript, t.final_transcript
 		FROM interview_turns t
 		JOIN interview_sessions session ON session.id = t.session_id
-		WHERE session.guest_preview_id = $1
+		WHERE session.guest_preview_id = $1 AND NOT t.skipped
 		ORDER BY t.seq`, previewID)
 	if err != nil {
 		return nil, err

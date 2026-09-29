@@ -23,6 +23,7 @@ type Repository interface {
 	Start(context.Context, string, string) (Session, error)
 	Cancel(context.Context, string, string) (Session, error)
 	Advance(context.Context, AdvanceInput) (Session, error)
+	SkipTurn(context.Context, SkipTurnInput) (Session, error)
 	AttachAudio(context.Context, AttachAudioInput) (Session, error)
 	SaveTurnTranscript(context.Context, SaveTurnTranscriptInput) (Session, error)
 	Finalize(context.Context, FinalizeInput) (Session, error)
@@ -108,6 +109,13 @@ func (s *Service) Advance(ctx context.Context, input AdvanceInput) (Session, err
 		return Session{}, ErrInvalid
 	}
 	return s.repository.Advance(ctx, input)
+}
+
+func (s *Service) SkipTurn(ctx context.Context, input SkipTurnInput) (Session, error) {
+	if !keyPattern.MatchString(input.IdempotencyKey) || input.TurnSeq < 1 || input.AtMs < 1 {
+		return Session{}, ErrInvalid
+	}
+	return s.repository.SkipTurn(ctx, input)
 }
 
 func (s *Service) AttachAudio(ctx context.Context, input AttachAudioInput) (Session, error) {

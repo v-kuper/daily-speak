@@ -209,12 +209,24 @@ export const advanceInterview = (
   nextCandidateId: string,
   atMs: number,
   idempotencyKey: string,
+  skipCurrent = false,
 ): Promise<InterviewSession> => interviewRequest(`${interviewPath(id)}/advance`, postJSON({
   idempotencyKey,
   currentTurnSeq,
   nextCandidateId,
   atMs,
+  skipCurrent,
 }, idempotencyKey));
+
+export const skipInterviewTurn = (
+  id: string,
+  seq: number,
+  atMs: number,
+  idempotencyKey: string,
+): Promise<InterviewSession> => interviewRequest(
+  `${interviewPath(id)}/turns/${seq}/skip`,
+  postJSON({ idempotencyKey, atMs }, idempotencyKey),
+);
 
 export const uploadInterviewTurnAudio = async (
   id: string,

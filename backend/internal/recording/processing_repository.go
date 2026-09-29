@@ -115,7 +115,7 @@ func (r *SQLProcessingRepository) VerifyInterviewDuration(ctx context.Context, j
 		UPDATE interview_turns t
 		SET ended_at_ms = GREATEST(t.asked_at_ms + 1, $2), updated_at = NOW()
 		WHERE t.session_id = $1
-		  AND t.seq = (SELECT MAX(seq) FROM interview_turns WHERE session_id = $1)`,
+		  AND t.seq = (SELECT MAX(seq) FROM interview_turns WHERE session_id = $1 AND NOT skipped)`,
 		sessionID, actualMS); err != nil {
 		return err
 	}
@@ -178,7 +178,7 @@ func (r *SQLProcessingRepository) LoadInterviewTurns(ctx context.Context, sessio
 	rows, err := r.db.Query(ctx, `
 		SELECT seq, question, asked_at_ms, ended_at_ms, transcript_status,
 		       provisional_transcript, final_transcript
-		FROM interview_turns WHERE session_id = $1 ORDER BY seq`, sessionID)
+		FROM interview_turns WHERE session_id = $1 AND NOT skipped ORDER BY seq`, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -219,7 +219,7 @@ func (r *SQLProcessingRepository) SaveInterviewTranscript(ctx context.Context, j
 			SET final_transcript = $3, updated_at = NOW()
 			FROM interview_sessions s
 			WHERE t.session_id = s.id AND s.id = $1 AND s.recording_id = $2
-			  AND t.seq = $4`, sessionID, job.ResourceID, answer, sequence)
+			  AND t.seq = $4 AND NOT t.skipped`, sessionID, job.ResourceID, answer, sequence)
 		if err != nil {
 			return false, err
 		}
@@ -281,7 +281,7 @@ func (r *SQLProcessingRepository) CompleteRecording(ctx context.Context, job Pro
 		SELECT t.seq, t.question
 		FROM interview_turns t
 		JOIN interview_sessions s ON s.id = t.session_id
-		WHERE s.recording_id = $1
+		WHERE s.recording_id = $1 AND NOT t.skipped
 		ORDER BY t.seq
 		FOR UPDATE OF t`, job.ResourceID)
 	if err != nil {
@@ -331,7 +331,7 @@ func (r *SQLProcessingRepository) CompleteRecording(ctx context.Context, job Pro
 				UPDATE interview_turns t
 				SET corrected_answer_text = $3, updated_at = NOW()
 				FROM interview_sessions s
-				WHERE t.session_id = s.id AND s.recording_id = $1 AND t.seq = $2`,
+				WHERE t.session_id = s.id AND s.recording_id = $1 AND t.seq = $2 AND NOT t.skipped`,
 				job.ResourceID, answer.Sequence, answer.CorrectedAnswerText)
 			if err != nil {
 				return false, err

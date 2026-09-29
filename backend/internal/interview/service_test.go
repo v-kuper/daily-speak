@@ -19,6 +19,8 @@ type serviceRepositoryFake struct {
 	find          bool
 	findErr       error
 	advanceCalled bool
+	skipCalled    bool
+	skipped       SkipTurnInput
 	startCalled   bool
 	startSession  Session
 	transcript    SaveTurnTranscriptInput
@@ -51,6 +53,11 @@ func (f *serviceRepositoryFake) Cancel(context.Context, string, string) (Session
 func (f *serviceRepositoryFake) Advance(context.Context, AdvanceInput) (Session, error) {
 	f.advanceCalled = true
 	return Session{}, nil
+}
+func (f *serviceRepositoryFake) SkipTurn(_ context.Context, input SkipTurnInput) (Session, error) {
+	f.skipCalled = true
+	f.skipped = input
+	return Session{ID: input.SessionID}, nil
 }
 func (f *serviceRepositoryFake) AttachAudio(context.Context, AttachAudioInput) (Session, error) {
 	return Session{}, nil
@@ -143,6 +150,21 @@ func TestAdvanceHasNoFixedTenQuestionLimit(t *testing.T) {
 	})
 	if err != nil || !repo.advanceCalled {
 		t.Fatalf("turn 28 rejected: err=%v called=%v", err, repo.advanceCalled)
+	}
+}
+
+func TestSkipTurnValidatesAndForwardsMutationIdentity(t *testing.T) {
+	repo := &serviceRepositoryFake{}
+	service := NewService(repo)
+	invalid := SkipTurnInput{OwnerPrincipalID: "principal", SessionID: "session", TurnSeq: 2, AtMs: 1200}
+	if _, err := service.SkipTurn(context.Background(), invalid); !errors.Is(err, ErrInvalid) || repo.skipCalled {
+		t.Fatalf("missing idempotency key err=%v called=%v", err, repo.skipCalled)
+	}
+	input := SkipTurnInput{OwnerPrincipalID: "principal", SessionID: "session",
+		IdempotencyKey: "skip-turn-12345678", TurnSeq: 2, AtMs: 1200}
+	got, err := service.SkipTurn(context.Background(), input)
+	if err != nil || got.ID != input.SessionID || !repo.skipCalled || repo.skipped != input {
+		t.Fatalf("skip got=%+v err=%v called=%v input=%+v", got, err, repo.skipCalled, repo.skipped)
 	}
 }
 
@@ -327,6 +349,25 @@ func TestFollowupUsesProfileLevelAndLatestAnswerInSameGenerationCall(t *testing.
 	}
 	if input["profileEnglishLevel"] != "a1" || input["latestLearnerAnswer"] != "I go park. Weekend friend." {
 		t.Fatalf("adaptive input = %#v", input)
+	}
+}
+
+func TestRefillUsesBroadStandaloneQuestionsWhenNoAnswerContextExists(t *testing.T) {
+	provider := &completionCapture{content: `{"questions":["Where do you like to travel?","How do you choose a place?","What do you pack for a trip?"]}`}
+	questions, err := NewLocalGenerator(provider).Refill(context.Background(), "Travel", "a2", nil,
+		[]string{"What is your favorite trip?"})
+	if err != nil || len(questions) != 3 {
+		t.Fatalf("refill questions = %#v, err = %v", questions, err)
+	}
+	if provider.calls != 1 || !strings.Contains(provider.system, "broad standalone questions") {
+		t.Fatalf("refill calls=%d system=%q", provider.calls, provider.system)
+	}
+	var input map[string]any
+	if err := json.Unmarshal([]byte(provider.input), &input); err != nil {
+		t.Fatal(err)
+	}
+	if input["latestLearnerAnswer"] != "" {
+		t.Fatalf("refill input = %#v", input)
 	}
 }
 

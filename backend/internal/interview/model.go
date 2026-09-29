@@ -85,6 +85,15 @@ type AdvanceInput struct {
 	CurrentTurnSeq   int
 	NextCandidateID  string
 	AtMs             int
+	SkipCurrent      bool
+}
+
+type SkipTurnInput struct {
+	OwnerPrincipalID string
+	SessionID        string
+	IdempotencyKey   string
+	TurnSeq          int
+	AtMs             int
 }
 
 type AttachAudioInput struct {

@@ -1840,7 +1840,7 @@
             "$ref": "#/components/responses/V1ServiceUnavailable"
           }
         },
-        "description": "Closes the current answer at atMs and atomically consumes a candidate. The client may display its prefetched text immediately while this request is acknowledged.",
+        "description": "Closes the current turn at atMs and atomically consumes a candidate. Set skipCurrent when the learner chooses not to answer; that turn is excluded from the final dialogue and analysis. The client may display its prefetched text immediately while this request is acknowledged.",
         "requestBody": {
           "required": true,
           "content": {
@@ -1999,6 +1999,61 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/InterviewTurnTranscriptRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/interviews/{interviewId}/turns/{sequence}/skip": {
+      "post": {
+        "tags": [
+          "Interviews"
+        ],
+        "summary": "Skip the active unanswered interview turn",
+        "description": "Closes the latest unanswered turn and excludes its question from the final dialogue, analysis, and shadowing script. The operation conflicts once answer audio or transcript evidence has been stored.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RequestIdHeader"
+          },
+          {
+            "$ref": "#/components/parameters/InterviewIdPath"
+          },
+          {
+            "$ref": "#/components/parameters/InterviewTurnSequencePath"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/V1InterviewOK"
+          },
+          "400": {
+            "$ref": "#/components/responses/V1BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/V1Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/V1NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/V1Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/V1ServiceUnavailable"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SkipInterviewTurnRequest"
               }
             }
           }
@@ -5081,6 +5136,28 @@
           "nextCandidateId": {
             "type": "string",
             "format": "uuid"
+          },
+          "atMs": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "skipCurrent": {
+            "type": "boolean",
+            "default": false,
+            "description": "True when the learner intentionally leaves the current question unanswered. The skipped turn is excluded from final output."
+          }
+        }
+      },
+      "SkipInterviewTurnRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "idempotencyKey",
+          "atMs"
+        ],
+        "properties": {
+          "idempotencyKey": {
+            "type": "string"
           },
           "atMs": {
             "type": "integer",

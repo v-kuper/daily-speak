@@ -3,7 +3,13 @@ import type { InterviewCandidate, InterviewSession, InterviewTurn } from "./inte
 export type InterviewAdvance = {
   candidate: InterviewCandidate;
   previousTurn: InterviewTurn;
+  skipPrevious: boolean;
   session: InterviewSession;
+};
+
+export type InterviewClosure = {
+  session: InterviewSession;
+  skippedTurn: InterviewTurn | null;
 };
 
 export const MIN_ANSWER_MS = 300;
@@ -54,6 +60,7 @@ export const advanceInterviewTimeline = (
   usedCandidateIds: ReadonlySet<string>,
   atMs: number,
   maxAtMs = Number.POSITIVE_INFINITY,
+  skipPrevious = false,
 ): InterviewAdvance | null => {
   const previousTurn = session.turns[session.turns.length - 1];
   const candidate = session.candidates.find((item) => !usedCandidateIds.has(item.id));
@@ -71,11 +78,14 @@ export const advanceInterviewTimeline = (
   return {
     candidate,
     previousTurn,
+    skipPrevious,
     session: {
       ...session,
       candidates: session.candidates.filter((item) => item.id !== candidate.id),
       turns: [
-        ...session.turns.map((turn) => turn.seq === previousTurn.seq ? { ...turn, endedAtMs: boundary } : turn),
+        ...(skipPrevious
+          ? session.turns.filter((turn) => turn.seq !== previousTurn.seq)
+          : session.turns.map((turn) => turn.seq === previousTurn.seq ? { ...turn, endedAtMs: boundary } : turn)),
         nextTurn,
       ],
       currentTurnSeq: nextTurn.seq,
@@ -98,7 +108,8 @@ export const commitInterviewAdvance = (
   const endedTurn = advance.session.turns.find((turn) => turn.seq === advance.previousTurn.seq);
   const nextTurn = advance.session.turns[advance.session.turns.length - 1];
   if (!currentTurn || currentTurn.seq !== advance.previousTurn.seq || currentTurn.endedAtMs !== null
-    || !endedTurn || endedTurn.endedAtMs === null || !nextTurn || nextTurn.seq === currentTurn.seq) {
+    || (!advance.skipPrevious && (!endedTurn || endedTurn.endedAtMs === null))
+    || !nextTurn || nextTurn.seq === currentTurn.seq) {
     return null;
   }
   return {
@@ -106,9 +117,37 @@ export const commitInterviewAdvance = (
     candidates: current.candidates.filter((candidate) => candidate.id !== advance.candidate.id),
     turns: [
       ...current.turns.slice(0, -1),
-      { ...currentTurn, endedAtMs: endedTurn.endedAtMs },
+      ...(advance.skipPrevious ? [] : [{ ...currentTurn, endedAtMs: endedTurn!.endedAtMs }]),
       nextTurn,
     ],
     currentTurnSeq: nextTurn.seq,
+  };
+};
+
+export const closeInterviewTimeline = (
+  session: InterviewSession,
+  atMs: number,
+  skipCurrent: boolean,
+): InterviewClosure => {
+  const current = session.turns[session.turns.length - 1];
+  if (!current) return { session, skippedTurn: null };
+  const boundary = Math.max(current.askedAtMs + 1, Math.floor(atMs));
+  if (skipCurrent) {
+    const turns = session.turns.slice(0, -1);
+    return {
+      skippedTurn: current,
+      session: {
+        ...session,
+        turns,
+        currentTurnSeq: turns.length ? turns[turns.length - 1].seq : null,
+      },
+    };
+  }
+  return {
+    skippedTurn: null,
+    session: {
+      ...session,
+      turns: session.turns.map((turn) => turn.seq === current.seq ? { ...turn, endedAtMs: boundary } : turn),
+    },
   };
 };
