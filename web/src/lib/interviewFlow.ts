@@ -71,6 +71,7 @@ export const advanceInterviewTimeline = (
   const nextTurn: InterviewTurn = {
     seq: previousTurn.seq + 1,
     question: candidate.question,
+    usefulWords: candidate.usefulWords,
     askedAtMs: boundary,
     endedAtMs: null,
     provisionalTranscript: "",

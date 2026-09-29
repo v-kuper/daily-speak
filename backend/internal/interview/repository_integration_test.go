@@ -69,25 +69,26 @@ func TestInterviewSessionSQLLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := repo.SavePreparation(ctx, preparationJob, created.ID, Preparation{
-		Questions: []string{"Where would you travel first?", "What would you pack for the trip?", "How do you plan your route?"},
-		Vocabulary: []VocabularyItem{
-			{Word: "journey", Translation: "путешествие"}, {Word: "route", Translation: "маршрут"},
-			{Word: "map", Translation: "карта"}, {Word: "visit", Translation: "посетить"},
-			{Word: "ticket", Translation: "билет"}, {Word: "pack", Translation: "собирать вещи"},
-			{Word: "train", Translation: "поезд"}, {Word: "trip", Translation: "поездка"},
-			{Word: "luggage", Translation: "багаж"}, {Word: "hotel", Translation: "отель"},
-			{Word: "explore", Translation: "исследовать"}, {Word: "sightseeing", Translation: "осмотр достопримечательностей"},
+		OpeningUsefulWords: []string{"journey", "explore", "memorable", "abroad", "because", "in my opinion"},
+		Candidate: GuidedQuestion{
+			Question:    "Where would you travel first?",
+			UsefulWords: []string{"destination", "choose", "exciting", "nearby", "because", "for example"},
 		},
 	}); err != nil {
 		t.Fatal(err)
 	}
 	started, err := service.Start(ctx, principalID, created.ID)
-	if err != nil || started.CurrentTurnSeq != 1 || len(started.Candidates) != 3 {
+	if err != nil || started.CurrentTurnSeq != 1 || len(started.Candidates) != 1 {
 		t.Fatalf("start = %+v, err=%v", started, err)
 	}
-	if len(started.UsefulWords) != 12 || len(started.UsefulVocabulary) != 12 ||
-		started.UsefulVocabulary[0].Translation != "путешествие" {
-		t.Fatalf("prepared vocabulary = words:%v vocabulary:%+v", started.UsefulWords, started.UsefulVocabulary)
+	if len(started.OpeningUsefulWords) != 6 || len(started.Turns) != 1 ||
+		len(started.Turns[0].UsefulWords) != 6 || len(started.Candidates[0].UsefulWords) != 6 {
+		t.Fatalf("question guidance = opening:%v turns:%+v candidates:%+v",
+			started.OpeningUsefulWords, started.Turns, started.Candidates)
+	}
+	if _, err := database.Exec(ctx, `INSERT INTO interview_candidates(id,session_id,question,source)
+		VALUES($1,$2,'What do you pack for a trip?','prepared')`, uuid.NewString(), created.ID); err == nil {
+		t.Fatal("database allowed more than one prepared next question")
 	}
 	advance := AdvanceInput{OwnerPrincipalID: principalID, SessionID: created.ID,
 		IdempotencyKey: "advance-12345678", CurrentTurnSeq: 1,
@@ -96,13 +97,17 @@ func TestInterviewSessionSQLLifecycle(t *testing.T) {
 	if err != nil || advanced.CurrentTurnSeq != 2 || advanced.Turns[0].EndedAtMs == nil {
 		t.Fatalf("advance = %+v, err=%v", advanced, err)
 	}
+	if len(advanced.Candidates) != 0 || len(advanced.Turns[1].UsefulWords) != 6 ||
+		advanced.Turns[1].UsefulWords[0] != "destination" {
+		t.Fatalf("candidate words did not follow the visible question: %+v", advanced)
+	}
 	retriedAdvance, err := service.Advance(ctx, advance)
 	if err != nil || retriedAdvance.CurrentTurnSeq != 2 {
 		t.Fatalf("idempotent advance = %+v, err=%v", retriedAdvance, err)
 	}
 	if _, err := service.Advance(ctx, AdvanceInput{OwnerPrincipalID: principalID,
 		SessionID: created.ID, IdempotencyKey: "advance-87654321", CurrentTurnSeq: 1,
-		NextCandidateID: started.Candidates[1].ID, AtMs: 1200}); !errors.Is(err, ErrConflict) {
+		NextCandidateID: started.Candidates[0].ID, AtMs: 1200}); !errors.Is(err, ErrConflict) {
 		t.Fatalf("stale advance err=%v", err)
 	}
 	if _, err := database.Exec(ctx, `UPDATE interview_turns
@@ -117,9 +122,15 @@ func TestInterviewSessionSQLLifecycle(t *testing.T) {
 	}); !errors.Is(err, ErrConflict) {
 		t.Fatalf("late realtime replacement err=%v", err)
 	}
+	secondCandidateID := uuid.NewString()
+	if _, err := database.Exec(ctx, `INSERT INTO interview_candidates(id,session_id,question,useful_words,source)
+		VALUES($1,$2,'How do you plan your route?','["route","compare","direct","carefully","in advance","for example"]'::jsonb,'adaptive')`,
+		secondCandidateID, created.ID); err != nil {
+		t.Fatal(err)
+	}
 	third, err := service.Advance(ctx, AdvanceInput{OwnerPrincipalID: principalID,
 		SessionID: created.ID, IdempotencyKey: "advance-third-1234", CurrentTurnSeq: 2,
-		NextCandidateID: started.Candidates[1].ID, AtMs: 2200})
+		NextCandidateID: secondCandidateID, AtMs: 2200})
 	if err != nil || third.CurrentTurnSeq != 3 || len(third.Turns) != 3 {
 		t.Fatalf("advance before skip = %+v, err=%v", third, err)
 	}

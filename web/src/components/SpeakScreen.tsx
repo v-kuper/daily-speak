@@ -82,7 +82,6 @@ import {
   stopRecording,
   tickRecording,
   toggleAddTopicInput,
-  toggleWords,
   useCustomTopic as applyCustomTopic
 } from "../store/slices/appSlice";
 import GuidanceWordTicker from "./GuidanceWordTicker";
@@ -256,7 +255,6 @@ export default function SpeakScreen() {
   const {
     speakState,
     selectedTopic,
-    showWords,
     recordingDuration,
     topics,
     showAddTopicInput,
@@ -337,6 +335,7 @@ export default function SpeakScreen() {
   const questionSpeechPlayerRef = useRef<QuestionSpeechPlayer | null>(null);
   const questionSpeechGenerationRef = useRef(0);
   const automaticallySpokenQuestionRef = useRef<string | null>(null);
+  const prefetchedQuestionSpeechRef = useRef<string | null>(null);
 
   useEffect(() => {
     const controller = new EphemeralCaptionController(setInterviewLiveCaption);
@@ -441,10 +440,10 @@ export default function SpeakScreen() {
     : null;
 
   useEffect(() => {
-    if (!visibleInterviewQuestionKey || !visibleInterviewTurn || questionSpeechMuted || interviewBoundaryPending) return;
+    if (!visibleInterviewQuestionKey || !visibleInterviewTurn || interviewBoundaryPending) return;
     if (automaticallySpokenQuestionRef.current === visibleInterviewQuestionKey) return;
     automaticallySpokenQuestionRef.current = visibleInterviewQuestionKey;
-    playInterviewQuestion(visibleInterviewTurn.question);
+    if (!questionSpeechMuted) playInterviewQuestion(visibleInterviewTurn.question);
   }, [
     interviewBoundaryPending,
     playInterviewQuestion,
@@ -456,7 +455,30 @@ export default function SpeakScreen() {
   useEffect(() => {
     if (speakState === "recording" && recordingPracticeType === "topic") return;
     automaticallySpokenQuestionRef.current = null;
+    prefetchedQuestionSpeechRef.current = null;
   }, [recordingPracticeType, speakState]);
+
+  const nextInterviewCandidate = speakState === "recording" && recordingPracticeType === "topic"
+    ? interview?.candidates[0]
+    : undefined;
+  const nextInterviewCandidateKey = nextInterviewCandidate && interview
+    ? `${interview.id}:${nextInterviewCandidate.id}:${nextInterviewCandidate.question}`
+    : null;
+
+  useEffect(() => {
+    if (!nextInterviewCandidate || !nextInterviewCandidateKey || !interview || questionSpeechMuted) return;
+    if (prefetchedQuestionSpeechRef.current === nextInterviewCandidateKey) return;
+    prefetchedQuestionSpeechRef.current = nextInterviewCandidateKey;
+    const player = questionSpeechPlayerRef.current ?? new QuestionSpeechPlayer();
+    questionSpeechPlayerRef.current = player;
+    void player.preload(
+      nextInterviewCandidate.question,
+      async () => fetchQuestionSpeech(
+        await getInterviewQuestionSpeechToken(interview.id),
+        nextInterviewCandidate.question,
+      ),
+    ).catch(() => undefined);
+  }, [interview, nextInterviewCandidate, nextInterviewCandidateKey, questionSpeechMuted]);
 
   const cancelCurrentInterview = useCallback((keepalive = false) => {
     const recovery = browserInterviewRecovery();
@@ -527,11 +549,10 @@ export default function SpeakScreen() {
           });
       const candidates = [...server.candidates, ...(authoritativeCandidates ? [] : current.candidates)]
         .filter((candidate) => !usedInterviewCandidateIdsRef.current.has(candidate.id))
-        .filter((candidate, index, all) => all.findIndex((item) => item.id === candidate.id) === index);
+        .filter((candidate, index, all) => all.findIndex((item) => item.id === candidate.id) === index)
+        .slice(0, 1);
       return {
         ...server,
-        usefulWords: server.usefulWords.length ? server.usefulWords : current.usefulWords,
-        usefulVocabulary: server.usefulVocabulary.length ? server.usefulVocabulary : current.usefulVocabulary,
         turns,
         candidates,
         currentTurnSeq: turns.length ? turns[turns.length - 1].seq : null,
@@ -1357,6 +1378,7 @@ export default function SpeakScreen() {
       const opening: InterviewTurn = {
         seq: 1,
         question: session.openingQuestion,
+        usefulWords: session.openingUsefulWords,
         askedAtMs: 0,
         endedAtMs: null,
         provisionalTranscript: "",
@@ -2032,9 +2054,7 @@ export default function SpeakScreen() {
       ?? (interview?.status === "failed" ? interview.error || "Could not prepare this interview." : null);
     const isTopicGuidancePreparing =
       !isPhotoPractice && !preparationFailure && interview?.status !== "ready";
-    const shouldShowWords = !isPhotoPractice && showWords && Boolean(interview?.usefulVocabulary.length);
-    const shouldShowGuidanceSkeleton =
-      !isPhotoPractice && isTopicGuidancePreparing && !interview?.usefulVocabulary.length;
+    const shouldShowGuidanceSkeleton = !isPhotoPractice && isTopicGuidancePreparing;
 
     return (
       <section className="speak-screen">
@@ -2051,7 +2071,7 @@ export default function SpeakScreen() {
             <img src={pendingPhotoDataUrl} alt="Photo to describe" className="photo-practice-preview" />
           )}
           <h2 className="heading-xl speak-heading-tight">{isPhotoPractice ? selectedTopic : interview?.openingQuestion ?? selectedTopic}</h2>
-          {!isPhotoPractice && <div className="profile-value">The next questions are prepared privately and will appear one at a time while you speak.</div>}
+          {!isPhotoPractice && <div className="profile-value">One next question and its answer words are prepared privately while you speak.</div>}
 
           {quotaHint && <div className="notice">{quotaHint}</div>}
 
@@ -2100,20 +2120,9 @@ export default function SpeakScreen() {
               </div>
             )}
 
-            {Boolean(interview?.usefulVocabulary.length) && (
-              <div className="collapsible-section">
-                <button className="collapsible-header" onClick={() => dispatch(toggleWords())}>
-                  <span>Useful words</span>
-                  <span className={`toggle-arrow ${showWords ? "open" : ""}`}>↓</span>
-                </button>
-                <div className={`collapsible-content ${shouldShowWords ? "open" : ""}`}>
-                  {interview?.usefulVocabulary.map((item) => (
-                    <div key={item.word.toLocaleLowerCase()} className="word-item vocabulary-item">
-                      <span className="vocabulary-word">{item.word}</span>
-                      {item.translation && <span className="vocabulary-translation">{item.translation}</span>}
-                    </div>
-                  ))}
-                </div>
+            {!isTopicGuidancePreparing && !preparationFailure && (
+              <div className="profile-value">
+                Ready. Helpful words will appear only while you answer each question.
               </div>
             )}
 
@@ -2137,7 +2146,9 @@ export default function SpeakScreen() {
 
     return (
       <section className="speak-screen">
-        {isTopicInterview && Boolean(interview?.usefulWords.length) && <GuidanceWordTicker words={interview?.usefulWords ?? []} />}
+        {isTopicInterview && Boolean(currentTurn?.usefulWords.length) && (
+          <GuidanceWordTicker key={`${interview?.id}:${currentTurn?.seq}`} words={currentTurn?.usefulWords ?? []} />
+        )}
 
         <div className="speak-card speak-center-card speak-recording-card">
           <div className="recording-session-meta">

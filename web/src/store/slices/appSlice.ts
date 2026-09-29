@@ -60,7 +60,6 @@ export type AppState = {
   speakState: SpeakMode;
   selectedTopic: string | null;
   showQuestions: boolean;
-  showWords: boolean;
   recordingDuration: number;
   recordings: Recording[];
   deletedRecordingIds: string[];
@@ -1401,7 +1400,6 @@ const initialState: AppState = {
   speakState: "idle",
   selectedTopic: null,
   showQuestions: false,
-  showWords: false,
   recordingDuration: 0,
   recordings: [],
   deletedRecordingIds: [],
@@ -1578,7 +1576,6 @@ const applySavedRecording = (state: AppState, recording: Recording, localRecordi
   state.speakState = "idle";
   state.selectedTopic = null;
   state.showQuestions = false;
-  state.showWords = false;
   state.recordingDuration = 0;
   state.showAddTopicInput = false;
   state.customTopicDraft = "";
@@ -1807,7 +1804,6 @@ const appSlice = createSlice({
 
       state.questionsError = null;
       state.showQuestions = false;
-      state.showWords = false;
       state.interestsSaveError = null;
       clearTopicGuidanceState(state);
       clearStudyWordsState(state);
@@ -1880,7 +1876,6 @@ const appSlice = createSlice({
       state.speakState = "idle";
       state.selectedTopic = null;
       state.showQuestions = false;
-      state.showWords = false;
       state.recordingDuration = 0;
       state.showAddTopicInput = false;
       state.customTopicDraft = "";
@@ -1926,7 +1921,6 @@ const appSlice = createSlice({
         state.pendingRecordingAudioStorageKey = null;
         state.recordingInputError = null;
         state.showQuestions = false;
-        state.showWords = false;
         state.recordingPracticeType = "topic";
         clearTopicGuidanceState(state);
       }
@@ -1950,7 +1944,6 @@ const appSlice = createSlice({
       state.selectedTopic = normalizedObject ? `Photo description: ${normalizedObject}` : "Photo description";
       state.speakState = "readyToRecord";
       state.showQuestions = false;
-      state.showWords = false;
       state.showAddTopicInput = false;
       state.customTopicDraft = "";
       state.recordingSaveError = null;
@@ -1962,7 +1955,6 @@ const appSlice = createSlice({
     startFreeTalk: (state) => {
       state.selectedTopic = null;
       state.showQuestions = false;
-      state.showWords = false;
       state.speakState = "recording";
       state.recordingDuration = 0;
       state.recordingSaveError = null;
@@ -1976,7 +1968,6 @@ const appSlice = createSlice({
       state.selectedTopic = action.payload;
       state.speakState = "readyToRecord";
       state.showQuestions = false;
-      state.showWords = true;
       state.showAddTopicInput = false;
       state.customTopicDraft = "";
       state.recordingSaveError = null;
@@ -1990,9 +1981,6 @@ const appSlice = createSlice({
     },
     toggleQuestions: (state) => {
       state.showQuestions = !state.showQuestions;
-    },
-    toggleWords: (state) => {
-      state.showWords = !state.showWords;
     },
     startRecording: (state) => {
       state.speakState = "recording";
@@ -2037,7 +2025,6 @@ const appSlice = createSlice({
       state.speakState = "idle";
       state.recordingDuration = 0;
       state.showQuestions = false;
-      state.showWords = false;
       state.showAddTopicInput = false;
       state.customTopicDraft = "";
       state.recordingSaveError = null;
@@ -2051,7 +2038,6 @@ const appSlice = createSlice({
       state.selectedTopic = null;
       state.recordingDuration = 0;
       state.showQuestions = false;
-      state.showWords = false;
       state.showAddTopicInput = false;
       state.customTopicDraft = "";
       state.pendingRecordingAudioStorageKey = null;
@@ -2087,7 +2073,6 @@ const appSlice = createSlice({
       state.selectedTopic = normalized;
       state.speakState = "readyToRecord";
       state.showQuestions = false;
-      state.showWords = false;
       state.showAddTopicInput = false;
       state.customTopicDraft = "";
       state.recordingPracticeType = "topic";
@@ -2626,7 +2611,6 @@ export const {
   startFreeTalk,
   selectTopic,
   toggleQuestions,
-  toggleWords,
   startRecording,
   tickRecording,
   stopRecording,

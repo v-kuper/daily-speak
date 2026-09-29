@@ -277,10 +277,16 @@ test("JSON and multipart mutations declare request bodies", () => {
 
 test("adaptive interview contract keeps final speech separate from question metadata", () => {
   const interview = openapi.components.schemas.InterviewSession;
+  const candidate = openapi.components.schemas.InterviewCandidate;
+  const turn = openapi.components.schemas.InterviewTurn;
   const vocabularyItem = openapi.components.schemas.InterviewVocabularyItem;
   const savedTurn = openapi.components.schemas.SavedInterviewTurn;
   assert.ok(interview.properties.candidates);
   assert.ok(interview.properties.turns);
+  assert.equal(interview.properties.candidates.maxItems, 1);
+  assert.equal(interview.properties.openingUsefulWords.maxItems, 10);
+  assert.equal(candidate.properties.usefulWords.maxItems, 10);
+  assert.equal(turn.properties.usefulWords.maxItems, 10);
   assert.equal(interview.properties.usefulWords.maxItems, 12);
   assert.equal(interview.properties.usefulVocabulary.maxItems, 12);
   assert.equal(interview.properties.usefulVocabulary.items.$ref, "#/components/schemas/InterviewVocabularyItem");

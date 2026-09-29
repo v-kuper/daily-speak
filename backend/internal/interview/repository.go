@@ -164,8 +164,31 @@ func (r *SQLRepository) EnsureRefill(ctx context.Context, ownerPrincipalID, sess
 		AND consumed_by_turn_seq IS NULL`, sessionID).Scan(&remaining); err != nil {
 		return err
 	}
-	if remaining > 1 {
+	if remaining > 0 {
 		return nil
+	}
+	var latestTurnID, transcriptStatus string
+	var latestUpdatedAt time.Time
+	err = tx.QueryRow(ctx, `SELECT id,transcript_status,updated_at FROM interview_turns
+		WHERE session_id=$1 AND ended_at_ms IS NOT NULL AND NOT skipped
+		ORDER BY seq DESC LIMIT 1`, sessionID).Scan(&latestTurnID, &transcriptStatus, &latestUpdatedAt)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return err
+	}
+	if err == nil && (transcriptStatus == "pending" || transcriptStatus == "queued") &&
+		time.Since(latestUpdatedAt) < 15*time.Second {
+		return nil
+	}
+	if err == nil {
+		var activeTurn bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM processing_jobs
+			WHERE kind='interview.process' AND resource_id=$1 AND payload->>'step'='turn'
+			AND state IN ('queued','running','retry_wait'))`, latestTurnID).Scan(&activeTurn); err != nil {
+			return err
+		}
+		if activeTurn {
+			return nil
+		}
 	}
 	var active bool
 	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM processing_jobs
@@ -207,11 +230,12 @@ func (r *SQLRepository) Start(ctx context.Context, ownerPrincipalID, sessionID s
 	if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM interview_candidates WHERE session_id=$1 AND consumed_by_turn_seq IS NULL`, sessionID).Scan(&candidateCount); err != nil {
 		return Session{}, err
 	}
-	if candidateCount != 3 {
+	if candidateCount != 1 {
 		return Session{}, ErrNotReady
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO interview_turns(id,session_id,seq,question,asked_at_ms)
-		VALUES($1,$2,1,$3,0)`, uuid.NewString(), sessionID, row.OpeningQuestion)
+	openingWordsJSON, _ := json.Marshal(row.OpeningUsefulWords)
+	_, err = tx.Exec(ctx, `INSERT INTO interview_turns(id,session_id,seq,question,useful_words,asked_at_ms)
+		VALUES($1,$2,1,$3,$4::jsonb,0)`, uuid.NewString(), sessionID, row.OpeningQuestion, string(openingWordsJSON))
 	if err != nil {
 		return Session{}, err
 	}
@@ -283,9 +307,10 @@ func (r *SQLRepository) Advance(ctx context.Context, input AdvanceInput) (Sessio
 		return Session{}, ErrConflict
 	}
 	var question string
-	err = tx.QueryRow(ctx, `SELECT question FROM interview_candidates
+	var usefulWordsJSON []byte
+	err = tx.QueryRow(ctx, `SELECT question,useful_words FROM interview_candidates
 		WHERE id=$1 AND session_id=$2 AND consumed_by_turn_seq IS NULL FOR UPDATE`,
-		input.NextCandidateID, input.SessionID).Scan(&question)
+		input.NextCandidateID, input.SessionID).Scan(&question, &usefulWordsJSON)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Session{}, ErrNotReady
 	}
@@ -303,9 +328,9 @@ func (r *SQLRepository) Advance(ctx context.Context, input AdvanceInput) (Sessio
 		return Session{}, err
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO interview_turns
-		(id,session_id,seq,question,asked_at_ms,advance_key,source_candidate_id)
-		VALUES($1,$2,$3,$4,$5,$6,$7)`, uuid.NewString(), input.SessionID, currentSeq+1,
-		question, input.AtMs, input.IdempotencyKey, input.NextCandidateID)
+		(id,session_id,seq,question,useful_words,asked_at_ms,advance_key,source_candidate_id)
+		VALUES($1,$2,$3,$4,$5::jsonb,$6,$7,$8)`, uuid.NewString(), input.SessionID, currentSeq+1,
+		question, string(usefulWordsJSON), input.AtMs, input.IdempotencyKey, input.NextCandidateID)
 	if err != nil {
 		return Session{}, err
 	}
@@ -314,10 +339,10 @@ func (r *SQLRepository) Advance(ctx context.Context, input AdvanceInput) (Sessio
 		AND consumed_by_turn_seq IS NULL`, input.SessionID).Scan(&remaining); err != nil {
 		return Session{}, err
 	}
-	// A completed answer enqueues a higher-priority adaptive question. Keep the
-	// batch refill as an emergency reserve only, otherwise both jobs pay to
-	// generate questions for the same newly opened turn.
-	if remaining <= 1 {
+	// An answered turn gets its one-ahead question from the higher-priority turn
+	// job after the realtime transcript arrives. A skipped turn has no transcript,
+	// so it needs the context-free refill immediately.
+	if input.SkipCurrent && remaining == 0 {
 		if err := workqueue.Enqueue(ctx, tx, workqueue.NewJob{
 			ID: uuid.NewString(), Kind: JobKind, ResourceID: input.SessionID,
 			IdempotencyKey: fmt.Sprintf("interview.refill:%s:%d", input.SessionID, currentSeq+1),
@@ -597,6 +622,7 @@ func finalizationMatches(row sessionRow, input FinalizeInput) bool {
 type sessionRow struct {
 	ID, OwnerPrincipalID, UserID, Topic, OpeningQuestion, EnglishLevel, Status string
 	Interests                                                                  []string
+	OpeningUsefulWords                                                         []string
 	UsefulWords                                                                []string
 	UsefulVocabulary                                                           []VocabularyItem
 	MaxDurationSeconds, EndedAtMs                                              int
@@ -615,7 +641,7 @@ func (r *SQLRepository) sessionRow(ctx context.Context, q sessionQuerier, ownerP
 		return sessionRow{}, ErrNotFound
 	}
 	sqlText := `SELECT id,owner_principal_id,COALESCE(user_id,''),topic,opening_question,english_level,
-		interests,useful_words,useful_vocabulary,status,max_duration_seconds,started_at,COALESCE(ended_at_ms,0),
+		interests,opening_useful_words,useful_words,useful_vocabulary,status,max_duration_seconds,started_at,COALESCE(ended_at_ms,0),
 		COALESCE(recording_id,''),COALESCE(guest_preview_id,''),COALESCE(finalize_key,''),
 		COALESCE(error_message,''),created_at,expires_at
 		FROM interview_sessions WHERE id=$1 AND owner_principal_id=$2`
@@ -623,11 +649,11 @@ func (r *SQLRepository) sessionRow(ctx context.Context, q sessionQuerier, ownerP
 		sqlText += " FOR UPDATE"
 	}
 	var result sessionRow
-	var interests, words, vocabulary []byte
+	var interests, openingWords, words, vocabulary []byte
 	var started sql.NullTime
 	err := q.QueryRow(ctx, sqlText, sessionID, ownerPrincipalID).Scan(
 		&result.ID, &result.OwnerPrincipalID, &result.UserID, &result.Topic, &result.OpeningQuestion,
-		&result.EnglishLevel, &interests, &words, &vocabulary, &result.Status, &result.MaxDurationSeconds,
+		&result.EnglishLevel, &interests, &openingWords, &words, &vocabulary, &result.Status, &result.MaxDurationSeconds,
 		&started, &result.EndedAtMs, &result.RecordingID, &result.GuestPreviewID,
 		&result.FinalizeKey, &result.Error, &result.CreatedAt, &result.ExpiresAt,
 	)
@@ -643,6 +669,9 @@ func (r *SQLRepository) sessionRow(ctx context.Context, q sessionQuerier, ownerP
 	if err := json.Unmarshal(interests, &result.Interests); err != nil {
 		return sessionRow{}, err
 	}
+	if err := json.Unmarshal(openingWords, &result.OpeningUsefulWords); err != nil {
+		return sessionRow{}, err
+	}
 	if err := json.Unmarshal(words, &result.UsefulWords); err != nil {
 		return sessionRow{}, err
 	}
@@ -654,17 +683,21 @@ func (r *SQLRepository) sessionRow(ctx context.Context, q sessionQuerier, ownerP
 
 func (r *SQLRepository) view(ctx context.Context, row sessionRow) (Session, error) {
 	view := Session{ID: row.ID, Status: row.Status, Topic: row.Topic,
-		OpeningQuestion: row.OpeningQuestion, UsefulWords: row.UsefulWords, UsefulVocabulary: row.UsefulVocabulary,
+		OpeningQuestion: row.OpeningQuestion, OpeningUsefulWords: row.OpeningUsefulWords,
+		UsefulWords: row.UsefulWords, UsefulVocabulary: row.UsefulVocabulary,
 		Candidates: []Candidate{}, Turns: []Turn{}, MaxDurationSeconds: row.MaxDurationSeconds,
 		Error: row.Error, CreatedAt: row.CreatedAt.UTC(), StartedAt: row.StartedAt,
 		ExpiresAt: row.ExpiresAt.UTC()}
 	if view.UsefulWords == nil {
 		view.UsefulWords = []string{}
 	}
+	if view.OpeningUsefulWords == nil {
+		view.OpeningUsefulWords = []string{}
+	}
 	if view.UsefulVocabulary == nil {
 		view.UsefulVocabulary = []VocabularyItem{}
 	}
-	rows, err := r.db.Query(ctx, `SELECT id,question,source FROM interview_candidates
+	rows, err := r.db.Query(ctx, `SELECT id,question,useful_words,source FROM interview_candidates
 		WHERE session_id=$1 AND consumed_by_turn_seq IS NULL
 		ORDER BY CASE WHEN source='adaptive' THEN 0 ELSE 1 END, created_at ASC`, row.ID)
 	if err != nil {
@@ -672,9 +705,17 @@ func (r *SQLRepository) view(ctx context.Context, row sessionRow) (Session, erro
 	}
 	for rows.Next() {
 		var candidate Candidate
-		if err := rows.Scan(&candidate.ID, &candidate.Question, &candidate.Source); err != nil {
+		var usefulWords []byte
+		if err := rows.Scan(&candidate.ID, &candidate.Question, &usefulWords, &candidate.Source); err != nil {
 			rows.Close()
 			return Session{}, err
+		}
+		if err := json.Unmarshal(usefulWords, &candidate.UsefulWords); err != nil {
+			rows.Close()
+			return Session{}, err
+		}
+		if candidate.UsefulWords == nil {
+			candidate.UsefulWords = []string{}
 		}
 		view.Candidates = append(view.Candidates, candidate)
 	}
@@ -683,7 +724,7 @@ func (r *SQLRepository) view(ctx context.Context, row sessionRow) (Session, erro
 	if err != nil {
 		return Session{}, err
 	}
-	rows, err = r.db.Query(ctx, `SELECT t.seq,t.question,t.asked_at_ms,t.ended_at_ms,
+	rows, err = r.db.Query(ctx, `SELECT t.seq,t.question,t.useful_words,t.asked_at_ms,t.ended_at_ms,
 		COALESCE(t.provisional_transcript,''),t.transcript_status,
 		COALESCE(c.source,'opening') FROM interview_turns t
 		LEFT JOIN interview_candidates c ON c.id=t.source_candidate_id
@@ -694,10 +735,18 @@ func (r *SQLRepository) view(ctx context.Context, row sessionRow) (Session, erro
 	for rows.Next() {
 		var turn Turn
 		var ended sql.NullInt64
-		if err := rows.Scan(&turn.Seq, &turn.Question, &turn.AskedAtMs, &ended,
+		var usefulWords []byte
+		if err := rows.Scan(&turn.Seq, &turn.Question, &usefulWords, &turn.AskedAtMs, &ended,
 			&turn.ProvisionalTranscript, &turn.TranscriptStatus, &turn.QuestionSource); err != nil {
 			rows.Close()
 			return Session{}, err
+		}
+		if err := json.Unmarshal(usefulWords, &turn.UsefulWords); err != nil {
+			rows.Close()
+			return Session{}, err
+		}
+		if turn.UsefulWords == nil {
+			turn.UsefulWords = []string{}
 		}
 		if ended.Valid {
 			value := int(ended.Int64)

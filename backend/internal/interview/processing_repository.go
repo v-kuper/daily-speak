@@ -55,7 +55,9 @@ func (r *SQLRepository) LoadPreparation(ctx context.Context, sessionID string) (
 }
 
 func (r *SQLRepository) SavePreparation(ctx context.Context, job workqueue.Job, sessionID string, prepared Preparation) error {
-	if len(prepared.Questions) != 3 || len(prepared.Vocabulary) != preparationVocabularyCount {
+	openingWords, openingOK := normalizeUsefulWords(prepared.OpeningUsefulWords)
+	candidate, candidateOK := normalizeGuidedQuestion(prepared.Candidate)
+	if !openingOK || !candidateOK {
 		return ErrInvalid
 	}
 	tx, err := r.db.Begin(ctx)
@@ -73,20 +75,14 @@ func (r *SQLRepository) SavePreparation(ctx context.Context, job workqueue.Job, 
 	if status != StatusPreparing {
 		return nil
 	}
-	words := make([]string, 0, len(prepared.Vocabulary))
-	for _, item := range prepared.Vocabulary {
-		words = append(words, item.Word)
+	openingWordsJSON, _ := json.Marshal(openingWords)
+	candidateWordsJSON, _ := json.Marshal(candidate.UsefulWords)
+	if _, err := tx.Exec(ctx, `INSERT INTO interview_candidates(id,session_id,question,useful_words,source)
+		VALUES($1,$2,$3,$4::jsonb,'prepared')`, uuid.NewString(), sessionID, candidate.Question, string(candidateWordsJSON)); err != nil {
+		return err
 	}
-	wordsJSON, _ := json.Marshal(words)
-	vocabularyJSON, _ := json.Marshal(prepared.Vocabulary)
-	for _, question := range prepared.Questions {
-		if _, err := tx.Exec(ctx, `INSERT INTO interview_candidates(id,session_id,question,source)
-			VALUES($1,$2,$3,'prepared')`, uuid.NewString(), sessionID, question); err != nil {
-			return err
-		}
-	}
-	if _, err := tx.Exec(ctx, `UPDATE interview_sessions SET useful_words=$2::jsonb,useful_vocabulary=$3::jsonb,status='ready',updated_at=NOW()
-		WHERE id=$1`, sessionID, string(wordsJSON), string(vocabularyJSON)); err != nil {
+	if _, err := tx.Exec(ctx, `UPDATE interview_sessions SET opening_useful_words=$2::jsonb,useful_words=$2::jsonb,status='ready',updated_at=NOW()
+		WHERE id=$1`, sessionID, string(openingWordsJSON)); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
@@ -157,10 +153,7 @@ func (r *SQLRepository) LoadRefill(ctx context.Context, sessionID string) (Refil
 		AND consumed_by_turn_seq IS NULL`, sessionID).Scan(&remaining); err != nil {
 		return RefillWork{}, false, err
 	}
-	// Normal answered turns replenish the reserve with one adaptive question.
-	// Batch generation is only needed when that path cannot keep two questions
-	// ready (for example, after consecutive skipped turns).
-	if remaining > 1 {
+	if remaining > 0 {
 		return RefillWork{}, false, nil
 	}
 	rows, err := r.db.Query(ctx, `SELECT seq,question,COALESCE(final_transcript,provisional_transcript,'')
@@ -252,9 +245,9 @@ func (r *SQLRepository) SaveTranscript(ctx context.Context, job workqueue.Job, t
 	return canonicalTranscript, nil
 }
 
-func (r *SQLRepository) SaveAdaptive(ctx context.Context, job workqueue.Job, sessionID string, sourceSeq int, question string) (bool, error) {
-	question = strings.TrimSpace(question)
-	if question == "" {
+func (r *SQLRepository) SaveAdaptive(ctx context.Context, job workqueue.Job, sessionID string, sourceSeq int, guided GuidedQuestion) (bool, error) {
+	guided, valid := normalizeGuidedQuestion(guided)
+	if !valid {
 		return false, ErrInvalid
 	}
 	tx, err := r.db.Begin(ctx)
@@ -272,6 +265,14 @@ func (r *SQLRepository) SaveAdaptive(ctx context.Context, job workqueue.Job, ses
 	if status != StatusRecording {
 		return false, nil
 	}
+	var remaining int
+	if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM interview_candidates WHERE session_id=$1
+		AND consumed_by_turn_seq IS NULL`, sessionID).Scan(&remaining); err != nil {
+		return false, err
+	}
+	if remaining > 0 {
+		return false, nil
+	}
 	var currentSeq int
 	if err := tx.QueryRow(ctx, `SELECT COALESCE(MAX(seq),0) FROM interview_turns WHERE session_id=$1`, sessionID).Scan(&currentSeq); err != nil {
 		return false, err
@@ -279,7 +280,7 @@ func (r *SQLRepository) SaveAdaptive(ctx context.Context, job workqueue.Job, ses
 	if sourceSeq < currentSeq-2 {
 		return false, nil
 	}
-	key := normalizedCandidateKey(question)
+	key := normalizedCandidateKey(guided.Question)
 	rows, err := tx.Query(ctx, `SELECT question FROM interview_turns WHERE session_id=$1
 		UNION ALL SELECT question FROM interview_candidates WHERE session_id=$1`, sessionID)
 	if err != nil {
@@ -291,7 +292,7 @@ func (r *SQLRepository) SaveAdaptive(ctx context.Context, job workqueue.Job, ses
 			rows.Close()
 			return false, err
 		}
-		if normalizedCandidateKey(existing) == key || questionsOverlap(existing, question) {
+		if normalizedCandidateKey(existing) == key || questionsOverlap(existing, guided.Question) {
 			rows.Close()
 			return false, nil
 		}
@@ -301,8 +302,9 @@ func (r *SQLRepository) SaveAdaptive(ctx context.Context, job workqueue.Job, ses
 	if err != nil {
 		return false, err
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO interview_candidates(id,session_id,question,source,source_turn_seq)
-		VALUES($1,$2,$3,'adaptive',$4)`, uuid.NewString(), sessionID, question, sourceSeq)
+	wordsJSON, _ := json.Marshal(guided.UsefulWords)
+	_, err = tx.Exec(ctx, `INSERT INTO interview_candidates(id,session_id,question,useful_words,source,source_turn_seq)
+		VALUES($1,$2,$3,$4::jsonb,'adaptive',$5)`, uuid.NewString(), sessionID, guided.Question, string(wordsJSON), sourceSeq)
 	if err != nil {
 		return false, err
 	}
@@ -312,8 +314,9 @@ func (r *SQLRepository) SaveAdaptive(ctx context.Context, job workqueue.Job, ses
 	return true, nil
 }
 
-func (r *SQLRepository) SaveRefill(ctx context.Context, job workqueue.Job, sessionID string, questions []string) (int, error) {
-	if len(questions) != 3 {
+func (r *SQLRepository) SaveRefill(ctx context.Context, job workqueue.Job, sessionID string, guided GuidedQuestion) (int, error) {
+	guided, valid := normalizeGuidedQuestion(guided)
+	if !valid {
 		return 0, ErrInvalid
 	}
 	tx, err := r.db.Begin(ctx)
@@ -336,7 +339,7 @@ func (r *SQLRepository) SaveRefill(ctx context.Context, job workqueue.Job, sessi
 		AND consumed_by_turn_seq IS NULL`, sessionID).Scan(&remaining); err != nil {
 		return 0, err
 	}
-	if remaining >= 3 {
+	if remaining > 0 {
 		return 0, nil
 	}
 	rows, err := tx.Query(ctx, `SELECT question FROM interview_turns WHERE session_id=$1
@@ -358,36 +361,20 @@ func (r *SQLRepository) SaveRefill(ctx context.Context, job workqueue.Job, sessi
 	if err != nil {
 		return 0, err
 	}
-	added := 0
-	for _, question := range questions {
-		if remaining >= 3 {
-			break
+	for _, existing := range seen {
+		if questionsOverlap(existing, guided.Question) {
+			return 0, errors.New("interview reserve contains no new question")
 		}
-		duplicate := false
-		for _, existing := range seen {
-			if questionsOverlap(existing, question) {
-				duplicate = true
-				break
-			}
-		}
-		if duplicate {
-			continue
-		}
-		if _, err := tx.Exec(ctx, `INSERT INTO interview_candidates(id,session_id,question,source)
-			VALUES($1,$2,$3,'prepared')`, uuid.NewString(), sessionID, question); err != nil {
-			return 0, err
-		}
-		seen = append(seen, question)
-		remaining++
-		added++
+	}
+	wordsJSON, _ := json.Marshal(guided.UsefulWords)
+	if _, err := tx.Exec(ctx, `INSERT INTO interview_candidates(id,session_id,question,useful_words,source)
+		VALUES($1,$2,$3,$4::jsonb,'prepared')`, uuid.NewString(), sessionID, guided.Question, string(wordsJSON)); err != nil {
+		return 0, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return 0, err
 	}
-	if added == 0 && remaining <= 1 {
-		return 0, errors.New("interview reserve contains no new questions")
-	}
-	return added, nil
+	return 1, nil
 }
 
 func requireInterviewLease(ctx context.Context, tx pgx.Tx, job workqueue.Job) error {

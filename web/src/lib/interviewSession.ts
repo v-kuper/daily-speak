@@ -3,8 +3,7 @@ import { ensureGuestPreviewIdentity } from "./guestPreview";
 import { resolveInterestLabels } from "./interestCatalog";
 import { newIdempotencyKey, uploadMedia } from "./mediaUpload";
 
-export type InterviewCandidate = { id: string; question: string };
-export type InterviewVocabularyItem = { word: string; translation: string };
+export type InterviewCandidate = { id: string; question: string; usefulWords: string[] };
 export type InterviewTurn = {
   seq: number;
   question: string;
@@ -12,6 +11,7 @@ export type InterviewTurn = {
   endedAtMs: number | null;
   provisionalTranscript: string;
   transcriptStatus?: string;
+  usefulWords: string[];
   /** Client-only stable deltas received from the live STT socket. */
   liveTranscriptFinal?: string;
   /** Client-only replaceable STT hypothesis. It is never submitted. */
@@ -22,9 +22,8 @@ export type InterviewSession = {
   status: string;
   topic: string;
   openingQuestion: string;
+  openingUsefulWords: string[];
   error: string | null;
-  usefulWords: string[];
-  usefulVocabulary: InterviewVocabularyItem[];
   turns: InterviewTurn[];
   candidates: InterviewCandidate[];
   currentTurnSeq: number | null;
@@ -67,6 +66,7 @@ export const preserveLiveInterviewTurn = (
 ): InterviewTurn => {
   const merged = {
     ...server,
+    usefulWords: server.usefulWords?.length ? server.usefulWords : (local.usefulWords ?? []),
     provisionalTranscript: server.transcriptStatus === "ready"
       ? server.provisionalTranscript
       : server.provisionalTranscript || local.provisionalTranscript,
@@ -81,30 +81,17 @@ export const preserveLiveInterviewTurn = (
   };
 };
 
-export const parseInterviewVocabulary = (
-  payload: unknown,
-  fallbackWords: string[] = [],
-): InterviewVocabularyItem[] => {
+export const parseQuestionUsefulWords = (payload: unknown): string[] => {
   const seen = new Set<string>();
-  const items: InterviewVocabularyItem[] = [];
-  const add = (wordValue: unknown, translationValue: unknown) => {
-    if (typeof wordValue !== "string" || typeof translationValue !== "string") return;
-    const word = wordValue.trim().replace(/\s+/g, " ");
-    const translation = translationValue.trim().replace(/\s+/g, " ");
+  if (!Array.isArray(payload)) return [];
+  return payload.flatMap((value): string[] => {
+    if (typeof value !== "string") return [];
+    const word = value.trim().replace(/\s+/g, " ");
     const key = word.toLocaleLowerCase();
-    if (!word || seen.has(key) || items.length >= 12) return;
+    if (!word || seen.has(key) || seen.size >= 10) return [];
     seen.add(key);
-    items.push({ word, translation });
-  };
-  if (Array.isArray(payload)) {
-    for (const value of payload) {
-      if (!value || typeof value !== "object") continue;
-      const item = value as Record<string, unknown>;
-      add(item.word, item.translation);
-    }
-  }
-  for (const word of fallbackWords) add(word, "");
-  return items;
+    return [word];
+  });
 };
 
 const parseSession = (payload: unknown): InterviewSession => {
@@ -125,19 +112,20 @@ const parseSession = (payload: unknown): InterviewSession => {
       endedAtMs: Number.isFinite(turn.endedAtMs) ? Math.max(0, Number(turn.endedAtMs)) : null,
       provisionalTranscript: typeof turn.provisionalTranscript === "string" ? turn.provisionalTranscript : "",
       transcriptStatus: typeof turn.transcriptStatus === "string" ? turn.transcriptStatus : "pending",
+      usefulWords: parseQuestionUsefulWords(turn.usefulWords),
     }];
   });
   const candidates = (Array.isArray(source.candidates) ? source.candidates : []).flatMap((value): InterviewCandidate[] => {
     if (!value || typeof value !== "object") return [];
     const candidate = value as Record<string, unknown>;
     if (typeof candidate.id !== "string" || !candidate.id || typeof candidate.question !== "string" || !candidate.question.trim()) return [];
-    return [{ id: candidate.id, question: candidate.question.trim() }];
-  });
-  const usefulWords = (Array.isArray(source.usefulWords) ? source.usefulWords : [])
-    .filter((word): word is string => typeof word === "string")
-    .map((word) => word.trim().replace(/\s+/g, " "))
-    .filter(Boolean)
-    .slice(0, 12);
+    return [{
+      id: candidate.id,
+      question: candidate.question.trim(),
+      usefulWords: parseQuestionUsefulWords(candidate.usefulWords),
+    }];
+  }).slice(0, 1);
+  const openingUsefulWords = parseQuestionUsefulWords(source.openingUsefulWords);
   return {
     id: source.id,
     status: typeof source.status === "string" ? source.status : "preparing",
@@ -145,9 +133,10 @@ const parseSession = (payload: unknown): InterviewSession => {
     openingQuestion: typeof source.openingQuestion === "string" && source.openingQuestion.trim()
       ? source.openingQuestion.trim()
       : typeof source.topic === "string" ? source.topic : "",
+    openingUsefulWords: openingUsefulWords.length
+      ? openingUsefulWords
+      : parseQuestionUsefulWords(source.usefulWords),
     error: typeof source.error === "string" && source.error.trim() ? source.error.trim() : null,
-    usefulWords,
-    usefulVocabulary: parseInterviewVocabulary(source.usefulVocabulary, usefulWords),
     turns,
     candidates,
     currentTurnSeq: Number.isSafeInteger(source.currentTurnSeq) && Number(source.currentTurnSeq) > 0

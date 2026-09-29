@@ -153,28 +153,33 @@ that ceiling when the latest answer is short, fragmented, or disconnected; it
 does not run a second model call to classify or validate difficulty.
 
 Adaptive topic interviews use a separate `/api/v1/interviews` lifecycle. The
-selected opening question starts a durable session; three hidden prepared
-questions keep navigation responsive while completed answers are transcribed
-and used to generate later questions. Adaptive candidates are served before
-older prepared candidates when ready. Answered turns replenish the reserve one
-contextual question at a time; the three-question batch refill runs only as an
-emergency when one candidate remains, such as after consecutive skips. This
-avoids overlapping model calls for the same reserve. The same preparation job
-creates twelve level-appropriate English words or short phrases with concise
-Russian translations. The API keeps the English-only list for live interview
-prompts and older clients, while the preparation screen uses the translated pairs.
+selected opening question starts a durable session. Preparation generates 6 to
+10 level-appropriate English words or short phrases for that question, plus one
+hidden next question with its own words. Each answered turn can generate one
+contextual replacement from the answer transcript. If the reserve is empty after
+a skip or failed generation, a durable refill generates one standalone question
+and its words. A partial unique index enforces at most one unconsumed candidate
+per session. The preparation screen shows no answer words; the recording screen
+scrolls only the current question's words above the question. New words may be
+nouns, verbs, adjectives, adverbs, connectors, or short helper phrases. The
+legacy session-wide vocabulary fields remain in v1 responses for compatibility:
+`usefulWords` mirrors the opening question's words, while new sessions leave
+the translated `usefulVocabulary` list empty.
 During an answer, the browser sends raw
 PCM to Cartesia over a realtime WebSocket using a short-lived, STT-scoped token
 issued by the API. The browser persists each final answer transcript through
 the interview API and records one continuous audio file for playback. Presented
 question text and answer boundaries remain session data rather than learner
 speech.
-Displayed questions can be pronounced on demand through Cartesia's bytes TTS
-endpoint. The API issues a separate short-lived, TTS-only token for an owned,
-active interview; the browser requests and caches that question's audio, pauses
-microphone capture while it plays, and never exposes the long-lived provider
-key. Pronunciation does not add work to question generation or the durable
-interview worker.
+Displayed questions are pronounced automatically through Cartesia's bytes TTS
+endpoint unless the learner mutes them. The API issues a separate short-lived,
+TTS-only token for an owned, active interview. The browser fetches and caches
+audio for the one hidden next question before it is displayed, then plays it
+when that question becomes visible. The opening question may incur an initial
+fetch delay. Playback temporarily pauses microphone capture so synthesized
+speech does not enter the learner's answer, and the long-lived provider key
+stays server-only. Pronunciation does not add work to the durable interview
+worker.
 The learner may move past an unanswered question or stop on it. The interview
 repository marks that turn as skipped in the same state transition that opens
 the next question, or through the final-turn skip endpoint when recording

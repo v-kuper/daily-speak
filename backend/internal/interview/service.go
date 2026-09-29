@@ -88,7 +88,7 @@ func (s *Service) Get(ctx context.Context, ownerPrincipalID, sessionID string) (
 	if err != nil {
 		return Session{}, err
 	}
-	if session.Status == StatusRecording && len(session.Candidates) <= 1 {
+	if session.Status == StatusRecording && len(session.Candidates) == 0 {
 		if err := s.repository.EnsureRefill(ctx, ownerPrincipalID, sessionID); err != nil {
 			return Session{}, err
 		}

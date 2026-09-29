@@ -18,15 +18,16 @@ var (
 )
 
 const (
-	StatusPreparing            = "preparing"
-	StatusReady                = "ready"
-	StatusRecording            = "recording"
-	StatusFinalizing           = "finalizing"
-	StatusFinalized            = "finalized"
-	StatusFailed               = "failed"
-	StatusCancelled            = "cancelled"
-	JobKind                    = "interview.process"
-	preparationVocabularyCount = 12
+	StatusPreparing        = "preparing"
+	StatusReady            = "ready"
+	StatusRecording        = "recording"
+	StatusFinalizing       = "finalizing"
+	StatusFinalized        = "finalized"
+	StatusFailed           = "failed"
+	StatusCancelled        = "cancelled"
+	JobKind                = "interview.process"
+	minQuestionUsefulWords = 1
+	maxQuestionUsefulWords = 10
 )
 
 type VocabularyItem struct {
@@ -35,19 +36,21 @@ type VocabularyItem struct {
 }
 
 type Candidate struct {
-	ID       string `json:"id"`
-	Question string `json:"question"`
-	Source   string `json:"source,omitempty"`
+	ID          string   `json:"id"`
+	Question    string   `json:"question"`
+	UsefulWords []string `json:"usefulWords"`
+	Source      string   `json:"source,omitempty"`
 }
 
 type Turn struct {
-	Seq                   int    `json:"seq"`
-	Question              string `json:"question"`
-	QuestionSource        string `json:"questionSource"`
-	AskedAtMs             int    `json:"askedAtMs"`
-	EndedAtMs             *int   `json:"endedAtMs,omitempty"`
-	ProvisionalTranscript string `json:"provisionalTranscript,omitempty"`
-	TranscriptStatus      string `json:"transcriptStatus"`
+	Seq                   int      `json:"seq"`
+	Question              string   `json:"question"`
+	QuestionSource        string   `json:"questionSource"`
+	AskedAtMs             int      `json:"askedAtMs"`
+	EndedAtMs             *int     `json:"endedAtMs,omitempty"`
+	ProvisionalTranscript string   `json:"provisionalTranscript,omitempty"`
+	TranscriptStatus      string   `json:"transcriptStatus"`
+	UsefulWords           []string `json:"usefulWords"`
 }
 
 type Session struct {
@@ -55,6 +58,7 @@ type Session struct {
 	Status             string           `json:"status"`
 	Topic              string           `json:"topic"`
 	OpeningQuestion    string           `json:"openingQuestion"`
+	OpeningUsefulWords []string         `json:"openingUsefulWords"`
 	UsefulWords        []string         `json:"usefulWords"`
 	UsefulVocabulary   []VocabularyItem `json:"usefulVocabulary"`
 	Candidates         []Candidate      `json:"candidates"`
@@ -154,8 +158,13 @@ type FinalizeInput struct {
 }
 
 type Preparation struct {
-	Questions  []string
-	Vocabulary []VocabularyItem
+	OpeningUsefulWords []string
+	Candidate          GuidedQuestion
+}
+
+type GuidedQuestion struct {
+	Question    string   `json:"question"`
+	UsefulWords []string `json:"usefulWords"`
 }
 
 type ContextTurn struct {
@@ -166,8 +175,8 @@ type ContextTurn struct {
 
 type Generator interface {
 	Prepare(ctx context.Context, topic, openingQuestion, level string, interests []string) (Preparation, error)
-	Followup(ctx context.Context, topic, level string, history []ContextTurn, avoid []string) (string, error)
-	Refill(ctx context.Context, topic, level string, history []ContextTurn, avoid []string) ([]string, error)
+	Followup(ctx context.Context, topic, level string, history []ContextTurn, avoid []string) (GuidedQuestion, error)
+	Refill(ctx context.Context, topic, level string, history []ContextTurn, avoid []string) (GuidedQuestion, error)
 }
 
 type AudioMaterializer interface {

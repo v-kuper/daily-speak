@@ -1696,7 +1696,7 @@
             "$ref": "#/components/responses/V1ServiceUnavailable"
           }
         },
-        "description": "Creates an owned session and schedules three hidden backup questions and eight useful words. Both guest and account Bearer identities are supported.",
+        "description": "Creates an owned session and schedules generation of words for the opening question plus one hidden next question with its own answer words. Both guest and account Bearer identities are supported.",
         "requestBody": {
           "required": true,
           "content": {
@@ -1751,7 +1751,7 @@
             "$ref": "#/components/responses/V1ServiceUnavailable"
           }
         },
-        "description": "Returns immutable presented turns, provisional transcripts, and candidate questions for future transitions. When a recording has at most one candidate and no active refill job, polling schedules a rate-limited durable refill after a failed attempt."
+        "description": "Returns presented turns with their answer words, provisional transcripts, and at most one hidden next question with its own answer words. If the next question is missing and no answer processing or refill job is active, polling schedules a rate-limited durable refill."
       }
     },
     "/api/v1/interviews/{interviewId}/start": {
@@ -5011,6 +5011,14 @@
           "question": {
             "type": "string"
           },
+          "usefulWords": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 10,
+            "description": "English words or short phrases for answering this candidate question; empty for legacy candidates."
+          },
           "source": {
             "type": "string",
             "enum": [
@@ -5037,6 +5045,14 @@
           },
           "question": {
             "type": "string"
+          },
+          "usefulWords": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 10,
+            "description": "English words or short phrases for answering this presented question; empty for legacy turns."
           },
           "questionSource": {
             "type": "string",
@@ -5127,13 +5143,21 @@
           "openingQuestion": {
             "type": "string"
           },
+          "openingUsefulWords": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 10,
+            "description": "English words or short phrases for answering the opening question. They are shown during the answer, not on the preparation screen."
+          },
           "usefulWords": {
             "type": "array",
             "items": {
               "type": "string"
             },
             "maxItems": 12,
-            "description": "English-only vocabulary used by clients during the live interview."
+            "description": "Legacy session-wide English vocabulary. New sessions mirror the opening question's words here for older clients; question-specific words are on turns and candidates."
           },
           "usefulVocabulary": {
             "type": "array",
@@ -5141,14 +5165,15 @@
               "$ref": "#/components/schemas/InterviewVocabularyItem"
             },
             "maxItems": 12,
-            "description": "Vocabulary with Russian translations for the preparation screen. Older sessions may return an empty array."
+            "description": "Legacy translated preparation vocabulary. New sessions return an empty array."
           },
           "candidates": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/InterviewCandidate"
             },
-            "description": "Prepared and adaptive questions available for future transitions; clients keep these hidden until selected."
+            "maxItems": 1,
+            "description": "The single prepared next question; clients keep it hidden until selected and may fetch its speech audio ahead of time."
           },
           "turns": {
             "type": "array",

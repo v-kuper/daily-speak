@@ -7,7 +7,7 @@ type GuidanceWordTickerProps = {
   words: string[];
 };
 
-const TICKER_SPEED_PX_PER_SECOND = 18;
+const TICKER_SPEED_PX_PER_SECOND = 14;
 
 export default function GuidanceWordTicker({ words }: GuidanceWordTickerProps) {
   const normalizedWords = useMemo(() => {
@@ -23,6 +23,7 @@ export default function GuidanceWordTicker({ words }: GuidanceWordTickerProps) {
         return true;
       });
   }, [words]);
+  const wordsKey = normalizedWords.join("\u0000");
   const trackRef = useRef<HTMLDivElement | null>(null);
   const frameRef = useRef<number | null>(null);
   const offsetRef = useRef(0);
@@ -78,12 +79,12 @@ export default function GuidanceWordTicker({ words }: GuidanceWordTickerProps) {
       }
       frameRef.current = null;
     };
-  }, [normalizedWords, paintOffset]);
+  }, [wordsKey, paintOffset]);
 
   useEffect(() => {
     offsetRef.current = 0;
     paintOffset(0);
-  }, [normalizedWords, paintOffset]);
+  }, [wordsKey, paintOffset]);
 
   if (normalizedWords.length === 0) {
     return null;
@@ -143,7 +144,7 @@ export default function GuidanceWordTicker({ words }: GuidanceWordTickerProps) {
   return (
     <div className="guidance-word-ticker">
       <div className="guidance-word-ticker-header">
-        <span>Useful words</span>
+        <span>Words for this question</span>
         <span>{status}</span>
       </div>
       <div

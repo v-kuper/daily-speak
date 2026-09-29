@@ -17,8 +17,8 @@ type ProcessingStore interface {
 	LoadTurn(context.Context, string) (TurnWork, bool, error)
 	LoadRefill(context.Context, string) (RefillWork, bool, error)
 	SaveTranscript(context.Context, workqueue.Job, string, string) (string, error)
-	SaveAdaptive(context.Context, workqueue.Job, string, int, string) (bool, error)
-	SaveRefill(context.Context, workqueue.Job, string, []string) (int, error)
+	SaveAdaptive(context.Context, workqueue.Job, string, int, GuidedQuestion) (bool, error)
+	SaveRefill(context.Context, workqueue.Job, string, GuidedQuestion) (int, error)
 	QueueWaitMs(context.Context, string) int64
 }
 
@@ -66,7 +66,7 @@ func (p *Processor) Process(ctx context.Context, job workqueue.Job) error {
 		if err := p.store.SavePreparation(ctx, job, work.SessionID, prepared); err != nil {
 			return err
 		}
-		logger.Info("prepare.completed", map[string]any{"queueWaitMs": queueWait, "generationMs": logging.ElapsedMs(started), "candidateCount": len(prepared.Questions)})
+		logger.Info("prepare.completed", map[string]any{"queueWaitMs": queueWait, "generationMs": logging.ElapsedMs(started), "candidateCount": 1})
 		return nil
 	case "turn":
 		work, required, err := p.store.LoadTurn(ctx, job.ResourceID)
@@ -104,25 +104,15 @@ func (p *Processor) Process(ctx context.Context, job workqueue.Job) error {
 			return nil
 		}
 		started := time.Now()
-		question, err := p.generator.Followup(ctx, work.Topic, work.EnglishLevel, work.History, work.AvoidQuestions)
+		guided, err := p.generator.Followup(ctx, work.Topic, work.EnglishLevel, work.History, work.AvoidQuestions)
 		generationMs := logging.ElapsedMs(started)
 		if err != nil {
 			logger.Warn("turn.generation_failed", map[string]any{"queueWaitMs": queueWait, "transcriptionMs": transcriptionMs, "generationMs": generationMs})
 			return err
 		}
-		added, err := p.store.SaveAdaptive(ctx, job, work.SessionID, work.Seq, question)
+		added, err := p.store.SaveAdaptive(ctx, job, work.SessionID, work.Seq, guided)
 		if err != nil {
 			return err
-		}
-		if !added {
-			work.AvoidQuestions = append(work.AvoidQuestions, question)
-			if retryQuestion, retryErr := p.generator.Followup(ctx, work.Topic, work.EnglishLevel, work.History, work.AvoidQuestions); retryErr == nil {
-				added, err = p.store.SaveAdaptive(ctx, job, work.SessionID, work.Seq, retryQuestion)
-				if err != nil {
-					return err
-				}
-			}
-			generationMs = logging.ElapsedMs(started)
 		}
 		logger.Info("turn.completed", map[string]any{"queueWaitMs": queueWait, "transcriptionMs": transcriptionMs, "generationMs": generationMs, "adaptiveAdded": added})
 		return nil
@@ -132,12 +122,12 @@ func (p *Processor) Process(ctx context.Context, job workqueue.Job) error {
 			return err
 		}
 		started := time.Now()
-		questions, err := p.generator.Refill(ctx, work.Topic, work.EnglishLevel, work.History, work.AvoidQuestions)
+		guided, err := p.generator.Refill(ctx, work.Topic, work.EnglishLevel, work.History, work.AvoidQuestions)
 		if err != nil {
 			logger.Warn("refill.failed", map[string]any{"queueWaitMs": queueWait, "generationMs": logging.ElapsedMs(started)})
 			return err
 		}
-		added, err := p.store.SaveRefill(ctx, job, work.SessionID, questions)
+		added, err := p.store.SaveRefill(ctx, job, work.SessionID, guided)
 		if err != nil {
 			return err
 		}

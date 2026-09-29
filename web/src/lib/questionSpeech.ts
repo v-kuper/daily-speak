@@ -118,6 +118,12 @@ export class QuestionSpeechPlayer {
     }
   }
 
+  async preload(question: string, load: () => Promise<ArrayBuffer>): Promise<void> {
+    const key = normalizedQuestion(question);
+    if (this.cache.has(key)) return;
+    await this.loadOnce(key, load);
+  }
+
   async play(question: string, load: () => Promise<ArrayBuffer>, onPlaying: () => void): Promise<void> {
     this.stop();
     const generation = this.generation;

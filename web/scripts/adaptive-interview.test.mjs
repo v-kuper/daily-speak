@@ -18,7 +18,7 @@ const {
   rotateFailedInterviewSegment,
 } = load(sourcePath("../src/lib/interviewFlow.ts"));
 const { encodeWav, InterviewTurnCapture, pcmHasSpeechActivity } = load(sourcePath("../src/lib/interviewTurnCapture.ts"));
-const { mergeInterviewTranscriptStatus, parseInterviewVocabulary, preserveLiveInterviewTurn } = load(sourcePath("../src/lib/interviewSession.ts"));
+const { mergeInterviewTranscriptStatus, parseQuestionUsefulWords, preserveLiveInterviewTurn } = load(sourcePath("../src/lib/interviewSession.ts"));
 const { buildQuestionSpeechRequest, QuestionSpeechPlayer } = load(sourcePath("../src/lib/questionSpeech.ts"));
 const { parseInterviewTurns } = load(sourcePath("../src/lib/interviewTimeline.ts"));
 const { createInterviewRecovery, mayAbandonInterview, recoverPreviousInterview } = load(sourcePath("../src/lib/interviewRecovery.ts"));
@@ -85,18 +85,11 @@ test("server polling preserves local captions until a canonical transcript is re
   assert.equal(mergeInterviewTranscriptStatus("queued", "pending"), "queued");
 });
 
-test("interview preparation keeps translated vocabulary while older sessions fall back to English words", () => {
-  assert.deepEqual(parseInterviewVocabulary([
-    { word: "  book a room ", translation: " забронировать номер " },
-    { word: "route", translation: "маршрут" },
-  ], ["route", "ticket"]), [
-    { word: "book a room", translation: "забронировать номер" },
-    { word: "route", translation: "маршрут" },
-    { word: "ticket", translation: "" },
+test("question words are normalized and bounded", () => {
+  assert.deepEqual(parseQuestionUsefulWords([" plan ", "PLAN", "in   advance", "book", null]), [
+    "plan", "in advance", "book",
   ]);
-  assert.deepEqual(parseInterviewVocabulary(undefined, ["journey"]), [
-    { word: "journey", translation: "" },
-  ]);
+  assert.equal(parseQuestionUsefulWords(Array.from({ length: 12 }, (_, index) => `word ${index}`)).length, 10);
 });
 
 test("navigation cancels an unsaved interview but protects an ongoing or completed save", () => {
@@ -209,13 +202,14 @@ test("Next keeps the current answer open when no question is ready", () => {
   };
   assert.equal(advanceInterviewTimeline(session, new Set(), 5000), null);
   assert.equal(session.turns[0].endedAtMs, null);
-  session.candidates = [{ id: "ready-1", question: "Where would you go first?" }];
+  session.candidates = [{ id: "ready-1", question: "Where would you go first?", usefulWords: ["destination", "choose", "because"] }];
   assert.equal(advanceInterviewTimeline(session, new Set(), 100), null, "rapid Next must not create an empty answer");
   assert.equal(advanceInterviewTimeline(session, new Set(), 5000, 5000), null, "Next cannot open a question at the session limit");
   const advance = advanceInterviewTimeline(session, new Set(), 5000);
   assert.equal(advance.session.turns[0].endedAtMs, 5000);
   assert.equal(advance.session.turns[1].askedAtMs, 5000);
   assert.equal(advance.session.turns[1].question, "Where would you go first?");
+  assert.deepEqual(advance.session.turns[1].usefulWords, ["destination", "choose", "because"]);
   assert.equal(session.turns[0].endedAtMs, null);
 });
 
@@ -236,7 +230,7 @@ test("a prepared Next commits only after its audio boundary and preserves late s
       liveTranscriptFinal: "I went",
       liveTranscriptInterim: "",
     }],
-    candidates: [{ id: "candidate-2", question: "What did you enjoy?" }],
+    candidates: [{ id: "candidate-2", question: "What did you enjoy?", usefulWords: ["explore", "memorable"] }],
     currentTurnSeq: 1,
     maxDurationSeconds: 600,
   };
@@ -257,6 +251,7 @@ test("a prepared Next commits only after its audio boundary and preserves late s
   assert.equal(committed.turns[0].endedAtMs, 1200);
   assert.equal(committed.turns[0].liveTranscriptFinal, "I went to Rome.");
   assert.equal(committed.turns[1].question, "What did you enjoy?");
+  assert.deepEqual(committed.turns[1].usefulWords, ["explore", "memorable"]);
   assert.deepEqual(committed.candidates, []);
 });
 
@@ -590,6 +585,7 @@ test("question playback generates identical audio once and replays the cached by
   const previousAudioContext = globalThis.AudioContext;
   let contexts = 0;
   let closes = 0;
+  let starts = 0;
   class AudioContextFake {
     constructor() { contexts += 1; }
     destination = {};
@@ -603,7 +599,7 @@ test("question playback generates identical audio once and replays the cached by
         connect() {},
         disconnect() {},
         stop() {},
-        start() { queueMicrotask(() => this.onended?.()); },
+        start() { starts += 1; queueMicrotask(() => this.onended?.()); },
       };
     }
   }
@@ -622,15 +618,18 @@ test("question playback generates identical audio once and replays the cached by
     generations += 1;
     return new Promise((resolve) => { resolveAudio = resolve; });
   };
+  const preload = player.preload("How was your trip?", load);
+  assert.equal(starts, 0, "prefetching must not play a hidden question");
   const first = player.play("How was your trip?", load, () => undefined);
   await new Promise((resolve) => setImmediate(resolve));
   player.stop();
   const second = player.play("  How was   your trip? ", load, () => undefined);
   assert.equal(generations, 1, "a second click must share the in-flight generation");
   resolveAudio(new Uint8Array([1, 2, 3]).buffer);
-  await Promise.all([first, second]);
+  await Promise.all([preload, first, second]);
   await player.play("How was your trip?", load, () => undefined);
   assert.equal(generations, 1, "a replay must use the cached audio bytes");
+  assert.equal(starts, 2, "the prepared audio must play when requested and on replay");
   assert.equal(contexts, 1, "automatic playback must reuse the unlocked context");
   player.dispose();
   assert.equal(closes, 1);
