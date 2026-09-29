@@ -648,6 +648,29 @@ button {
   line-height: 1.35;
 }
 
+.topic-choice {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.topic-choice .topic-btn {
+  flex: 1;
+}
+
+.topic-dismiss-btn {
+  min-width: 44px;
+  border: 1px solid var(--border-soft);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.48);
+  cursor: pointer;
+}
+
+.topic-dismiss-btn:hover:not(:disabled) {
+  border-color: rgba(240, 95, 47, 0.34);
+  background: rgba(255, 255, 255, 0.72);
+}
+
 .topic-btn:hover,
 .recording-card:hover,
 .profile-menu-item:hover {

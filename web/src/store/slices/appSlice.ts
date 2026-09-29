@@ -1780,6 +1780,9 @@ const appSlice = createSlice({
     clearQuestionsError: (state) => {
       state.questionsError = null;
     },
+    hideDailyQuestion: (state, action: PayloadAction<string>) => {
+      state.topics = state.topics.filter((question) => question !== action.payload);
+    },
     clearTopicGuidanceError: (state) => {
       state.topicGuidanceError = null;
     },
@@ -2595,6 +2598,7 @@ const appSlice = createSlice({
 
 export const {
   clearQuestionsError,
+  hideDailyQuestion,
   clearTopicGuidanceError,
   clearStudyError,
   setPhotoUploadError,

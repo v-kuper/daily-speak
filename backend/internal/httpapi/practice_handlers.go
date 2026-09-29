@@ -28,15 +28,26 @@ func (s *Server) handleDailyQuestions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	level, ok := s.practiceEnglishLevel(w, r, values.Get("level"))
+	user, ok := s.optionalAccountUserV1(w, r)
 	if !ok {
 		return
 	}
+	level := learner.NormalizeEnglishLevel(values.Get("level"))
+	userID := ""
+	if user != nil {
+		level = user.EnglishLevel
+		userID = user.ID
+	}
 	result, err := s.practiceGenerator.DailyQuestions(r.Context(), practice.DailyQuestionsInput{
+		UserID:  userID,
 		DateKey: dateKey, RefreshToken: values.Get("refresh"), EnglishLevel: level,
 		Interests: normalizeURLInterests(values), AvoidQuestions: values["avoid"],
 	})
 	if err != nil {
+		if errors.Is(err, practice.ErrHistoryUnavailable) {
+			writeV1Error(w, r, http.StatusServiceUnavailable, "question_history_unavailable", "Could not load question history")
+			return
+		}
 		writePracticeGenerationError(
 			w, r, err, practice.ErrQuestionsExhausted,
 			"Could not generate a sufficiently new set of questions. Try regenerate again.",
@@ -48,6 +59,29 @@ func (s *Server) handleDailyQuestions(w http.ResponseWriter, r *http.Request) {
 		"model": result.Meta.Model, "attempt": result.Meta.Attempt,
 	})
 	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) handleDismissDailyQuestion(w http.ResponseWriter, r *http.Request) {
+	identity, ok := s.requiredAccountIdentityV1(w, r)
+	if !ok {
+		return
+	}
+	var input struct {
+		Question string `json:"question"`
+	}
+	if !decodeIdentityJSON(w, r, &input) {
+		return
+	}
+	err := s.practiceGenerator.DismissQuestion(r.Context(), identity.User.ID, input.Question)
+	if errors.Is(err, practice.ErrInvalidQuestion) {
+		writeV1Error(w, r, http.StatusBadRequest, "invalid_question", "Question must be between 1 and 300 characters")
+		return
+	}
+	if err != nil {
+		writeV1Error(w, r, http.StatusServiceUnavailable, "question_history_unavailable", "Could not save question preference")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) handleTopicGuidance(w http.ResponseWriter, r *http.Request) {

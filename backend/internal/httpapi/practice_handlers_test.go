@@ -39,3 +39,16 @@ func TestDailyQuestionsUsesServerAIClient(t *testing.T) {
 		t.Fatalf("injected client calls = %d, want 1", client.calls)
 	}
 }
+
+func TestDismissDailyQuestionRequiresAccount(t *testing.T) {
+	handler := newTestServer(Config{}).Handler()
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/practice/daily-questions/dismiss", strings.NewReader(`{"question":"What food do you like?"}`))
+	request.Header.Set("Content-Type", "application/json")
+
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+}

@@ -15,6 +15,8 @@ const (
 
 var (
 	ErrInvalidDateKey     = errors.New("date must use YYYY-MM-DD format")
+	ErrInvalidQuestion    = errors.New("question must be between 1 and 300 characters")
+	ErrHistoryUnavailable = errors.New("question history is unavailable")
 	ErrTopicRequired      = errors.New("topic is required")
 	ErrTopicTooLong       = errors.New("topic is too long")
 	ErrQuestionsExhausted = errors.New("could not generate sufficiently new questions")
@@ -24,8 +26,15 @@ var (
 
 type Generator interface {
 	DailyQuestions(context.Context, DailyQuestionsInput) (DailyQuestionsResult, error)
+	DismissQuestion(context.Context, string, string) error
 	TopicGuidance(context.Context, TopicGuidanceInput) (TopicGuidanceResult, error)
 	StudyPack(context.Context, StudyPackInput) (StudyPackResult, error)
+}
+
+// QuestionHistory is the persistence port for answered and explicitly dismissed questions.
+type QuestionHistory interface {
+	ListAvoidQuestions(context.Context, string) ([]string, error)
+	DismissQuestion(context.Context, string, string, string) error
 }
 
 // CompletionProvider is the outbound port used by the practice application
@@ -47,6 +56,7 @@ type Completion struct {
 }
 
 type DailyQuestionsInput struct {
+	UserID         string
 	DateKey        string
 	RefreshToken   string
 	EnglishLevel   string
@@ -94,10 +104,15 @@ type StudyPackResult struct {
 
 type Service struct {
 	provider CompletionProvider
+	history  QuestionHistory
 }
 
-func NewService(provider CompletionProvider) *Service {
-	return &Service{provider: provider}
+func NewService(provider CompletionProvider, history ...QuestionHistory) *Service {
+	service := &Service{provider: provider}
+	if len(history) > 0 {
+		service.history = history[0]
+	}
+	return service
 }
 
 func chooseFloat(condition bool, ifTrue float64, ifFalse float64) float64 {

@@ -145,9 +145,13 @@ client owns the selectable interest catalog and maps saved interest IDs to
 theme names before calling the practice API. The API response counts are
 documented in OpenAPI.
 
-Daily question generation receives recent answered questions from the loaded
-recording history so the existing generation call can choose new themes and
-angles. Adaptive interview generation uses the English level stored on the
+Daily question generation reads the authenticated account's full answered-question
+history from interview turns and legacy recordings, plus explicit question
+dismissals from PostgreSQL. Recent exclusions guide the prompt; all exclusions
+are checked before returning a generated set. The web client can send additional
+recent questions, remembers recently presented options during the open page, and
+dismisses an unwanted suggestion permanently for that account.
+Adaptive interview generation uses the English level stored on the
 session as a hard CEFR ceiling. The same generation call may simplify below
 that ceiling when the latest answer is short, fragmented, or disconnected; it
 does not run a second model call to classify or validate difficulty.

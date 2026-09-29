@@ -61,12 +61,14 @@ import {
 } from "../lib/interviewFlow";
 import { newIdempotencyKey } from "../lib/mediaUpload";
 import { collectRecentAnsweredQuestions, questionHistoryKey } from "../lib/dailyQuestionHistory";
+import { dismissDailyQuestion } from "../lib/dailyQuestionPreference";
 import { formatTime, toDateKey } from "../lib/utils";
 import { useAppDispatch, useAppSelector, useAppStore } from "../store/hooks";
 import {
   backToQuestionsList,
   clearPhotoForPractice,
   clearQuestionsError,
+  hideDailyQuestion,
   fetchDailyQuestions,
   MAX_AUTHENTICATED_RECORDING_SECONDS,
   PHOTO_PRACTICE_MAX_BYTES,
@@ -192,6 +194,8 @@ export default function SpeakScreen() {
   const [questionSpeechMuted, setQuestionSpeechMuted] = useState(false);
   const [openingAudioError, setOpeningAudioError] = useState<string | null>(null);
   const [interviewRefreshToken, setInterviewRefreshToken] = useState(0);
+  const [dismissingQuestion, setDismissingQuestion] = useState<string | null>(null);
+  const [questionPreferenceError, setQuestionPreferenceError] = useState<string | null>(null);
   const {
     speakState,
     selectedTopic,
@@ -224,6 +228,19 @@ export default function SpeakScreen() {
     () => questionHistoryKey(recentAnsweredQuestions),
     [recentAnsweredQuestions],
   );
+  const recentlyPresentedQuestionsRef = useRef<string[]>([]);
+
+  useEffect(() => {
+    const seen = new Set<string>();
+    recentlyPresentedQuestionsRef.current = [...topics, ...recentlyPresentedQuestionsRef.current]
+      .filter((question) => {
+        const key = question.trim().toLocaleLowerCase();
+        if (!key || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .slice(0, 20);
+  }, [topics]);
 
   const sessionLimitSeconds = MAX_AUTHENTICATED_RECORDING_SECONDS;
 
@@ -1897,10 +1914,33 @@ export default function SpeakScreen() {
         force: true,
         refreshToken: String(Date.now()),
         interestIds: selectedInterestIds,
-        avoidQuestions: [...topics, ...recentAnsweredQuestions],
+        avoidQuestions: [...recentlyPresentedQuestionsRef.current, ...recentAnsweredQuestions],
         englishLevel: selectedEnglishLevel
       })
     );
+  };
+
+  const onDismissQuestion = async (question: string) => {
+    if (dismissingQuestion || questionsStatus === "loading") return;
+    setQuestionPreferenceError(null);
+    setDismissingQuestion(question);
+    try {
+      await dismissDailyQuestion(question);
+      const previousQuestions = [...recentlyPresentedQuestionsRef.current];
+      dispatch(hideDailyQuestion(question));
+      void dispatch(fetchDailyQuestions({
+        dateKey: toDateKey(new Date()),
+        force: true,
+        refreshToken: String(Date.now()),
+        interestIds: selectedInterestIds,
+        avoidQuestions: [...previousQuestions, ...recentAnsweredQuestions],
+        englishLevel: selectedEnglishLevel,
+      }));
+    } catch (error) {
+      setQuestionPreferenceError(error instanceof Error ? error.message : "Could not save your question preference.");
+    } finally {
+      setDismissingQuestion(null);
+    }
   };
 
   const onRefreshTopicGuidance = () => {
@@ -1990,9 +2030,23 @@ export default function SpeakScreen() {
                 </div>
               ))
             ) : topics.map((topic) => (
-              <button key={topic} className="topic-btn" onClick={() => onSelectTopic(topic)}>
-                {topic}
-              </button>
+              <div key={topic} className="topic-choice">
+                <button className="topic-btn" onClick={() => onSelectTopic(topic)}>
+                  {topic}
+                </button>
+                {isAuthenticated && (
+                  <button
+                    type="button"
+                    className="topic-dismiss-btn"
+                    aria-label={`Do not suggest again: ${topic}`}
+                    title="Do not suggest this question again"
+                    disabled={dismissingQuestion !== null || questionsStatus === "loading"}
+                    onClick={() => void onDismissQuestion(topic)}
+                  >
+                    {dismissingQuestion === topic ? "…" : "👎"}
+                  </button>
+                )}
+              </div>
             ))}
             {showAddTopicInput ? (
               <form
@@ -2027,6 +2081,7 @@ export default function SpeakScreen() {
             <div className="profile-value">No daily questions yet. You can still add your own.</div>
           )}
           {questionsError && <div className="auth-error top-spaced">{questionsError}</div>}
+          {questionPreferenceError && <div className="auth-error top-spaced" role="alert">{questionPreferenceError}</div>}
           <label className="topic-btn photo-topic-btn">
             <span>Describe a photo</span>
             <span className="profile-value">Choose an image and start recording</span>

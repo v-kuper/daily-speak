@@ -54,12 +54,13 @@ const documentedAPIRoutes = [
   "/api/v1/media/uploads/{uploadId}/parts", "/api/v1/media/uploads/{uploadId}/complete",
   "/api/v1/media/{assetId}/download", "/api/v1/media/uploads/{uploadId}/parts/{partNumber}",
   "/api/v1/media/local/assets/{assetId}/content",
-  "/api/v1/practice/daily-questions", "/api/v1/practice/topic-guidance", "/api/v1/practice/study-words",
+  "/api/v1/practice/daily-questions", "/api/v1/practice/daily-questions/dismiss", "/api/v1/practice/topic-guidance", "/api/v1/practice/study-words",
   "/api/v1/profile", "/api/v1/profile/interests", "/api/v1/profile/english-level",
   "/api/v1/subscription",
 ];
 
 const protectedOperations = [
+  ["/api/v1/practice/daily-questions/dismiss", "post"],
   ["/api/v1/interviews", "post"], ["/api/v1/interviews/{interviewId}", "get"],
   ["/api/v1/interviews/{interviewId}/start", "post"],
   ["/api/v1/interviews/{interviewId}/cancel", "post"],
@@ -80,6 +81,7 @@ const protectedOperations = [
 ];
 
 const mutationBodies = [
+  ["/api/v1/practice/daily-questions/dismiss", "post", "application/json"],
   ["/api/v1/auth/register", "post", "application/json"], ["/api/v1/auth/login", "post", "application/json"],
   ["/api/v1/auth/refresh", "post", "application/json"],
   ["/api/v1/guest/previews", "post", "application/json"],
@@ -187,6 +189,7 @@ test("OpenAPI inventories every supported API route", () => {
     ["/api/v1/media/uploads/{uploadId}/parts/{partNumber}", /mux\.HandleFunc\("\/api\/v1\/media\/uploads\/"/],
     ["/api/v1/media/local/assets/{assetId}/content", /mux\.HandleFunc\("\/api\/v1\/media\/local\/"/],
     ["/api/v1/practice/daily-questions", /path == "\/api\/v1\/practice\/daily-questions"/],
+    ["/api/v1/practice/daily-questions/dismiss", /path == "\/api\/v1\/practice\/daily-questions\/dismiss"/],
     ["/api/v1/profile", /path == "\/api\/v1\/profile"/],
     ["/api/v1/subscription", /path == "\/api\/v1\/subscription"/],
   ];

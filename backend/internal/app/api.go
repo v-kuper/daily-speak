@@ -53,7 +53,7 @@ func NewAPI(config APIConfig) *httpapi.Server {
 	}
 	practiceGenerator := config.PracticeGenerator
 	if practiceGenerator == nil {
-		practiceGenerator = practice.NewService(practiceollama.New(aiClient))
+		practiceGenerator = practice.NewService(practiceollama.New(aiClient), practice.NewSQLQuestionHistoryRepository(config.DB))
 	}
 	recordingService := recording.NewAnalysisService(recordingollama.New(aiClient), recording.AnalysisConfigFromEnv())
 	recordingAnalyzer := config.RecordingAnalyzer

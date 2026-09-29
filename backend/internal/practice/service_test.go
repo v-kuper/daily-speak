@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -14,6 +15,21 @@ type fakeCompletionProvider struct {
 	err       error
 	calls     int
 	requests  []CompletionRequest
+}
+
+type fakeQuestionHistory struct {
+	questions []string
+	listErr   error
+	dismissed []string
+}
+
+func (f *fakeQuestionHistory) ListAvoidQuestions(_ context.Context, _ string) ([]string, error) {
+	return f.questions, f.listErr
+}
+
+func (f *fakeQuestionHistory) DismissQuestion(_ context.Context, _ string, question, key string) error {
+	f.dismissed = append(f.dismissed, question, key)
+	return nil
 }
 
 func (f *fakeCompletionProvider) Complete(_ context.Context, request CompletionRequest) (Completion, error) {
@@ -141,6 +157,61 @@ func TestDailyQuestionsAvoidsMoreThanTheLastThreeQuestions(t *testing.T) {
 	}
 	if !strings.Contains(provider.requests[0].UserPrompt, "Old fourth?") {
 		t.Fatal("previous fourth question was omitted from the prompt")
+	}
+}
+
+func TestDailyQuestionsChecksEntireAccountHistoryBeyondPromptWindow(t *testing.T) {
+	history := &fakeQuestionHistory{questions: make([]string, 0, 51)}
+	for i := 0; i < 50; i++ {
+		history.questions = append(history.questions, fmt.Sprintf("Previous question %d?", i))
+	}
+	history.questions = append(history.questions, "What food do you like?")
+	provider := &fakeCompletionProvider{responses: []Completion{
+		{Content: `{"questions":["What food do you like?","What did you learn?","What comes next?"]}`},
+		{Content: `{"questions":["Where do you go after work?","What did you learn?","What comes next?"]}`},
+	}}
+	result, err := NewService(provider, history).DailyQuestions(context.Background(), DailyQuestionsInput{
+		UserID: "user-1", DateKey: "2026-09-27",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if provider.calls != 2 || result.Questions[0] != "Where do you go after work?" {
+		t.Fatalf("calls = %d, questions = %#v", provider.calls, result.Questions)
+	}
+	if strings.Contains(provider.requests[0].UserPrompt, "What food do you like?") {
+		t.Fatal("old question should be validated without expanding the prompt indefinitely")
+	}
+	if !strings.Contains(provider.requests[1].UserPrompt, "What food do you like?") {
+		t.Fatal("rejected candidate should guide the retry")
+	}
+}
+
+func TestDailyQuestionsStopsWhenAccountHistoryCannotBeLoaded(t *testing.T) {
+	provider := &fakeCompletionProvider{}
+	history := &fakeQuestionHistory{listErr: errors.New("database unavailable")}
+	_, err := NewService(provider, history).DailyQuestions(context.Background(), DailyQuestionsInput{
+		UserID: "user-1", DateKey: "2026-09-27",
+	})
+	if !errors.Is(err, ErrHistoryUnavailable) || provider.calls != 0 {
+		t.Fatalf("error = %v, provider calls = %d", err, provider.calls)
+	}
+}
+
+func TestDismissQuestionPersistsNormalizedQuestionAndRejectsInvalidInput(t *testing.T) {
+	history := &fakeQuestionHistory{}
+	service := NewService(&fakeCompletionProvider{}, history)
+	if err := service.DismissQuestion(context.Background(), "user-1", "  What food do you like  "); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(history.dismissed, []string{"What food do you like?", "what food enjoy"}) {
+		t.Fatalf("dismissed = %#v", history.dismissed)
+	}
+	if err := service.DismissQuestion(context.Background(), "user-1", "   "); !errors.Is(err, ErrInvalidQuestion) {
+		t.Fatalf("invalid question error = %v", err)
+	}
+	if err := service.DismissQuestion(context.Background(), "user-1", "?"); !errors.Is(err, ErrInvalidQuestion) {
+		t.Fatalf("punctuation-only question error = %v", err)
 	}
 }
 

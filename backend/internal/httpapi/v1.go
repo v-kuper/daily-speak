@@ -103,6 +103,8 @@ func (s *Server) dispatchV1(w http.ResponseWriter, r *http.Request) {
 		s.routeRecordingV1(w, r, strings.TrimPrefix(path, "/api/v1/recordings/"))
 	case path == "/api/v1/practice/daily-questions" && r.Method == http.MethodGet:
 		s.handleDailyQuestions(w, r)
+	case path == "/api/v1/practice/daily-questions/dismiss" && r.Method == http.MethodPost:
+		s.handleDismissDailyQuestion(w, r)
 	case path == "/api/v1/practice/topic-guidance" && r.Method == http.MethodGet:
 		s.handleTopicGuidance(w, r)
 	case path == "/api/v1/practice/study-words" && r.Method == http.MethodGet:
@@ -130,7 +132,7 @@ func (s *Server) dispatchV1(w http.ResponseWriter, r *http.Request) {
 
 func isApplicationV1Resource(path string) bool {
 	switch path {
-	case "/api/v1/practice/daily-questions", "/api/v1/practice/topic-guidance", "/api/v1/practice/study-words",
+	case "/api/v1/practice/daily-questions", "/api/v1/practice/daily-questions/dismiss", "/api/v1/practice/topic-guidance", "/api/v1/practice/study-words",
 		"/api/v1/profile", "/api/v1/profile/interests", "/api/v1/profile/english-level", "/api/v1/subscription":
 		return true
 	default:

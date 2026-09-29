@@ -1285,7 +1285,7 @@
           "AI"
         ],
         "summary": "Generate daily speaking questions",
-        "description": "Returns three distinct opening questions. Each can start a longer interview about one recognizable interest theme. Uses an optional Bearer access token. If authenticated, the user's saved English level overrides the `level` query parameter.",
+        "description": "Returns three distinct opening questions. Each can start a longer interview about one recognizable interest theme. Uses an optional Bearer access token. If authenticated, the user's saved English level overrides the `level` query parameter, and answered or dismissed questions from the account's full history are excluded.",
         "security": [
           {
             "bearerAuth": []
@@ -1311,7 +1311,7 @@
           {
             "name": "avoid",
             "in": "query",
-            "description": "Previous opening questions to avoid; may be repeated. The generator considers up to 20 distinct questions.",
+            "description": "Additional opening questions to avoid; may be repeated. The generator considers up to 20 distinct client-supplied questions in addition to the authenticated account's full answered and dismissed question history.",
             "schema": {
               "type": "array",
               "items": {
@@ -1331,6 +1331,65 @@
           },
           "502": {
             "$ref": "#/components/responses/V1BadGateway"
+          },
+          "503": {
+            "$ref": "#/components/responses/V1ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/api/v1/practice/daily-questions/dismiss": {
+      "post": {
+        "tags": [
+          "AI"
+        ],
+        "summary": "Never suggest an opening question again",
+        "description": "Saves a question exclusion for the authenticated account. Repeating the same request is safe.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RequestIdHeader"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "question"
+                ],
+                "properties": {
+                  "question": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 300
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "$ref": "#/components/responses/V1NoContent"
+          },
+          "400": {
+            "$ref": "#/components/responses/V1BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/V1Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/V1Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/V1ServiceUnavailable"
           }
         }
       }
