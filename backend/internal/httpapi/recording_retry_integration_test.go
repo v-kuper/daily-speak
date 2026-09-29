@@ -46,6 +46,8 @@ func (client *retryAIClient) PostChat(ctx context.Context, body any) (ai.ChatRes
 	switch {
 	case strings.Contains(prompt, "adjudicator, not an error detector"):
 		return ai.ChatResponse{Response: `{"decisions":{}}`}, nil
+	case strings.Contains(prompt, "Identify up to three genuine strengths"):
+		return ai.ChatResponse{Response: `{"strengths":[]}`}, nil
 	case strings.Contains(prompt, "Rewrite the transcript as natural conversational English"):
 		return ai.ChatResponse{Response: `{"correctedTranscript":"I went home yesterday."}`}, nil
 	default:
@@ -199,7 +201,7 @@ func TestRecordingRetryAnalysisClaimsOnceAndContinuesToReady(t *testing.T) {
 	}
 	close(client.release)
 	recording := fixture.waitForStatus(t, "ready")
-	if recording.CorrectedTranscript != "I went home yesterday." || client.callCount() != 9 {
+	if recording.CorrectedTranscript != "I went home yesterday." || client.callCount() != 10 {
 		t.Fatalf("recording=%#v calls=%d", recording, client.callCount())
 	}
 	fixture.waitForShadowingStatus(t, "ready")
