@@ -57,6 +57,7 @@ func TestIssuerMapsCartesiaProtocolToInterviewCredential(t *testing.T) {
 	query := endpoint.Query()
 	if query.Get("region") != "test" || query.Get("model") != "ink-2" ||
 		query.Get("encoding") != "pcm_s16le" || query.Get("sample_rate") != "16000" ||
+		query.Get("language") != "en" ||
 		query.Get("cartesia_version") != "test-version" {
 		t.Fatalf("unexpected WebSocket query: %v", query)
 	}

@@ -8,9 +8,10 @@ class InterviewCaptureProcessor extends AudioWorkletProcessor {
     this.sourceFrames = 0;
     this.sum = 0;
     this.count = 0;
-    // Send 64 ms of 16 kHz PCM at a time so live captions reach Cartesia more
-    // often without creating an excessive main-thread message rate.
-    this.buffer = new Int16Array(1024);
+    // Cartesia recommends roughly 100 ms of realtime audio per message.
+    // Keep the resampler continuous across messages; only a question boundary
+    // flushes a shorter tail so adjacent sounds are not dropped.
+    this.buffer = new Int16Array(Math.round(this.targetRate / 10));
     this.length = 0;
     this.port.onmessage = (event) => {
       if (event.data?.type !== "boundary") return;

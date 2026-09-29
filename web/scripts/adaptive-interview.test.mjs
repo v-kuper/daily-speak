@@ -985,3 +985,32 @@ test("worklet closes each answer at its own boundary", () => {
   assert.ok(pcm[0].every((sample) => sample > 16000));
   assert.ok(pcm[1].every((sample) => sample < -8000));
 });
+
+test("worklet streams 100 ms packets and preserves the shorter boundary tail", () => {
+  const messages = [];
+  let Processor;
+  class AudioWorkletProcessor {
+    constructor() {
+      this.port = { onmessage: null, postMessage: (message) => messages.push(message) };
+    }
+  }
+  runInNewContext(readFileSync(resolve("public/interview-capture-worklet.js"), "utf8"), {
+    AudioWorkletProcessor,
+    registerProcessor: (_name, value) => { Processor = value; },
+    sampleRate: 48000,
+    Int16Array,
+    Math,
+  });
+  const processor = new Processor();
+  processor.process([[new Float32Array(4800).fill(0.5)]]);
+  processor.process([[new Float32Array(300).fill(0.25)]]);
+  processor.port.onmessage({ data: { type: "boundary", id: 1 } });
+  processor.process([[new Float32Array(4800).fill(-0.5)]]);
+
+  const pcm = messages.filter((message) => message.type === "samples").map((message) => message.pcm);
+  assert.deepEqual(pcm.map((chunk) => chunk.length), [1600, 100, 1600]);
+  assert.ok(pcm[0].every((sample) => sample > 16000));
+  assert.ok(pcm[1].every((sample) => sample > 8000));
+  assert.ok(pcm[2].every((sample) => sample < -16000));
+  assert.deepEqual(messages.filter((message) => message.type === "boundary").map((message) => message.id), [1]);
+});

@@ -170,7 +170,12 @@ PCM to Cartesia over a realtime WebSocket using a short-lived, STT-scoped token
 issued by the API. The browser persists each final answer transcript through
 the interview API and records one continuous audio file for playback. Presented
 question text and answer boundaries remain session data rather than learner
-speech.
+speech. The browser streams approximately 100 ms PCM packets continuously,
+flushes the remaining samples at each question boundary, and displays the
+latest interim words as they arrive so longer answers do not hide new text
+behind the two-line caption limit. The manual STT connection specifies English
+and finalizes only at the explicit answer boundary so late provider deltas
+remain attached to the correct question.
 Displayed questions are pronounced automatically through Cartesia's bytes TTS
 endpoint unless the learner mutes them. The API issues a separate short-lived,
 TTS-only token for an owned, active interview. The browser fetches and caches

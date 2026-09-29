@@ -121,6 +121,7 @@ func (i *Issuer) IssueRealtimeCredential(ctx context.Context, ttl time.Duration)
 	query.Set("model", realtimeModel)
 	query.Set("encoding", realtimeEncoding)
 	query.Set("sample_rate", "16000")
+	query.Set("language", "en")
 	query.Set("cartesia_version", i.apiVersion)
 	endpoint.RawQuery = query.Encode()
 	return interview.RealtimeTranscriptionCredential{

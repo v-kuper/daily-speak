@@ -996,6 +996,14 @@ export default function SpeakScreen() {
               (snapshot) => {
                 const { turnSeq, finalText, interimText } = snapshot;
                 if (!isCurrent() || interviewRef.current?.id !== session.id) return;
+                const visibleTurn = interviewRef.current.turns[interviewRef.current.turns.length - 1];
+                if (recordingEndedAtMsRef.current === null
+                  && visibleTurn?.seq === turnSeq && visibleTurn.endedAtMs === null) {
+                  interviewCaptionControllerRef.current?.update(snapshot);
+                }
+                const matchingTurn = interviewRef.current.turns.find((turn) => turn.seq === turnSeq);
+                if (!matchingTurn || matchingTurn.transcriptStatus === "ready"
+                  || (matchingTurn.liveTranscriptFinal === finalText && matchingTurn.liveTranscriptInterim === interimText)) return;
                 updateInterview((current) => current?.id === session.id ? {
                   ...current,
                   turns: current.turns.map((turn) => {
@@ -1007,11 +1015,6 @@ export default function SpeakScreen() {
                     };
                   }),
                 } : current);
-                const visibleTurn = interviewRef.current?.turns[interviewRef.current.turns.length - 1];
-                if (recordingEndedAtMsRef.current === null
-                  && visibleTurn?.seq === turnSeq && visibleTurn.endedAtMs === null) {
-                  interviewCaptionControllerRef.current?.update(snapshot);
-                }
               },
             );
             if (!isCurrent()) {

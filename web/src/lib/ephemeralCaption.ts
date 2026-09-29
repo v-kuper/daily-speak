@@ -1,4 +1,5 @@
 export const DEFAULT_LIVE_CAPTION_IDLE_MS = 1600;
+const MAX_VISIBLE_CAPTION_CHARS = 72;
 
 export type CaptionScheduler = {
   schedule: (callback: () => void, delayMs: number) => number;
@@ -17,7 +18,15 @@ const browserScheduler: CaptionScheduler = {
   cancel: (handle) => window.clearTimeout(handle),
 };
 
-/** Publishes only the latest recognized phrase and clears it after inactivity. */
+const latestCaptionWords = (value: string): string => {
+  const caption = value.trim();
+  if (caption.length <= MAX_VISIBLE_CAPTION_CHARS) return caption;
+  const tail = caption.slice(-MAX_VISIBLE_CAPTION_CHARS);
+  const firstWordBreak = tail.search(/\s/);
+  return firstWordBreak < 0 ? tail : tail.slice(firstWordBreak).trimStart();
+};
+
+/** Keeps the newest words within the two visible subtitle lines. */
 export class EphemeralCaptionController {
   private timer: number | null = null;
   private disposed = false;
@@ -60,7 +69,7 @@ export class EphemeralCaptionController {
     if (!changed && !snapshot.captionText.trim()) return;
 
     this.cancelTimer();
-    const caption = `${this.phraseFinalText}${snapshot.interimText}`.trim();
+    const caption = latestCaptionWords(`${this.phraseFinalText}${snapshot.interimText}`);
     this.publish(caption || null);
     if (!caption) return;
     this.timer = this.scheduler.schedule(() => {

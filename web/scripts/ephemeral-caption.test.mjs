@@ -68,6 +68,23 @@ test("stable deltas form one phrase, then a new phrase starts after silence", ()
   assert.equal(published.at(-1), "Today");
 });
 
+test("long answers keep the newest recognized words visible", () => {
+  const published = [];
+  const captions = new EphemeralCaptionController((caption) => published.push(caption), new FakeScheduler());
+
+  captions.beginTurn(1);
+  captions.update({
+    turnSeq: 1,
+    finalText: "The beginning of my answer contains many earlier words that should move out of view ",
+    interimText: "while I am speaking these newest words",
+    captionText: "while I am speaking these newest words",
+  });
+
+  assert.ok(published.at(-1).endsWith("while I am speaking these newest words"));
+  assert.ok(!published.at(-1).includes("The beginning"));
+  assert.ok(published.at(-1).length <= 72);
+});
+
 test("turn changes, clear, and dispose reject stale subtitle updates", () => {
   const published = [];
   const scheduler = new FakeScheduler();
