@@ -153,7 +153,7 @@ async function refreshRecording(store: AppStore, recordingId: string, force = fa
   if (!state.isAuthenticated || recordingId.startsWith("local-")) return;
   const { recording, error, shouldFetch, isLoading } = recordingDetailState(state, recordingId);
   // Pause on errors until the user retries. Reads happen at each tick, including after a 401.
-  if (!error && !isLoading && (force || shouldFetch || (recording && shouldPollRecording(recording.status, recording.shadowingStatus, recording.strengthsStatus)))) {
+  if (!error && !isLoading && (force || shouldFetch || (recording && shouldPollRecording(recording.status, recording.shadowingStatus)))) {
     await store.dispatch(fetchRecording(recordingId));
   }
 }

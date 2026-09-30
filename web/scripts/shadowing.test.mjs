@@ -49,22 +49,10 @@ test("recording polling covers main and shadowing processing", () => {
   assert.equal(shadowing.shouldPollRecording("ready", "ready"), false);
 });
 
-test("only experimental sample audio is replaced; corrected learner audio keeps its cache", () => {
-  const ready = { recordingStatus: "ready", correctedTranscript: "My answer.", shadowingStatus: "ready", requestLoading: false };
-  assert.equal(shadowing.shouldScheduleShadowing(ready), false);
-  assert.equal(shadowing.shouldScheduleShadowing({ ...ready, hasObsoleteScript: true }), true);
-  assert.equal(shadowing.shouldScheduleShadowing({ ...ready, hasObsoleteScript: false }), false);
-  assert.equal(shadowing.shouldScheduleShadowing({ ...ready, hasObsoleteScript: true, requestLoading: true }), false);
-});
-
-test("shadowing parses canonical question and sample-answer scripts", () => {
-  const script = { englishLevel: "a2", text: "Where do you work? I work in a shop.", turns: [{ sequence: 2, question: "Where do you work?", answerText: "I work in a shop." }] };
-  assert.deepEqual(shadowing.parseShadowingScript(script), script);
-  assert.equal(shadowing.parseShadowingScript(null), null);
-  assert.equal(shadowing.parseShadowingScript({ ...script, text: "Unrelated text." }), null);
-  assert.equal(shadowing.parseShadowingScript({ ...script, englishLevel: "wrong" }), null);
-  assert.equal(shadowing.parseShadowingScript({ ...script, turns: [] }), null);
-  assert.equal(shadowing.parseShadowingScript({ ...script, turns: [script.turns[0], script.turns[0]] }), null);
+test("ready learner audio reuses its cache", () => {
+  assert.equal(shadowing.shouldScheduleShadowing({
+    recordingStatus: "ready", correctedTranscript: "My answer.", shadowingStatus: "ready", requestLoading: false,
+  }), false);
 });
 
 test("shadowing processing becomes stale after five minutes", () => {

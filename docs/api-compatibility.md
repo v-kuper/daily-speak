@@ -67,7 +67,11 @@ Focused feedback adds optional `focusedFeedback` version 1 and optional immutabl
 question indexes to v1 recording and interview responses. Existing recordings
 retain their original analysis; new recordings project blockers into `suggestions`
 and up to three praises into `strengths` for older clients. Native tips and curated
-three-point micro lessons are available through the new field. Every new focus
+three-point micro lessons are available through the new field. The current web account
+client consumes only `focusedFeedback`; it does not parse or render the compatibility
+`suggestions`, `strengths`, `strengthsStatus`, or discontinued `shadowingScript`.
+Ready recordings without valid focused feedback offer explicit reanalysis through
+the existing idempotent endpoint instead of an older feedback layout. Every new focus
 uses mandatory one-based `occurrence` and exact answer-relative UTF-16 spans.
 All confidently identified errors are returned as blockers, without a numeric cap
 on errors or total items. Each retains its rule and explanation. At most one optional

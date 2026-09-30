@@ -1,16 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
-import { buildTranscriptSegments } from "../lib/transcriptHighlight";
-import ConversationTranscript from "./ConversationTranscript";
+import { useEffect, useState } from "react";
+import { guestPreviewSegments } from "../lib/guestPreviewFeedback";
 import {
   fetchGuestPreview,
   guestPreviewPath,
   type GuestPreview,
 } from "../lib/guestPreview";
 import { formatTime } from "../lib/utils";
-import SuggestionCard from "./SuggestionCard";
 
 const statusLabel = (preview: GuestPreview): string => {
   if (preview.state === "queued") return "Your preview is waiting for an analysis slot...";
@@ -50,10 +48,6 @@ export default function GuestPreviewScreen({ previewId }: { previewId: string })
     };
   }, [previewId, retryKey]);
 
-  const transcriptSegments = useMemo(
-    () => buildTranscriptSegments(preview?.transcript ?? "", preview?.corrections ?? []),
-    [preview?.corrections, preview?.transcript]
-  );
   const authPath = `/auth?returnTo=${encodeURIComponent(guestPreviewPath(previewId))}`;
 
   if (!preview && error) {
@@ -86,6 +80,9 @@ export default function GuestPreviewScreen({ previewId }: { previewId: string })
   const processing = preview.state === "queued" || preview.state === "processing";
   const ready = preview.state === "ready";
   const hasConversationTranscript = preview.practiceType === "topic" && preview.interviewTurns.length > 0;
+  const answers = hasConversationTranscript ? preview.interviewTurns.map(turn => turn.answerText) : [preview.transcript];
+  const renderAnswer = (text: string) => guestPreviewSegments(text, preview.corrections, answers).map((segment, index) =>
+    segment.isCorrection ? <mark key={index} className="guest-correction-mark">{segment.text}</mark> : <span key={index}>{segment.text}</span>);
 
   return (
     <section>
@@ -125,31 +122,27 @@ export default function GuestPreviewScreen({ previewId }: { previewId: string })
       <div className="transcript-section">
         <div className="section-title">{hasConversationTranscript ? "Conversation transcript" : "Transcript"}</div>
         {hasConversationTranscript ? (
-          <ConversationTranscript
-            turns={preview.interviewTurns}
-            suggestions={preview.corrections}
-            processing={processing}
-          />
-        ) : preview.transcript ? (
-          <div className="transcript-text">
-            {transcriptSegments.map((segment, index) => segment.isError ? (
-              <mark
-                key={`guest-transcript-${index}`}
-                className={`transcript-error-mark${segment.severity ? ` transcript-error-mark-${segment.severity}` : ""}`}
-              >
-                {segment.text}
-              </mark>
-            ) : <span key={`guest-transcript-${index}`}>{segment.text}</span>)}
+          <div className="transcript-text conversation-transcript">
+            {preview.interviewTurns.map(turn => <div className="conversation-turn" key={turn.sequence}>
+              <p className="conversation-line"><strong className="conversation-speaker">Interviewer:</strong> {turn.question}</p>
+              <p className="conversation-line conversation-answer"><strong className="conversation-speaker">You:</strong> {turn.answerText.trim()
+                ? renderAnswer(turn.answerText) : processing ? "Transcribing answer…" : "No answer was recorded."}</p>
+            </div>)}
           </div>
+        ) : preview.transcript ? (
+          <div className="transcript-text">{renderAnswer(preview.transcript)}</div>
         ) : (
           <div className="empty-state">{processing ? "Your transcript will appear here automatically." : "Transcript is unavailable."}</div>
         )}
       </div>
 
-      <div className="suggestions-section">
+      <div className="guest-corrections-section">
         <div className="section-title">Preview corrections</div>
         {preview.corrections.length > 0 ? preview.corrections.map((suggestion, index) => (
-          <SuggestionCard key={`${suggestion.wrong}-${suggestion.right}-${index}`} suggestion={suggestion} />
+          <article className="guest-correction-card" key={`${suggestion.wrong}-${index}`}>
+            <div className="guest-correction-proof"><del>{suggestion.wrong}</del><span aria-hidden="true">→</span><strong>{suggestion.right}</strong></div>
+            <p>{suggestion.explanation}</p>
+          </article>
         )) : (
           <div className="empty-state">
             {processing ? "We are selecting up to two high-confidence corrections." : ready ? "No clear correction was needed in this preview." : "Corrections are unavailable."}

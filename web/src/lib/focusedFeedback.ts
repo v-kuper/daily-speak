@@ -20,18 +20,11 @@ export const parseFocusedFeedback = (value: unknown): FocusedFeedback | undefine
     !Number.isSafeInteger(item.occurrence) || Number(item.occurrence) < 1 ||
     !["id", "originalFragment", "title", "explanation", "ruleId"].every(key => typeof item[key] === "string" && Boolean(item[key]))) return undefined;
    const lesson = item.microLesson as { title?: unknown; points?: unknown } | undefined;
-   const context = item.practiceContext as Record<string, unknown> | undefined;
-   const practiceContext = context && typeof context === "object"
-    && ["originalText", "correctedText", "audioFeedbackId"].every(key => typeof context[key] === "string" && Boolean((context[key] as string).trim()))
-    && (context.originalText as string).length <= 1600 && (context.correctedText as string).length <= 1600
-    && (context.audioFeedbackId as string).length <= 200
-    ? { originalText: context.originalText as string, correctedText: context.correctedText as string, audioFeedbackId: context.audioFeedbackId as string } : undefined;
    items.push({ id: String(item.id), kind: item.kind as FeedbackFocus["kind"], originalFragment: String(item.originalFragment),
     occurrence: Number(item.occurrence), title: String(item.title), explanation: String(item.explanation), ruleId: String(item.ruleId),
     span: { start: Number(span.start), end: Number(span.end), turnSequence: Number(sequence) },
     correctedFragment: typeof item.correctedFragment === "string" ? item.correctedFragment : undefined,
     practiceText: typeof item.practiceText === "string" ? item.practiceText : undefined,
-    practiceContext,
     microLesson: lesson && typeof lesson.title === "string" && Array.isArray(lesson.points) && lesson.points.length === 3 && lesson.points.every(point => typeof point === "string")
      ? { title: lesson.title, points: lesson.points as [string, string, string] } : undefined });
   }

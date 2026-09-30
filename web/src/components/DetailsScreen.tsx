@@ -4,9 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { deleteAndNavigate, reconcileRecordingSaveRoute, recordingDetailState, saveAndNavigate, startRecordingDetailLifecycle } from "../lib/routeFlows";
 
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
-import { buildTranscriptSegments, buildConversationTranscriptTurns } from "../lib/transcriptHighlight";
-import { feedbackCardId, transcriptMarkId, type ReviewKind } from "../lib/feedbackAnchors";
+import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import {
   recordingProcessingLabel,
   recordingRetryLabel,
@@ -23,23 +21,18 @@ import { loadRecordingDraftAudio } from "../lib/recordingDraftAudio";
 import { useAppDispatch, useAppSelector, useAppStore } from "../store/hooks";
 import {
   clearRecordingDeleteError,
-  fetchRecording,
   generateShadowingAudio,
   resetPlaybackState,
   retryRecordingProcessing,
-  retryRecordingStrengths,
+  requestRecordingFeedback,
   setPlaybackPlaying,
   setPlaybackPosition,
 } from "../store/slices/appSlice";
-import SuggestionCard from "./SuggestionCard";
 import RecordingLoadError from "./RecordingLoadError";
 import ProtectedMediaImage from "./ProtectedMediaImage";
 import ConversationTranscript from "./ConversationTranscript";
-import StrengthCard from "./StrengthCard";
 import FocusedFeedbackReview, { FeedbackLegend } from "./FocusedFeedbackReview";
 import InterviewRetakes from "./InterviewRetakes";
-import { apiFetch } from "../lib/apiClient";
-import { newIdempotencyKey } from "../lib/mediaUpload";
 
 const formatPracticeLabel = (value: "free_talk" | "topic" | "photo_description"): string => {
   switch (value) {
@@ -103,10 +96,6 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [originalTranscriptOpen, setOriginalTranscriptOpen] = useState(true);
   const [correctedTranscriptOpen, setCorrectedTranscriptOpen] = useState(true);
-  const [reanalysisLoading, setReanalysisLoading] = useState(false);
- const [reanalysisError, setReanalysisError] = useState("");
- const reanalysisKey = useRef<string | null>(null);
- const [selectedReview, setSelectedReview] = useState<string | null>(null);
   const {
     isPlaying,
     playbackPosition,
@@ -121,8 +110,8 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
     shadowingRequestStatus,
     shadowingRequestError: globalShadowingError,
     shadowingRequestRecordingId,
-    strengthsRetryStatuses,
-    strengthsRetryErrors,
+    recordingFeedbackStatuses,
+    recordingFeedbackErrors,
   } = useAppSelector(
     (state) => state.app
   );
@@ -139,7 +128,6 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
 
   useEffect(() => {
     setDeleteModalOpen(false);
-    setSelectedReview(null);
     return startRecordingDetailLifecycle(store, routeRecordingId);
   }, [store, routeRecordingId]);
   const recordingId = recording?.id ?? null;
@@ -150,8 +138,7 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
   const shadowingStatus = recording?.shadowingStatus ?? "pending";
   const shadowingUpdatedAt = recording?.shadowingUpdatedAt ?? "";
   const shadowingDownloadPath = recording?.media?.shadowing?.downloadPath ?? null;
-  const hasObsoleteShadowingScript = Boolean(recording?.shadowingScript);
-  const shadowingAudioReady = shadowingStatus === "ready" && !hasObsoleteShadowingScript;
+  const shadowingAudioReady = Boolean(recording?.focusedFeedback) && shadowingStatus === "ready";
   const {
     url: recordingMediaURL,
     loading: recordingMediaLoading,
@@ -187,16 +174,6 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
     && recording.interviewTurns.every((turn) => Boolean(turn.correctedAnswerText?.trim())),
   );
   const hasCorrectedTranscript = recording ? recording.correctedTranscript.trim().length > 0 : false;
-  const hasSuggestions = recording ? recording.suggestions.length > 0 : false;
-  const recordingStrengths = recording?.strengths ?? [];
-  const hasStrengths = recordingStrengths.length > 0;
-  const transcriptSegments = useMemo(() => {
-    if (!recording) {
-      return [];
-    }
-
-    return buildTranscriptSegments(recording.transcript, recording.suggestions, recording.strengths ?? []);
-  }, [recording]);
   const isDeleteLoading = recordingDeleteStatus === "loading";
   const isRecordingRetryLoading = recordingId
     ? recordingRetryStatuses[recordingId] === "loading"
@@ -215,18 +192,20 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
     recordingStatus === "ready" &&
     hasCorrectedTranscript &&
     (shadowingStatus === "failed" || shadowingIsStale || Boolean(shadowingRequestError));
+  const isFeedbackRequestLoading = Boolean(recordingId && recordingFeedbackStatuses[recordingId] === "loading");
+  const feedbackRequestError = recordingId ? recordingFeedbackErrors[recordingId] : null;
   const canDelete = Boolean(recordingId) && recordingId !== backgroundSaveRecordingId;
 
   useEffect(() => {
     if (
       !recordingId ||
+      !recording?.focusedFeedback ||
       autoShadowingRequestedRef.current.has(recordingId) ||
       !shouldScheduleShadowing({
         recordingStatus: recordingStatus ?? "failed",
         correctedTranscript,
         shadowingStatus,
         requestLoading: isShadowingRequestLoading,
-        hasObsoleteScript: hasObsoleteShadowingScript,
       })
     ) {
       return;
@@ -241,7 +220,7 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
     recordingId,
     recordingStatus,
     shadowingStatus,
-    hasObsoleteShadowingScript,
+    recording?.focusedFeedback,
   ]);
 
   useEffect(() => {
@@ -383,35 +362,6 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
     audio.pause();
   };
 
-  const reviewID = (kind: ReviewKind, index: number) =>
-    (kind === "correction" ? recording?.suggestions[index]?.id : recordingStrengths[index]?.id) ?? index;
-  const reviewSegments = hasConversationTranscript && recording
-    ? buildConversationTranscriptTurns(recording.interviewTurns, recording.suggestions, "original", recordingStrengths).flatMap(turn => turn.answerSegments)
-    : transcriptSegments;
-  const canLocateReview = (kind: ReviewKind, index: number) => reviewSegments.some(segment =>
-    segment.feedbackIndex === index && (kind === "correction" ? segment.isError : segment.isStrength));
-
-  const scrollBehavior = (): ScrollBehavior =>
-    window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
-
-  const showReviewCard = (kind: ReviewKind, index: number) => {
-    const id = feedbackCardId(kind, reviewID(kind, index));
-    setSelectedReview(id);
-    const card = document.getElementById(id);
-    card?.scrollIntoView({ behavior: scrollBehavior(), block: "center" });
-    card?.focus({ preventScroll: true });
-  };
-
-  const showTranscriptMark = (kind: ReviewKind, index: number) => {
-    setOriginalTranscriptOpen(true);
-    setSelectedReview(feedbackCardId(kind, reviewID(kind, index)));
-    window.requestAnimationFrame(() => {
-      const mark = document.getElementById(transcriptMarkId(kind, reviewID(kind, index)));
-      mark?.scrollIntoView({ behavior: scrollBehavior(), block: "center" });
-      mark?.focus({ preventScroll: true });
-    });
-  };
-
   const onSeek = (event: MouseEvent<HTMLDivElement>) => {
     if (!recording || !hasAudio) {
       return;
@@ -526,41 +476,6 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
     );
   }
 
-  const renderedTranscriptTargets = new Set<string>();
-  const renderTranscriptSegment = (segment: (typeof transcriptSegments)[number], index: number) => {
-    if (!segment.isError && !segment.isStrength) {
-      return <span key={`segment-${index}`}>{segment.text}</span>;
-    }
-    const kind: ReviewKind = segment.isError ? "correction" : "strength";
-    const feedbackIndex = segment.feedbackIndex ?? 0;
-    const targetKey = `${kind}-${feedbackIndex}`;
-    const firstOccurrence = !renderedTranscriptTargets.has(targetKey);
-    renderedTranscriptTargets.add(targetKey);
-    return (
-      <mark
-        key={`segment-${index}`}
-        id={firstOccurrence ? transcriptMarkId(kind, reviewID(kind, feedbackIndex)) : undefined}
-        data-feedback-kind={kind}
-        data-feedback-index={feedbackIndex}
-        className={segment.isError
-          ? `transcript-error-mark${segment.severity ? ` transcript-error-mark-${segment.severity}` : ""}`
-          : "transcript-strength-mark"}
-        role="button"
-        tabIndex={0}
-        aria-controls={feedbackCardId(kind, reviewID(kind, feedbackIndex))}
-        onClick={() => showReviewCard(kind, feedbackIndex)}
-        onKeyDown={(event) => {
-          if (event.key === "Enter" || event.key === " ") {
-            event.preventDefault();
-            showReviewCard(kind, feedbackIndex);
-          }
-        }}
-      >
-        {segment.text}
-      </mark>
-    );
-  };
-
   const recordingTitle = recording.practiceType === "topic"
     ? recording.interviewTurns?.[0]?.question || recording.topic
     : recording.topic;
@@ -631,8 +546,8 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
           <section className="details-material-card details-original-material">
             <div className="material-heading">
               <div>
-                <div className="material-kicker">{recording.focusedFeedback ? "Исходное аудио" : "Your recording"}</div>
-                <h3>{recording.focusedFeedback ? "Ваша запись" : "Original conversation"}</h3>
+                <div className="material-kicker">Исходное аудио</div>
+                <h3>Ваша запись</h3>
               </div>
             </div>
             {recordingMediaLoading ? (
@@ -671,17 +586,14 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
             {originalTranscriptOpen && (
               <div id="original-transcript-panel" className="material-transcript-scroll">
                 {recording.focusedFeedback ? (
-                  <FocusedFeedbackReview feedback={recording.focusedFeedback} transcript={recording.transcript} turns={recording.interviewTurns} audioBase={`/api/v1/recordings/${recording.id}/feedback`} showLegend={false} />
+                  <FocusedFeedbackReview feedback={recording.focusedFeedback} transcript={recording.transcript} turns={hasConversationTranscript ? recording.interviewTurns : []} audioBase={`/api/v1/recordings/${recording.id}/feedback`} showLegend={false} />
                 ) : hasConversationTranscript ? (
                   <ConversationTranscript
                     turns={recording.interviewTurns}
-                    suggestions={recording.suggestions}
-                    strengths={recordingStrengths}
                     processing={isProcessing}
-                    onReviewSelect={showReviewCard}
                   />
                 ) : hasTranscript ? (
-                  <div className="transcript-text">{transcriptSegments.map(renderTranscriptSegment)}</div>
+                  <div className="transcript-text">{recording.transcript}</div>
                 ) : isProcessing ? (
                   <div className="empty-state">{recording.processingStage === "transcribing" ? "Transcribing audio. The transcript will appear here automatically." : "The transcript will appear here automatically."}</div>
                 ) : (
@@ -690,9 +602,25 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
                 {renderProcessingRetry("transcribing")}
               </div>
             )}
+            {!recording.focusedFeedback && !isProcessing && !isFailed && (
+              <div className="feedback-empty" aria-label="Разбор ответа">
+                <div>
+                  <h4>Разбор ещё не готов</h4>
+                  <p>Разберём ошибки, объясним правила и подготовим примеры для практики.</p>
+                </div>
+                {!recording.id.startsWith("local-") && hasTranscript && <button
+                  type="button"
+                  className="practice-action-button"
+                  disabled={isFeedbackRequestLoading}
+                  onClick={() => { void dispatch(requestRecordingFeedback(recording.id)); }}
+                >{isFeedbackRequestLoading ? "Запускаем разбор…" : feedbackRequestError ? "Повторить разбор" : "Сделать разбор"}</button>}
+                {feedbackRequestError && <p className="auth-error" role="alert">{feedbackRequestError}</p>}
+              </div>
+            )}
+            {renderProcessingRetry("suggestions")}
           </section>
 
-          <section className="details-material-card details-shadowing-material">
+          {(recording.focusedFeedback || isProcessing) && <section className="details-material-card details-shadowing-material">
             <div className="material-heading">
               <div>
                 <div className="material-kicker">Исправленная версия</div>
@@ -723,7 +651,7 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
                 <button className="btn btn-secondary" onClick={retryShadowingMedia}>Reload audio</button>
               </div>
             )}
-            {(showShadowingProgress || hasObsoleteShadowingScript) && !shadowingRequestError && (
+            {showShadowingProgress && !shadowingRequestError && (
               <div className={shadowingIsStale ? "auth-error" : "empty-state"}>{shadowingProgressLabel(recording.shadowingStatus, shadowingIsStale)}</div>
             )}
             {recordingStatus === "ready" && hasCorrectedTranscript && (recording.shadowingStatus === "failed" || shadowingRequestError) && (
@@ -748,7 +676,7 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
             </button>
             <div id="corrected-transcript-panel" className="material-transcript-scroll" hidden={!correctedTranscriptOpen}>
               {hasCorrectedConversation ? (
-                <ConversationTranscript turns={recording.interviewTurns} suggestions={[]} processing={isProcessing} answerKind="corrected" />
+                <ConversationTranscript turns={recording.interviewTurns} processing={isProcessing} answerKind="corrected" />
               ) : hasCorrectedTranscript ? (
                 <div className="transcript-text">{recording.correctedTranscript}</div>
               ) : isProcessing ? (
@@ -760,79 +688,16 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
               )}
               {renderProcessingRetry("rewriting")}
             </div>
-          </section>
-          {recording.status === "ready" && !recording.id.startsWith("local-") && recording.interviewTurns?.some(turn => turn.answerText.trim()) && <InterviewRetakes key={recording.id} recording={recording} onOpen={() => {
+          </section>}
+          {recording.focusedFeedback && recording.status === "ready" && !recording.id.startsWith("local-") && recording.interviewTurns?.some(turn => turn.answerText.trim()) && <InterviewRetakes key={recording.id} recording={recording} onOpen={() => {
             audioRef.current?.pause();
             shadowingAudioRef.current?.pause();
             dispatch(setPlaybackPlaying(false));
           }} />}
         </div>
 
-        {!recording.focusedFeedback && <section className="details-feedback">
-
-          <div className="feedback-heading">
-            <div className="material-kicker">Your feedback</div>
-            <h3>Corrections and strengths</h3>
-            <p>Choose a highlight in the transcript to open its explanation.</p>
-          </div>
-          {recording.strengthsStatus === "processing" && <div className="empty-state" role="status">Finding useful examples of English you used well…</div>}
-          {recording.strengthsStatus === "ready" && !hasStrengths && <div className="empty-state">No specific examples were selected this time.</div>}
-          {(recording.strengthsStatus === "failed" || (recording.strengthsStatus === "unknown" && !hasStrengths && recording.status === "ready")) && (
-            <div className="processing-retry">
-              <div className="notice">{recording.strengthsStatus === "failed" ? "Good examples could not be checked. Your corrections are saved." : "Useful examples have not been checked for this recording."}</div>
-              {strengthsRetryErrors[recording.id] && <div className="auth-error">{strengthsRetryErrors[recording.id]}</div>}
-              <button className="btn btn-secondary" disabled={strengthsRetryStatuses[recording.id] === "loading"}
-                onClick={() => { void dispatch(retryRecordingStrengths(recording.id)); }}>
-                {strengthsRetryStatuses[recording.id] === "loading" ? "Checking…" : recording.strengthsStatus === "failed" ? "Retry good examples" : "Find good examples"}
-              </button>
-            </div>
-          )}
-          {hasStrengths && (
-            <div className="feedback-group">
-              <div className="feedback-group-title">What you did well</div>
-              {recordingStrengths.map((strength, index) => {
-                const id = feedbackCardId("strength", strength.id ?? index);
-                return <StrengthCard key={strength.id ?? `${strength.excerpt}-${index}`} id={id} active={selectedReview === id} strength={strength} onShowInTranscript={canLocateReview("strength", index) ? () => showTranscriptMark("strength", index) : undefined} />;
-              })}
-            </div>
-          )}
-          <div className="feedback-group">
-            <div className="feedback-group-title">Corrections</div>
-            {hasSuggestions ? recording.suggestions.map((suggestion, index) => {
-              const id = feedbackCardId("correction", suggestion.id ?? index);
-              return (
-                <SuggestionCard
-                  key={suggestion.id ?? `${suggestion.wrong}-${suggestion.right}-${suggestion.category ?? "uncategorized"}-${index}`}
-                  id={id}
-                  active={selectedReview === id}
-                  suggestion={suggestion}
-                  onShowInTranscript={canLocateReview("correction", index) ? () => showTranscriptMark("correction", index) : undefined}
-                />
-              );
-            }) : isProcessing && recording.processingStage !== "rewriting" ? (
-              <div className="empty-state">AI feedback will appear here after transcription.</div>
-            ) : isFailed && recording.processingStage !== "rewriting" ? (
-              <div className="empty-state">AI feedback is unavailable for this recording.</div>
-            ) : (
-              <div className="empty-state">No clear corrections were needed.</div>
-            )}
-          </div>
-          {renderProcessingRetry("suggestions")}
-        </section>}
       </div>
 
-
-      {recording.status === "ready" && !recording.focusedFeedback && !recording.id.startsWith("local-") && <div className="retake-panel">
-       <button className="btn btn-secondary" disabled={reanalysisLoading} onClick={() => {
-        if (reanalysisLoading) return; setReanalysisLoading(true); setReanalysisError("");
-        reanalysisKey.current ??= newIdempotencyKey("feedback");
-        void apiFetch(`/api/v1/recordings/${recording.id}/feedback/reanalyze`, {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({idempotencyKey:reanalysisKey.current})})
-         .then(response => {if (!response.ok) throw new Error("Не удалось запустить новый разбор."); return dispatch(fetchRecording(recording.id)).unwrap();})
-         .catch(error => setReanalysisError(error instanceof Error ? error.message : "Разбор недоступен."))
-         .finally(() => setReanalysisLoading(false));
-       }}>{reanalysisLoading ? "Запускаем разбор…" : "Обновить до фокусированного разбора"}</button>
-       {reanalysisError && <p role="alert" className="auth-error">{reanalysisError}</p>}
-      </div>}
       <button className="btn btn-danger btn-large delete-recording-btn" onClick={onOpenDeleteModal} disabled={!canDelete || isDeleteLoading}>
         {!canDelete ? "Saving recording..." : isDeleteLoading ? "Deleting..." : "Delete recording"}
       </button>
