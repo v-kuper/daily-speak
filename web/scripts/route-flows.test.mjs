@@ -28,7 +28,7 @@ let draft = {
 const saved = {
   id: "permanent-123", topic: "Travel", duration: 20, timestamp: draft.timestamp,
   practiceType: "topic", status: "processing", transcript: "", correctedTranscript: "",
-  suggestions: [], processingStage: "transcription", photoObject: null, processingError: null,
+  interviewTurns: [], focusedFeedback: { version: 1, answers: [] }, processingStage: "transcription", photoObject: null, processingError: null,
   shadowingStatus: "pending", shadowingError: null, shadowingUpdatedAt: draft.timestamp,
   media: {
     audio: { assetId: "audio-asset", downloadPath: "/api/v1/media/audio-asset/download" },
@@ -527,67 +527,24 @@ test("the local topic processing route immediately renders its saved conversatio
   assert.match(markup, /I went to Rome\./);
 });
 
-test("topic shadowing restores corrected learner answers and hides experimental samples", () => {
+test("topic shadowing keeps corrected learner answers alongside the focused review", () => {
   const recording = {
-    ...saved,
-    status: "ready",
-    processingStage: null,
-    transcript: "I goed home yesterday.",
-    correctedTranscript: "I went home yesterday.",
-    shadowingScript: {
-      englishLevel: "a2", text: "Did you say I goed home? I went to the park yesterday.",
-      turns: [{ sequence: 1, question: "Did you say I goed home?", answerText: "I went to the park yesterday." }],
-    },
-    suggestions: [{
-      wrong: "I goed home",
-      right: "I went home",
-      explanation: "Use the past tense went.",
-      severity: "major",
-    }],
+    ...saved, status: "ready", processingStage: null,
+    transcript: "I goed home yesterday.", correctedTranscript: "I went home yesterday.",
+    focusedFeedback: { version: 1, answers: [{ turnSequence: 1, items: [{
+      id: "went", kind: "blocker", originalFragment: "goed", correctedFragment: "went", occurrence: 1,
+      span: { start: 2, end: 6, turnSequence: 1 }, title: "Прошедшее время", explanation: "Use went.", ruleId: "verb-forms",
+    }] }] },
     interviewTurns: [{
-      sequence: 1,
-      question: "Did you say I goed home?",
-      askedAtMs: 0,
-      endedAtMs: 3000,
-      answerText: "I goed home yesterday.",
-      correctedAnswerText: "I went home yesterday.",
-      answerSource: "final",
-      answerAlignment: null,
+      sequence: 1, question: "Where did you go?", askedAtMs: 0, endedAtMs: 3000,
+      answerText: "I goed home yesterday.", correctedAnswerText: "I went home yesterday.", answerSource: "final", answerAlignment: null,
     }],
   };
   const markup = renderDetails(storeFor({ isAuthenticated: true, recordings: [recording] }), recording.id);
-
-  assert.match(markup, /Conversation transcript/);
-  assert.equal((markup.match(/conversation-transcript/g) ?? []).length, 2);
-  assert.equal((markup.match(/Interviewer:<\/strong> Did you say I goed home\?/g) ?? []).length, 2);
-  assert.match(markup, /You:<\/strong>/);
+  assert.match(markup, /focus-mark focus-blocker/);
   assert.match(markup, /Shadowing practice[\s\S]*Ваш ответ в естественной форме[\s\S]*I went home yesterday\./);
-  assert.doesNotMatch(markup, /I went to the park yesterday\./);
-  assert.equal((markup.match(/<mark/g) ?? []).length, 1);
-  assert.doesNotMatch(markup, /Interview timeline|interview-timeline/);
-});
-
-test("legacy topic results retain their corrected transcript for shadowing", () => {
-  const recording = {
-    ...saved,
-    status: "ready",
-    processingStage: null,
-    correctedTranscript: "I went home yesterday.",
-    interviewTurns: [{
-      sequence: 1,
-      question: "Where did you go?",
-      askedAtMs: 0,
-      endedAtMs: 3000,
-      answerText: "I goed home yesterday.",
-      answerSource: "final",
-      answerAlignment: null,
-    }],
-  };
-  const markup = renderDetails(storeFor({ isAuthenticated: true, recordings: [recording] }), recording.id);
-
-  assert.equal((markup.match(/Interviewer:<\/strong>/g) ?? []).length, 1);
-  assert.match(markup, /Shadowing practice[\s\S]*I went home yesterday\./);
-  assert.doesNotMatch(markup, /Natural answer is unavailable/);
+  assert.match(markup, /Interviewer:<\/strong> Where did you go\?/);
+  assert.doesNotMatch(markup, /transcript-error-mark|Corrections and strengths/);
 });
 
 test("answer practice follows shadowing and lists answered questions in their original order", () => {
@@ -637,7 +594,7 @@ test("partial corrected turns fall back to the full corrected learner transcript
   };
   const markup = renderDetails(storeFor({ isAuthenticated: true, recordings: [recording] }), recording.id);
 
-  assert.equal((markup.match(/conversation-transcript/g) ?? []).length, 1);
+  assert.equal((markup.match(/conversation-transcript/g) ?? []).length, 0);
   assert.match(markup, /Shadowing practice[\s\S]*Where did you go\? I went home\. What happened next\? I made dinner\./);
   assert.doesNotMatch(markup, /Natural answer is unavailable/);
 });

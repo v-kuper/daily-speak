@@ -22,12 +22,10 @@ test("three blockers can coexist with independently budgeted praise and native t
   assert.equal(parseFocusedFeedback({version:1,answers:[{items:[...items,extra]}]}),undefined);
  }
 });
-test("context practice and its own audio identity survive parsing; invalid optional context is omitted", () => {
- const practiceContext = {originalText:"I go home.",correctedText:"I went home.",audioFeedbackId:"context-v1-1"};
- const parsed = parseFocusedFeedback({version:1,answers:[{items:[{...item,practiceText:"Unrelated example.",practiceContext}]}]});
- assert.deepEqual(parsed.answers[0].items[0].practiceContext,practiceContext);
- const invalid = parseFocusedFeedback({version:1,answers:[{items:[{...item,practiceContext:{...practiceContext,audioFeedbackId:""}}]}]});
- assert.equal(invalid.answers[0].items[0].practiceContext,undefined);
+test("practice uses the standalone example and ignores discontinued contextual metadata", () => {
+ const parsed = parseFocusedFeedback({version:1,answers:[{items:[{...item,practiceContext:{originalText:"I go home.",correctedText:"I went home.",audioFeedbackId:"context-v1-1"}}]}]});
+ assert.equal(parsed.answers[0].items[0].practiceText,item.practiceText);
+ assert.equal(Object.hasOwn(parsed.answers[0].items[0],"practiceContext"),false);
 });
 const ready = {status:"ready",asset:{id:"audio",state:"ready"},request:{method:"GET",url:"https://media.example/audio",headers:{},expiresAt:new Date(Date.now()+60000).toISOString()}};
 const run = async (states, options = {}) => {

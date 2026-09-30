@@ -261,11 +261,17 @@ adapters; HTTP only authenticates, maps feature errors, and serializes results.
 The additive v1 `id` and `span` feedback fields and `strengthsStatus` recording
 field preserve older rows and clients. `unknown` represents legacy coverage;
 `ready` with an empty array is a completed search with no selected examples.
-The web client renders exact anchored spans and uses a conservative exact,
-whole-word, unique-match fallback for old feedback. It keeps ambiguous legacy
-cards without guessing locations. Request generations prevent late reads from
-overwriting mutation results. The natural practice version can rephrase learner
-speech and is labeled separately from the correction explanations.
+The current web account detail uses only `focusedFeedback` and its exact anchored
+spans. It discards compatibility suggestions, strengths, and discontinued shadowing
+scripts rather than rendering or migrating them. A ready recording without valid
+focused feedback shows its original transcript and a “Сделать разбор” action using
+`POST /api/v1/recordings/{recordingId}/feedback/reanalyze`. The action is single-flight,
+reuses its idempotency key after uncertain failures, and resumes normal GET polling
+once the durable queue accepts it. An empty valid focused result is a completed
+analysis. Processing failures retain their stage-specific retry actions. Shadowing
+and answer practice appear with the new analysis. Request generations prevent late
+reads from overwriting mutation results. Limited guest previews keep their separate
+current two-correction contract; their UI does not use account compatibility models.
 
 Free-talk recordings and non-interview guest previews use Cartesia's batch
 transcription API. Audio remains in backend-owned storage; the worker sends a

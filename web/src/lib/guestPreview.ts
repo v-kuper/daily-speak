@@ -1,5 +1,5 @@
 import { apiFetch, readApiJSON } from "./apiClient";
-import type { PracticeType, Suggestion } from "./data";
+import type { PracticeType } from "./data";
 import {
   browserIdentity,
   createAnonymousIdentity,
@@ -8,7 +8,7 @@ import {
 } from "./identity";
 import { newIdempotencyKey, sha256Blob, uploadMedia } from "./mediaUpload";
 import { deleteRecordingDraftAudio, loadRecordingDraftAudio } from "./recordingDraftAudio";
-import { parseSuggestions } from "./suggestions";
+import { parseGuestPreviewCorrections, type GuestPreviewCorrection } from "./guestPreviewFeedback";
 import { parseInterviewTurns, type SavedInterviewTurn } from "./interviewTimeline";
 
 const GUEST_SESSION_KEY = "daily-speaking.guest-preview.v1";
@@ -30,7 +30,7 @@ export type GuestPreview = {
   practiceType: "free_talk" | "topic";
   transcript: string;
   interviewTurns: SavedInterviewTurn[];
-  corrections: Suggestion[];
+  corrections: GuestPreviewCorrection[];
   processingError: string | null;
   expiresAt: string;
 };
@@ -213,7 +213,7 @@ const parsePreview = (value: unknown): GuestPreview | null => {
     practiceType,
     transcript: candidate.transcript,
     interviewTurns: parseInterviewTurns(candidate.interviewTurns),
-    corrections: parseSuggestions(candidate.corrections).slice(0, 2),
+    corrections: parseGuestPreviewCorrections(candidate.corrections),
     processingError: typeof candidate.processingError === "string" ? candidate.processingError : null,
     expiresAt: candidate.expiresAt,
   };

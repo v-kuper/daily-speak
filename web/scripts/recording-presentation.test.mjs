@@ -20,7 +20,8 @@ test("history counts genuine errors independently of praise and naturalness, and
 test("history titles use the actual opening question and status distinguishes failed and partial processing", () => {
   assert.equal(recordingTitle({ ...recording, interviewTurns: [{ question: "What did you work on?" }] }), "What did you work on?");
   assert.equal(recordingTitle(recording), "Work");
-  assert.equal(recordingHistoryStatus(recording), "Разбор готов");
+  assert.equal(recordingHistoryStatus(recording), "Нужен разбор");
+  assert.equal(recordingHistoryStatus({ ...recording, focusedFeedback: { version: 1, answers: [] } }), "Разбор готов");
   assert.equal(recordingHistoryStatus({ ...recording, status: "failed" }), "Разбор не завершён");
   assert.equal(recordingHistoryStatus({ ...recording, status: "processing", processingStage: "transcribing" }), "Распознаём речь");
 });

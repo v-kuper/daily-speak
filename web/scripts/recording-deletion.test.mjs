@@ -51,7 +51,7 @@ const recordingState = () => ({
 
 test("recording deletion needs no publication or sharing state", () => {
   const state = app.default(undefined, { type: "test/initialize" });
-  assert.deepEqual(Object.keys(state).filter((key) => /feed|share|copyMessage/i.test(key)), []);
+  assert.deepEqual(Object.keys(state).filter((key) => /feed(?!back)|share|copyMessage/i.test(key)), []);
 });
 
 test("successful deletion clears selection, resets playback, and ignores late recording responses", () => {

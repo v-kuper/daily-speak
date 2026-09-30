@@ -1,4 +1,4 @@
-import type { ShadowingScript, ShadowingStatus } from "./shadowing";
+import type { ShadowingStatus } from "./shadowing";
 import type { SavedInterviewTurn } from "./interviewTimeline";
 
 export type TopicData = {
@@ -6,47 +6,7 @@ export type TopicData = {
   words: string[];
 };
 
-export type SuggestionCategory =
-  | "language_switch"
-  | "verb_grammar"
-  | "nouns_determiners"
-  | "prepositions"
-  | "vocabulary"
-  | "sentence_structure"
-  | "naturalness";
-
-export type SuggestionSeverity = "major" | "medium" | "minor";
-
-export type LearningReference = {
-  id: string;
-  title: string;
-  summary: string;
-  url?: string;
-};
-
 export type FeedbackSpan = { start: number; end: number; turnSequence?: number };
-
-export type Suggestion = {
-  id?: string;
-  span?: FeedbackSpan;
-  wrong: string;
-  right: string;
-  explanation: string;
-  category?: SuggestionCategory;
-  severity?: SuggestionSeverity;
-  ruleId?: string;
-  learningReference?: LearningReference;
-};
-
-export type Strength = {
-  id?: string;
-  span?: FeedbackSpan;
-  excerpt: string;
-  explanation: string;
-  category: SuggestionCategory;
-  ruleId: string;
-  learningReference?: LearningReference;
-};
 
 export type PracticeType = "free_talk" | "topic" | "photo_description";
 export type RecordingStatus = "processing" | "ready" | "failed";
@@ -63,7 +23,7 @@ export type RecordingMedia = {
 export type FeedbackFocus = {
  id: string; kind: "praise" | "blocker" | "native_tip"; originalFragment: string; occurrence: number;
  span: FeedbackSpan; title: string; explanation: string; correctedFragment?: string; ruleId: string;
- practiceText?: string; practiceContext?: { originalText: string; correctedText: string; audioFeedbackId: string };
+ practiceText?: string;
  microLesson?: { title: string; points: [string, string, string] };
 };
 export type FocusedFeedback = { version: 1; answers: { turnSequence?: number; items: FeedbackFocus[] }[] };
@@ -77,9 +37,6 @@ export type Recording = {
   transcript: string;
   interviewTurns: SavedInterviewTurn[];
   correctedTranscript: string;
-  suggestions: Suggestion[];
-  strengths: Strength[];
-  strengthsStatus?: "unknown" | "pending" | "processing" | "ready" | "failed";
   processingStage: RecordingProcessingStage | null;
   practiceType: PracticeType;
   localAudioStorageKey: string | null;
@@ -87,7 +44,6 @@ export type Recording = {
   photoObject: string | null;
   processingError: string | null;
   shadowingStatus: ShadowingStatus;
-  shadowingScript?: ShadowingScript | null;
   shadowingError: string | null;
   shadowingUpdatedAt: string;
   media: RecordingMedia | null;

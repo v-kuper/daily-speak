@@ -34,7 +34,7 @@ export const recordingFeedbackSummary = (recording: Recording): string | null =>
 
 export const recordingHistoryStatus = (recording: Recording): string => {
   if (recording.status === "failed") return "Разбор не завершён";
-  if (recording.status === "ready") return "Разбор готов";
+  if (recording.status === "ready") return recording.focusedFeedback ? "Разбор готов" : "Нужен разбор";
   switch (recording.processingStage) {
     case "transcribing": return "Распознаём речь";
     case "suggestions": return "Разбираем ответ";
