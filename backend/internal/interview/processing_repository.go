@@ -75,14 +75,26 @@ func (r *SQLRepository) SavePreparation(ctx context.Context, job workqueue.Job, 
 	if status != StatusPreparing {
 		return nil
 	}
-	openingWordsJSON, _ := json.Marshal(openingWords)
-	candidateWordsJSON, _ := json.Marshal(candidate.UsefulWords)
-	if _, err := tx.Exec(ctx, `INSERT INTO interview_candidates(id,session_id,question,useful_words,source)
-		VALUES($1,$2,$3,$4::jsonb,'prepared')`, uuid.NewString(), sessionID, candidate.Question, string(candidateWordsJSON)); err != nil {
+	var openingQuestion string
+	if err := tx.QueryRow(ctx, `SELECT opening_question FROM interview_sessions WHERE id=$1`, sessionID).Scan(&openingQuestion); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, `UPDATE interview_sessions SET opening_useful_words=$2::jsonb,useful_words=$2::jsonb,status='ready',updated_at=NOW()
-		WHERE id=$1`, sessionID, string(openingWordsJSON)); err != nil {
+	openingArtifact, err := createQuestionArtifact(ctx, tx, sessionID, openingQuestion)
+	if err != nil {
+		return err
+	}
+	candidateArtifact, err := createQuestionArtifact(ctx, tx, sessionID, candidate.Question)
+	if err != nil {
+		return err
+	}
+	openingWordsJSON, _ := json.Marshal(openingWords)
+	candidateWordsJSON, _ := json.Marshal(candidate.UsefulWords)
+	if _, err := tx.Exec(ctx, `INSERT INTO interview_candidates(id,session_id,question,useful_words,source,question_artifact_id)
+		VALUES($1,$2,$3,$4::jsonb,'prepared',$5)`, uuid.NewString(), sessionID, candidate.Question, string(candidateWordsJSON), candidateArtifact); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE interview_sessions SET opening_useful_words=$2::jsonb,useful_words=$2::jsonb,status='ready',updated_at=NOW(),opening_question_artifact_id=$3
+		WHERE id=$1`, sessionID, string(openingWordsJSON), openingArtifact); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
@@ -302,9 +314,13 @@ func (r *SQLRepository) SaveAdaptive(ctx context.Context, job workqueue.Job, ses
 	if err != nil {
 		return false, err
 	}
+	artifactID, err := createQuestionArtifact(ctx, tx, sessionID, guided.Question)
+	if err != nil {
+		return false, err
+	}
 	wordsJSON, _ := json.Marshal(guided.UsefulWords)
-	_, err = tx.Exec(ctx, `INSERT INTO interview_candidates(id,session_id,question,useful_words,source,source_turn_seq)
-		VALUES($1,$2,$3,$4::jsonb,'adaptive',$5)`, uuid.NewString(), sessionID, guided.Question, string(wordsJSON), sourceSeq)
+	_, err = tx.Exec(ctx, `INSERT INTO interview_candidates(id,session_id,question,useful_words,source,source_turn_seq,question_artifact_id)
+		VALUES($1,$2,$3,$4::jsonb,'adaptive',$5,$6)`, uuid.NewString(), sessionID, guided.Question, string(wordsJSON), sourceSeq, artifactID)
 	if err != nil {
 		return false, err
 	}
@@ -366,9 +382,13 @@ func (r *SQLRepository) SaveRefill(ctx context.Context, job workqueue.Job, sessi
 			return 0, errors.New("interview reserve contains no new question")
 		}
 	}
+	artifactID, err := createQuestionArtifact(ctx, tx, sessionID, guided.Question)
+	if err != nil {
+		return 0, err
+	}
 	wordsJSON, _ := json.Marshal(guided.UsefulWords)
-	if _, err := tx.Exec(ctx, `INSERT INTO interview_candidates(id,session_id,question,useful_words,source)
-		VALUES($1,$2,$3,$4::jsonb,'prepared')`, uuid.NewString(), sessionID, guided.Question, string(wordsJSON)); err != nil {
+	if _, err := tx.Exec(ctx, `INSERT INTO interview_candidates(id,session_id,question,useful_words,source,question_artifact_id)
+		VALUES($1,$2,$3,$4::jsonb,'prepared',$5)`, uuid.NewString(), sessionID, guided.Question, string(wordsJSON), artifactID); err != nil {
 		return 0, err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -395,25 +415,7 @@ func (r *SQLRepository) QueueWaitMs(ctx context.Context, jobID string) int64 {
 	return max(0, time.Since(created).Milliseconds())
 }
 
-func (r *SQLRepository) Expire(ctx context.Context) error {
-	_, err := r.db.Exec(ctx, `UPDATE interview_sessions
-		SET status='failed',error_message='Session expired',updated_at=NOW()
-		WHERE status IN ('preparing','ready','recording') AND expires_at <= NOW()`)
-	if err != nil {
-		return err
-	}
-	_, err = r.db.Exec(ctx, `UPDATE interview_sessions
-		SET status='finalized',updated_at=NOW()
-		WHERE status='finalizing' AND expires_at <= NOW()
-		AND (recording_id IS NOT NULL OR guest_preview_id IS NOT NULL)`)
-	if err != nil {
-		return err
-	}
-	_, err = r.db.Exec(ctx, `DELETE FROM interview_sessions
-		WHERE status IN ('failed','cancelled') AND expires_at <= NOW()
-		AND recording_id IS NULL AND guest_preview_id IS NULL`)
-	return err
-}
+func (r *SQLRepository) Expire(ctx context.Context) error { return r.expireArtifactSessions(ctx) }
 
 func (r *SQLRepository) FinalizeFailure(ctx context.Context, tx pgx.Tx, job workqueue.Job, message string) error {
 	var payload struct {
@@ -430,6 +432,12 @@ func (r *SQLRepository) FinalizeFailure(ctx context.Context, tx pgx.Tx, job work
 	case "turn":
 		_, err := tx.Exec(ctx, `UPDATE interview_turns SET transcript_status='failed',updated_at=NOW()
 			WHERE id=$1 AND NOT skipped AND transcript_status<>'ready'`, job.ResourceID)
+		return err
+	case "question_audio":
+		_, err := tx.Exec(ctx, `UPDATE interview_question_artifacts SET status='failed',error_message='Не удалось озвучить вопрос. Можно продолжить с текстом.' WHERE id=$1 AND job_id=$2 AND status='processing'`, job.ResourceID, job.ID)
+		return err
+	case "answer_attempt":
+		_, err := tx.Exec(ctx, `UPDATE interview_answer_attempts SET status='failed',error_message='Не удалось разобрать попытку. Попробуйте ещё раз.' WHERE id=$1 AND job_id=$2 AND status='processing'`, job.ResourceID, job.ID)
 		return err
 	case "refill":
 		return nil

@@ -2,7 +2,7 @@ import { apiFetch, readApiJSON, resolveApiURL } from "./apiClient";
 
 const MAX_CONCURRENT_PART_UPLOADS = 3;
 
-export type MediaPurpose = "recording_audio" | "recording_photo" | "interview_turn_audio";
+export type MediaPurpose = "recording_audio" | "recording_photo" | "interview_turn_audio" | "interview_attempt_audio";
 
 export type MediaRequest = (path: string, init: RequestInit) => Promise<Response>;
 

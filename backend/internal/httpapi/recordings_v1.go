@@ -2,8 +2,10 @@ package httpapi
 
 import (
 	"context"
+	"daily-speaking-practice/backend/internal/interview"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,29 +18,68 @@ import (
 // recordingV1Response exposes persisted private media only through owned media
 // references that clients exchange for short-lived download requests.
 type recordingV1Response struct {
-	ID                  string                    `json:"id"`
-	Topic               string                    `json:"topic"`
-	Duration            int                       `json:"duration"`
-	Timestamp           string                    `json:"timestamp"`
-	Status              string                    `json:"status"`
-	Transcript          string                    `json:"transcript"`
-	CorrectedTranscript string                    `json:"correctedTranscript"`
-	Suggestions         []suggestion              `json:"suggestions"`
-	Strengths           []strength                `json:"strengths"`
-	StrengthsStatus     string                    `json:"strengthsStatus,omitempty"`
-	ProcessingStage     *string                   `json:"processingStage"`
-	PracticeType        string                    `json:"practiceType"`
-	PhotoObject         *string                   `json:"photoObject"`
-	ProcessingError     *string                   `json:"processingError"`
-	ShadowingStatus     string                    `json:"shadowingStatus"`
-	ShadowingError      *string                   `json:"shadowingError"`
-	ShadowingUpdatedAt  string                    `json:"shadowingUpdatedAt"`
-	Media               *recordingMediaResponse   `json:"media,omitempty"`
-	InterviewTurns      []recording.InterviewTurn `json:"interviewTurns,omitempty"`
+	FocusedFeedback     *recording.FocusedFeedback `json:"focusedFeedback,omitempty"`
+	ShadowingScript     *shadowing.Script          `json:"shadowingScript,omitempty"`
+	ID                  string                     `json:"id"`
+	Topic               string                     `json:"topic"`
+	Duration            int                        `json:"duration"`
+	Timestamp           string                     `json:"timestamp"`
+	Status              string                     `json:"status"`
+	Transcript          string                     `json:"transcript"`
+	CorrectedTranscript string                     `json:"correctedTranscript"`
+	Suggestions         []suggestion               `json:"suggestions"`
+	Strengths           []strength                 `json:"strengths"`
+	StrengthsStatus     string                     `json:"strengthsStatus,omitempty"`
+	ProcessingStage     *string                    `json:"processingStage"`
+	PracticeType        string                     `json:"practiceType"`
+	PhotoObject         *string                    `json:"photoObject"`
+	ProcessingError     *string                    `json:"processingError"`
+	ShadowingStatus     string                     `json:"shadowingStatus"`
+	ShadowingError      *string                    `json:"shadowingError"`
+	ShadowingUpdatedAt  string                     `json:"shadowingUpdatedAt"`
+	Media               *recordingMediaResponse    `json:"media,omitempty"`
+	InterviewTurns      []recording.InterviewTurn  `json:"interviewTurns,omitempty"`
 }
 
 func (s *Server) routeRecordingV1(w http.ResponseWriter, r *http.Request, relativePath string) {
 	parts := strings.Split(strings.Trim(relativePath, "/"), "/")
+	if len(parts) == 3 && parts[1] == "feedback" && parts[2] == "reanalyze" {
+		s.handleFeedbackReanalysisV1(w, r, parts[0])
+		return
+	}
+	if len(parts) == 4 && parts[1] == "feedback" && parts[3] == "audio" {
+		s.handleFeedbackAudioV1(w, r, parts[0], "", parts[2])
+		return
+	}
+	if len(parts) >= 4 && parts[1] == "interview-turns" {
+		seq, err := strconv.Atoi(parts[2])
+		if err != nil || seq < 1 {
+			s.writeInterviewError(w, r, interview.ErrInvalid)
+			return
+		}
+		if len(parts) == 4 && parts[3] == "question-audio" {
+			s.handleQuestionAudioV1(w, r, interview.QuestionAudioInput{RecordingID: parts[0], TurnSeq: seq})
+			return
+		}
+		if parts[3] == "attempts" {
+			if len(parts) == 4 {
+				s.handleAnswerAttemptsV1(w, r, parts[0], seq, "")
+				return
+			}
+			if len(parts) == 6 && parts[5] == "retry" {
+				s.handleRetryAttemptV1(w, r, parts[0], seq, parts[4])
+				return
+			}
+			if len(parts) == 5 {
+				s.handleAnswerAttemptsV1(w, r, parts[0], seq, parts[4])
+				return
+			}
+			if len(parts) == 8 && parts[5] == "feedback" && parts[7] == "audio" {
+				s.handleFeedbackAudioV1(w, r, parts[0], parts[4], parts[6])
+				return
+			}
+		}
+	}
 	if len(parts) == 1 && parts[0] != "" {
 		recordingID := pathUnescape(parts[0])
 		switch r.Method {
@@ -204,6 +245,8 @@ func (s *Server) handleListRecordingsV1(w http.ResponseWriter, r *http.Request) 
 
 func recordingV1ResponseFromRecord(record recording.Record) recordingV1Response {
 	return recordingV1Response{
+		FocusedFeedback:     record.FocusedFeedback(),
+		ShadowingScript:     shadowing.DecodeScript(record.ShadowingScriptJSON),
 		ID:                  record.ID,
 		Topic:               record.Topic,
 		Duration:            recording.NormalizeDurationSeconds(record.Duration),

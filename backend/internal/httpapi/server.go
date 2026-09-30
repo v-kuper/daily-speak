@@ -31,6 +31,10 @@ type Dependencies struct {
 	RecordingStrengthsService *recording.StrengthsService
 	GuestPreviewStore         *guestpreview.Store
 	InterviewService          *interview.Service
+	QuestionAudioService      *interview.QuestionAudioService
+	AnswerAttemptService      *interview.AnswerAttemptService
+	FeedbackAudioService      *recording.FeedbackAudioService
+	FeedbackReanalysisService *recording.FeedbackReanalysisService
 	ShadowingStore            *shadowing.Store
 	BrowserCookie             auth.CookieConfig
 	IdentityTokens            auth.TokenConfig
@@ -56,6 +60,10 @@ type Server struct {
 	recordingStrengthsService *recording.StrengthsService
 	guestPreviewStore         *guestpreview.Store
 	interviewService          *interview.Service
+	questionAudioService      *interview.QuestionAudioService
+	answerAttemptService      *interview.AnswerAttemptService
+	feedbackAudioService      *recording.FeedbackAudioService
+	feedbackReanalysisService *recording.FeedbackReanalysisService
 	shadowingStore            *shadowing.Store
 	browserCookie             auth.CookieConfig
 	identityTokens            auth.TokenConfig
@@ -82,8 +90,10 @@ func NewServer(dependencies Dependencies) *Server {
 		recordingReader: dependencies.RecordingReader, recordingRetryService: dependencies.RecordingRetryService,
 		recordingStrengthsService: dependencies.RecordingStrengthsService,
 		guestPreviewStore:         dependencies.GuestPreviewStore, shadowingStore: dependencies.ShadowingStore,
-		interviewService: dependencies.InterviewService,
-		browserCookie:    dependencies.BrowserCookie, identityTokens: dependencies.IdentityTokens,
+		interviewService:     dependencies.InterviewService,
+		questionAudioService: dependencies.QuestionAudioService, answerAttemptService: dependencies.AnswerAttemptService,
+		feedbackAudioService: dependencies.FeedbackAudioService, feedbackReanalysisService: dependencies.FeedbackReanalysisService,
+		browserCookie: dependencies.BrowserCookie, identityTokens: dependencies.IdentityTokens,
 		identityService: dependencies.IdentityService, cors: dependencies.CORS,
 		mediaService: dependencies.MediaService, mediaSigner: dependencies.MediaSigner,
 		operations: dependencies.Operations, limiter: dependencies.Limiter,

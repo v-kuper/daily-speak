@@ -70,6 +70,7 @@ export const advanceInterviewTimeline = (
   if (boundary >= maxAtMs) return null;
   const nextTurn: InterviewTurn = {
     seq: previousTurn.seq + 1,
+    questionIndex: candidate.questionIndex,
     question: candidate.question,
     usefulWords: candidate.usefulWords,
     askedAtMs: boundary,

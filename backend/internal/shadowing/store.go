@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"daily-speaking-practice/backend/internal/db"
+	"daily-speaking-practice/backend/internal/media"
 	"daily-speaking-practice/backend/internal/workqueue"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -29,10 +30,11 @@ func (s *Store) Schedule(ctx context.Context, userID, recordingID string) (bool,
 	var correctedTranscript string
 	err = tx.QueryRow(ctx, `
 		UPDATE recordings
-		SET shadowing_status = 'processing', shadowing_error = NULL,
+		SET shadowing_status = 'processing', shadowing_error = NULL, shadowing_script = NULL,
 		    shadowing_updated_at = NOW(), shadowing_attempt_id = $3
 		WHERE id = $1 AND user_id = $2 AND BTRIM(corrected_transcript) <> ''
 		  AND (shadowing_status IN ('pending', 'failed')
+		    OR (shadowing_status='ready' AND shadowing_script IS NOT NULL)
 		    OR (shadowing_status = 'processing' AND shadowing_attempt_id IS NULL AND shadowing_updated_at < NOW() - INTERVAL '5 minutes'))
 		RETURNING corrected_transcript`, recordingID, userID, attemptID).Scan(&correctedTranscript)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -62,9 +64,10 @@ func (s *Store) Schedule(ctx context.Context, userID, recordingID string) (bool,
 func (s *Store) LoadWork(ctx context.Context, job Job) (Work, bool, error) {
 	var work Work
 	err := s.db.QueryRow(ctx, `
-		SELECT user_id, corrected_transcript FROM recordings
-		WHERE id = $1 AND shadowing_status = 'processing' AND shadowing_attempt_id = $2`,
-		job.ResourceID, job.ID).Scan(&work.UserID, &work.CorrectedTranscript)
+		SELECT r.user_id,r.corrected_transcript FROM recordings r
+		WHERE r.id = $1 AND r.shadowing_status = 'processing' AND r.shadowing_attempt_id = $2
+		  AND EXISTS (SELECT 1 FROM processing_jobs WHERE id=$2 AND state='running' AND lease_token=$3 AND lease_expires_at>NOW())`,
+		job.ResourceID, job.ID, job.LeaseToken).Scan(&work.UserID, &work.CorrectedTranscript)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Work{}, false, nil
 	}
@@ -77,6 +80,13 @@ func (s *Store) Complete(ctx context.Context, job Job, asset Asset) (bool, error
 		return false, err
 	}
 	defer tx.Rollback(ctx)
+	var previous *string
+	if err := tx.QueryRow(ctx, `SELECT shadowing_asset_id FROM recordings WHERE id=$1 AND user_id=$2 FOR UPDATE`, job.ResourceID, asset.OwnerID).Scan(&previous); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil
+		}
+		return false, err
+	}
 	var bucket any
 	if asset.Bucket != "" {
 		bucket = asset.Bucket
@@ -95,13 +105,18 @@ func (s *Store) Complete(ctx context.Context, job Job, asset Asset) (bool, error
 	}
 	result, err := tx.Exec(ctx, `
 		UPDATE recordings
-		SET shadowing_status = 'ready', shadowing_asset_id = $2,
+		SET shadowing_status = 'ready', shadowing_asset_id = $2, shadowing_script = NULL,
 		    shadowing_error = NULL, shadowing_updated_at = NOW(), shadowing_attempt_id = NULL
 		WHERE id = $1 AND user_id = $3 AND shadowing_status = 'processing' AND shadowing_attempt_id = $4
-		  AND EXISTS (SELECT 1 FROM processing_jobs WHERE id = $4 AND state = 'running' AND lease_token = $5)`,
+		  AND EXISTS (SELECT 1 FROM processing_jobs WHERE id = $4 AND state = 'running' AND lease_token = $5 AND lease_expires_at > NOW())`,
 		job.ResourceID, asset.ID, asset.OwnerID, job.ID, job.LeaseToken)
 	if err != nil || result.RowsAffected() == 0 {
 		return false, err
+	}
+	if previous != nil && *previous != asset.ID {
+		if err := media.RetireArtifacts(ctx, tx, []string{*previous}); err != nil {
+			return false, err
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return false, err

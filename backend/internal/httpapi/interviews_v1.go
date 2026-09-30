@@ -29,6 +29,13 @@ func (s *Server) routeInterviewV1(w http.ResponseWriter, r *http.Request, path s
 	}
 	id := parts[0]
 	switch {
+	case len(parts) == 4 && parts[1] == "questions" && parts[3] == "audio":
+		index, err := strconv.Atoi(parts[2])
+		if err != nil || index < 1 {
+			s.writeInterviewError(w, r, interview.ErrInvalid)
+		} else {
+			s.handleQuestionAudioV1(w, r, interview.QuestionAudioInput{SessionID: id, Index: index})
+		}
 	case len(parts) == 1 && r.Method == http.MethodGet:
 		s.handleGetInterviewV1(w, r, id)
 	case len(parts) == 2 && parts[1] == "start" && r.Method == http.MethodPost:

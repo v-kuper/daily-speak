@@ -130,6 +130,9 @@ func (r *SQLRepository) Cancel(ctx context.Context, ownerPrincipalID, sessionID 
 	if err != nil {
 		return Session{}, err
 	}
+	if err := retireSessionArtifacts(ctx, tx, sessionID); err != nil {
+		return Session{}, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return Session{}, err
 	}
@@ -234,8 +237,8 @@ func (r *SQLRepository) Start(ctx context.Context, ownerPrincipalID, sessionID s
 		return Session{}, ErrNotReady
 	}
 	openingWordsJSON, _ := json.Marshal(row.OpeningUsefulWords)
-	_, err = tx.Exec(ctx, `INSERT INTO interview_turns(id,session_id,seq,question,useful_words,asked_at_ms)
-		VALUES($1,$2,1,$3,$4::jsonb,0)`, uuid.NewString(), sessionID, row.OpeningQuestion, string(openingWordsJSON))
+	_, err = tx.Exec(ctx, `INSERT INTO interview_turns(id,session_id,seq,question,useful_words,asked_at_ms,question_artifact_id)
+		VALUES($1,$2,1,$3,$4::jsonb,0,(SELECT opening_question_artifact_id FROM interview_sessions WHERE id=$2))`, uuid.NewString(), sessionID, row.OpeningQuestion, string(openingWordsJSON))
 	if err != nil {
 		return Session{}, err
 	}
@@ -307,10 +310,11 @@ func (r *SQLRepository) Advance(ctx context.Context, input AdvanceInput) (Sessio
 		return Session{}, ErrConflict
 	}
 	var question string
+	var questionArtifactID *string
 	var usefulWordsJSON []byte
-	err = tx.QueryRow(ctx, `SELECT question,useful_words FROM interview_candidates
+	err = tx.QueryRow(ctx, `SELECT question,useful_words,question_artifact_id FROM interview_candidates
 		WHERE id=$1 AND session_id=$2 AND consumed_by_turn_seq IS NULL FOR UPDATE`,
-		input.NextCandidateID, input.SessionID).Scan(&question, &usefulWordsJSON)
+		input.NextCandidateID, input.SessionID).Scan(&question, &usefulWordsJSON, &questionArtifactID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Session{}, ErrNotReady
 	}
@@ -328,9 +332,9 @@ func (r *SQLRepository) Advance(ctx context.Context, input AdvanceInput) (Sessio
 		return Session{}, err
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO interview_turns
-		(id,session_id,seq,question,useful_words,asked_at_ms,advance_key,source_candidate_id)
-		VALUES($1,$2,$3,$4,$5::jsonb,$6,$7,$8)`, uuid.NewString(), input.SessionID, currentSeq+1,
-		question, string(usefulWordsJSON), input.AtMs, input.IdempotencyKey, input.NextCandidateID)
+		(id,session_id,seq,question,useful_words,asked_at_ms,advance_key,source_candidate_id,question_artifact_id)
+		VALUES($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9)`, uuid.NewString(), input.SessionID, currentSeq+1,
+		question, string(usefulWordsJSON), input.AtMs, input.IdempotencyKey, input.NextCandidateID, questionArtifactID)
 	if err != nil {
 		return Session{}, err
 	}
@@ -697,16 +701,20 @@ func (r *SQLRepository) view(ctx context.Context, row sessionRow) (Session, erro
 	if view.UsefulVocabulary == nil {
 		view.UsefulVocabulary = []VocabularyItem{}
 	}
-	rows, err := r.db.Query(ctx, `SELECT id,question,useful_words,source FROM interview_candidates
-		WHERE session_id=$1 AND consumed_by_turn_seq IS NULL
-		ORDER BY CASE WHEN source='adaptive' THEN 0 ELSE 1 END, created_at ASC`, row.ID)
+	if err := r.db.QueryRow(ctx, `SELECT COALESCE(a.question_index,0) FROM interview_sessions s LEFT JOIN interview_question_artifacts a ON a.id=s.opening_question_artifact_id WHERE s.id=$1`, row.ID).Scan(&view.OpeningQuestionIndex); err != nil {
+		return Session{}, err
+	}
+	rows, err := r.db.Query(ctx, `SELECT c.id,c.question,c.useful_words,c.source,COALESCE(a.question_index,0) FROM interview_candidates c
+		LEFT JOIN interview_question_artifacts a ON a.id=c.question_artifact_id
+		WHERE c.session_id=$1 AND c.consumed_by_turn_seq IS NULL
+		ORDER BY CASE WHEN c.source='adaptive' THEN 0 ELSE 1 END, c.created_at ASC`, row.ID)
 	if err != nil {
 		return Session{}, err
 	}
 	for rows.Next() {
 		var candidate Candidate
 		var usefulWords []byte
-		if err := rows.Scan(&candidate.ID, &candidate.Question, &usefulWords, &candidate.Source); err != nil {
+		if err := rows.Scan(&candidate.ID, &candidate.Question, &usefulWords, &candidate.Source, &candidate.QuestionIndex); err != nil {
 			rows.Close()
 			return Session{}, err
 		}
@@ -726,8 +734,9 @@ func (r *SQLRepository) view(ctx context.Context, row sessionRow) (Session, erro
 	}
 	rows, err = r.db.Query(ctx, `SELECT t.seq,t.question,t.useful_words,t.asked_at_ms,t.ended_at_ms,
 		COALESCE(t.provisional_transcript,''),t.transcript_status,
-		COALESCE(c.source,'opening') FROM interview_turns t
+		COALESCE(c.source,'opening'),COALESCE(a.question_index,0) FROM interview_turns t
 		LEFT JOIN interview_candidates c ON c.id=t.source_candidate_id
+		LEFT JOIN interview_question_artifacts a ON a.id=t.question_artifact_id
 		WHERE t.session_id=$1 AND NOT t.skipped ORDER BY t.seq`, row.ID)
 	if err != nil {
 		return Session{}, err
@@ -737,7 +746,7 @@ func (r *SQLRepository) view(ctx context.Context, row sessionRow) (Session, erro
 		var ended sql.NullInt64
 		var usefulWords []byte
 		if err := rows.Scan(&turn.Seq, &turn.Question, &usefulWords, &turn.AskedAtMs, &ended,
-			&turn.ProvisionalTranscript, &turn.TranscriptStatus, &turn.QuestionSource); err != nil {
+			&turn.ProvisionalTranscript, &turn.TranscriptStatus, &turn.QuestionSource, &turn.QuestionIndex); err != nil {
 			rows.Close()
 			return Session{}, err
 		}

@@ -17,7 +17,6 @@ type processorStore struct {
 func (s *processorStore) LoadWork(context.Context, Job) (Work, bool, error) {
 	return s.work, s.found, nil
 }
-
 func (s *processorStore) Complete(_ context.Context, _ Job, asset Asset) (bool, error) {
 	s.asset = asset
 	return s.completed, nil

@@ -29,10 +29,12 @@ func (f TranscribeFunc) Transcribe(ctx context.Context, path string) (string, er
 }
 
 type Processor struct {
-	store        ProcessingStore
-	materializer AudioMaterializer
-	transcriber  Transcriber
-	generator    Generator
+	store          ProcessingStore
+	materializer   AudioMaterializer
+	transcriber    Transcriber
+	generator      Generator
+	questionAudio  *QuestionAudioProcessor
+	answerAttempts *AnswerAttemptProcessor
 }
 
 func NewProcessor(store ProcessingStore, materializer AudioMaterializer, transcriber Transcriber, generator Generator) *Processor {
@@ -52,6 +54,16 @@ func (p *Processor) Process(ctx context.Context, job workqueue.Job) error {
 	logger := logging.ForBackground("worker.interview")
 	queueWait := p.store.QueueWaitMs(ctx, job.ID)
 	switch payload.Step {
+	case "question_audio":
+		if p.questionAudio == nil {
+			return ErrSpeechUnavailable
+		}
+		return p.questionAudio.Process(ctx, job)
+	case "answer_attempt":
+		if p.answerAttempts == nil {
+			return ErrUnavailable
+		}
+		return p.answerAttempts.Process(ctx, job)
 	case "prepare":
 		work, required, err := p.store.LoadPreparation(ctx, job.ResourceID)
 		if err != nil || !required {
@@ -136,4 +148,10 @@ func (p *Processor) Process(ctx context.Context, job workqueue.Job) error {
 	default:
 		return errors.New("unknown interview processing step")
 	}
+}
+
+func (p *Processor) WithArtifacts(audio *QuestionAudioProcessor, attempts *AnswerAttemptProcessor) *Processor {
+	p.questionAudio = audio
+	p.answerAttempts = attempts
+	return p
 }

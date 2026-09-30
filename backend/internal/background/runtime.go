@@ -29,6 +29,13 @@ type ShadowingProcessor interface {
 	Process(context.Context, shadowing.Job, shadowing.Logger) error
 }
 
+type FeedbackAudioProcessor interface {
+	Process(context.Context, workqueue.Job) error
+}
+type FeedbackAudioFinalizer interface {
+	FinalizeAudioFailure(context.Context, pgx.Tx, workqueue.Job) error
+}
+
 type InterviewProcessor interface {
 	Process(context.Context, workqueue.Job) error
 }
@@ -64,19 +71,21 @@ type MediaCleanup interface {
 }
 
 type Dependencies struct {
-	DB                    *db.DB
-	JobStore              *workqueue.Store
-	RecordingProcessor    RecordingProcessor
-	RecordingRepository   RecordingFinalizer
-	StrengthsProcessor    RecordingProcessor
-	StrengthsRepository   StrengthsFinalizer
-	GuestPreviewProcessor GuestPreviewProcessor
-	GuestPreviewStore     GuestPreviewStore
-	InterviewProcessor    InterviewProcessor
-	InterviewStore        InterviewStore
-	ShadowingProcessor    ShadowingProcessor
-	ShadowingStore        ShadowingFinalizer
-	MediaCleanup          MediaCleanup
+	FeedbackAudioProcessor  FeedbackAudioProcessor
+	FeedbackAudioRepository FeedbackAudioFinalizer
+	DB                      *db.DB
+	JobStore                *workqueue.Store
+	RecordingProcessor      RecordingProcessor
+	RecordingRepository     RecordingFinalizer
+	StrengthsProcessor      RecordingProcessor
+	StrengthsRepository     StrengthsFinalizer
+	GuestPreviewProcessor   GuestPreviewProcessor
+	GuestPreviewStore       GuestPreviewStore
+	InterviewProcessor      InterviewProcessor
+	InterviewStore          InterviewStore
+	ShadowingProcessor      ShadowingProcessor
+	ShadowingStore          ShadowingFinalizer
+	MediaCleanup            MediaCleanup
 }
 
 type Runtime struct{ dependencies Dependencies }
@@ -127,6 +136,13 @@ func (r *Runtime) Handle(ctx context.Context, job workqueue.Job) error {
 		jobCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 		defer cancel()
 		return r.dependencies.InterviewProcessor.Process(jobCtx, job)
+	case workqueue.KindRecordingFeedbackAudio:
+		if r.dependencies.FeedbackAudioProcessor == nil {
+			return errors.New("feedback audio processor is not configured")
+		}
+		jobCtx, cancel := context.WithTimeout(ctx, shadowing.JobTimeout)
+		defer cancel()
+		return r.dependencies.FeedbackAudioProcessor.Process(jobCtx, job)
 	case workqueue.KindShadowingSynthesize:
 		if r.dependencies.ShadowingProcessor == nil {
 			return errors.New("shadowing processor is not configured")
@@ -171,6 +187,11 @@ func (r *Runtime) FinalizeFailure(ctx context.Context, tx pgx.Tx, job workqueue.
 			return errors.New("interview store is not configured")
 		}
 		return r.dependencies.InterviewStore.FinalizeFailure(ctx, tx, job, message)
+	case workqueue.KindRecordingFeedbackAudio:
+		if r.dependencies.FeedbackAudioRepository == nil {
+			return errors.New("feedback audio repository is not configured")
+		}
+		return r.dependencies.FeedbackAudioRepository.FinalizeAudioFailure(ctx, tx, job)
 	case workqueue.KindShadowingSynthesize:
 		if r.dependencies.ShadowingStore == nil {
 			return errors.New("shadowing store is not configured")

@@ -26,8 +26,16 @@ type sqlAnalysisCheckpoint struct {
 
 func (r *SQLProcessingRepository) AnalysisCheckpoint(job ProcessingJob, input AnalysisInput) AnalysisCheckpoint {
 	input.Checkpoint = nil
+	if input.Pipeline != FocusedPipeline {
+		input.Pipeline = ""
+		input.ContextTurns = nil
+	}
 	data, _ := json.Marshal(input)
-	hash := sha256.Sum256(append([]byte("feedback-v2:"), data...))
+	prefix := "feedback-v2:"
+	if input.Pipeline == FocusedPipeline {
+		prefix = "feedback-v3-all-errors:"
+	}
+	hash := sha256.Sum256(append([]byte(prefix), data...))
 	return &sqlAnalysisCheckpoint{repository: r, job: job, fingerprint: fmt.Sprintf("%x", hash)}
 }
 
@@ -69,6 +77,49 @@ func (c *sqlAnalysisCheckpoint) Save(ctx context.Context, category SuggestionCat
 		WHERE id = $1 AND status = 'processing' AND processing_job_id = $4
 		AND EXISTS (SELECT 1 FROM processing_jobs WHERE id = $4 AND state = 'running' AND lease_token = $5 AND lease_expires_at > NOW())`,
 		c.job.ResourceID, string(category), string(payload), c.job.ID, c.job.LeaseToken)
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() != 1 {
+		return workqueue.ErrLeaseLost
+	}
+	return tx.Commit(ctx)
+}
+
+func (c *sqlAnalysisCheckpoint) LoadFocused(ctx context.Context) (*FocusedFeedback, bool, error) {
+	var payload []byte
+	if err := c.repository.db.QueryRow(ctx, `SELECT COALESCE(analysis_checkpoints->'focused-v1','null'::jsonb) FROM recordings WHERE id=$1`, c.job.ResourceID).Scan(&payload); err != nil {
+		return nil, false, err
+	}
+	var stored struct {
+		Fingerprint string          `json:"fingerprint"`
+		Feedback    json.RawMessage `json:"feedback"`
+	}
+	if json.Unmarshal(payload, &stored) != nil || stored.Fingerprint != c.fingerprint {
+		return nil, false, nil
+	}
+	feedback := DecodeFocusedFeedback(stored.Feedback)
+	return feedback, feedback != nil, nil
+}
+
+func (c *sqlAnalysisCheckpoint) SaveFocused(ctx context.Context, feedback *FocusedFeedback) error {
+	payload, err := json.Marshal(struct {
+		Fingerprint string           `json:"fingerprint"`
+		Feedback    *FocusedFeedback `json:"feedback"`
+	}{c.fingerprint, feedback})
+	if err != nil {
+		return err
+	}
+	tx, err := c.repository.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if err = requireRecordingLease(ctx, tx, c.job); err != nil {
+		return err
+	}
+	result, err := tx.Exec(ctx, `UPDATE recordings SET analysis_checkpoints=analysis_checkpoints||jsonb_build_object('focused-v1',$2::jsonb)
+ WHERE id=$1 AND processing_job_id=$3 AND status='processing'`, c.job.ResourceID, string(payload), c.job.ID)
 	if err != nil {
 		return err
 	}

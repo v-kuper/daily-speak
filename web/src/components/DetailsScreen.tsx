@@ -23,6 +23,7 @@ import { loadRecordingDraftAudio } from "../lib/recordingDraftAudio";
 import { useAppDispatch, useAppSelector, useAppStore } from "../store/hooks";
 import {
   clearRecordingDeleteError,
+  fetchRecording,
   generateShadowingAudio,
   resetPlaybackState,
   retryRecordingProcessing,
@@ -35,15 +36,19 @@ import RecordingLoadError from "./RecordingLoadError";
 import ProtectedMediaImage from "./ProtectedMediaImage";
 import ConversationTranscript from "./ConversationTranscript";
 import StrengthCard from "./StrengthCard";
+import FocusedFeedbackReview, { FeedbackLegend } from "./FocusedFeedbackReview";
+import InterviewRetakes from "./InterviewRetakes";
+import { apiFetch } from "../lib/apiClient";
+import { newIdempotencyKey } from "../lib/mediaUpload";
 
 const formatPracticeLabel = (value: "free_talk" | "topic" | "photo_description"): string => {
   switch (value) {
     case "free_talk":
-      return "Free talk";
+      return "Свободная практика";
     case "photo_description":
-      return "Photo description";
+      return "Описание фото";
     default:
-      return "Topic";
+      return "Интервью";
   }
 };
 
@@ -97,8 +102,11 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
   const [playbackError, setPlaybackError] = useState<string | null>(null);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [originalTranscriptOpen, setOriginalTranscriptOpen] = useState(true);
-  const [correctedTranscriptOpen, setCorrectedTranscriptOpen] = useState(false);
-  const [selectedReview, setSelectedReview] = useState<string | null>(null);
+  const [correctedTranscriptOpen, setCorrectedTranscriptOpen] = useState(true);
+  const [reanalysisLoading, setReanalysisLoading] = useState(false);
+ const [reanalysisError, setReanalysisError] = useState("");
+ const reanalysisKey = useRef<string | null>(null);
+ const [selectedReview, setSelectedReview] = useState<string | null>(null);
   const {
     isPlaying,
     playbackPosition,
@@ -142,6 +150,8 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
   const shadowingStatus = recording?.shadowingStatus ?? "pending";
   const shadowingUpdatedAt = recording?.shadowingUpdatedAt ?? "";
   const shadowingDownloadPath = recording?.media?.shadowing?.downloadPath ?? null;
+  const hasObsoleteShadowingScript = Boolean(recording?.shadowingScript);
+  const shadowingAudioReady = shadowingStatus === "ready" && !hasObsoleteShadowingScript;
   const {
     url: recordingMediaURL,
     loading: recordingMediaLoading,
@@ -159,7 +169,7 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
     retry: retryShadowingMedia,
   } = useProtectedMediaURL(
     shadowingDownloadPath,
-    shadowingStatus === "ready",
+    shadowingAudioReady,
   );
   const audioSrc = recordingAudioDownloadPath ? recordingMediaURL : localAudioSrc;
   const hasAudio = Boolean(audioSrc);
@@ -216,6 +226,7 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
         correctedTranscript,
         shadowingStatus,
         requestLoading: isShadowingRequestLoading,
+        hasObsoleteScript: hasObsoleteShadowingScript,
       })
     ) {
       return;
@@ -230,6 +241,7 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
     recordingId,
     recordingStatus,
     shadowingStatus,
+    hasObsoleteShadowingScript,
   ]);
 
   useEffect(() => {
@@ -549,12 +561,28 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
     );
   };
 
+  const recordingTitle = recording.practiceType === "topic"
+    ? recording.interviewTurns?.[0]?.question || recording.topic
+    : recording.topic;
+  const recordedAt = new Date(recording.timestamp);
+  const recordingDate = Number.isFinite(recordedAt.getTime())
+    ? recordedAt.toLocaleString("ru", { day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" })
+    : null;
+
   return (
     <section>
       <Link className="back-btn" href="/history">
         ← Back
       </Link>
-      <h2>Recording</h2>
+      <header className="details-heading">
+        <div className="material-kicker">{formatPracticeLabel(recording.practiceType)}</div>
+        <h2>{recordingTitle}</h2>
+        <div className="details-metadata" aria-label="Информация о записи">
+          {recordingDate && <time dateTime={recording.timestamp}>{recordingDate}</time>}
+          <span>Длительность <strong>{formatTime(recordingDuration)}</strong></span>
+          {Boolean(recording.interviewTurns?.length) && <span>Вопросов: <strong>{recording.interviewTurns.length}</strong></span>}
+        </div>
+      </header>
       <RecordingLoadError recordingId={routeRecordingId} />
 
       {isProcessing && (
@@ -592,30 +620,26 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
         </div>
       )}
 
-      <div className="details-metadata">
-        <div>
-          <strong>{formatTime(recordingDuration)}</strong>
-        </div>
-        <div>{recording.topic}</div>
-        <div>{formatPracticeLabel(recording.practiceType)}</div>
-      </div>
+      {recording.focusedFeedback && <aside className="details-review-guide" aria-label="Как читать разбор">
+        <div className="material-kicker">Как читать разбор</div>
+        <FeedbackLegend explain />
+        <p>Подсвечиваем все уверенно найденные ошибки. Нажмите на цветной фрагмент или плашку, чтобы открыть правило и потренироваться на примере.</p>
+      </aside>}
 
       <div className="details-workbench">
         <div className="details-materials">
           <section className="details-material-card details-original-material">
             <div className="material-heading">
               <div>
-                <div className="material-kicker">Your recording</div>
-                <h3>Original conversation</h3>
+                <div className="material-kicker">{recording.focusedFeedback ? "Исходное аудио" : "Your recording"}</div>
+                <h3>{recording.focusedFeedback ? "Ваша запись" : "Original conversation"}</h3>
               </div>
             </div>
             {recordingMediaLoading ? (
               <div className="notice">Preparing protected recording audio...</div>
             ) : hasAudio ? (
               <audio ref={audioRef} src={audioSrc ?? undefined} preload="metadata" />
-            ) : (
-              <div className="notice">Audio is unavailable for this recording.</div>
-            )}
+            ) : null}
             <div className="player material-player">
               <div className="player-controls">
                 <button className="play-btn" onClick={onTogglePlayback} disabled={!hasAudio} aria-label={isPlaying ? "Pause" : "Play"}>
@@ -646,7 +670,9 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
             </button>
             {originalTranscriptOpen && (
               <div id="original-transcript-panel" className="material-transcript-scroll">
-                {hasConversationTranscript ? (
+                {recording.focusedFeedback ? (
+                  <FocusedFeedbackReview feedback={recording.focusedFeedback} transcript={recording.transcript} turns={recording.interviewTurns} audioBase={`/api/v1/recordings/${recording.id}/feedback`} showLegend={false} />
+                ) : hasConversationTranscript ? (
                   <ConversationTranscript
                     turns={recording.interviewTurns}
                     suggestions={recording.suggestions}
@@ -669,13 +695,13 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
           <section className="details-material-card details-shadowing-material">
             <div className="material-heading">
               <div>
-                <div className="material-kicker">Practice version</div>
+                <div className="material-kicker">Исправленная версия</div>
                 <h3>Shadowing practice</h3>
               </div>
             </div>
-            <p className="shadowing-hint">Listen, then repeat with the same rhythm and pronunciation. This version applies your corrections and may rephrase your answer for practice.</p>
-            {recording.shadowingStatus === "ready" && shadowingMediaLoading && <div className="empty-state">Preparing protected pronunciation audio...</div>}
-            {recording.shadowingStatus === "ready" && shadowingMediaURL && (
+            <p className="shadowing-hint">Ваши мысли и детали в естественном английском: исправляем грамматику и построение фраз с учётом вашего уровня. Слушайте и повторяйте, следуя ритму и произношению.</p>
+            {shadowingAudioReady && shadowingMediaLoading && <div className="empty-state">Preparing protected pronunciation audio...</div>}
+            {shadowingAudioReady && shadowingMediaURL && (
               <audio
                 ref={shadowingAudioRef}
                 className="shadowing-audio"
@@ -690,14 +716,14 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
                 onError={reportShadowingMediaError}
               />
             )}
-            {recording.shadowingStatus === "ready" && !shadowingDownloadPath && <div className="auth-error">The protected pronunciation audio reference is unavailable.</div>}
-            {recording.shadowingStatus === "ready" && shadowingMediaError && (
+            {shadowingAudioReady && !shadowingDownloadPath && <div className="auth-error">The protected pronunciation audio reference is unavailable.</div>}
+            {shadowingAudioReady && shadowingMediaError && (
               <div className="processing-retry">
                 <div className="auth-error">{shadowingMediaError}</div>
                 <button className="btn btn-secondary" onClick={retryShadowingMedia}>Reload audio</button>
               </div>
             )}
-            {showShadowingProgress && !shadowingRequestError && (
+            {(showShadowingProgress || hasObsoleteShadowingScript) && !shadowingRequestError && (
               <div className={shadowingIsStale ? "auth-error" : "empty-state"}>{shadowingProgressLabel(recording.shadowingStatus, shadowingIsStale)}</div>
             )}
             {recordingStatus === "ready" && hasCorrectedTranscript && (recording.shadowingStatus === "failed" || shadowingRequestError) && (
@@ -717,7 +743,7 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
               aria-controls="corrected-transcript-panel"
               onClick={() => setCorrectedTranscriptOpen((open) => !open)}
             >
-              <span>Natural practice version</span>
+              <span>Ваш ответ в естественной форме</span>
               <span aria-hidden="true">{correctedTranscriptOpen ? "−" : "+"}</span>
             </button>
             <div id="corrected-transcript-panel" className="material-transcript-scroll" hidden={!correctedTranscriptOpen}>
@@ -735,9 +761,15 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
               {renderProcessingRetry("rewriting")}
             </div>
           </section>
+          {recording.status === "ready" && !recording.id.startsWith("local-") && recording.interviewTurns?.some(turn => turn.answerText.trim()) && <InterviewRetakes key={recording.id} recording={recording} onOpen={() => {
+            audioRef.current?.pause();
+            shadowingAudioRef.current?.pause();
+            dispatch(setPlaybackPlaying(false));
+          }} />}
         </div>
 
-        <section className="details-feedback">
+        {!recording.focusedFeedback && <section className="details-feedback">
+
           <div className="feedback-heading">
             <div className="material-kicker">Your feedback</div>
             <h3>Corrections and strengths</h3>
@@ -786,9 +818,21 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
             )}
           </div>
           {renderProcessingRetry("suggestions")}
-        </section>
+        </section>}
       </div>
 
+
+      {recording.status === "ready" && !recording.focusedFeedback && !recording.id.startsWith("local-") && <div className="retake-panel">
+       <button className="btn btn-secondary" disabled={reanalysisLoading} onClick={() => {
+        if (reanalysisLoading) return; setReanalysisLoading(true); setReanalysisError("");
+        reanalysisKey.current ??= newIdempotencyKey("feedback");
+        void apiFetch(`/api/v1/recordings/${recording.id}/feedback/reanalyze`, {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({idempotencyKey:reanalysisKey.current})})
+         .then(response => {if (!response.ok) throw new Error("Не удалось запустить новый разбор."); return dispatch(fetchRecording(recording.id)).unwrap();})
+         .catch(error => setReanalysisError(error instanceof Error ? error.message : "Разбор недоступен."))
+         .finally(() => setReanalysisLoading(false));
+       }}>{reanalysisLoading ? "Запускаем разбор…" : "Обновить до фокусированного разбора"}</button>
+       {reanalysisError && <p role="alert" className="auth-error">{reanalysisError}</p>}
+      </div>}
       <button className="btn btn-danger btn-large delete-recording-btn" onClick={onOpenDeleteModal} disabled={!canDelete || isDeleteLoading}>
         {!canDelete ? "Saving recording..." : isDeleteLoading ? "Deleting..." : "Delete recording"}
       </button>

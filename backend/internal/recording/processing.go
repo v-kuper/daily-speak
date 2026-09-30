@@ -21,6 +21,7 @@ type ProcessingJob struct {
 }
 
 type ProcessingWork struct {
+	AnalysisPipeline     string
 	UserID               string
 	Stage                string
 	AudioPath            *string
@@ -233,7 +234,7 @@ func (p *Processor) analyzeWithInterests(ctx context.Context, job ProcessingJob,
 		return errors.New("recording analysis is not configured")
 	}
 	input := AnalysisInput{
-		RecordingID: job.ResourceID, Transcript: work.Transcript, Topic: work.Topic,
+		Pipeline: work.AnalysisPipeline, RecordingID: job.ResourceID, Transcript: work.Transcript, Topic: work.Topic,
 		Interests: interests, PracticeType: work.PracticeType, PhotoObject: work.PhotoObject,
 		EnglishLevel: work.EnglishLevel, InterviewTurns: dialogue,
 	}

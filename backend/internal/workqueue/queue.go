@@ -16,12 +16,13 @@ import (
 )
 
 const (
-	KindRecordingProcess    = "recording.process"
-	KindRecordingStrengths  = "recording.strengths"
-	KindShadowingSynthesize = "shadowing.synthesize"
-	KindMediaDelete         = "media.delete"
-	KindGuestPreview        = "guest.preview"
-	KindInterviewProcess    = "interview.process"
+	KindRecordingProcess       = "recording.process"
+	KindRecordingStrengths     = "recording.strengths"
+	KindRecordingFeedbackAudio = "recording.feedback_audio"
+	KindShadowingSynthesize    = "shadowing.synthesize"
+	KindMediaDelete            = "media.delete"
+	KindGuestPreview           = "guest.preview"
+	KindInterviewProcess       = "interview.process"
 )
 
 var ErrLeaseLost = errors.New("processing job lease was lost")

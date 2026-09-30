@@ -2,6 +2,7 @@ import type { AppStore } from "../store";
 import {
   cancelAuth,
   deleteRecording,
+  discardRecordingDraft,
   fetchRecording,
   finishGuestPreviewFlow,
   finishFailedRecordingSave,
@@ -17,6 +18,7 @@ import {
 import { parseHistoryDate, recordingPath, safeReturnTo } from "./routes";
 import { shouldPollRecording } from "./shadowing";
 import { guestPreviewIdFromPath } from "./guestPreview";
+import { deleteRecordingDraftAudio } from "./recordingDraftAudio";
 
 type RouteNavigator = { push: (path: string) => void; replace: (path: string) => void };
 
@@ -67,6 +69,17 @@ export function cancelAuthentication(store: AppStore, router: RouteNavigator, re
 export function startGuestSave(store: AppStore, router: RouteNavigator) {
   store.dispatch(openAuthForSave());
   router.push("/auth?returnTo=%2Fspeak");
+}
+
+export async function discardRecordingAndNavigate(store: AppStore, router: RouteNavigator) {
+  const state = store.getState().app;
+  if (state.speakState !== "recorded" || state.recordingSaveStatus === "loading") return;
+  const audioStorageKey = state.pendingRecordingAudioStorageKey;
+  // Reset immediately, so late capture callbacks cannot reuse the abandoned
+  // draft while its IndexedDB copy is being removed.
+  store.dispatch(discardRecordingDraft());
+  await deleteRecordingDraftAudio(audioStorageKey);
+  router.replace("/speak");
 }
 
 export async function saveAndNavigate(

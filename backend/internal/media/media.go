@@ -29,9 +29,11 @@ const (
 	// PurposeGuestPreviewAudio is an internal storage purpose. Clients still
 	// request recording_audio; the media application service maps guest uploads
 	// to this value so PostgreSQL can enforce one live guest object atomically.
-	PurposeGuestPreviewAudio  = "guest_preview_audio"
-	PurposeRecordingPhoto     = "recording_photo"
-	PurposeInterviewTurnAudio = "interview_turn_audio"
+	PurposeGuestPreviewAudio      = "guest_preview_audio"
+	PurposeRecordingPhoto         = "recording_photo"
+	PurposeInterviewTurnAudio     = "interview_turn_audio"
+	PurposeInterviewAttemptAudio  = "interview_attempt_audio"
+	PurposeInterviewQuestionAudio = "interview_question_audio"
 )
 
 type Asset struct {

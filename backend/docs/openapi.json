@@ -836,7 +836,7 @@
           "Recordings"
         ],
         "summary": "Schedule pronunciation audio generation",
-        "description": "Claims an owned ready recording for durable shadowing synthesis without duplicating already-running work.",
+        "description": "Schedules owned ready recording shadowing through the durable worker, using the saved corrected learner transcript without an extra model call. Ready experimental fictional sample audio with shadowingScript is replaced once; other ready learner audio and processing work are reused. The replacement clears shadowingScript and retires its old audio through bounded background cleanup.",
         "security": [
           {
             "bearerAuth": []
@@ -2327,6 +2327,769 @@
         },
         "operationId": "retryRecordingStrengths"
       }
+    },
+    "/api/v1/interviews/{interviewId}/questions/{questionIndex}/audio": {
+      "get": {
+        "tags": [
+          "Mobile API v1",
+          "Interviews"
+        ],
+        "summary": "Read cached audio state and signed link",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RequestIdHeader"
+          },
+          {
+            "$ref": "#/components/parameters/InterviewIdPath"
+          },
+          {
+            "$ref": "#/components/parameters/QuestionIndexPath"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/V1ArtifactAudioResponseOK"
+          },
+          "400": {
+            "$ref": "#/components/responses/V1BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/V1Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/V1Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/V1NotFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/V1MethodNotAllowed"
+          },
+          "409": {
+            "$ref": "#/components/responses/V1Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/V1InternalServerError"
+          },
+          "503": {
+            "$ref": "#/components/responses/V1ServiceUnavailable"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Mobile API v1",
+          "Interviews"
+        ],
+        "summary": "Start or retry durable audio synthesis",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RequestIdHeader"
+          },
+          {
+            "$ref": "#/components/parameters/InterviewIdPath"
+          },
+          {
+            "$ref": "#/components/parameters/QuestionIndexPath"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/V1ArtifactAudioResponseOK"
+          },
+          "202": {
+            "$ref": "#/components/responses/V1ArtifactAudioResponseAccepted"
+          },
+          "400": {
+            "$ref": "#/components/responses/V1BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/V1Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/V1Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/V1NotFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/V1MethodNotAllowed"
+          },
+          "409": {
+            "$ref": "#/components/responses/V1Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/V1InternalServerError"
+          },
+          "503": {
+            "$ref": "#/components/responses/V1ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/api/v1/recordings/{recordingId}/interview-turns/{sequence}/question-audio": {
+      "get": {
+        "tags": [
+          "Mobile API v1",
+          "Recordings"
+        ],
+        "summary": "Read cached audio state and signed link",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RequestIdHeader"
+          },
+          {
+            "$ref": "#/components/parameters/RecordingIdPath"
+          },
+          {
+            "$ref": "#/components/parameters/InterviewTurnSequencePath"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/V1ArtifactAudioResponseOK"
+          },
+          "400": {
+            "$ref": "#/components/responses/V1BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/V1Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/V1Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/V1NotFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/V1MethodNotAllowed"
+          },
+          "409": {
+            "$ref": "#/components/responses/V1Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/V1InternalServerError"
+          },
+          "503": {
+            "$ref": "#/components/responses/V1ServiceUnavailable"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Mobile API v1",
+          "Recordings"
+        ],
+        "summary": "Start or retry durable audio synthesis",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RequestIdHeader"
+          },
+          {
+            "$ref": "#/components/parameters/RecordingIdPath"
+          },
+          {
+            "$ref": "#/components/parameters/InterviewTurnSequencePath"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/V1ArtifactAudioResponseOK"
+          },
+          "202": {
+            "$ref": "#/components/responses/V1ArtifactAudioResponseAccepted"
+          },
+          "400": {
+            "$ref": "#/components/responses/V1BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/V1Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/V1Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/V1NotFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/V1MethodNotAllowed"
+          },
+          "409": {
+            "$ref": "#/components/responses/V1Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/V1InternalServerError"
+          },
+          "503": {
+            "$ref": "#/components/responses/V1ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/api/v1/recordings/{recordingId}/feedback/{feedbackId}/audio": {
+      "get": {
+        "tags": [
+          "Mobile API v1",
+          "Recordings"
+        ],
+        "summary": "Read cached audio state and signed link",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RequestIdHeader"
+          },
+          {
+            "$ref": "#/components/parameters/RecordingIdPath"
+          },
+          {
+            "$ref": "#/components/parameters/FeedbackIdPath"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/V1ArtifactAudioResponseOK"
+          },
+          "400": {
+            "$ref": "#/components/responses/V1BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/V1Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/V1Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/V1NotFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/V1MethodNotAllowed"
+          },
+          "409": {
+            "$ref": "#/components/responses/V1Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/V1InternalServerError"
+          },
+          "503": {
+            "$ref": "#/components/responses/V1ServiceUnavailable"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Mobile API v1",
+          "Recordings"
+        ],
+        "summary": "Start or retry durable audio synthesis",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RequestIdHeader"
+          },
+          {
+            "$ref": "#/components/parameters/RecordingIdPath"
+          },
+          {
+            "$ref": "#/components/parameters/FeedbackIdPath"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/V1ArtifactAudioResponseOK"
+          },
+          "202": {
+            "$ref": "#/components/responses/V1ArtifactAudioResponseAccepted"
+          },
+          "400": {
+            "$ref": "#/components/responses/V1BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/V1Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/V1Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/V1NotFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/V1MethodNotAllowed"
+          },
+          "409": {
+            "$ref": "#/components/responses/V1Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/V1InternalServerError"
+          },
+          "503": {
+            "$ref": "#/components/responses/V1ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/api/v1/recordings/{recordingId}/interview-turns/{sequence}/attempts/{attemptId}/feedback/{feedbackId}/audio": {
+      "get": {
+        "tags": [
+          "Mobile API v1",
+          "Recordings"
+        ],
+        "summary": "Read cached audio state and signed link",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RequestIdHeader"
+          },
+          {
+            "$ref": "#/components/parameters/RecordingIdPath"
+          },
+          {
+            "$ref": "#/components/parameters/InterviewTurnSequencePath"
+          },
+          {
+            "$ref": "#/components/parameters/AttemptIdPath"
+          },
+          {
+            "$ref": "#/components/parameters/FeedbackIdPath"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/V1ArtifactAudioResponseOK"
+          },
+          "400": {
+            "$ref": "#/components/responses/V1BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/V1Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/V1Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/V1NotFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/V1MethodNotAllowed"
+          },
+          "409": {
+            "$ref": "#/components/responses/V1Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/V1InternalServerError"
+          },
+          "503": {
+            "$ref": "#/components/responses/V1ServiceUnavailable"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Mobile API v1",
+          "Recordings"
+        ],
+        "summary": "Start or retry durable audio synthesis",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RequestIdHeader"
+          },
+          {
+            "$ref": "#/components/parameters/RecordingIdPath"
+          },
+          {
+            "$ref": "#/components/parameters/InterviewTurnSequencePath"
+          },
+          {
+            "$ref": "#/components/parameters/AttemptIdPath"
+          },
+          {
+            "$ref": "#/components/parameters/FeedbackIdPath"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/V1ArtifactAudioResponseOK"
+          },
+          "202": {
+            "$ref": "#/components/responses/V1ArtifactAudioResponseAccepted"
+          },
+          "400": {
+            "$ref": "#/components/responses/V1BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/V1Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/V1Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/V1NotFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/V1MethodNotAllowed"
+          },
+          "409": {
+            "$ref": "#/components/responses/V1Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/V1InternalServerError"
+          },
+          "503": {
+            "$ref": "#/components/responses/V1ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/api/v1/recordings/{recordingId}/interview-turns/{sequence}/attempts": {
+      "get": {
+        "tags": [
+          "Mobile API v1",
+          "Recordings"
+        ],
+        "summary": "List separate attempts for this original question",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RequestIdHeader"
+          },
+          {
+            "$ref": "#/components/parameters/RecordingIdPath"
+          },
+          {
+            "$ref": "#/components/parameters/InterviewTurnSequencePath"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Use the oldest returned attempt ID to fetch the next page."
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/V1AnswerAttemptListOK"
+          },
+          "400": {
+            "$ref": "#/components/responses/V1BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/V1Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/V1Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/V1NotFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/V1MethodNotAllowed"
+          },
+          "409": {
+            "$ref": "#/components/responses/V1Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/V1InternalServerError"
+          },
+          "503": {
+            "$ref": "#/components/responses/V1ServiceUnavailable"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Mobile API v1",
+          "Recordings"
+        ],
+        "summary": "Save a separate answer attempt",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RequestIdHeader"
+          },
+          {
+            "$ref": "#/components/parameters/RecordingIdPath"
+          },
+          {
+            "$ref": "#/components/parameters/InterviewTurnSequencePath"
+          },
+          {
+            "$ref": "#/components/parameters/FeedbackIdempotencyKeyHeader"
+          }
+        ],
+        "responses": {
+          "202": {
+            "$ref": "#/components/responses/V1AnswerAttemptResponseAccepted"
+          },
+          "400": {
+            "$ref": "#/components/responses/V1BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/V1Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/V1Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/V1NotFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/V1MethodNotAllowed"
+          },
+          "409": {
+            "$ref": "#/components/responses/V1Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/V1InternalServerError"
+          },
+          "503": {
+            "$ref": "#/components/responses/V1ServiceUnavailable"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateAnswerAttemptRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/recordings/{recordingId}/interview-turns/{sequence}/attempts/{attemptId}": {
+      "get": {
+        "tags": [
+          "Mobile API v1",
+          "Recordings"
+        ],
+        "summary": "Read one answer attempt",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RequestIdHeader"
+          },
+          {
+            "$ref": "#/components/parameters/RecordingIdPath"
+          },
+          {
+            "$ref": "#/components/parameters/InterviewTurnSequencePath"
+          },
+          {
+            "$ref": "#/components/parameters/AttemptIdPath"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/V1AnswerAttemptResponseOK"
+          },
+          "400": {
+            "$ref": "#/components/responses/V1BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/V1Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/V1Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/V1NotFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/V1MethodNotAllowed"
+          },
+          "409": {
+            "$ref": "#/components/responses/V1Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/V1InternalServerError"
+          },
+          "503": {
+            "$ref": "#/components/responses/V1ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/api/v1/recordings/{recordingId}/interview-turns/{sequence}/attempts/{attemptId}/retry": {
+      "post": {
+        "tags": [
+          "Mobile API v1",
+          "Recordings"
+        ],
+        "summary": "Retry failed attempt processing using persisted audio and checkpoints",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RequestIdHeader"
+          },
+          {
+            "$ref": "#/components/parameters/RecordingIdPath"
+          },
+          {
+            "$ref": "#/components/parameters/InterviewTurnSequencePath"
+          },
+          {
+            "$ref": "#/components/parameters/AttemptIdPath"
+          }
+        ],
+        "responses": {
+          "202": {
+            "$ref": "#/components/responses/V1AnswerAttemptResponseAccepted"
+          },
+          "400": {
+            "$ref": "#/components/responses/V1BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/V1Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/V1Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/V1NotFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/V1MethodNotAllowed"
+          },
+          "409": {
+            "$ref": "#/components/responses/V1Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/V1InternalServerError"
+          },
+          "503": {
+            "$ref": "#/components/responses/V1ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/api/v1/recordings/{recordingId}/feedback/reanalyze": {
+      "post": {
+        "tags": [
+          "Mobile API v1",
+          "Recordings"
+        ],
+        "summary": "Explicitly reanalyze the original recording",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RequestIdHeader"
+          },
+          {
+            "$ref": "#/components/parameters/RecordingIdPath"
+          },
+          {
+            "$ref": "#/components/parameters/FeedbackIdempotencyKeyHeader"
+          }
+        ],
+        "responses": {
+          "202": {
+            "$ref": "#/components/responses/V1FeedbackReanalysisResponseAccepted"
+          },
+          "400": {
+            "$ref": "#/components/responses/V1BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/V1Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/V1Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/V1NotFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/V1MethodNotAllowed"
+          },
+          "409": {
+            "$ref": "#/components/responses/V1Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/V1InternalServerError"
+          },
+          "503": {
+            "$ref": "#/components/responses/V1ServiceUnavailable"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReanalyzeFeedbackRequest"
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2552,6 +3315,44 @@
           "type": "integer",
           "minimum": 1
         }
+      },
+      "FeedbackIdPath": {
+        "name": "feedbackId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string"
+        }
+      },
+      "AttemptIdPath": {
+        "name": "attemptId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string"
+        }
+      },
+      "QuestionIndexPath": {
+        "name": "questionIndex",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "FeedbackIdempotencyKeyHeader": {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": false,
+        "description": "Stable mutation key; required here unless supplied as idempotencyKey in the JSON body.",
+        "schema": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$"
+        },
+        "example": "ios-01K6T7Q2Y3A8F4N5R6M7P8S9V0"
       }
     },
     "responses": {
@@ -3277,6 +4078,111 @@
             "schema": {
               "$ref": "#/components/schemas/InterviewSessionResponse"
             }
+          }
+        }
+      },
+      "V1ArtifactAudioResponseOK": {
+        "description": "Current resource state.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ArtifactAudioResponse"
+            }
+          }
+        },
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestID"
+          }
+        }
+      },
+      "V1ArtifactAudioResponseAccepted": {
+        "description": "Durable work queued or still processing.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ArtifactAudioResponse"
+            }
+          }
+        },
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestID"
+          }
+        }
+      },
+      "V1AnswerAttemptListOK": {
+        "description": "Current resource state.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/AnswerAttemptList"
+            }
+          }
+        },
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestID"
+          }
+        }
+      },
+      "V1AnswerAttemptResponseOK": {
+        "description": "Current resource state.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/AnswerAttemptResponse"
+            }
+          }
+        },
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestID"
+          }
+        }
+      },
+      "V1AnswerAttemptResponseAccepted": {
+        "description": "Durable work queued or still processing.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/AnswerAttemptResponse"
+            }
+          }
+        },
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestID"
+          }
+        }
+      },
+      "V1FeedbackReanalysisResponseOK": {
+        "description": "Current resource state.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/FeedbackReanalysisResponse"
+            }
+          }
+        },
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestID"
+          }
+        }
+      },
+      "V1FeedbackReanalysisResponseAccepted": {
+        "description": "Durable work queued or still processing.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/FeedbackReanalysisResponse"
+            }
+          }
+        },
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestID"
           }
         }
       }
@@ -4016,7 +4922,8 @@
         "enum": [
           "recording_audio",
           "recording_photo",
-          "interview_turn_audio"
+          "interview_turn_audio",
+          "interview_attempt_audio"
         ]
       },
       "MediaChecksum": {
@@ -4112,7 +5019,7 @@
             ]
           },
           "purpose": {
-            "$ref": "#/components/schemas/MediaPurpose"
+            "$ref": "#/components/schemas/StoredMediaPurpose"
           },
           "contentType": {
             "type": "string"
@@ -4750,7 +5657,7 @@
           },
           "correctedTranscript": {
             "type": "string",
-            "description": "Natural transcript used for shadowing. For adaptive topic interviews this is the chronological question-and-corrected-answer dialogue without role labels; for free talk and photo description it contains learner speech only."
+            "description": "Corrected learner transcript used for shadowing. For adaptive interviews this is the chronological question-and-corrected-learner-answer dialogue without role labels. Rewriting uses the current profile level and preserves learner meaning and facts; occasional accessible phrasing from the next CEFR level is allowed."
           },
           "suggestions": {
             "type": "array",
@@ -4761,7 +5668,7 @@
           "strengths": {
             "type": "array",
             "maxItems": 3,
-            "description": "Verified learner examples. Populated independently by a durable job after corrections are saved; inspect strengthsStatus to distinguish empty results from pending or failed processing.",
+            "description": "At most three verified learner examples. Focused feedback mirrors praise here; legacy recordings use the independent strengths job.",
             "items": {
               "$ref": "#/components/schemas/Strength"
             }
@@ -4826,6 +5733,14 @@
               "failed"
             ],
             "description": "Independent good-example processing. unknown is used for legacy recordings without coverage information; ready with an empty strengths array means no examples were selected. Failure does not affect corrections, rewriting, or shadowing."
+          },
+          "focusedFeedback": {
+            "$ref": "#/components/schemas/FocusedFeedback"
+          },
+          "shadowingScript": {
+            "$ref": "#/components/schemas/ShadowingScript",
+            "description": "Deprecated experimental fictional-answer payload. No new scripts are generated. Its presence lets clients schedule a one-time replacement with corrected learner audio; the field is cleared when scheduled.",
+            "deprecated": true
           }
         },
         "example": {
@@ -5229,8 +6144,8 @@
             "items": {
               "type": "string"
             },
-            "maxItems": 10,
-            "description": "English words or short phrases for answering this candidate question; empty for legacy candidates."
+            "maxItems": 20,
+            "description": "Up to twenty English words or short phrases for answering this candidate question; new generation aims for twenty, empty for legacy candidates."
           },
           "source": {
             "type": "string",
@@ -5238,6 +6153,11 @@
               "prepared",
               "adaptive"
             ]
+          },
+          "questionIndex": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Immutable session artifact index, independent of visible turn sequence. Absent for historical turns until explicit hydration."
           }
         }
       },
@@ -5264,8 +6184,8 @@
             "items": {
               "type": "string"
             },
-            "maxItems": 10,
-            "description": "English words or short phrases for answering this presented question; empty for legacy turns."
+            "maxItems": 20,
+            "description": "Up to twenty English words or short phrases for answering this presented question; new generation aims for twenty, empty for legacy turns."
           },
           "questionSource": {
             "type": "string",
@@ -5297,6 +6217,11 @@
               "ready",
               "failed"
             ]
+          },
+          "questionIndex": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Immutable session artifact index, independent of visible turn sequence. Absent for historical turns until explicit hydration."
           }
         }
       },
@@ -5361,15 +6286,15 @@
             "items": {
               "type": "string"
             },
-            "maxItems": 10,
-            "description": "English words or short phrases for answering the opening question. They are shown during the answer, not on the preparation screen."
+            "maxItems": 20,
+            "description": "Up to twenty English words or short phrases for answering the opening question; new generation aims for twenty. They are shown during the answer, not on the preparation screen."
           },
           "usefulWords": {
             "type": "array",
             "items": {
               "type": "string"
             },
-            "maxItems": 12,
+            "maxItems": 20,
             "description": "Legacy session-wide English vocabulary. New sessions mirror the opening question's words here for older clients; question-specific words are on turns and candidates."
           },
           "usefulVocabulary": {
@@ -5411,6 +6336,10 @@
           "createdAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "openingQuestionIndex": {
+            "type": "integer",
+            "minimum": 1
           }
         }
       },
@@ -5699,6 +6628,11 @@
               "approximate"
             ],
             "description": "Present when full-audio text is assigned to a question using estimated speech timestamps; the canonical transcript remains unchanged."
+          },
+          "questionIndex": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Immutable session artifact index, independent of visible turn sequence. Absent for historical turns until explicit hydration."
           }
         }
       },
@@ -5721,6 +6655,379 @@
           "turnSequence": {
             "type": "integer",
             "minimum": 1
+          }
+        }
+      },
+      "MicroLesson": {
+        "type": "object",
+        "required": [
+          "title",
+          "points"
+        ],
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "points": {
+            "type": "array",
+            "minItems": 3,
+            "maxItems": 3,
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "description": "Three curated Russian learning points owned by the server; never model-generated."
+      },
+      "FeedbackFocus": {
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "originalFragment",
+          "occurrence",
+          "span",
+          "title",
+          "explanation",
+          "ruleId",
+          "category"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "praise",
+              "blocker",
+              "native_tip"
+            ]
+          },
+          "originalFragment": {
+            "type": "string",
+            "description": "Verbatim case-sensitive quotation from this learner answer."
+          },
+          "occurrence": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Mandatory 1-based exact whole-word occurrence within the designated answer."
+          },
+          "span": {
+            "$ref": "#/components/schemas/FeedbackSpan"
+          },
+          "title": {
+            "type": "string",
+            "description": "Contextual Russian heading explaining intended meaning."
+          },
+          "explanation": {
+            "type": "string",
+            "description": "One or two Russian sentences explaining the pattern."
+          },
+          "correctedFragment": {
+            "type": "string"
+          },
+          "ruleId": {
+            "type": "string"
+          },
+          "category": {
+            "$ref": "#/components/schemas/SuggestionCategory"
+          },
+          "practiceText": {
+            "type": "string",
+            "maxLength": 800,
+            "description": "A separate hypothetical English example illustrating this rule, suitable for listening and repetition at the learner level."
+          },
+          "practiceContext": {
+            "$ref": "#/components/schemas/FeedbackPracticeContext"
+          },
+          "microLesson": {
+            "$ref": "#/components/schemas/MicroLesson"
+          }
+        }
+      },
+      "FeedbackPracticeContext": {
+        "type": "object",
+        "required": [
+          "originalText",
+          "correctedText",
+          "audioFeedbackId"
+        ],
+        "properties": {
+          "originalText": {
+            "type": "string",
+            "maxLength": 800
+          },
+          "correctedText": {
+            "type": "string",
+            "maxLength": 800
+          },
+          "audioFeedbackId": {
+            "type": "string",
+            "description": "Opaque feedbackId for the existing feedback audio resource. Use this ID to hear correctedText, rather than the legacy practiceText."
+          }
+        },
+        "description": "Optional sentence or bounded excerpt from the designated learner answer, with only the anchored originalFragment replaced by correctedFragment. Other wording is preserved; clipped excerpts use ellipses. Absent for praise or unverifiable anchors. Computed for saved feedback without reanalysis."
+      },
+      "FocusedFeedback": {
+        "type": "object",
+        "required": [
+          "version",
+          "answers"
+        ],
+        "properties": {
+          "version": {
+            "type": "integer",
+            "const": 1
+          },
+          "answers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "items"
+              ],
+              "properties": {
+                "turnSequence": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "description": "Stored interview sequence; absent/zero for free talk or photo description."
+                },
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/FeedbackFocus"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "description": "All confidently identified learner errors, with no numeric limit on errors or total items. Each error has a correction, explanation and rule. Up to one optional praise and one native tip per answer. Questions never receive highlights; all spans are validated and disjoint."
+      },
+      "ArtifactAudioResponse": {
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "not_requested",
+              "processing",
+              "ready",
+              "failed"
+            ]
+          },
+          "questionIndex": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "error": {
+            "type": "string"
+          },
+          "asset": {
+            "$ref": "#/components/schemas/MediaAsset"
+          },
+          "request": {
+            "$ref": "#/components/schemas/SignedMediaRequest"
+          }
+        },
+        "description": "GET never starts synthesis. POST starts missing audio or retries failed synthesis, and is a no-op while processing/ready. Ready includes a fresh private signed download request. Signed URL errors must be retried with GET, never regeneration."
+      },
+      "AnswerAttempt": {
+        "type": "object",
+        "required": [
+          "id",
+          "recordingId",
+          "turnSequence",
+          "status",
+          "transcript",
+          "durationSeconds",
+          "audioAssetId",
+          "createdAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "recordingId": {
+            "type": "string"
+          },
+          "turnSequence": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "processing",
+              "ready",
+              "failed"
+            ]
+          },
+          "transcript": {
+            "type": "string"
+          },
+          "durationSeconds": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 600
+          },
+          "audioAssetId": {
+            "type": "string"
+          },
+          "focusedFeedback": {
+            "$ref": "#/components/schemas/FocusedFeedback"
+          },
+          "error": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "description": "Separate immutable answer attempt. Original question, subsequent turns and original recording remain unchanged."
+      },
+      "AnswerAttemptResponse": {
+        "type": "object",
+        "required": [
+          "attempt"
+        ],
+        "properties": {
+          "attempt": {
+            "$ref": "#/components/schemas/AnswerAttempt"
+          }
+        }
+      },
+      "AnswerAttemptList": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 50,
+            "items": {
+              "$ref": "#/components/schemas/AnswerAttempt"
+            }
+          }
+        }
+      },
+      "CreateAnswerAttemptRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "audioAssetId"
+        ],
+        "properties": {
+          "audioAssetId": {
+            "type": "string"
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$"
+          }
+        },
+        "description": "Supply a stable idempotencyKey here or Idempotency-Key header. Audio must be an owned, ready, unattached interview_attempt_audio asset; duration is verified by the worker."
+      },
+      "ReanalyzeFeedbackRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "idempotencyKey": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$"
+          }
+        },
+        "description": "Explicitly replace original feedback using the focused pipeline. Stable key is required in body or header. Stored attempts are preserved."
+      },
+      "FeedbackReanalysisResponse": {
+        "type": "object",
+        "required": [
+          "scheduled"
+        ],
+        "properties": {
+          "scheduled": {
+            "type": "boolean"
+          }
+        }
+      },
+      "StoredMediaPurpose": {
+        "type": "string",
+        "enum": [
+          "recording_audio",
+          "recording_photo",
+          "shadowing_audio",
+          "guest_preview_audio",
+          "interview_turn_audio",
+          "interview_attempt_audio",
+          "interview_question_audio",
+          "interview_question_manifest",
+          "feedback_audio"
+        ]
+      },
+      "ShadowingScript": {
+        "type": "object",
+        "required": [
+          "englishLevel",
+          "text",
+          "turns"
+        ],
+        "properties": {
+          "englishLevel": {
+            "type": "string",
+            "enum": [
+              "a1",
+              "a2",
+              "b1",
+              "b2",
+              "c1",
+              "c2"
+            ],
+            "description": "Profile English level snapshot at generation time."
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 20000,
+            "description": "Exact audio transcript: immutable question then fictional sample answer, in turn order, joined with spaces."
+          },
+          "turns": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "$ref": "#/components/schemas/ShadowingSampleAnswer"
+            }
+          }
+        },
+        "deprecated": true
+      },
+      "ShadowingSampleAnswer": {
+        "type": "object",
+        "required": [
+          "sequence",
+          "question",
+          "answerText"
+        ],
+        "properties": {
+          "sequence": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "question": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Exact saved non-skipped interview question."
+          },
+          "answerText": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1200,
+            "description": "Fictional speaker answer at the profile CEFR ceiling, independent of learner answers. Maximum 40 words at A1/A2 and 80 words at other levels."
           }
         }
       }

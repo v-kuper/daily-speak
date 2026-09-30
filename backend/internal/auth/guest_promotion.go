@@ -189,6 +189,15 @@ func promoteGuestPreview(ctx context.Context, tx pgx.Tx, guestPrincipalID string
 	if result.RowsAffected() != 1 {
 		return nil, errors.New("guest preview promotion lost its state transition")
 	}
+	// Transfer the entire retained interview before publishing its account owner.
+	if _, err := tx.Exec(ctx, `UPDATE media_assets SET owner_principal_id=$2,retention_until=NULL,updated_at=NOW()
+ WHERE owner_principal_id=$3 AND id IN (
+ SELECT q.audio_asset_id FROM interview_question_artifacts q JOIN interview_sessions s ON s.id=q.session_id WHERE s.guest_preview_id=$1
+ UNION SELECT q.manifest_asset_id FROM interview_question_artifacts q JOIN interview_sessions s ON s.id=q.session_id WHERE s.guest_preview_id=$1
+ UNION SELECT t.audio_asset_id FROM interview_turns t JOIN interview_sessions s ON s.id=t.session_id WHERE s.guest_preview_id=$1
+ UNION SELECT u.asset_id FROM media_uploads u JOIN interview_sessions s ON s.id=u.interview_session_id WHERE s.guest_preview_id=$1)`, preview.ID, userPrincipalID, guestPrincipalID); err != nil {
+		return nil, err
+	}
 	// Keep the interview timeline reachable from the newly promoted recording.
 	if _, err := tx.Exec(ctx, `
 		UPDATE interview_sessions

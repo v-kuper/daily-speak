@@ -89,10 +89,15 @@ func NewWorker(config WorkerConfig) *background.Runtime {
 		Store: guestStore, Materializer: materializer, ProbeAudioDuration: probe,
 		Transcribe: transcribeForProcessing, Analyzer: analysis,
 	})
+	generated := media.NewGeneratedStore(config.MediaStore, config.MediaBucket, media.NewSQLRepository(config.DB))
+	feedbackAudioRepository := recording.NewSQLFeedbackAudioRepository(config.DB)
+	feedbackAudioProcessor := recording.NewFeedbackAudioProcessor(feedbackAudioRepository, synthesizer, generated)
 	interviewRepository := interview.NewSQLRepository(config.DB)
 	interviewProcessor := interview.NewProcessor(interviewRepository, materializer,
 		interview.TranscribeFunc(transcribeForProcessing),
-		interview.NewLocalGenerator(interviewollama.New(aiClient)))
+		interview.NewLocalGenerator(interviewollama.New(aiClient))).WithArtifacts(
+		interview.NewQuestionAudioProcessor(interviewRepository, synthesizer, generated),
+		interview.NewAnswerAttemptProcessor(interviewRepository, materializer, interview.TranscribeFunc(transcribeForProcessing), analysis, probe))
 	shadowStore := shadowing.NewStore(config.DB)
 	shadowProcessor := shadowing.NewProcessor(shadowing.ProcessorDependencies{
 		Store: shadowStore, Synthesizer: synthesizer, MediaStore: config.MediaStore,
@@ -100,6 +105,7 @@ func NewWorker(config WorkerConfig) *background.Runtime {
 	})
 	cleanup := media.NewCleanup(config.DB, mediaService, config.MediaStore)
 	return background.NewRuntime(background.Dependencies{
+		FeedbackAudioProcessor: feedbackAudioProcessor, FeedbackAudioRepository: feedbackAudioRepository,
 		DB: config.DB, JobStore: workqueue.NewStore(config.DB),
 		RecordingProcessor: recordingProcessor, RecordingRepository: recordingRepository,
 		StrengthsProcessor: recording.NewStrengthsService(recordingRepository, recordingRepository, analysis, uuid.NewString), StrengthsRepository: recordingRepository,

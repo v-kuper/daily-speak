@@ -62,7 +62,7 @@ func validateCreateInput(input CreateUploadInput) (string, error) {
 			return "", ErrPayloadTooLarge
 		}
 		return "wav", nil
-	case PurposeRecordingAudio, PurposeGuestPreviewAudio:
+	case PurposeRecordingAudio, PurposeGuestPreviewAudio, PurposeInterviewAttemptAudio:
 		if input.InterviewSessionID != "" {
 			return "", ErrInvalidRequest
 		}

@@ -208,3 +208,16 @@ func TestExtractRussianPhrasesKeepsExactUniqueText(t *testing.T) {
 		}
 	}
 }
+func TestShadowingRewriteKeepsProfileLevelAndAllowsOnlySmallNextLevelStretch(t *testing.T) {
+	for level, next := range map[string]string{"a1": "A2", "a2": "B1", "b1": "B2", "b2": "C1", "c1": "C2"} {
+		prompt := recordingInterviewNaturalVersionPrompt(RewriteInput{EnglishLevel: level, InterviewTurns: []InterviewDialogueTurn{{Sequence: 1, Question: "What happened?", Answer: "I go to the office yesterday."}}})
+		for _, fragment := range []string{"Learner level: " + strings.ToUpper(level), "occasional short, useful expression from " + next, "Do not raise the whole answer by a level", "sole reference", "Never answer the question as a different person", "Fix all remaining clear errors"} {
+			if !strings.Contains(prompt, fragment) {
+				t.Fatalf("missing %q for %s", fragment, level)
+			}
+		}
+	}
+	if strings.Contains(recordingNaturalVersionLevelGuidance("c2"), "from C3") {
+		t.Fatal("C2 must not invent a higher CEFR level")
+	}
+}

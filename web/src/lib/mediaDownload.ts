@@ -6,7 +6,7 @@ type MediaErrorPayload = {
   error?: { code?: unknown; message?: unknown };
 };
 
-type MediaDownloadPayload = {
+export type MediaDownloadPayload = {
   asset?: { id?: unknown; state?: unknown };
   request?: {
     method?: unknown;
@@ -103,6 +103,10 @@ export const requestMediaPlaybackTicket = async ({
   const response = await request(downloadPath, { method: "GET", cache: "no-store", signal });
   if (!response.ok) throw await readDownloadError(response);
   const payload = await readApiJSON<MediaDownloadPayload>(response);
+  return parseMediaPlaybackTicket(payload, assetId, now);
+};
+
+export const parseMediaPlaybackTicket = (payload: MediaDownloadPayload | null, assetId: string, now = Date.now): MediaPlaybackTicket => {
   const signedRequest = payload?.request;
   if (
     payload?.asset?.id !== assetId ||

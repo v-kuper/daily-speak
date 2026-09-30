@@ -29,6 +29,7 @@ func (g *LocalGenerator) Prepare(ctx context.Context, topic, openingQuestion, le
 	level = learner.NormalizeEnglishLevel(level)
 	input, _ := json.Marshal(map[string]any{
 		"topic": topic, "openingQuestion": openingQuestion, "englishLevel": level, "interests": interests,
+		"wordsPerQuestion": maxQuestionUsefulWords,
 	})
 	system := strings.Join([]string{
 		"You prepare the first two turns of an English speaking interview. Return only JSON with this shape: {\"openingUsefulWords\":[\"...\"],\"next\":{\"question\":\"...\",\"usefulWords\":[\"...\"]}}.",
@@ -80,7 +81,7 @@ func (g *LocalGenerator) Followup(ctx context.Context, topic, level string, hist
 	latestAnswer := history[len(history)-1].Transcript
 	input, _ := json.Marshal(map[string]any{
 		"selectedTopic": topic, "profileEnglishLevel": level, "latestLearnerAnswer": latestAnswer,
-		"history": history, "avoidQuestions": avoid,
+		"history": history, "avoidQuestions": avoid, "wordsPerQuestion": maxQuestionUsefulWords,
 	})
 	system := strings.Join([]string{
 		"You are a thoughtful English speaking interviewer. Return only JSON {\"question\":\"...\",\"usefulWords\":[\"...\"]}.",
@@ -138,7 +139,7 @@ func (g *LocalGenerator) Refill(ctx context.Context, topic, level string, histor
 	}
 	input, _ := json.Marshal(map[string]any{
 		"selectedTopic": topic, "profileEnglishLevel": level, "latestLearnerAnswer": latestAnswer,
-		"history": history, "avoidQuestions": avoid,
+		"history": history, "avoidQuestions": avoid, "wordsPerQuestion": maxQuestionUsefulWords,
 	})
 	system := strings.Join([]string{
 		"You prepare one reserve English speaking interview question. Return only JSON {\"question\":\"...\",\"usefulWords\":[\"...\"]}.",
@@ -177,7 +178,7 @@ func (g *LocalGenerator) Refill(ctx context.Context, topic, level string, histor
 	return GuidedQuestion{}, errors.New("interview reserve response is invalid")
 }
 
-const questionUsefulWordsRule = "For this question, return 6 to 10 distinct, practical English words or short phrases that can help form an answer. Mix useful nouns, verbs, adjectives, adverbs, connectors, and helper phrases as appropriate; do not limit the list to nouns. Keep them at or below the profile level, directly relevant to answering this exact question, and do not include translations."
+const questionUsefulWordsRule = "Return 20 distinct, practical English words or short phrases for EACH question. Both openingUsefulWords and every usefulWords array must contain 20 entries. Give the learner a broad choice of relevant ways to express ideas, without padding the list with duplicates or unrelated words. Mix useful nouns, verbs, adjectives, adverbs, connectors, and helper phrases as appropriate; do not limit the list to nouns. Keep them at or below the profile level, directly relevant to answering this exact question, and do not include translations."
 
 func normalizeGuidedQuestion(value GuidedQuestion) (GuidedQuestion, bool) {
 	value.Question = strings.TrimSpace(value.Question)

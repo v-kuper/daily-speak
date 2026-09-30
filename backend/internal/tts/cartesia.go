@@ -141,3 +141,8 @@ func (c *cartesiaClient) Synthesize(ctx context.Context, transcript string) ([]b
 	}
 	return audio, nil
 }
+
+// Non-secret settings are kept with immutable generated question artifacts.
+func (client *cartesiaClient) SpeechMetadata() map[string]any {
+	return map[string]any{"provider": "cartesia", "model": client.config.Model, "voiceId": client.config.VoiceID, "apiVersion": client.config.APIVersion, "container": "mp3", "sampleRate": 44100, "bitRate": 128000, "language": "en", "speed": 1, "volume": 1}
+}

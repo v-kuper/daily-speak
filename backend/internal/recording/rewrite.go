@@ -194,10 +194,11 @@ func recordingInterviewNaturalVersionPrompt(input RewriteInput) string {
 		"Learner level: " + learner.FormatEnglishLevel(input.EnglishLevel) + ".",
 		recordingNaturalVersionLevelGuidance(input.EnglishLevel),
 		"Rewrite each learner answer as natural conversational English while preserving its meaning, intent, and factual details.",
+		"Use that learner's answer as the sole reference for their experience. Preserve who did what, time, negation, uncertainty, names, numbers, and personal details. Never answer the question as a different person or replace their story with a generic model answer.",
 		"Questions are immutable context only. Never correct, rewrite, copy, or include a question in correctedAnswerText.",
 		"Do not add speaker names or role labels such as Interviewer or Learner.",
 		"Replace every Russian word or phrase with its supplied English correction so every corrected answer is English-only.",
-		"Apply each supplied correction only to its anchored learner answer and occurrence. Spans use UTF-16 offsets within the answer. Preserve correctly used patterns, meaning, and factual details. Improve clarity and word order with minimal changes.",
+		"Apply each supplied correction only to its anchored learner answer and occurrence. Spans use UTF-16 offsets within the answer. Fix all remaining clear errors too: verb forms, agreement, articles, prepositions, sentence structure and word order. Preserve correct patterns and repair the learner's own phrasing with minimal changes.",
 		"Return exactly one corrected answer for every input turn, in the same order and with the same sequence.",
 		`Return only JSON with this exact shape: {"correctedAnswers":[{"sequence":1,"correctedAnswerText":"..."}]}.`,
 		"No markdown, no extra keys, and no combined transcript.",
@@ -227,6 +228,16 @@ func recordingNaturalVersionPrompt(transcript string, suggestions []Suggestion, 
 }
 
 func recordingNaturalVersionLevelGuidance(englishLevel string) string {
+	level := learner.NormalizeEnglishLevel(englishLevel)
+	base := recordingNaturalVersionBaseLevelGuidance(level)
+	next := map[string]string{"a1": "A2", "a2": "B1", "b1": "B2", "b2": "C1", "c1": "C2"}[level]
+	if next == "" {
+		return base + " Keep the result easy to repeat aloud; do not make it more complex just to sound impressive."
+	}
+	return base + " Keep most wording and sentence structures at the learner's stated level. You may use an occasional short, useful expression from " + next + " only if it preserves the learner's meaning and is easy to repeat. Do not raise the whole answer by a level or introduce dense vocabulary."
+}
+
+func recordingNaturalVersionBaseLevelGuidance(englishLevel string) string {
 	switch learner.NormalizeEnglishLevel(englishLevel) {
 	case "a1":
 		return "Use very simple everyday vocabulary and short spoken sentences."
