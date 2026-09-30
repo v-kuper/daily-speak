@@ -30,10 +30,11 @@ func TestStrengthsV1RetryIsOwnedIdempotentAndIndependent(t *testing.T) {
 	fixture := newRecordingCreateV1Fixture(t)
 	ctx := context.Background()
 	id := uuid.NewString()
+	shadowingAssetID := fixture.insertAsset(t, fixture.owner.Identity.PrincipalID, "shadowing_audio")
 	if _, err := fixture.database.Exec(ctx, `INSERT INTO recordings
-		(id, user_id, topic, duration, timestamp, status, transcript, corrected_transcript, suggestions, strengths_status, shadowing_status)
+		(id, user_id, topic, duration, timestamp, status, transcript, corrected_transcript, suggestions, strengths_status, shadowing_status, shadowing_asset_id)
 		VALUES ($1, $2, 'Travel', 20, NOW(), 'ready', 'I go home.', 'I went home.',
-		'[{"wrong":"go","right":"went","explanation":"Past time."}]'::jsonb, 'failed', 'ready')`, id, fixture.owner.Identity.User.ID); err != nil {
+		'[{"wrong":"go","right":"went","explanation":"Past time."}]'::jsonb, 'failed', 'ready', $3)`, id, fixture.owner.Identity.User.ID, shadowingAssetID); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
@@ -60,7 +61,7 @@ func TestStrengthsV1RetryIsOwnedIdempotentAndIndependent(t *testing.T) {
 		if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
 			t.Fatal(err)
 		}
-		if payload.Scheduled != scheduled || payload.Recording.Status != "ready" || payload.Recording.StrengthsStatus != "processing" || payload.Recording.ShadowingStatus != "ready" || payload.Recording.CorrectedTranscript != "I went home." || len(payload.Recording.Suggestions) != 1 {
+		if payload.Scheduled != scheduled || payload.Recording.Status != "ready" || payload.Recording.StrengthsStatus != "processing" || payload.Recording.ShadowingStatus != "ready" || payload.Recording.Media == nil || payload.Recording.Media.Shadowing == nil || payload.Recording.Media.Shadowing.AssetID != shadowingAssetID || payload.Recording.CorrectedTranscript != "I went home." || len(payload.Recording.Suggestions) != 1 {
 			t.Fatalf("payload=%#v", payload)
 		}
 	}

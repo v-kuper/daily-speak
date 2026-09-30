@@ -70,12 +70,18 @@ func TestQueueClaimsOnceRecoversExpiredLeaseAndFencesOldOwner(t *testing.T) {
 		t.Fatalf("stored guest preview kind=%q err=%v", guestKind, err)
 	}
 
+	// Claim uses the database clock; make this fixture eligible on that same clock.
+	var availableAt time.Time
+	if err := database.QueryRow(ctx, `SELECT NOW() - INTERVAL '1 second'`).Scan(&availableAt); err != nil {
+		t.Fatalf("read database clock: %v", err)
+	}
 	job := NewJob{
 		ID:             jobID,
 		Kind:           KindMediaDelete,
 		ResourceID:     "media-asset-" + jobID,
 		IdempotencyKey: idempotencyKey,
 		MaxAttempts:    3,
+		AvailableAt:    availableAt,
 	}
 	if err := Enqueue(ctx, database, job); err != nil {
 		t.Fatal(err)

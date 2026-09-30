@@ -20,17 +20,38 @@ import (
 )
 
 type retryAIClient struct {
-	mu         sync.Mutex
-	calls      int
-	blockFirst bool
-	started    chan struct{}
-	release    chan struct{}
-	once       sync.Once
+	mu               sync.Mutex
+	calls            int
+	callsByOperation map[string]int
+	blockFirst       bool
+	started          chan struct{}
+	release          chan struct{}
+	once             sync.Once
+	blockStrengths   bool
+	strengthsStarted chan struct{}
+	strengthsRelease chan struct{}
+	strengthsOnce    sync.Once
 }
 
 func (client *retryAIClient) PostChat(ctx context.Context, body any) (ai.ChatResponse, error) {
+	prompt := retryPromptFromBody(body)
+	operation := "detector"
+	switch {
+	case strings.Contains(prompt, "adjudicator, not an error detector"):
+		operation = "review"
+	case strings.Contains(prompt, "Identify up to three genuine strengths"):
+		operation = "strengths"
+	case strings.Contains(prompt, "Rewrite the transcript as natural conversational English"):
+		operation = "rewrite"
+	case strings.Contains(prompt, "Your only category is language_switch."):
+		operation = "language_switch"
+	}
 	client.mu.Lock()
 	client.calls++
+	if client.callsByOperation == nil {
+		client.callsByOperation = map[string]int{}
+	}
+	client.callsByOperation[operation]++
 	call := client.calls
 	client.mu.Unlock()
 	if client.blockFirst && call == 1 {
@@ -42,7 +63,14 @@ func (client *retryAIClient) PostChat(ctx context.Context, body any) (ai.ChatRes
 		}
 	}
 
-	prompt := retryPromptFromBody(body)
+	if client.blockStrengths && operation == "strengths" {
+		client.strengthsOnce.Do(func() { close(client.strengthsStarted) })
+		select {
+		case <-client.strengthsRelease:
+		case <-ctx.Done():
+			return ai.ChatResponse{}, ctx.Err()
+		}
+	}
 	switch {
 	case strings.Contains(prompt, "adjudicator, not an error detector"):
 		return ai.ChatResponse{Response: `{"decisions":{}}`}, nil
@@ -59,6 +87,16 @@ func (client *retryAIClient) callCount() int {
 	client.mu.Lock()
 	defer client.mu.Unlock()
 	return client.calls
+}
+
+func (client *retryAIClient) operationCallCounts() map[string]int {
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	counts := make(map[string]int, len(client.callsByOperation))
+	for operation, count := range client.callsByOperation {
+		counts[operation] = count
+	}
+	return counts
 }
 
 func retryPromptFromBody(body any) string {
@@ -178,8 +216,24 @@ func (fixture recordingRetryFixture) waitForShadowingStatus(t *testing.T, want s
 	return recording.Record{}
 }
 
+func (fixture recordingRetryFixture) waitForStrengthsStatus(t *testing.T, want string) recording.Record {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		record, err := fixture.server.recordingReader.Get(context.Background(), fixture.owner.ID, fixture.recordingID)
+		if err == nil && record.StrengthsStatus == want {
+			return record
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	record, err := fixture.server.recordingReader.Get(context.Background(), fixture.owner.ID, fixture.recordingID)
+	t.Fatalf("strengths status did not become %q: recording=%#v err=%v", want, record, err)
+	return recording.Record{}
+}
+
 func TestRecordingRetryAnalysisClaimsOnceAndContinuesToReady(t *testing.T) {
-	client := &retryAIClient{blockFirst: true, started: make(chan struct{}), release: make(chan struct{})}
+	client := &retryAIClient{blockFirst: true, started: make(chan struct{}), release: make(chan struct{}),
+		blockStrengths: true, strengthsStarted: make(chan struct{}), strengthsRelease: make(chan struct{})}
 	fixture := newRecordingRetryFixture(t, "suggestions", client)
 
 	first := fixture.post(t, fixture.ownerAccessToken)
@@ -201,10 +255,21 @@ func TestRecordingRetryAnalysisClaimsOnceAndContinuesToReady(t *testing.T) {
 	}
 	close(client.release)
 	recording := fixture.waitForStatus(t, "ready")
-	if recording.CorrectedTranscript != "I went home yesterday." || client.callCount() != 10 {
+	if recording.CorrectedTranscript != "I went home yesterday." || recording.StrengthsStatus != "processing" {
 		t.Fatalf("recording=%#v calls=%d", recording, client.callCount())
 	}
+	select {
+	case <-client.strengthsStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("independent strength analysis did not start")
+	}
+	counts := client.operationCallCounts()
+	if counts["detector"] != 6 || counts["rewrite"] != 1 || counts["strengths"] != 1 || counts["review"] != 0 || counts["language_switch"] != 0 {
+		t.Fatalf("unexpected analysis calls: %#v", counts)
+	}
 	fixture.waitForShadowingStatus(t, "ready")
+	close(client.strengthsRelease)
+	fixture.waitForStrengthsStatus(t, "ready")
 }
 
 func TestRecordingRetryRewriteSkipsDetectorsAndReviewer(t *testing.T) {
