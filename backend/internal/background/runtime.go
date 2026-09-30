@@ -42,6 +42,10 @@ type RecordingFinalizer interface {
 	FinalizeFailure(context.Context, pgx.Tx, string, string, string) error
 }
 
+type StrengthsFinalizer interface {
+	FinalizeStrengthsFailure(context.Context, pgx.Tx, string, string) error
+}
+
 type GuestPreviewStore interface {
 	Expire(context.Context) error
 	FinalizeFailure(context.Context, pgx.Tx, string, string, string) error
@@ -64,6 +68,8 @@ type Dependencies struct {
 	JobStore              *workqueue.Store
 	RecordingProcessor    RecordingProcessor
 	RecordingRepository   RecordingFinalizer
+	StrengthsProcessor    RecordingProcessor
+	StrengthsRepository   StrengthsFinalizer
 	GuestPreviewProcessor GuestPreviewProcessor
 	GuestPreviewStore     GuestPreviewStore
 	InterviewProcessor    InterviewProcessor
@@ -100,6 +106,13 @@ func (r *Runtime) Handle(ctx context.Context, job workqueue.Job) error {
 		jobCtx, cancel := context.WithTimeout(ctx, guestpreview.ProcessingTimeout)
 		defer cancel()
 		return r.dependencies.GuestPreviewProcessor.Process(jobCtx, guestpreview.Job{ID: job.ID, ResourceID: job.ResourceID, LeaseToken: job.LeaseToken})
+	case workqueue.KindRecordingStrengths:
+		if r.dependencies.StrengthsProcessor == nil {
+			return errors.New("strengths processor is not configured")
+		}
+		jobCtx, cancel := context.WithTimeout(ctx, recording.StrengthsTimeout)
+		defer cancel()
+		return r.dependencies.StrengthsProcessor.Process(jobCtx, recording.ProcessingJob{ID: job.ID, ResourceID: job.ResourceID, LeaseToken: job.LeaseToken}, logging.ForBackground("worker.recordings.strengths"))
 	case workqueue.KindRecordingProcess:
 		if r.dependencies.RecordingProcessor == nil {
 			return errors.New("recording processor is not configured")
@@ -143,6 +156,11 @@ func (r *Runtime) FinalizeFailure(ctx context.Context, tx pgx.Tx, job workqueue.
 			return errors.New("guest preview store is not configured")
 		}
 		return r.dependencies.GuestPreviewStore.FinalizeFailure(ctx, tx, job.ID, job.ResourceID, message)
+	case workqueue.KindRecordingStrengths:
+		if r.dependencies.StrengthsRepository == nil {
+			return errors.New("strengths repository is not configured")
+		}
+		return r.dependencies.StrengthsRepository.FinalizeStrengthsFailure(ctx, tx, job.ID, job.ResourceID)
 	case workqueue.KindRecordingProcess:
 		if r.dependencies.RecordingRepository == nil {
 			return errors.New("recording repository is not configured")

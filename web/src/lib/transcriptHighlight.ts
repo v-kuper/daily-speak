@@ -1,4 +1,5 @@
 import type { Strength, Suggestion, SuggestionSeverity } from "./data";
+import { feedbackRanges, exactPhraseRanges } from "./feedbackSpans";
 import type { SavedInterviewTurn } from "./interviewTimeline";
 
 export type TranscriptSegment = {
@@ -9,7 +10,7 @@ export type TranscriptSegment = {
   feedbackIndex?: number;
 };
 
-type HighlightSuggestion = Pick<Suggestion, "wrong" | "severity">;
+type HighlightSuggestion = Pick<Suggestion, "wrong" | "severity" | "span" | "id">;
 
 export type ConversationTranscriptTurn = {
   sequence: number;
@@ -31,7 +32,8 @@ const parseSeverity = (value: unknown): SuggestionSeverity | null => {
 export const buildTranscriptSegments = (
   transcript: string,
   suggestions: ReadonlyArray<HighlightSuggestion>,
-  strengths: ReadonlyArray<Pick<Strength, "excerpt">> = []
+  strengths: ReadonlyArray<Pick<Strength, "excerpt" | "span" | "id">> = [],
+  turnSequence = 0
 ): TranscriptSegment[] => {
   if (!transcript) {
     return [];
@@ -42,28 +44,19 @@ export const buildTranscriptSegments = (
   const severities = Array.from<SuggestionSeverity | null>({ length: transcript.length }).fill(null);
   const errorIndexes = Array.from<number | null>({ length: transcript.length }).fill(null);
   const strengthIndexes = Array.from<number | null>({ length: transcript.length }).fill(null);
-  const lowerTranscript = transcript.toLowerCase();
 
   suggestions
     .map((suggestion, suggestionIndex) => ({ suggestion, suggestionIndex }))
     .sort((left, right) => right.suggestion.wrong.trim().length - left.suggestion.wrong.trim().length)
     .forEach(({ suggestion, suggestionIndex }) => {
-      const phrase = typeof suggestion.wrong === "string" ? suggestion.wrong.trim().toLowerCase() : "";
-      if (!phrase) {
+      const phrase = typeof suggestion.wrong === "string" ? suggestion.wrong.trim() : "";
+      if (!phrase || (suggestion.id && !suggestion.span)) {
         return;
       }
 
       const severity = parseSeverity(suggestion.severity);
       const rank = severity ? SEVERITY_RANK[severity] : 0;
-      let fromIndex = 0;
-
-      while (fromIndex < lowerTranscript.length) {
-        const start = lowerTranscript.indexOf(phrase, fromIndex);
-        if (start === -1) {
-          break;
-        }
-
-        const end = start + phrase.length;
+      for (const { start, end } of feedbackRanges(transcript, phrase, suggestion.span, turnSequence)) {
         for (let index = start; index < end; index += 1) {
           isError[index] = true;
           if (rank > severityRank[index]) {
@@ -73,23 +66,18 @@ export const buildTranscriptSegments = (
           }
         }
 
-        fromIndex = start + 1;
       }
     });
 
   strengths.forEach((strength, strengthIndex) => {
-    const phrase = typeof strength.excerpt === "string" ? strength.excerpt.trim().toLowerCase() : "";
-    if (!phrase) return;
-    let fromIndex = 0;
-    while (fromIndex < lowerTranscript.length) {
-      const start = lowerTranscript.indexOf(phrase, fromIndex);
-      if (start === -1) break;
-      for (let index = start; index < start + phrase.length; index += 1) {
+    const phrase = typeof strength.excerpt === "string" ? strength.excerpt.trim() : "";
+    if (!phrase || (strength.id && !strength.span)) return;
+    for (const { start, end } of feedbackRanges(transcript, phrase, strength.span, turnSequence)) {
+      for (let index = start; index < end; index += 1) {
         if (!isError[index] && strengthIndexes[index] === null) {
           strengthIndexes[index] = strengthIndex;
         }
       }
-      fromIndex = start + 1;
     }
   });
 
@@ -127,13 +115,19 @@ export const buildConversationTranscriptTurns = (
   turns: ReadonlyArray<SavedInterviewTurn>,
   suggestions: ReadonlyArray<HighlightSuggestion>,
   answerKind: "original" | "corrected" = "original",
-  strengths: ReadonlyArray<Pick<Strength, "excerpt">> = [],
-): ConversationTranscriptTurn[] => turns.map((turn) => {
-  const answerText = answerKind === "corrected" ? turn.correctedAnswerText ?? "" : turn.answerText;
-  return {
-    sequence: turn.sequence,
-    question: turn.question,
-    answerSegments: buildTranscriptSegments(answerText, answerKind === "corrected" ? [] : suggestions, answerKind === "corrected" ? [] : strengths),
-    hasAnswer: answerText.trim().length > 0,
-  };
-});
+  strengths: ReadonlyArray<Pick<Strength, "excerpt" | "span" | "id">> = [],
+): ConversationTranscriptTurn[] => {
+  // A legacy phrase must be unique across the complete interview, not per turn.
+  const unique = (phrase: string) => turns.reduce((count, turn) => count + exactPhraseRanges(turn.answerText, phrase).length, 0) === 1;
+  const safeSuggestions = suggestions.map(item => item.span || unique(item.wrong) ? item : { ...item, wrong: "" });
+  const safeStrengths = strengths.map(item => item.span || unique(item.excerpt) ? item : { ...item, excerpt: "" });
+  return turns.map((turn) => {
+    const answerText = answerKind === "corrected" ? turn.correctedAnswerText ?? "" : turn.answerText;
+    return {
+      sequence: turn.sequence,
+      question: turn.question,
+      answerSegments: buildTranscriptSegments(answerText, answerKind === "corrected" ? [] : safeSuggestions, answerKind === "corrected" ? [] : safeStrengths, turn.sequence),
+      hasAnswer: answerText.trim().length > 0,
+    };
+  });
+};

@@ -34,6 +34,8 @@ type LearningReference struct {
 // Suggestion is the recording-domain representation stored by workers and
 // returned by every delivery adapter (web today, mobile in the future).
 type Suggestion struct {
+	ID                string             `json:"id,omitempty"`
+	Span              *FeedbackSpan      `json:"span,omitempty"`
 	Wrong             string             `json:"wrong"`
 	Right             string             `json:"right"`
 	Explanation       string             `json:"explanation"`
@@ -46,6 +48,8 @@ type Suggestion struct {
 // Strength is a verified excerpt that demonstrates correct, useful English.
 // Learning references are resolved by the server from the rule catalog.
 type Strength struct {
+	ID                string             `json:"id,omitempty"`
+	Span              *FeedbackSpan      `json:"span,omitempty"`
 	Excerpt           string             `json:"excerpt"`
 	Explanation       string             `json:"explanation"`
 	Category          SuggestionCategory `json:"category"`
@@ -65,6 +69,7 @@ type Record struct {
 	CorrectedTranscript string
 	SuggestionsJSON     []byte
 	StrengthsJSON       []byte
+	StrengthsStatus     string
 	ProcessingStage     *string
 	PracticeType        string
 	PhotoObject         *string
@@ -150,6 +155,7 @@ func NormalizeSuggestions(input []byte, limit int) []Suggestion {
 			ruleID = ""
 		}
 		out = append(out, Suggestion{
+			ID: strings.TrimSpace(stringValue(item["id"])), Span: normalizeFeedbackSpan(item["span"]),
 			Wrong: wrong, Right: right, Explanation: explanation,
 			Category: category, Severity: severity, RuleID: ruleID,
 			LearningReference: reference,
@@ -177,7 +183,8 @@ func NormalizeStrengths(input []byte, limit int) []Strength {
 		category, validCategory := ParseSuggestionCategory(stringValue(item["category"]))
 		ruleID := strings.TrimSpace(stringValue(item["ruleId"]))
 		reference := ReferenceFor(ruleID, category)
-		key := strings.ToLower(excerpt)
+		span := normalizeFeedbackSpan(item["span"])
+		key := feedbackID("strength", excerpt, span)
 		if excerpt == "" || explanation == "" || !validCategory || reference == nil || len([]rune(excerpt)) > 300 || len([]rune(explanation)) > 800 {
 			continue
 		}
@@ -186,6 +193,7 @@ func NormalizeStrengths(input []byte, limit int) []Strength {
 		}
 		seen[key] = struct{}{}
 		out = append(out, Strength{
+			ID: strings.TrimSpace(stringValue(item["id"])), Span: span,
 			Excerpt: excerpt, Explanation: explanation, Category: category,
 			RuleID: ruleID, LearningReference: reference,
 		})
@@ -248,4 +256,16 @@ func firstValue(item map[string]any, keys ...string) any {
 func stringValue(value any) string {
 	typed, _ := value.(string)
 	return typed
+}
+
+func normalizeFeedbackSpan(value any) *FeedbackSpan {
+	data, err := json.Marshal(value)
+	if err != nil || value == nil {
+		return nil
+	}
+	var span FeedbackSpan
+	if json.Unmarshal(data, &span) != nil || span.Start < 0 || span.End <= span.Start || span.TurnSequence < 0 {
+		return nil
+	}
+	return &span
 }

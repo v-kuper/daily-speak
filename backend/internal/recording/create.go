@@ -39,6 +39,7 @@ type Created struct {
 	CorrectedTranscript string
 	SuggestionsJSON     []byte
 	StrengthsJSON       []byte
+	StrengthsStatus     string
 	ProcessingStage     *string
 	PracticeType        string
 	PhotoObject         *string

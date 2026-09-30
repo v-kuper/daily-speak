@@ -35,7 +35,7 @@ func (p *Provider) Complete(ctx context.Context, request recording.AnalysisCompl
 		},
 		"options": map[string]any{"temperature": request.Temperature, "seed": request.Seed},
 	}
-	if request.ForceJSON || !settings.IsThinkingModel {
+	if request.StrictJSON || request.ForceJSON || !settings.IsThinkingModel {
 		body["format"] = "json"
 	}
 	payload, err := p.client.PostChat(ctx, body)

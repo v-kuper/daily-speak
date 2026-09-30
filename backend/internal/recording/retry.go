@@ -130,9 +130,11 @@ func afterRetryClaim(record Record, startedAt time.Time) Record {
 			record.Transcript = ""
 			record.SuggestionsJSON = []byte("[]")
 			record.StrengthsJSON = []byte("[]")
+			record.StrengthsStatus = "pending"
 		case "suggestions":
 			record.SuggestionsJSON = []byte("[]")
 			record.StrengthsJSON = []byte("[]")
+			record.StrengthsStatus = "pending"
 		}
 	}
 	return record

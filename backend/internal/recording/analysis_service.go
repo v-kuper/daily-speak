@@ -19,8 +19,9 @@ type Analyzer interface {
 }
 
 type AnalysisResult struct {
-	Suggestions []Suggestion
-	Strengths   []Strength
+	Suggestions     []Suggestion
+	Strengths       []Strength
+	StrengthsStatus string
 }
 
 type AnalysisInput struct {
@@ -32,6 +33,7 @@ type AnalysisInput struct {
 	PracticeType   string
 	PhotoObject    *string
 	EnglishLevel   string
+	Checkpoint     AnalysisCheckpoint
 }
 
 type AnalysisLogger interface {
@@ -56,10 +58,6 @@ type AnalysisCompletionRequest struct {
 }
 
 type AnalysisConfig struct{ Concurrency int }
-
-func AnalysisConfigFromEnv() AnalysisConfig {
-	return AnalysisConfig{Concurrency: analysisConcurrencyFromEnv()}
-}
 
 type AnalysisService struct {
 	provider    AnalysisProvider
@@ -87,42 +85,21 @@ func (s *AnalysisService) Analyze(ctx context.Context, request AnalysisInput, lo
 		PracticeType:   request.PracticeType,
 		PhotoObject:    request.PhotoObject,
 		EnglishLevel:   learner.FormatEnglishLevel(request.EnglishLevel),
-		Russian:        extractRussianPhrases(transcript),
+		Russian:        analysisRussianPhrases(transcript, request.InterviewTurns),
 	}
-	analysisCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	type strengthResult struct {
-		strengths []Strength
-		err       error
+	candidates, err := s.runDetectorsWithCheckpoint(ctx, input, request.RecordingID, logger, request.Checkpoint)
+	if err != nil {
+		return AnalysisResult{}, err
 	}
-	strengthsChannel := make(chan strengthResult, 1)
-	go func() {
-		strengths, err := s.requestStrengths(analysisCtx, input, request.RecordingID, logger)
-		strengthsChannel <- strengthResult{strengths: strengths, err: err}
-	}()
+	suggestions := []Suggestion{}
+	if len(candidates) > 0 {
+		suggestions, err = s.requestReview(ctx, transcript, candidates, input.Russian, input.InterviewTurns, request.RecordingID, logger)
+		if err != nil {
+			return AnalysisResult{}, ErrAnalysis
+		}
+	}
 
-	candidates, err := s.runDetectors(analysisCtx, input, request.RecordingID, logger)
-	if err != nil {
-		cancel()
-		<-strengthsChannel
-		return AnalysisResult{}, ErrAnalysis
-	}
-	suggestions, err := s.requestReview(analysisCtx, transcript, candidates, input.Russian, input.InterviewTurns, request.RecordingID, logger)
-	if err != nil {
-		cancel()
-		<-strengthsChannel
-		return AnalysisResult{}, ErrAnalysis
-	}
-	strengthResultValue := <-strengthsChannel
-	strengths := strengthResultValue.strengths
-	if strengthResultValue.err != nil {
-		logger.Warn("recording.analysis_strengths", map[string]any{
-			"recordingId": request.RecordingID, "outcome": "unavailable",
-		})
-		strengths = []Strength{}
-	}
-	strengths = strengthsWithoutCorrectionOverlap(strengths, suggestions)
-	return AnalysisResult{Suggestions: suggestions, Strengths: strengths}, nil
+	return AnalysisResult{Suggestions: suggestions, Strengths: []Strength{}, StrengthsStatus: "pending"}, nil
 }
 
 type detectorPassResult struct {
@@ -131,6 +108,10 @@ type detectorPassResult struct {
 }
 
 func (s *AnalysisService) runDetectors(ctx context.Context, input recordingAnalysisInput, recordingID string, logger AnalysisLogger) ([]analysisCandidate, error) {
+	return s.runDetectorsWithCheckpoint(ctx, input, recordingID, logger, nil)
+}
+
+func (s *AnalysisService) runDetectorsWithCheckpoint(ctx context.Context, input recordingAnalysisInput, recordingID string, logger AnalysisLogger, checkpoint AnalysisCheckpoint) ([]analysisCandidate, error) {
 	results := make([]detectorPassResult, len(recordingAnalysisPasses))
 	jobs := make(chan int)
 	var workers sync.WaitGroup
@@ -146,7 +127,23 @@ func (s *AnalysisService) runDetectors(ctx context.Context, input recordingAnaly
 					if !open {
 						return
 					}
-					candidates, err := s.requestDetector(ctx, recordingAnalysisPasses[index], input, index, recordingID, logger)
+					pass := recordingAnalysisPasses[index]
+					var candidates []analysisCandidate
+					var err error
+					loaded := false
+					if checkpoint != nil {
+						candidates, loaded, err = checkpoint.Load(ctx, pass.Category)
+					}
+					if err == nil && !loaded {
+						if pass.Category == categoryLanguageSwitch && len(input.Russian) == 0 {
+							candidates = []analysisCandidate{}
+						} else {
+							candidates, err = s.requestDetector(ctx, pass, input, index, recordingID, logger)
+						}
+						if err == nil && checkpoint != nil {
+							err = checkpoint.Save(ctx, pass.Category, candidates)
+						}
+					}
 					results[index] = detectorPassResult{candidates: candidates, err: err}
 				}
 			}
@@ -175,10 +172,14 @@ func (s *AnalysisService) runDetectors(ctx context.Context, input recordingAnaly
 			return nil, result.err
 		}
 		sort.SliceStable(result.candidates, func(i, j int) bool {
-			iPosition := strings.Index(input.Transcript, result.candidates[i].Wrong)
-			jPosition := strings.Index(input.Transcript, result.candidates[j].Wrong)
-			if iPosition != jPosition {
-				return iPosition < jPosition
+			iSpan, jSpan := result.candidates[i].Span, result.candidates[j].Span
+			if iSpan != nil && jSpan != nil {
+				if iSpan.TurnSequence != jSpan.TurnSequence {
+					return iSpan.TurnSequence < jSpan.TurnSequence
+				}
+				if iSpan.Start != jSpan.Start {
+					return iSpan.Start < jSpan.Start
+				}
 			}
 			return result.candidates[i].Wrong < result.candidates[j].Wrong
 		})
@@ -198,6 +199,9 @@ func (s *AnalysisService) runDetectors(ctx context.Context, input recordingAnaly
 func (s *AnalysisService) requestDetector(ctx context.Context, pass analysisPass, input recordingAnalysisInput, passIndex int, recordingID string, logger AnalysisLogger) ([]analysisCandidate, error) {
 	prompt := recordingDetectorPrompt(pass, input)
 	for attempt := 0; attempt < 2; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		started := time.Now()
 		strictJSON := attempt > 0
 		content, err := s.provider.Complete(ctx, AnalysisCompletionRequest{
@@ -211,7 +215,7 @@ func (s *AnalysisService) requestDetector(ctx context.Context, pass analysisPass
 			logger.Warn("recording.analysis_detector", analysisLogMeta(recordingID, string(pass.Category), "request_error", attempt+1, time.Since(started), 0))
 			continue
 		}
-		candidates, valid := parseDetectorCandidates(content, pass.Category, input.Transcript)
+		candidates, valid := parseDetectorCandidates(content, pass.Category, input.Transcript, input.InterviewTurns)
 		if valid {
 			for index := range candidates {
 				candidates[index].PassIndex = passIndex
@@ -227,6 +231,9 @@ func (s *AnalysisService) requestDetector(ctx context.Context, pass analysisPass
 func (s *AnalysisService) requestReview(ctx context.Context, transcript string, candidates []analysisCandidate, requiredRussian []string, interviewTurns []InterviewDialogueTurn, recordingID string, logger AnalysisLogger) ([]suggestion, error) {
 	prompt := recordingReviewerPrompt(transcript, candidates, requiredRussian, interviewTurns)
 	for attempt := 0; attempt < 2; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		started := time.Now()
 		strictJSON := attempt > 0
 		content, err := s.provider.Complete(ctx, AnalysisCompletionRequest{

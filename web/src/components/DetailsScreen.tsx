@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { deleteAndNavigate, reconcileRecordingSaveRoute, recordingDetailState, saveAndNavigate, startRecordingDetailLifecycle } from "../lib/routeFlows";
 
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
-import { buildTranscriptSegments } from "../lib/transcriptHighlight";
+import { buildTranscriptSegments, buildConversationTranscriptTurns } from "../lib/transcriptHighlight";
 import { feedbackCardId, transcriptMarkId, type ReviewKind } from "../lib/feedbackAnchors";
 import {
   recordingProcessingLabel,
@@ -26,6 +26,7 @@ import {
   generateShadowingAudio,
   resetPlaybackState,
   retryRecordingProcessing,
+  retryRecordingStrengths,
   setPlaybackPlaying,
   setPlaybackPosition,
 } from "../store/slices/appSlice";
@@ -110,7 +111,10 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
     recordingRetryStatuses,
     recordingRetryErrors,
     shadowingRequestStatus,
-    shadowingRequestError,
+    shadowingRequestError: globalShadowingError,
+    shadowingRequestRecordingId,
+    strengthsRetryStatuses,
+    strengthsRetryErrors,
   } = useAppSelector(
     (state) => state.app
   );
@@ -127,6 +131,7 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
 
   useEffect(() => {
     setDeleteModalOpen(false);
+    setSelectedReview(null);
     return startRecordingDetailLifecycle(store, routeRecordingId);
   }, [store, routeRecordingId]);
   const recordingId = recording?.id ?? null;
@@ -187,7 +192,8 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
     ? recordingRetryStatuses[recordingId] === "loading"
     : false;
   const recordingRetryError = recordingId ? recordingRetryErrors[recordingId] ?? null : null;
-  const isShadowingRequestLoading = shadowingRequestStatus === "loading";
+  const shadowingRequestError = shadowingRequestRecordingId === recordingId ? globalShadowingError : null;
+  const isShadowingRequestLoading = shadowingRequestRecordingId === recordingId && shadowingRequestStatus === "loading";
   const shadowingIsStale = isShadowingStale(shadowingStatus, shadowingUpdatedAt);
   const retryLabel = recordingRetryLabel(recording?.processingStage ?? null);
   const showShadowingProgress = shouldShowShadowingProgress({
@@ -365,11 +371,19 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
     audio.pause();
   };
 
+  const reviewID = (kind: ReviewKind, index: number) =>
+    (kind === "correction" ? recording?.suggestions[index]?.id : recordingStrengths[index]?.id) ?? index;
+  const reviewSegments = hasConversationTranscript && recording
+    ? buildConversationTranscriptTurns(recording.interviewTurns, recording.suggestions, "original", recordingStrengths).flatMap(turn => turn.answerSegments)
+    : transcriptSegments;
+  const canLocateReview = (kind: ReviewKind, index: number) => reviewSegments.some(segment =>
+    segment.feedbackIndex === index && (kind === "correction" ? segment.isError : segment.isStrength));
+
   const scrollBehavior = (): ScrollBehavior =>
     window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
 
   const showReviewCard = (kind: ReviewKind, index: number) => {
-    const id = feedbackCardId(kind, index);
+    const id = feedbackCardId(kind, reviewID(kind, index));
     setSelectedReview(id);
     const card = document.getElementById(id);
     card?.scrollIntoView({ behavior: scrollBehavior(), block: "center" });
@@ -378,9 +392,9 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
 
   const showTranscriptMark = (kind: ReviewKind, index: number) => {
     setOriginalTranscriptOpen(true);
-    setSelectedReview(feedbackCardId(kind, index));
+    setSelectedReview(feedbackCardId(kind, reviewID(kind, index)));
     window.requestAnimationFrame(() => {
-      const mark = document.getElementById(transcriptMarkId(kind, index));
+      const mark = document.getElementById(transcriptMarkId(kind, reviewID(kind, index)));
       mark?.scrollIntoView({ behavior: scrollBehavior(), block: "center" });
       mark?.focus({ preventScroll: true });
     });
@@ -513,7 +527,7 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
     return (
       <mark
         key={`segment-${index}`}
-        id={firstOccurrence ? transcriptMarkId(kind, feedbackIndex) : undefined}
+        id={firstOccurrence ? transcriptMarkId(kind, reviewID(kind, feedbackIndex)) : undefined}
         data-feedback-kind={kind}
         data-feedback-index={feedbackIndex}
         className={segment.isError
@@ -521,7 +535,7 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
           : "transcript-strength-mark"}
         role="button"
         tabIndex={0}
-        aria-controls={feedbackCardId(kind, feedbackIndex)}
+        aria-controls={feedbackCardId(kind, reviewID(kind, feedbackIndex))}
         onClick={() => showReviewCard(kind, feedbackIndex)}
         onKeyDown={(event) => {
           if (event.key === "Enter" || event.key === " ") {
@@ -659,7 +673,7 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
                 <h3>Shadowing practice</h3>
               </div>
             </div>
-            <p className="shadowing-hint">Listen, then repeat with the same rhythm and pronunciation.</p>
+            <p className="shadowing-hint">Listen, then repeat with the same rhythm and pronunciation. This version applies your corrections and may rephrase your answer for practice.</p>
             {recording.shadowingStatus === "ready" && shadowingMediaLoading && <div className="empty-state">Preparing protected pronunciation audio...</div>}
             {recording.shadowingStatus === "ready" && shadowingMediaURL && (
               <audio
@@ -703,7 +717,7 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
               aria-controls="corrected-transcript-panel"
               onClick={() => setCorrectedTranscriptOpen((open) => !open)}
             >
-              <span>Corrected transcription</span>
+              <span>Natural practice version</span>
               <span aria-hidden="true">{correctedTranscriptOpen ? "−" : "+"}</span>
             </button>
             <div id="corrected-transcript-panel" className="material-transcript-scroll" hidden={!correctedTranscriptOpen}>
@@ -729,26 +743,38 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
             <h3>Corrections and strengths</h3>
             <p>Choose a highlight in the transcript to open its explanation.</p>
           </div>
+          {recording.strengthsStatus === "processing" && <div className="empty-state" role="status">Finding useful examples of English you used well…</div>}
+          {recording.strengthsStatus === "ready" && !hasStrengths && <div className="empty-state">No specific examples were selected this time.</div>}
+          {(recording.strengthsStatus === "failed" || (recording.strengthsStatus === "unknown" && !hasStrengths && recording.status === "ready")) && (
+            <div className="processing-retry">
+              <div className="notice">{recording.strengthsStatus === "failed" ? "Good examples could not be checked. Your corrections are saved." : "Useful examples have not been checked for this recording."}</div>
+              {strengthsRetryErrors[recording.id] && <div className="auth-error">{strengthsRetryErrors[recording.id]}</div>}
+              <button className="btn btn-secondary" disabled={strengthsRetryStatuses[recording.id] === "loading"}
+                onClick={() => { void dispatch(retryRecordingStrengths(recording.id)); }}>
+                {strengthsRetryStatuses[recording.id] === "loading" ? "Checking…" : recording.strengthsStatus === "failed" ? "Retry good examples" : "Find good examples"}
+              </button>
+            </div>
+          )}
           {hasStrengths && (
             <div className="feedback-group">
               <div className="feedback-group-title">What you did well</div>
               {recordingStrengths.map((strength, index) => {
-                const id = feedbackCardId("strength", index);
-                return <StrengthCard key={`${strength.excerpt}-${index}`} id={id} active={selectedReview === id} strength={strength} onShowInTranscript={() => showTranscriptMark("strength", index)} />;
+                const id = feedbackCardId("strength", strength.id ?? index);
+                return <StrengthCard key={strength.id ?? `${strength.excerpt}-${index}`} id={id} active={selectedReview === id} strength={strength} onShowInTranscript={canLocateReview("strength", index) ? () => showTranscriptMark("strength", index) : undefined} />;
               })}
             </div>
           )}
           <div className="feedback-group">
             <div className="feedback-group-title">Corrections</div>
             {hasSuggestions ? recording.suggestions.map((suggestion, index) => {
-              const id = feedbackCardId("correction", index);
+              const id = feedbackCardId("correction", suggestion.id ?? index);
               return (
                 <SuggestionCard
-                  key={`${suggestion.wrong}-${suggestion.right}-${suggestion.category ?? "uncategorized"}-${index}`}
+                  key={suggestion.id ?? `${suggestion.wrong}-${suggestion.right}-${suggestion.category ?? "uncategorized"}-${index}`}
                   id={id}
                   active={selectedReview === id}
                   suggestion={suggestion}
-                  onShowInTranscript={() => showTranscriptMark("correction", index)}
+                  onShowInTranscript={canLocateReview("correction", index) ? () => showTranscriptMark("correction", index) : undefined}
                 />
               );
             }) : isProcessing && recording.processingStage !== "rewriting" ? (

@@ -35,7 +35,7 @@ export default function ConversationTranscript({
     return (
       <mark
         key={key}
-        id={firstOccurrence ? transcriptMarkId(kind, index) : undefined}
+        id={firstOccurrence ? transcriptMarkId(kind, (kind === "correction" ? suggestions[index]?.id : strengths[index]?.id) ?? index) : undefined}
         data-feedback-kind={kind}
         data-feedback-index={index}
         className={segment.isError
@@ -43,7 +43,7 @@ export default function ConversationTranscript({
           : "transcript-strength-mark"}
         role="button"
         tabIndex={0}
-        aria-controls={`feedback-${kind}-${index}`}
+        aria-controls={`feedback-${kind}-${(kind === "correction" ? suggestions[index]?.id : strengths[index]?.id) ?? index}`}
         onClick={() => onReviewSelect?.(kind, index)}
         onKeyDown={(event) => {
           if (event.key === "Enter" || event.key === " ") {

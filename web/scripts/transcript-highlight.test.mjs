@@ -1,23 +1,13 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import test from "node:test";
+import { createTypeScriptLoader } from "./helpers/load-typescript.mjs";
 
-import ts from "typescript";
+const highlight = createTypeScriptLoader()("src/lib/transcriptHighlight.ts");
 
-async function importTypeScriptModule(path) {
-  const source = readFileSync(path, "utf8");
-  const { outputText } = ts.transpileModule(source, {
-    compilerOptions: {
-      module: ts.ModuleKind.ES2022,
-      target: ts.ScriptTarget.ES2022,
-    },
-  });
-
-  const moduleUrl = `data:text/javascript;base64,${Buffer.from(outputText).toString("base64")}`;
-  return import(moduleUrl);
-}
-
-const highlight = await importTypeScriptModule("src/lib/transcriptHighlight.ts");
+test("new feedback with a lost anchor does not guess a legacy location", () => {
+  const segments = highlight.buildTranscriptSegments("I go home.", [{ id: "correction-1", wrong: "go" }]);
+  assert.equal(segments.some(segment => segment.isError), false);
+});
 
 test("highest severity wins only on overlapping characters", () => {
   const segments = highlight.buildTranscriptSegments("I am forgot this.", [
@@ -34,11 +24,11 @@ test("highest severity wins only on overlapping characters", () => {
   );
 });
 
-test("every repeated exact phrase is highlighted", () => {
+test("ambiguous legacy repetitions are kept unmarked", () => {
   const segments = highlight.buildTranscriptSegments("I go, then I go.", [{ wrong: "I go", severity: "medium" }]);
   assert.deepEqual(
     segments.filter((part) => part.isError).map((part) => part.text),
-    ["I go", "I go"],
+    [],
   );
 });
 
@@ -108,4 +98,32 @@ test("strengths link to their card index and corrections win on overlap", () => 
   assert.equal(correction.feedbackIndex, 0);
   assert.equal(strengths.some((part) => part.text.includes("lived")), false);
   assert.equal(strengths.every((part) => part.feedbackIndex === 0), true);
+});
+
+test("anchored correction marks only the wrong context, using UTF-16 offsets", () => {
+  const text = "😀 I go every day. Yesterday I go.";
+  const segments = highlight.buildTranscriptSegments(text, [{ wrong: "I go", severity: "medium", span: { start: 29, end: 33 } }]);
+  assert.deepEqual(segments.filter(part => part.isError).map(part => part.text), ["I go"]);
+  assert.equal(segments[0].text, "😀 I go every day. Yesterday ");
+});
+
+test("exact case and word boundaries keep cards independently reachable", () => {
+  const segments = highlight.buildTranscriptSegments("Борщ was good. I ate борщ. She is going.", [
+    { wrong: "Борщ", severity: "medium" }, { wrong: "борщ", severity: "medium" }, { wrong: "go", severity: "medium" },
+  ]);
+  assert.deepEqual(segments.filter(part => part.isError).map(part => [part.text, part.feedbackIndex]), [["Борщ", 0], ["борщ", 1]]);
+});
+
+test("invalid anchors never fall back to a different occurrence", () => {
+  const segments = highlight.buildTranscriptSegments("I go home.", [{ wrong: "I go", severity: "major", span: { start: 2, end: 6 } }]);
+  assert.equal(segments.some(part => part.isError), false);
+});
+
+test("interview anchors remain inside their answer, including skipped sequences", () => {
+  const turns = [{ sequence: 1, question: "Usually?", answerText: "I go home." }, { sequence: 4, question: "Yesterday?", answerText: "I go home." }];
+  const result = highlight.buildConversationTranscriptTurns(turns, [{ wrong: "I go", severity: "medium", span: { start: 0, end: 4, turnSequence: 4 } }]);
+  assert.equal(result[0].answerSegments.some(part => part.isError), false);
+  assert.equal(result[1].answerSegments.some(part => part.isError), true);
+  const legacy = highlight.buildConversationTranscriptTurns(turns, [{ wrong: "I go", severity: "medium" }]);
+  assert.equal(legacy.some(turn => turn.answerSegments.some(part => part.isError)), false);
 });

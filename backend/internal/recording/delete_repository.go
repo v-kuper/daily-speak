@@ -76,7 +76,7 @@ func (t *sqlDeletionTransaction) Remove(ctx context.Context, userID string, reco
 		SET state = 'cancelled', completed_at = NOW(), updated_at = NOW(),
 		    lease_token = NULL, lease_owner = NULL, lease_expires_at = NULL, heartbeat_at = NULL
 		WHERE resource_id = $1
-		  AND kind IN ('recording.process', 'shadowing.synthesize')
+		  AND kind IN ('recording.process', 'recording.strengths', 'shadowing.synthesize')
 		  AND state IN ('queued', 'running', 'retry_wait')`, recordingID); err != nil {
 		return false, err
 	}

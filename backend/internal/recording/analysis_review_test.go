@@ -139,7 +139,7 @@ func TestReviewedSuggestionsKeepMandatoryRussianOverLongerOverlap(t *testing.T) 
 func TestReviewedSuggestionsPreserveDistinctNestedAndCaseVariantMandatoryRussian(t *testing.T) {
 	transcript := "I ate борщ. Then I cooked красный борщ. Борщ was delicious."
 	candidates := []analysisCandidate{
-		{ID: "language_switch-001", Wrong: "борщ", Right: "borscht", Explanation: "Use English.", Category: categoryLanguageSwitch},
+		{Span: &FeedbackSpan{Start: 6, End: 10}, ID: "language_switch-001", Wrong: "борщ", Right: "borscht", Explanation: "Use English.", Category: categoryLanguageSwitch},
 		{ID: "language_switch-002", Wrong: "красный борщ", Right: "red borscht", Explanation: "Use English.", Category: categoryLanguageSwitch},
 		{ID: "language_switch-003", Wrong: "Борщ", Right: "Borscht", Explanation: "Use English.", Category: categoryLanguageSwitch},
 	}

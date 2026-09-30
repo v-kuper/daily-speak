@@ -61,6 +61,7 @@ Recommended first alerts:
 | readiness unavailable | 2 min | 5 min |
 | acquired DB connections / max | > 70% | > 85% |
 | oldest `recording.process` job | > 10 min | > 30 min |
+| oldest `recording.strengths` job | > 10 min | > 30 min |
 | oldest `guest.preview` job | > 2 min | > 10 min |
 | oldest `interview.process` job | > 2 min | > 10 min |
 | terminal/failed jobs | any sustained increase | page when user work is affected |
@@ -76,9 +77,11 @@ background processing. Scale worker pools independently by job kind:
 
 1. Add API replicas when p95 latency or in-flight requests rise while the DB
    pool stays below 70% utilization.
-2. Add recording workers when `recording.process` age rises. Increase
+2. Add recording workers when `recording.process` or `recording.strengths` age rises. Increase
    `WORKER_RECORDING_CONCURRENCY` only within Cartesia's STT concurrency and
    credit limits and Ollama capacity.
+   Good-example jobs share this bounded pool, have a two-minute execution limit,
+   and retry independently. Their failure must not invalidate correction results.
 3. Scale adaptive interview workers with `WORKER_INTERVIEW_CONCURRENCY` when
    preparation, answer transcription, or question refill waits grow. Measure
    answer upload time, queue wait, Cartesia transcription time, question generation time,

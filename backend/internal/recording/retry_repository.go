@@ -41,6 +41,9 @@ func (transaction *sqlRetryTransaction) Claim(ctx context.Context, userID string
 		    transcript = CASE WHEN processing_stage = 'transcribing' THEN '' ELSE transcript END,
 		    suggestions = CASE WHEN processing_stage IN ('transcribing', 'suggestions') THEN '[]'::jsonb ELSE suggestions END,
 		    strengths = CASE WHEN processing_stage IN ('transcribing', 'suggestions') THEN '[]'::jsonb ELSE strengths END,
+		    strengths_status = CASE WHEN processing_stage IN ('transcribing', 'suggestions') THEN 'pending' ELSE strengths_status END,
+		    strengths_job_id = CASE WHEN processing_stage IN ('transcribing', 'suggestions') THEN NULL ELSE strengths_job_id END,
+		    analysis_checkpoints = CASE WHEN processing_stage = 'transcribing' THEN '{}'::jsonb ELSE analysis_checkpoints END,
 		    corrected_transcript = '',
 		    shadowing_status = 'pending',
 		    shadowing_asset_id = NULL,
@@ -53,6 +56,11 @@ func (transaction *sqlRetryTransaction) Claim(ctx context.Context, userID string
 	}
 	if result.RowsAffected() != 1 {
 		return false, nil
+	}
+	if _, err := transaction.tx.Exec(ctx, `UPDATE processing_jobs SET state = 'cancelled', completed_at = NOW(), lease_token = NULL, lease_owner = NULL, lease_expires_at = NULL, updated_at = NOW()
+        WHERE resource_id = $1 AND kind = 'recording.strengths' AND state IN ('queued', 'running', 'retry_wait')
+        AND EXISTS (SELECT 1 FROM recordings WHERE id = $1 AND processing_stage IN ('transcribing', 'suggestions'))`, recordingID); err != nil {
+		return false, err
 	}
 	if _, err := transaction.tx.Exec(ctx, `
 		UPDATE interview_turns t

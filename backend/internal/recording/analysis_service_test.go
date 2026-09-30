@@ -35,16 +35,14 @@ func TestAnalysisLogMetadataContainsNoLearnerText(t *testing.T) {
 	}
 }
 
-func TestAnalysisConfigFromEnvDefaultsAndAcceptsBoundedValue(t *testing.T) {
-	for _, value := range []string{"", "0", "8", "bad"} {
-		t.Setenv("AI_ANALYSIS_CONCURRENCY", value)
-		if got := AnalysisConfigFromEnv().Concurrency; got != 3 {
-			t.Fatalf("%q=%d", value, got)
+func TestAnalysisConfigBoundsConcurrency(t *testing.T) {
+	for _, value := range []int{0, -1, 8} {
+		if got := NewAnalysisService(nil, AnalysisConfig{Concurrency: value}).concurrency; got != 3 {
+			t.Fatalf("concurrency=%d", got)
 		}
 	}
-	t.Setenv("AI_ANALYSIS_CONCURRENCY", "2")
-	if got := AnalysisConfigFromEnv().Concurrency; got != 2 {
-		t.Fatalf("accepted=%d", got)
+	if got := NewAnalysisService(nil, AnalysisConfig{Concurrency: 2}).concurrency; got != 2 {
+		t.Fatalf("concurrency=%d", got)
 	}
 }
 
@@ -182,7 +180,7 @@ func TestAnalysisServiceRetriesThenReviews(t *testing.T) {
 	if err != nil || len(got.Suggestions) != 0 || len(got.Strengths) != 0 {
 		t.Fatalf("got=%#v err=%v", got, err)
 	}
-	if provider.byCategoryCall[categoryVerbGrammar] != 2 || provider.reviewerCalls != 1 {
+	if provider.byCategoryCall[categoryVerbGrammar] != 2 || provider.reviewerCalls != 0 {
 		t.Fatalf("verb=%d reviewer=%d", provider.byCategoryCall[categoryVerbGrammar], provider.reviewerCalls)
 	}
 }

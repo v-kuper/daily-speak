@@ -217,14 +217,39 @@ synthetic role labels. Free-talk and photo-description corrected transcripts
 continue to contain learner speech only.
 
 Full recording analysis is owned by `internal/recording`. Its application
-service runs the correction detector and reviewer pipeline alongside one
-bounded positive-strength pass through the provider port. The strength parser
-accepts at most three exact learner excerpts backed by the server-owned rule
-catalog; correction spans take precedence over overlapping strengths. A
-strength-provider failure is nonblocking and produces an empty strength list.
-The worker persists suggestions and strengths together under its active lease
-before advancing to rewriting. HTTP only normalizes the stored values and
-serializes them through the shared v1 recording contract.
+service runs seven category detectors and a reviewer through the provider port.
+It skips the language-switch call when no Cyrillic learner text is present and
+skips review when no candidates exist. Successful detector passes are persisted
+under the worker's active lease and reused on retry only when the analysis input
+and pipeline version match. Checkpoints are internal repository data.
+
+Every new correction and strength has a stable ID and an exact evidence span.
+Spans use half-open UTF-16 offsets; for interviews they refer to one learner
+answer identified by its stored sequence. Models identify an exact phrase and
+one-based occurrence, and the recording service resolves and validates its
+location. It rejects phrases spanning answers and ambiguous locations. Conflict
+resolution compares actual ranges, prioritizes mandatory language translations
+and more severe errors, and gives corrections precedence over overlapping
+strengths. Server-owned learning references remain the rule source.
+
+Saving corrections advances to rewriting and atomically queues an independent
+`recording.strengths` job. It shares the bounded recording worker pool and has
+its own two-minute timeout, retries, active-job fencing, and terminal status.
+A failed strength job never fails the recording. The owner may retry it through
+`POST /api/v1/recordings/{recordingId}/strengths` after correction analysis is
+complete. Repeated calls while processing or ready are no-ops. Deletion cancels
+both recording jobs; retrying transcription or correction analysis cancels
+obsolete positive-feedback work. API and worker composition selects concrete
+adapters; HTTP only authenticates, maps feature errors, and serializes results.
+
+The additive v1 `id` and `span` feedback fields and `strengthsStatus` recording
+field preserve older rows and clients. `unknown` represents legacy coverage;
+`ready` with an empty array is a completed search with no selected examples.
+The web client renders exact anchored spans and uses a conservative exact,
+whole-word, unique-match fallback for old feedback. It keeps ambiguous legacy
+cards without guessing locations. Request generations prevent late reads from
+overwriting mutation results. The natural practice version can rephrase learner
+speech and is labeled separately from the correction explanations.
 
 Free-talk recordings and non-interview guest previews use Cartesia's batch
 transcription API. Audio remains in backend-owned storage; the worker sends a

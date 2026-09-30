@@ -171,15 +171,17 @@ test("recording analysis owns its policy outside HTTP and provider adapters", ()
     "analysis_review.go",
     "analysis_support.go",
     "analysis_service.go",
-	"rewrite.go",
-	"processing.go",
-	"preview.go",
+    "analysis_strengths.go",
+    "feedback_span.go",
+    "strengths_service.go",
+    "rewrite.go",
+    "processing.go",
+    "preview.go",
   ];
   for (const path of [
     ...coreFiles.map((name) => `backend/internal/recording/${name}`),
     "backend/internal/recording/ollamaadapter/provider.go",
-    "backend/internal/httpapi/recording_analysis.go",
-	"backend/internal/httpapi/recording_rewrite.go",
+    "backend/internal/httpapi/recording_strengths.go",
   ]) {
     assert.equal(existsSync(path), true, `missing ${path}`);
   }
@@ -188,15 +190,14 @@ test("recording analysis owns its policy outside HTTP and provider adapters", ()
     .map((name) => readFileSync(`backend/internal/recording/${name}`, "utf8"))
     .join("\n");
   const provider = readFileSync("backend/internal/recording/ollamaadapter/provider.go", "utf8");
-  const transport = readFileSync("backend/internal/httpapi/recording_analysis.go", "utf8");
-	const rewriteTransport = readFileSync("backend/internal/httpapi/recording_rewrite.go", "utf8");
-  assert.doesNotMatch(core, /net\/http|internal\/httpapi|internal\/ai"/);
+  const transport = readFileSync("backend/internal/httpapi/recording_strengths.go", "utf8");
+  assert.doesNotMatch(core, /net\/http|internal\/httpapi|internal\/ai"|os\.Getenv/);
   assert.match(core, /AnalysisProvider/);
   assert.match(provider, /ai\.ChatClient/);
-  assert.match(transport, /recording\.AnalysisInput/);
-  assert.doesNotMatch(transport, /PostChat|error detector|adjudicator/);
-	assert.match(rewriteTransport, /recording\.RewriteInput/);
-	assert.doesNotMatch(rewriteTransport, /PostChat|natural conversational English/);
+  assert.match(transport, /recordingStrengthsService\.Retry/);
+  assert.doesNotMatch(transport, /PostChat|error detector|adjudicator|SELECT |INSERT INTO|UPDATE |pgx|workqueue/);
+  assert.equal(existsSync("backend/internal/httpapi/recording_analysis.go"), false);
+  assert.equal(existsSync("backend/internal/httpapi/recording_rewrite.go"), false);
   const processingRepository = readFileSync("backend/internal/recording/processing_repository.go", "utf8");
   assert.equal(existsSync("backend/internal/httpapi/recording_processing.go"), false);
   assert.match(processingRepository, /LoadProcessingWork|SaveTranscript|CompleteRecording/);

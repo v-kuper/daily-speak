@@ -2280,6 +2280,53 @@
           }
         }
       }
+    },
+    "/api/v1/recordings/{recordingId}/strengths": {
+      "post": {
+        "tags": [
+          "Mobile API v1",
+          "Recordings"
+        ],
+        "summary": "Retry good-example analysis",
+        "description": "Schedules durable positive-feedback processing for an owned recording after corrections are saved. Repeated calls while processing or ready do not enqueue another job. Corrections, the natural practice version, and shadowing remain unchanged.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RequestIdHeader"
+          },
+          {
+            "$ref": "#/components/parameters/RecordingIdPath"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/V1RecordingRetryOK"
+          },
+          "401": {
+            "$ref": "#/components/responses/V1Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/V1Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/V1NotFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/V1MethodNotAllowed"
+          },
+          "409": {
+            "$ref": "#/components/responses/V1Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/V1InternalServerError"
+          }
+        },
+        "operationId": "retryRecordingStrengths"
+      }
     }
   },
   "components": {
@@ -4516,6 +4563,59 @@
           },
           "explanation": {
             "type": "string"
+          },
+          "id": {
+            "type": "string",
+            "description": "Stable feedback identity for this anchored result. Optional for older recordings."
+          },
+          "span": {
+            "$ref": "#/components/schemas/FeedbackSpan"
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "language_switch",
+              "verb_grammar",
+              "nouns_determiners",
+              "prepositions",
+              "vocabulary",
+              "sentence_structure",
+              "naturalness"
+            ]
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "major",
+              "medium",
+              "minor"
+            ]
+          },
+          "ruleId": {
+            "type": "string"
+          },
+          "learningReference": {
+            "type": "object",
+            "required": [
+              "id",
+              "title",
+              "summary"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "summary": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string",
+                "format": "uri"
+              }
+            }
           }
         },
         "example": {
@@ -4568,6 +4668,13 @@
                 "format": "uri"
               }
             }
+          },
+          "id": {
+            "type": "string",
+            "description": "Stable feedback identity for this anchored result. Optional for older recordings."
+          },
+          "span": {
+            "$ref": "#/components/schemas/FeedbackSpan"
           }
         }
       },
@@ -4654,7 +4761,7 @@
           "strengths": {
             "type": "array",
             "maxItems": 3,
-            "description": "Verified examples of English the learner used well. New recordings return an empty array when no strength is available.",
+            "description": "Verified learner examples. Populated independently by a durable job after corrections are saved; inspect strengthsStatus to distinguish empty results from pending or failed processing.",
             "items": {
               "$ref": "#/components/schemas/Strength"
             }
@@ -4708,6 +4815,17 @@
               "$ref": "#/components/schemas/SavedInterviewTurn"
             },
             "description": "Present only for a saved adaptive topic interview. Each turn keeps the immutable question, learner answer, and optional corrected learner answer separate."
+          },
+          "strengthsStatus": {
+            "type": "string",
+            "enum": [
+              "unknown",
+              "pending",
+              "processing",
+              "ready",
+              "failed"
+            ],
+            "description": "Independent good-example processing. unknown is used for legacy recordings without coverage information; ready with an empty strengths array means no examples were selected. Failure does not affect corrections, rewriting, or shadowing."
           }
         },
         "example": {
@@ -5581,6 +5699,28 @@
               "approximate"
             ],
             "description": "Present when full-audio text is assigned to a question using estimated speech timestamps; the canonical transcript remains unchanged."
+          }
+        }
+      },
+      "FeedbackSpan": {
+        "type": "object",
+        "required": [
+          "start",
+          "end"
+        ],
+        "description": "Half-open UTF-16 offsets into the canonical learner transcript. With turnSequence, offsets are relative to that interview answer. The quoted phrase must equal the referenced slice.",
+        "properties": {
+          "start": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "end": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "turnSequence": {
+            "type": "integer",
+            "minimum": 1
           }
         }
       }

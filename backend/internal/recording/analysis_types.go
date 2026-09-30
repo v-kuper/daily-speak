@@ -20,6 +20,7 @@ type analysisPass struct {
 }
 
 type analysisCandidate struct {
+	Span        *FeedbackSpan      `json:"span,omitempty"`
 	ID          string             `json:"id"`
 	Wrong       string             `json:"wrong"`
 	Right       string             `json:"right"`
@@ -34,7 +35,7 @@ var recordingAnalysisPasses = []analysisPass{
 		Name:       "Russian/non-English insertion",
 		Category:   categoryLanguageSwitch,
 		Finds:      "Find every required Cyrillic word or contiguous phrase and give its natural English equivalent.",
-		MustIgnore: "Ignore English grammar, vocabulary, and style. Return exactly one candidate for every required Russian phrase and no other candidates.",
+		MustIgnore: "Ignore English grammar, vocabulary, and style. Return exactly one candidate for every occurrence of each required Russian phrase and no other candidates. Repeated occurrences must have separate location metadata.",
 	},
 	{
 		Name:       "Verb grammar",

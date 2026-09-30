@@ -100,6 +100,17 @@ func TestRecordingV1ResponseIncludesVerifiedStrengths(t *testing.T) {
 	}
 }
 
+func TestRecordingV1ResponsePreservesAnchoredFeedbackAndIndependentStatus(t *testing.T) {
+	response := recordingV1ResponseFromRecord(recording.Record{
+		ID: "recording", Status: "ready", StrengthsStatus: "processing",
+		SuggestionsJSON: []byte(`[{"id":"correction-1","wrong":"go","right":"went","explanation":"Use past simple.","span":{"start":2,"end":4,"turnSequence":3}}]`),
+		StrengthsJSON:   []byte(`[{"id":"strength-1","excerpt":"after work","explanation":"Useful time phrase.","category":"naturalness","ruleId":"collocations","span":{"start":10,"end":20,"turnSequence":1}}]`),
+	})
+	if response.StrengthsStatus != "processing" || len(response.Suggestions) != 1 || response.Suggestions[0].ID != "correction-1" || response.Suggestions[0].Span == nil || response.Suggestions[0].Span.TurnSequence != 3 || len(response.Strengths) != 1 || response.Strengths[0].ID != "strength-1" || response.Strengths[0].Span == nil || response.Strengths[0].Span.Start != 10 {
+		t.Fatalf("response=%#v", response)
+	}
+}
+
 func TestCreateRecordingV1AttachesReadyMediaAndIsIdempotent(t *testing.T) {
 	fixture := newRecordingCreateV1Fixture(t)
 	audioID := fixture.insertAsset(t, fixture.owner.Identity.PrincipalID, "recording_audio")

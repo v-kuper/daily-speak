@@ -25,6 +25,7 @@ type recordingV1Response struct {
 	CorrectedTranscript string                    `json:"correctedTranscript"`
 	Suggestions         []suggestion              `json:"suggestions"`
 	Strengths           []strength                `json:"strengths"`
+	StrengthsStatus     string                    `json:"strengthsStatus,omitempty"`
 	ProcessingStage     *string                   `json:"processingStage"`
 	PracticeType        string                    `json:"practiceType"`
 	PhotoObject         *string                   `json:"photoObject"`
@@ -57,12 +58,14 @@ func (s *Server) routeRecordingV1(w http.ResponseWriter, r *http.Request, relati
 			s.handleRetryRecordingV1(w, r, recordingID)
 		case "shadowing":
 			s.handleGenerateShadowingV1(w, r, recordingID)
+		case "strengths":
+			s.handleRetryStrengthsV1(w, r, recordingID)
 		default:
 			writeV1Error(w, r, http.StatusNotFound, "not_found", "Not found")
 		}
 		return
 	}
-	if len(parts) == 2 && parts[0] != "" && (parts[1] == "retry" || parts[1] == "shadowing") {
+	if len(parts) == 2 && parts[0] != "" && (parts[1] == "retry" || parts[1] == "shadowing" || parts[1] == "strengths") {
 		writeV1Error(w, r, http.StatusMethodNotAllowed, "method_not_allowed", "Method not allowed")
 		return
 	}
@@ -210,6 +213,7 @@ func recordingV1ResponseFromRecord(record recording.Record) recordingV1Response 
 		CorrectedTranscript: record.CorrectedTranscript,
 		Suggestions:         normalizeSuggestions(record.SuggestionsJSON, 0),
 		Strengths:           normalizeStrengths(record.StrengthsJSON, 3),
+		StrengthsStatus:     record.StrengthsStatus,
 		ProcessingStage:     normalizeRecordingProcessingStage(record.ProcessingStage),
 		PracticeType:        practice.NormalizeType(record.PracticeType),
 		PhotoObject:         normalizeOptionalPhotoObject(record.PhotoObject),

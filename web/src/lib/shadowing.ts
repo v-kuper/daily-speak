@@ -29,8 +29,9 @@ export const shouldScheduleShadowing = ({
 export const shouldPollRecording = (
   recordingStatus: string,
   shadowingStatus: ShadowingStatus,
+  strengthsStatus?: string,
 ): boolean => {
-  return recordingStatus === "processing" || shadowingStatus === "processing";
+  return recordingStatus === "processing" || shadowingStatus === "processing" || strengthsStatus === "processing";
 };
 
 export const isShadowingStale = (

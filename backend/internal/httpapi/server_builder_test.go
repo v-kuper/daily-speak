@@ -104,7 +104,7 @@ func newTestServer(config Config) *Server {
 	if practiceGenerator == nil {
 		practiceGenerator = practice.NewService(practiceollama.New(aiClient))
 	}
-	recordingService := recording.NewAnalysisService(recordingollama.New(aiClient), recording.AnalysisConfigFromEnv())
+	recordingService := recording.NewAnalysisService(recordingollama.New(aiClient), recording.AnalysisConfig{Concurrency: 3})
 	recordingAnalyzer := config.RecordingAnalyzer
 	if recordingAnalyzer == nil {
 		recordingAnalyzer = recordingService
@@ -141,14 +141,14 @@ func newTestServer(config Config) *Server {
 	guestStore := guestpreview.NewStore(config.DB, guestpreview.QueueCapacityFromEnv())
 	shadowingStore := shadowing.NewStore(config.DB)
 	server := NewServer(Dependencies{
-		OperationsMonitor:   operations.NewMonitor(config.DB, jobStore),
-		PracticeGenerator:   practiceGenerator,
-		ProfileService:      profile.NewService(profile.NewSQLRepository(config.DB)),
-		SubscriptionService: subscription.NewService(subscription.NewSQLRepository(config.DB)),
-		RecordingAnalyzer:   recordingAnalyzer, RecordingRewriter: recordingRewriter,
-		RecordingCreator: recording.NewCreator(recording.NewSQLCreateUnitOfWork(config.DB)),
-		RecordingDeleter: recording.NewDeleter(recordingDeletion, recordingDeletion, uuid.NewString),
-		RecordingReader:  recording.NewReader(recordingRecords),
+		OperationsMonitor:         operations.NewMonitor(config.DB, jobStore),
+		PracticeGenerator:         practiceGenerator,
+		ProfileService:            profile.NewService(profile.NewSQLRepository(config.DB)),
+		SubscriptionService:       subscription.NewService(subscription.NewSQLRepository(config.DB)),
+		RecordingCreator:          recording.NewCreator(recording.NewSQLCreateUnitOfWork(config.DB)),
+		RecordingDeleter:          recording.NewDeleter(recordingDeletion, recordingDeletion, uuid.NewString),
+		RecordingReader:           recording.NewReader(recordingRecords),
+		RecordingStrengthsService: recording.NewStrengthsService(recording.NewSQLProcessingRepository(config.DB), recording.NewSQLProcessingRepository(config.DB), nil, uuid.NewString),
 		RecordingRetryService: recording.NewRetryService(
 			recordingRecords, recording.NewSQLRetryUnitOfWork(config.DB), uuid.NewString,
 		),
@@ -188,6 +188,8 @@ func newTestServer(config Config) *Server {
 			Rewriter: recordingRewriter, NewID: uuid.NewString,
 		}),
 		RecordingRepository: recordingRepository,
+		StrengthsProcessor:  recording.NewStrengthsService(recordingRepository, recordingRepository, recordingService, uuid.NewString),
+		StrengthsRepository: recordingRepository,
 		GuestPreviewProcessor: guestpreview.NewProcessor(guestpreview.ProcessorDependencies{
 			Store: guestStore, Materializer: materializer, ProbeAudioDuration: probe,
 			Transcribe: transcribeForProcessing, Analyzer: previewAnalyzer,

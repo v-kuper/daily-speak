@@ -40,7 +40,7 @@ func NewWorker(config WorkerConfig) *background.Runtime {
 	if aiClient == nil {
 		aiClient = ai.OllamaClient{}
 	}
-	analysis := recording.NewAnalysisService(recordingollama.New(aiClient), recording.AnalysisConfigFromEnv())
+	analysis := recording.NewAnalysisService(recordingollama.New(aiClient), recordingAnalysisConfig())
 	cartesia := transcription.NewCartesia(transcription.CartesiaConfig{
 		APIKey: os.Getenv("CARTESIA_API_KEY"), Language: os.Getenv("TRANSCRIPTION_LANGUAGE"),
 		APIVersion: os.Getenv("CARTESIA_API_VERSION"),
@@ -102,6 +102,7 @@ func NewWorker(config WorkerConfig) *background.Runtime {
 	return background.NewRuntime(background.Dependencies{
 		DB: config.DB, JobStore: workqueue.NewStore(config.DB),
 		RecordingProcessor: recordingProcessor, RecordingRepository: recordingRepository,
+		StrengthsProcessor: recording.NewStrengthsService(recordingRepository, recordingRepository, analysis, uuid.NewString), StrengthsRepository: recordingRepository,
 		GuestPreviewProcessor: guestProcessor, GuestPreviewStore: guestStore,
 		InterviewProcessor: interviewProcessor, InterviewStore: interviewRepository,
 		ShadowingProcessor: shadowProcessor, ShadowingStore: shadowStore, MediaCleanup: cleanup,

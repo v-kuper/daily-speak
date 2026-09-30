@@ -119,6 +119,13 @@ export type AppState = {
   // Metadata stays in Redux while the audio blob lives in IndexedDB, so a
   // transient upload failure can be retried without copying audio into state.
   recordingSaveDrafts: Record<string, RecordingSaveDraft>;
+  recordingReadEpochs: Record<string, number>;
+  userDataRequest: { requestId: string; recordingEpochs: Record<string, number> } | null;
+  recordingFetchRequests: Record<string, { requestId: string; epoch: number }>;
+  recordingMutationRequests: Record<string, Record<string, string>>;
+  strengthsRetryStatuses: Record<string, AuthStatus>;
+  strengthsRetryErrors: Record<string, string>;
+  shadowingRequestRecordingId: string | null;
   recordingFetchStatuses: Record<string, "loading" | "ready" | "failed">;
   recordingFetchErrors: Record<string, string>;
   recordingFetchFailureKinds: Record<string, "transient" | "terminal">;
@@ -545,6 +552,8 @@ const parseRecording = (value: unknown): Recording | null => {
     correctedTranscript,
     suggestions,
     strengths,
+    strengthsStatus: ["pending", "processing", "ready", "failed"].includes(String(candidate.strengthsStatus))
+      ? candidate.strengthsStatus as Recording["strengthsStatus"] : "unknown",
     processingStage,
     practiceType,
     localAudioStorageKey: null,
@@ -1212,6 +1221,20 @@ export const generateShadowingAudio = createAsyncThunk<Recording, string, { reje
   },
 );
 
+export const retryRecordingStrengths = createAsyncThunk<Recording, string, { rejectValue: string }>(
+  "app/retryRecordingStrengths",
+  async (recordingId, { rejectWithValue }) => {
+    try {
+      const response = await apiFetch(`/api/v1/recordings/${encodeURIComponent(recordingId)}/strengths`, { method: "POST" });
+      if (response.status === 401) return rejectWithValue("Unauthorized");
+      const payload = await readApiJSON(response) as ({ recording?: unknown } & V1ErrorResponse) | null;
+      if (!response.ok) return rejectWithValue(typeof payload?.error?.message === "string" ? payload.error.message : "Good examples could not be scheduled.");
+      const recording = parseRecording(payload?.recording);
+      return recording ?? rejectWithValue("Invalid recording payload from server.");
+    } catch { return rejectWithValue("Cannot connect to recording service."); }
+  },
+);
+
 export const retryRecordingProcessing = createAsyncThunk<Recording, string, { rejectValue: string }>(
   "app/retryRecordingProcessing",
   async (recordingId, { rejectWithValue }) => {
@@ -1461,6 +1484,13 @@ const initialState: AppState = {
   recordingSaveError: null,
   recordingSaveResults: {},
   recordingSaveDrafts: {},
+  recordingReadEpochs: {},
+  userDataRequest: null,
+  recordingFetchRequests: {},
+  recordingMutationRequests: {},
+  strengthsRetryStatuses: {},
+  strengthsRetryErrors: {},
+  shadowingRequestRecordingId: null,
   recordingFetchStatuses: {},
   recordingFetchErrors: {},
   recordingFetchFailureKinds: {},
@@ -1493,6 +1523,7 @@ const resetPlayback = (state: AppState): void => {
 const resetShadowingRequest = (state: AppState): void => {
   state.shadowingRequestStatus = "idle";
   state.shadowingRequestError = null;
+  state.shadowingRequestRecordingId = null;
 };
 
 const resetRecordingRetry = (state: AppState): void => {
@@ -1506,6 +1537,39 @@ const clearRecordingRetry = (state: AppState, recordingId: string | null): void 
   }
   delete state.recordingRetryStatuses[recordingId];
   delete state.recordingRetryErrors[recordingId];
+};
+
+const beginRecordingMutation = (state: AppState, kind: string, meta: { arg: string; requestId: string }) => {
+  state.recordingReadEpochs[meta.arg] = (state.recordingReadEpochs[meta.arg] ?? 0) + 1;
+  (state.recordingMutationRequests[meta.arg] ??= {})[kind] = meta.requestId;
+};
+
+const finishRecordingMutation = (state: AppState, kind: string, meta: { arg: string; requestId: string }): boolean => {
+  if (!state.isAuthenticated || state.recordingMutationRequests[meta.arg]?.[kind] !== meta.requestId) return false;
+  delete state.recordingMutationRequests[meta.arg][kind];
+  state.recordingReadEpochs[meta.arg] = (state.recordingReadEpochs[meta.arg] ?? 0) + 1;
+  return true;
+};
+
+const acceptRecordingRead = (state: AppState, meta: { arg: string; requestId: string }): boolean => {
+  const pending = state.recordingFetchRequests[meta.arg];
+  if (!pending || pending.requestId !== meta.requestId) return false;
+  delete state.recordingFetchRequests[meta.arg];
+  state.recordingFetchStatuses[meta.arg] = "ready";
+  return state.isAuthenticated && pending.epoch === (state.recordingReadEpochs[meta.arg] ?? 0)
+    && Object.keys(state.recordingMutationRequests[meta.arg] ?? {}).length === 0;
+};
+
+const upsertRecordingMutation = (state: AppState, recording: Recording, kind: "shadowing" | "strengths") => {
+  const current = state.recordings.find(item => item.id === recording.id);
+  if (!current) { upsertRecording(state, recording); return; }
+  upsertRecording(state, kind === "strengths" ? {
+    ...current, strengths: recording.strengths, strengthsStatus: recording.strengthsStatus,
+  } : {
+    ...current, shadowingStatus: recording.shadowingStatus, shadowingError: recording.shadowingError,
+    shadowingUpdatedAt: recording.shadowingUpdatedAt,
+    media: current.media ? { ...current.media, shadowing: recording.media?.shadowing ?? null } : recording.media,
+  });
 };
 
 const upsertRecording = (state: AppState, recording: Recording): void => {
@@ -1682,6 +1746,12 @@ const completeAuthSuccess = (
   state.deletedRecordingIds = [];
   state.backgroundSaveRecordingId = null;
   state.currentRecordingId = null;
+  state.recordingReadEpochs = {};
+  state.userDataRequest = null;
+  state.recordingFetchRequests = {};
+  state.recordingMutationRequests = {};
+  state.strengthsRetryStatuses = {};
+  state.strengthsRetryErrors = {};
   state.recordingFetchStatuses = {};
   state.recordingFetchErrors = {};
   state.recordingFetchFailureKinds = {};
@@ -1724,6 +1794,12 @@ const clearAuthenticatedState = (state: AppState): void => {
   state.deletedRecordingIds = [];
   state.backgroundSaveRecordingId = null;
   state.currentRecordingId = null;
+  state.recordingReadEpochs = {};
+  state.userDataRequest = null;
+  state.recordingFetchRequests = {};
+  state.recordingMutationRequests = {};
+  state.strengthsRetryStatuses = {};
+  state.strengthsRetryErrors = {};
   state.recordingFetchStatuses = {};
   state.recordingFetchErrors = {};
   state.recordingFetchFailureKinds = {};
@@ -2282,23 +2358,36 @@ const appSlice = createSlice({
       .addCase(logout.rejected, (state) => {
         clearAuthenticatedState(state);
       })
-      .addCase(fetchUserData.pending, (state) => {
+      .addCase(fetchUserData.pending, (state, action) => {
         state.userDataStatus = "loading";
         state.userDataError = null;
+        state.userDataRequest = { requestId: action.meta.requestId, recordingEpochs: { ...state.recordingReadEpochs } };
       })
       .addCase(fetchUserData.fulfilled, (state, action) => {
+        if (!state.isAuthenticated || state.userDataRequest?.requestId !== action.meta.requestId) return;
+        const request = state.userDataRequest;
+        state.userDataRequest = null;
         state.userDataStatus = "ready";
         state.userDataError = null;
         state.selectedInterestIds = action.payload.interestIds;
         state.selectedEnglishLevel = action.payload.englishLevel;
         // Local recordings are not yet in the server list, including failed saves.
         const localRecordings = state.recordings.filter((recording) => recording.id.startsWith("local-"));
-        state.recordings = filterDeletedRecordings([...localRecordings, ...action.payload.recordings], state.deletedRecordingIds);
+        const protectedRecordings = state.recordings.filter(recording => !recording.id.startsWith("local-")
+          && ((state.recordingReadEpochs[recording.id] ?? 0) !== (request.recordingEpochs[recording.id] ?? 0)
+            || Object.keys(state.recordingMutationRequests[recording.id] ?? {}).length > 0));
+        const protectedIDs = new Set(protectedRecordings.map(recording => recording.id));
+        state.recordings = filterDeletedRecordings([
+          ...localRecordings, ...protectedRecordings,
+          ...action.payload.recordings.filter(recording => !protectedIDs.has(recording.id)),
+        ], state.deletedRecordingIds).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
         applySubscriptionState(state, action.payload.subscription);
         applyRecordingQuotaState(state, action.payload.quota);
         clearStudyWordsState(state);
       })
       .addCase(fetchUserData.rejected, (state, action) => {
+        if (state.userDataRequest?.requestId !== action.meta.requestId) return;
+        state.userDataRequest = null;
         if (action.payload === "Unauthorized") {
           expireSessionKeepingDraft(state);
           return;
@@ -2368,11 +2457,13 @@ const appSlice = createSlice({
       })
       .addCase(fetchRecording.pending, (state, action) => {
         state.recordingFetchStatuses[action.meta.arg] = "loading";
+        state.recordingFetchRequests[action.meta.arg] = { requestId: action.meta.requestId, epoch: state.recordingReadEpochs[action.meta.arg] ?? 0 };
         delete state.recordingFetchErrors[action.meta.arg];
         delete state.recordingFetchFailureKinds[action.meta.arg];
       })
       .addCase(fetchRecording.fulfilled, (state, action) => {
-        if (!state.isAuthenticated) return;
+        if (!acceptRecordingRead(state, action.meta)) return;
+        state.recordingReadEpochs[action.meta.arg] = (state.recordingReadEpochs[action.meta.arg] ?? 0) + 1;
         state.recordingFetchStatuses[action.meta.arg] = "ready";
         delete state.recordingFetchErrors[action.meta.arg];
         delete state.recordingFetchFailureKinds[action.meta.arg];
@@ -2383,21 +2474,24 @@ const appSlice = createSlice({
           expireSessionKeepingDraft(state);
           return;
         }
-        if (!state.isAuthenticated) return;
+        if (!acceptRecordingRead(state, action.meta)) return;
         state.recordingFetchStatuses[action.meta.arg] = "failed";
         state.recordingFetchErrors[action.meta.arg] = action.payload ?? "Failed to load recording.";
         state.recordingFetchFailureKinds[action.meta.arg] = action.meta.failureKind === "terminal" ? "terminal" : "transient";
       })
       .addCase(retryRecordingProcessing.pending, (state, action) => {
+        beginRecordingMutation(state, "processing", action.meta);
         state.recordingRetryStatuses[action.meta.arg] = "loading";
         delete state.recordingRetryErrors[action.meta.arg];
       })
       .addCase(retryRecordingProcessing.fulfilled, (state, action) => {
+        if (!finishRecordingMutation(state, "processing", action.meta)) return;
         clearRecordingRetry(state, action.meta.arg);
-        resetShadowingRequest(state);
+        if (state.shadowingRequestRecordingId === action.meta.arg) resetShadowingRequest(state);
         upsertRecording(state, action.payload);
       })
       .addCase(retryRecordingProcessing.rejected, (state, action) => {
+        if (action.payload !== "Unauthorized" && !finishRecordingMutation(state, "processing", action.meta)) return;
         delete state.recordingRetryStatuses[action.meta.arg];
         if (action.payload === "Unauthorized") {
           expireSessionKeepingDraft(state);
@@ -2405,22 +2499,44 @@ const appSlice = createSlice({
         }
         state.recordingRetryErrors[action.meta.arg] = action.payload ?? "Failed to retry recording processing.";
       })
-      .addCase(generateShadowingAudio.pending, (state) => {
+      .addCase(generateShadowingAudio.pending, (state, action) => {
+        beginRecordingMutation(state, "shadowing", action.meta);
+        state.shadowingRequestRecordingId = action.meta.arg;
         state.shadowingRequestStatus = "loading";
         state.shadowingRequestError = null;
       })
       .addCase(generateShadowingAudio.fulfilled, (state, action) => {
-        state.shadowingRequestStatus = "idle";
-        state.shadowingRequestError = null;
-        upsertRecording(state, action.payload);
+        if (!finishRecordingMutation(state, "shadowing", action.meta)) return;
+        if (state.shadowingRequestRecordingId === action.meta.arg) { state.shadowingRequestStatus = "idle"; state.shadowingRequestError = null; }
+        upsertRecordingMutation(state, action.payload, "shadowing");
       })
       .addCase(generateShadowingAudio.rejected, (state, action) => {
-        state.shadowingRequestStatus = "idle";
+        if (action.payload !== "Unauthorized" && !finishRecordingMutation(state, "shadowing", action.meta)) return;
         if (action.payload === "Unauthorized") {
           expireSessionKeepingDraft(state);
           return;
         }
-        state.shadowingRequestError = action.payload ?? "Failed to generate pronunciation audio.";
+        if (state.shadowingRequestRecordingId === action.meta.arg) {
+          state.shadowingRequestStatus = "idle";
+          state.shadowingRequestError = action.payload ?? "Failed to generate pronunciation audio.";
+        }
+      })
+      .addCase(retryRecordingStrengths.pending, (state, action) => {
+        beginRecordingMutation(state, "strengths", action.meta);
+        state.strengthsRetryStatuses[action.meta.arg] = "loading";
+        delete state.strengthsRetryErrors[action.meta.arg];
+      })
+      .addCase(retryRecordingStrengths.fulfilled, (state, action) => {
+        if (!finishRecordingMutation(state, "strengths", action.meta)) return;
+        delete state.strengthsRetryStatuses[action.meta.arg];
+        delete state.strengthsRetryErrors[action.meta.arg];
+        upsertRecordingMutation(state, action.payload, "strengths");
+      })
+      .addCase(retryRecordingStrengths.rejected, (state, action) => {
+        if (action.payload === "Unauthorized") { expireSessionKeepingDraft(state); return; }
+        if (!finishRecordingMutation(state, "strengths", action.meta)) return;
+        delete state.strengthsRetryStatuses[action.meta.arg];
+        state.strengthsRetryErrors[action.meta.arg] = action.payload ?? "Good examples could not be scheduled.";
       })
       .addCase(deleteRecording.pending, (state) => {
         state.recordingDeleteStatus = "loading";

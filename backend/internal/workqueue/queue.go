@@ -17,6 +17,7 @@ import (
 
 const (
 	KindRecordingProcess    = "recording.process"
+	KindRecordingStrengths  = "recording.strengths"
 	KindShadowingSynthesize = "shadowing.synthesize"
 	KindMediaDelete         = "media.delete"
 	KindGuestPreview        = "guest.preview"

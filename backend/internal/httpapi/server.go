@@ -20,55 +20,53 @@ import (
 )
 
 type Dependencies struct {
-	OperationsMonitor     *operations.Monitor
-	PracticeGenerator     practice.Generator
-	ProfileService        *profile.Service
-	SubscriptionService   *subscription.Service
-	RecordingAnalyzer     recording.Analyzer
-	RecordingRewriter     recording.Rewriter
-	RecordingCreator      *recording.Creator
-	RecordingDeleter      *recording.Deleter
-	RecordingReader       *recording.Reader
-	RecordingRetryService *recording.RetryService
-	GuestPreviewStore     *guestpreview.Store
-	InterviewService      *interview.Service
-	ShadowingStore        *shadowing.Store
-	BrowserCookie         auth.CookieConfig
-	IdentityTokens        auth.TokenConfig
-	IdentityService       *auth.IdentityService
-	CORS                  CORSConfig
-	MediaService          *media.Service
-	MediaSigner           *media.URLSigner
-	Operations            operations.Config
-	Limiter               requestLimiter
-	Network               operations.Network
-	Metrics               *operations.Metrics
+	OperationsMonitor         *operations.Monitor
+	PracticeGenerator         practice.Generator
+	ProfileService            *profile.Service
+	SubscriptionService       *subscription.Service
+	RecordingCreator          *recording.Creator
+	RecordingDeleter          *recording.Deleter
+	RecordingReader           *recording.Reader
+	RecordingRetryService     *recording.RetryService
+	RecordingStrengthsService *recording.StrengthsService
+	GuestPreviewStore         *guestpreview.Store
+	InterviewService          *interview.Service
+	ShadowingStore            *shadowing.Store
+	BrowserCookie             auth.CookieConfig
+	IdentityTokens            auth.TokenConfig
+	IdentityService           *auth.IdentityService
+	CORS                      CORSConfig
+	MediaService              *media.Service
+	MediaSigner               *media.URLSigner
+	Operations                operations.Config
+	Limiter                   requestLimiter
+	Network                   operations.Network
+	Metrics                   *operations.Metrics
 }
 
 type Server struct {
-	operationsMonitor     *operations.Monitor
-	practiceGenerator     practice.Generator
-	profileService        *profile.Service
-	subscriptionService   *subscription.Service
-	recordingAnalyzer     recording.Analyzer
-	recordingRewriter     recording.Rewriter
-	recordingCreator      *recording.Creator
-	recordingDeleter      *recording.Deleter
-	recordingReader       *recording.Reader
-	recordingRetryService *recording.RetryService
-	guestPreviewStore     *guestpreview.Store
-	interviewService      *interview.Service
-	shadowingStore        *shadowing.Store
-	browserCookie         auth.CookieConfig
-	identityTokens        auth.TokenConfig
-	identityService       *auth.IdentityService
-	cors                  CORSConfig
-	mediaService          *media.Service
-	mediaSigner           *media.URLSigner
-	operations            operations.Config
-	limiter               requestLimiter
-	network               operations.Network
-	metrics               *operations.Metrics
+	operationsMonitor         *operations.Monitor
+	practiceGenerator         practice.Generator
+	profileService            *profile.Service
+	subscriptionService       *subscription.Service
+	recordingCreator          *recording.Creator
+	recordingDeleter          *recording.Deleter
+	recordingReader           *recording.Reader
+	recordingRetryService     *recording.RetryService
+	recordingStrengthsService *recording.StrengthsService
+	guestPreviewStore         *guestpreview.Store
+	interviewService          *interview.Service
+	shadowingStore            *shadowing.Store
+	browserCookie             auth.CookieConfig
+	identityTokens            auth.TokenConfig
+	identityService           *auth.IdentityService
+	cors                      CORSConfig
+	mediaService              *media.Service
+	mediaSigner               *media.URLSigner
+	operations                operations.Config
+	limiter                   requestLimiter
+	network                   operations.Network
+	metrics                   *operations.Metrics
 }
 
 type requestLimiter interface {
@@ -80,10 +78,10 @@ func NewServer(dependencies Dependencies) *Server {
 		operationsMonitor: dependencies.OperationsMonitor,
 		practiceGenerator: dependencies.PracticeGenerator,
 		profileService:    dependencies.ProfileService, subscriptionService: dependencies.SubscriptionService,
-		recordingAnalyzer: dependencies.RecordingAnalyzer, recordingRewriter: dependencies.RecordingRewriter,
 		recordingCreator: dependencies.RecordingCreator, recordingDeleter: dependencies.RecordingDeleter,
 		recordingReader: dependencies.RecordingReader, recordingRetryService: dependencies.RecordingRetryService,
-		guestPreviewStore: dependencies.GuestPreviewStore, shadowingStore: dependencies.ShadowingStore,
+		recordingStrengthsService: dependencies.RecordingStrengthsService,
+		guestPreviewStore:         dependencies.GuestPreviewStore, shadowingStore: dependencies.ShadowingStore,
 		interviewService: dependencies.InterviewService,
 		browserCookie:    dependencies.BrowserCookie, identityTokens: dependencies.IdentityTokens,
 		identityService: dependencies.IdentityService, cors: dependencies.CORS,

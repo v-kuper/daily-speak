@@ -6,6 +6,8 @@ import type {
   SuggestionSeverity
 } from "./data";
 
+import { parseFeedbackSpan } from "./feedbackSpans";
+
 const SUGGESTION_CATEGORIES = new Set<SuggestionCategory>([
   "language_switch",
   "verb_grammar",
@@ -85,6 +87,11 @@ const parseSuggestion = (value: unknown): Suggestion | null => {
   }
 
   const suggestion: Suggestion = { wrong, right, explanation };
+  const id = trimmedString(candidate.id);
+  if (id) suggestion.id = id;
+  const span = parseFeedbackSpan(candidate.span);
+  if (candidate.span != null && !span) return null;
+  if (span) suggestion.span = span;
   const category = parseCategory(candidate.category);
   const severity = parseSeverity(candidate.severity);
   const ruleId = trimmedString(candidate.ruleId);
@@ -129,7 +136,12 @@ const parseStrength = (value: unknown): Strength | null => {
   if (!excerpt || !explanation || !category || !ruleId) {
     return null;
   }
+  const id = trimmedString(candidate.id);
+  const span = parseFeedbackSpan(candidate.span);
+  if (candidate.span != null && !span) return null;
   return {
+    ...(id ? { id } : {}),
+    ...(span ? { span } : {}),
     excerpt,
     explanation,
     category,

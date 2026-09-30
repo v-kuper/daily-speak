@@ -1,10 +1,7 @@
 package recording
 
 import (
-	"os"
 	"regexp"
-	"strconv"
-	"strings"
 )
 
 const defaultAnalysisConcurrency = 3
@@ -32,14 +29,6 @@ const (
 	severityMedium            = SeverityMedium
 	severityMinor             = SeverityMinor
 )
-
-func analysisConcurrencyFromEnv() int {
-	value, err := strconv.Atoi(strings.TrimSpace(os.Getenv("AI_ANALYSIS_CONCURRENCY")))
-	if err != nil || value < 1 || value > len(recordingAnalysisPasses) {
-		return defaultAnalysisConcurrency
-	}
-	return value
-}
 
 func extractRussianPhrases(transcript string) []string {
 	seen := map[string]struct{}{}
@@ -87,6 +76,23 @@ func absMod(value, mod int) int {
 	out := value % mod
 	if out < 0 {
 		return -out
+	}
+	return out
+}
+
+func analysisRussianPhrases(transcript string, turns []InterviewDialogueTurn) []string {
+	if len(turns) == 0 {
+		return extractRussianPhrases(transcript)
+	}
+	out := []string{}
+	seen := map[string]bool{}
+	for _, turn := range turns {
+		for _, phrase := range extractRussianPhrases(turn.Answer) {
+			if !seen[phrase] {
+				seen[phrase] = true
+				out = append(out, phrase)
+			}
+		}
 	}
 	return out
 }

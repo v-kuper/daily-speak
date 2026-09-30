@@ -65,18 +65,29 @@ func TestStrengthFailureDoesNotBlockCorrections(t *testing.T) {
 	if err != nil || len(result.Suggestions) != 0 || len(result.Strengths) != 0 {
 		t.Fatalf("result=%#v err=%v", result, err)
 	}
-	if provider.strengthCalls.Load() != 2 {
+	if provider.strengthCalls.Load() != 0 || result.StrengthsStatus != "pending" {
 		t.Fatalf("strength calls=%d", provider.strengthCalls.Load())
 	}
 }
 
 func TestCorrectionsWinWhenStrengthsOverlap(t *testing.T) {
 	strengths := []Strength{
-		{Excerpt: "I goed home", Explanation: "Clear sentence.", Category: CategorySentenceStructure, RuleID: "word-order"},
-		{Excerpt: "after work", Explanation: "Useful phrase.", Category: CategoryNaturalness, RuleID: "collocations"},
+		{Span: &FeedbackSpan{Start: 0, End: 11}, Excerpt: "I goed home", Explanation: "Clear sentence.", Category: CategorySentenceStructure, RuleID: "word-order"},
+		{Span: &FeedbackSpan{Start: 12, End: 22}, Excerpt: "after work", Explanation: "Useful phrase.", Category: CategoryNaturalness, RuleID: "collocations"},
 	}
-	got := strengthsWithoutCorrectionOverlap(strengths, []Suggestion{{Wrong: "goed", Right: "went"}})
+	got := strengthsWithoutCorrectionOverlap(strengths, []Suggestion{{Span: &FeedbackSpan{Start: 2, End: 6}, Wrong: "goed", Right: "went"}})
 	if len(got) != 1 || got[0].Excerpt != "after work" {
 		t.Fatalf("strengths=%#v", got)
+	}
+}
+
+func TestLegacyCorrectionsCannotBecomeContradictoryPositiveExamples(t *testing.T) {
+	input := AnalysisInput{Transcript: "I go home. Yesterday I go home."}
+	resolved := correctionSpansForOverlap(input, []Suggestion{{Wrong: "I go"}})
+	if len(resolved) != 2 {
+		t.Fatalf("legacy spans=%#v", resolved)
+	}
+	if got := strengthsWithoutCorrectionOverlap([]Strength{{Span: &FeedbackSpan{Start: 0, End: 9}}}, resolved); len(got) != 0 {
+		t.Fatalf("disputed phrase became a strength: %#v", got)
 	}
 }

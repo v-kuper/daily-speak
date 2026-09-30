@@ -18,7 +18,6 @@ import (
 	practiceollama "daily-speaking-practice/backend/internal/practice/ollamaadapter"
 	"daily-speaking-practice/backend/internal/profile"
 	"daily-speaking-practice/backend/internal/recording"
-	recordingollama "daily-speaking-practice/backend/internal/recording/ollamaadapter"
 	"daily-speaking-practice/backend/internal/shadowing"
 	"daily-speaking-practice/backend/internal/storage"
 	"daily-speaking-practice/backend/internal/subscription"
@@ -30,8 +29,6 @@ type APIConfig struct {
 	DB                 *db.DB
 	AIClient           ai.ChatClient
 	PracticeGenerator  practice.Generator
-	RecordingAnalyzer  recording.Analyzer
-	RecordingRewriter  recording.Rewriter
 	BrowserCookie      auth.CookieConfig
 	IdentityTokens     auth.TokenConfig
 	CORS               httpapi.CORSConfig
@@ -54,15 +51,6 @@ func NewAPI(config APIConfig) *httpapi.Server {
 	practiceGenerator := config.PracticeGenerator
 	if practiceGenerator == nil {
 		practiceGenerator = practice.NewService(practiceollama.New(aiClient), practice.NewSQLQuestionHistoryRepository(config.DB))
-	}
-	recordingService := recording.NewAnalysisService(recordingollama.New(aiClient), recording.AnalysisConfigFromEnv())
-	recordingAnalyzer := config.RecordingAnalyzer
-	if recordingAnalyzer == nil {
-		recordingAnalyzer = recordingService
-	}
-	recordingRewriter := config.RecordingRewriter
-	if recordingRewriter == nil {
-		recordingRewriter = recordingService
 	}
 	mediaStore := config.MediaStore
 	mediaBucket := strings.TrimSpace(config.MediaBucket)
@@ -89,15 +77,16 @@ func NewAPI(config APIConfig) *httpapi.Server {
 	}
 	recordingRecords := recording.NewSQLQueryRepository(config.DB)
 	recordingDeletion := recording.NewSQLDeletionRepository(config.DB)
+	recordingProcessing := recording.NewSQLProcessingRepository(config.DB)
 	return httpapi.NewServer(httpapi.Dependencies{
-		OperationsMonitor:   operations.NewMonitor(config.DB, workqueue.NewStore(config.DB)),
-		PracticeGenerator:   practiceGenerator,
-		ProfileService:      profile.NewService(profile.NewSQLRepository(config.DB)),
-		SubscriptionService: subscription.NewService(subscription.NewSQLRepository(config.DB)),
-		RecordingAnalyzer:   recordingAnalyzer, RecordingRewriter: recordingRewriter,
-		RecordingCreator: recording.NewCreator(recording.NewSQLCreateUnitOfWork(config.DB)),
-		RecordingDeleter: recording.NewDeleter(recordingDeletion, recordingDeletion, uuid.NewString),
-		RecordingReader:  recording.NewReader(recordingRecords),
+		OperationsMonitor:         operations.NewMonitor(config.DB, workqueue.NewStore(config.DB)),
+		PracticeGenerator:         practiceGenerator,
+		ProfileService:            profile.NewService(profile.NewSQLRepository(config.DB)),
+		SubscriptionService:       subscription.NewService(subscription.NewSQLRepository(config.DB)),
+		RecordingCreator:          recording.NewCreator(recording.NewSQLCreateUnitOfWork(config.DB)),
+		RecordingDeleter:          recording.NewDeleter(recordingDeletion, recordingDeletion, uuid.NewString),
+		RecordingReader:           recording.NewReader(recordingRecords),
+		RecordingStrengthsService: recording.NewStrengthsService(recordingProcessing, recordingProcessing, nil, uuid.NewString),
 		RecordingRetryService: recording.NewRetryService(
 			recordingRecords, recording.NewSQLRetryUnitOfWork(config.DB), uuid.NewString,
 		),

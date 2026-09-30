@@ -46,16 +46,18 @@ func (*cleanup) FinalizeFailure(context.Context, pgx.Tx, string, int, string) er
 
 func TestRuntimeDispatchesJobsWithoutHTTPTransport(t *testing.T) {
 	recordings := &recordingProcessor{}
+	strengths := &recordingProcessor{}
 	guests := &guestProcessor{}
 	shadows := &shadowProcessor{}
 	mediaCleanup := &cleanup{}
 	runtime := NewRuntime(Dependencies{
-		RecordingProcessor: recordings, GuestPreviewProcessor: guests,
+		RecordingProcessor: recordings, StrengthsProcessor: strengths, GuestPreviewProcessor: guests,
 		ShadowingProcessor: shadows, MediaCleanup: mediaCleanup,
 	})
 	jobs := []workqueue.Job{
 		{ID: "guest-job", Kind: workqueue.KindGuestPreview, ResourceID: "preview", LeaseToken: "g-lease"},
 		{ID: "recording-job", Kind: workqueue.KindRecordingProcess, ResourceID: "recording", LeaseToken: "r-lease"},
+		{ID: "strengths-job", Kind: workqueue.KindRecordingStrengths, ResourceID: "recording", LeaseToken: "p-lease"},
 		{ID: "shadow-job", Kind: workqueue.KindShadowingSynthesize, ResourceID: "recording", LeaseToken: "s-lease"},
 		{ID: "delete-job", Kind: workqueue.KindMediaDelete, ResourceID: "asset"},
 	}
@@ -64,7 +66,7 @@ func TestRuntimeDispatchesJobsWithoutHTTPTransport(t *testing.T) {
 			t.Fatalf("%s: %v", job.Kind, err)
 		}
 	}
-	if guests.job.ID != "guest-job" || recordings.job.ID != "recording-job" || shadows.job.ID != "shadow-job" || mediaCleanup.resourceID != "asset" {
+	if strengths.job.ID != "strengths-job" || strengths.job.LeaseToken != "p-lease" || guests.job.ID != "guest-job" || recordings.job.ID != "recording-job" || shadows.job.ID != "shadow-job" || mediaCleanup.resourceID != "asset" {
 		t.Fatalf("guest=%#v recording=%#v shadow=%#v cleanup=%#v", guests.job, recordings.job, shadows.job, mediaCleanup)
 	}
 }

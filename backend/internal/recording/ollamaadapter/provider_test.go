@@ -61,3 +61,13 @@ func TestProviderCanForceCheapJSONModeForPreview(t *testing.T) {
 		t.Fatalf("body=%#v", body)
 	}
 }
+
+func TestStrictJSONRetryAlsoConstrainsThinkingModels(t *testing.T) {
+	client := &fakeChatClient{}
+	provider := New(client)
+	provider.resolveSettings = func() ai.Settings { return ai.Settings{Model: "thinking-model", IsThinkingModel: true} }
+	_, err := provider.Complete(context.Background(), recording.AnalysisCompletionRequest{StrictJSON: true})
+	if err != nil { t.Fatal(err) }
+	body := client.body.(map[string]any)
+	if body["format"] != "json" { t.Fatalf("body=%#v", body) }
+}

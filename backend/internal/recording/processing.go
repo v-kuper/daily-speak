@@ -232,11 +232,15 @@ func (p *Processor) analyzeWithInterests(ctx context.Context, job ProcessingJob,
 	if p.dependencies.Analyzer == nil {
 		return errors.New("recording analysis is not configured")
 	}
-	analysis, err := p.dependencies.Analyzer.Analyze(ctx, AnalysisInput{
+	input := AnalysisInput{
 		RecordingID: job.ResourceID, Transcript: work.Transcript, Topic: work.Topic,
 		Interests: interests, PracticeType: work.PracticeType, PhotoObject: work.PhotoObject,
 		EnglishLevel: work.EnglishLevel, InterviewTurns: dialogue,
-	}, logger)
+	}
+	if repository, ok := p.dependencies.Repository.(AnalysisCheckpointRepository); ok {
+		input.Checkpoint = repository.AnalysisCheckpoint(job, input)
+	}
+	analysis, err := p.dependencies.Analyzer.Analyze(ctx, input, logger)
 	if err != nil {
 		return err
 	}

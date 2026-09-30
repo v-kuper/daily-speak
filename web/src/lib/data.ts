@@ -24,7 +24,11 @@ export type LearningReference = {
   url?: string;
 };
 
+export type FeedbackSpan = { start: number; end: number; turnSequence?: number };
+
 export type Suggestion = {
+  id?: string;
+  span?: FeedbackSpan;
   wrong: string;
   right: string;
   explanation: string;
@@ -35,6 +39,8 @@ export type Suggestion = {
 };
 
 export type Strength = {
+  id?: string;
+  span?: FeedbackSpan;
   excerpt: string;
   explanation: string;
   category: SuggestionCategory;
@@ -65,6 +71,7 @@ export type Recording = {
   correctedTranscript: string;
   suggestions: Suggestion[];
   strengths: Strength[];
+  strengthsStatus?: "unknown" | "pending" | "processing" | "ready" | "failed";
   processingStage: RecordingProcessingStage | null;
   practiceType: PracticeType;
   localAudioStorageKey: string | null;

@@ -33,3 +33,15 @@ device. Tokens, bearer headers, cookies, and passwords must never be logged.
 If a v1 operation must be retired, it will first return standards-based
 `Deprecation` and `Sunset` headers for at least 90 days. An incompatible change
 requires a new major path such as `/api/v2`.
+
+Recording feedback adds optional stable `id` and `span` fields. A span has
+half-open UTF-16 `start` and `end` offsets; optional `turnSequence` makes them
+relative to that stored learner answer rather than the full transcript.
+Older feedback may omit locations. Clients must validate the quoted slice and
+must not guess which repeated occurrence was erroneous.
+
+Optional `strengthsStatus` distinguishes unknown legacy coverage, pending,
+processing, ready (including an empty result), and failed positive-feedback
+processing. `POST /api/v1/recordings/{recordingId}/strengths` schedules only good
+examples; it never restarts corrections, rewriting, or shadowing. The operation
+is owner-protected and returns an existing result while processing or ready.

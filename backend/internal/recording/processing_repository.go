@@ -28,7 +28,7 @@ func (r *SQLProcessingRepository) LoadProcessingWork(ctx context.Context, job Pr
 	var suggestionJSON []byte
 	err := r.db.QueryRow(ctx, `
 		SELECT r.user_id, COALESCE(r.processing_stage, ''), r.audio_asset_id,
-		       r.transcript, r.suggestions, r.topic, r.practice_type, r.photo_object, u.english_level,
+		       r.transcript, r.suggestions, r.topic, r.practice_type, r.photo_object, COALESCE((SELECT english_level FROM interview_sessions WHERE recording_id = r.id), u.english_level),
 		       EXISTS (
 		         SELECT 1 FROM guest_previews p
 		         WHERE p.promoted_recording_id = r.id AND p.state = 'promoted'
@@ -236,17 +236,35 @@ func (r *SQLProcessingRepository) SaveInterviewTranscript(ctx context.Context, j
 func (r *SQLProcessingRepository) SaveAnalysis(ctx context.Context, job ProcessingJob, analysis AnalysisResult) (bool, error) {
 	suggestionsPayload, _ := json.Marshal(withoutReferences(analysis.Suggestions))
 	strengthsPayload, _ := json.Marshal(withoutStrengthReferences(analysis.Strengths))
-	result, err := r.db.Exec(ctx, `
-		UPDATE recordings
-		SET suggestions = $2::jsonb, strengths = $3::jsonb,
-		    processing_stage = 'rewriting', processing_error = NULL
-		WHERE id = $1 AND status = 'processing' AND processing_job_id = $4
-		  AND EXISTS (SELECT 1 FROM processing_jobs WHERE id = $4 AND state = 'running' AND lease_token = $5)`,
-		job.ResourceID, string(suggestionsPayload), string(strengthsPayload), job.ID, job.LeaseToken)
+	tx, err := r.db.Begin(ctx)
 	if err != nil {
 		return false, err
 	}
-	return result.RowsAffected() > 0, nil
+	defer tx.Rollback(ctx)
+	if err := requireRecordingLease(ctx, tx, job); err != nil {
+		return false, err
+	}
+	strengthsStatus := "ready"
+	strengthsJobID := ""
+	if analysis.StrengthsStatus == "pending" {
+		strengthsStatus = "processing"
+		strengthsJobID = job.ID + ":strengths"
+	}
+	result, err := tx.Exec(ctx, `UPDATE recordings
+        SET suggestions = $2::jsonb, strengths = $3::jsonb, strengths_status = $6, strengths_job_id = NULLIF($7, ''),
+            processing_stage = 'rewriting', processing_error = NULL
+        WHERE id = $1 AND status = 'processing' AND processing_job_id = $4
+        AND EXISTS (SELECT 1 FROM processing_jobs WHERE id = $4 AND state = 'running' AND lease_token = $5 AND lease_expires_at > NOW())`,
+		job.ResourceID, string(suggestionsPayload), string(strengthsPayload), job.ID, job.LeaseToken, strengthsStatus, strengthsJobID)
+	if err != nil || result.RowsAffected() == 0 {
+		return false, err
+	}
+	if strengthsJobID != "" {
+		if err := enqueueStrengths(ctx, tx, job.ResourceID, strengthsJobID); err != nil {
+			return false, err
+		}
+	}
+	return true, tx.Commit(ctx)
 }
 
 func withoutStrengthReferences(strengths []Strength) []Strength {

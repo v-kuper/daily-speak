@@ -1,23 +1,12 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import test from "node:test";
+import { createTypeScriptLoader } from "./helpers/load-typescript.mjs";
 
-import ts from "typescript";
+const suggestions = createTypeScriptLoader()("src/lib/suggestions.ts");
 
-async function importTypeScriptModule(path) {
-  const source = readFileSync(path, "utf8");
-  const { outputText } = ts.transpileModule(source, {
-    compilerOptions: {
-      module: ts.ModuleKind.ES2022,
-      target: ts.ScriptTarget.ES2022,
-    },
-  });
-
-  const moduleUrl = `data:text/javascript;base64,${Buffer.from(outputText).toString("base64")}`;
-  return import(moduleUrl);
-}
-
-const suggestions = await importTypeScriptModule("src/lib/suggestions.ts");
+test("malformed location metadata is rejected instead of becoming legacy feedback", () => {
+  assert.deepEqual(suggestions.parseSuggestions([{ wrong: "go", right: "went", explanation: "Past time.", span: { start: -1, end: 2 } }]), []);
+});
 
 test("all valid AI suggestions reach transcript highlighting and the review list", () => {
   const input = Array.from({ length: 25 }, (_, index) => ({
