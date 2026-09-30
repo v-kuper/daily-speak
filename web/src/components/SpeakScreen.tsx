@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { saveAndNavigate, startGuestSave } from "../lib/routeFlows";
 import {
   createGuestPreview,
@@ -61,7 +62,7 @@ import {
 } from "../lib/interviewFlow";
 import { newIdempotencyKey } from "../lib/mediaUpload";
 import { collectRecentAnsweredQuestions, questionHistoryKey } from "../lib/dailyQuestionHistory";
-import { dismissDailyQuestion } from "../lib/dailyQuestionPreference";
+import { dismissDailyQuestion, fetchDailyQuestionReplacement } from "../lib/dailyQuestionPreference";
 import { formatTime, toDateKey } from "../lib/utils";
 import { useAppDispatch, useAppSelector, useAppStore } from "../store/hooks";
 import {
@@ -69,6 +70,7 @@ import {
   clearPhotoForPractice,
   clearQuestionsError,
   hideDailyQuestion,
+  insertDailyQuestion,
   fetchDailyQuestions,
   MAX_AUTHENTICATED_RECORDING_SECONDS,
   PHOTO_PRACTICE_MAX_BYTES,
@@ -195,6 +197,8 @@ export default function SpeakScreen() {
   const [openingAudioError, setOpeningAudioError] = useState<string | null>(null);
   const [interviewRefreshToken, setInterviewRefreshToken] = useState(0);
   const [dismissingQuestion, setDismissingQuestion] = useState<string | null>(null);
+  const [replacingQuestion, setReplacingQuestion] = useState<string | null>(null);
+  const [pendingQuestionReplacement, setPendingQuestionReplacement] = useState<{ question: string; index: number } | null>(null);
   const [questionPreferenceError, setQuestionPreferenceError] = useState<string | null>(null);
   const {
     speakState,
@@ -1906,6 +1910,7 @@ export default function SpeakScreen() {
   }, [finishInterviewCapture, releaseMedia]);
 
   const onRefreshQuestions = () => {
+    if (dismissingQuestion || replacingQuestion || pendingQuestionReplacement) return;
     const dateKey = toDateKey(new Date());
     dispatch(clearQuestionsError());
     void dispatch(
@@ -1920,22 +1925,39 @@ export default function SpeakScreen() {
     );
   };
 
+  const onReplaceQuestion = async (pending: { question: string; index: number }, remainingQuestions: string[]) => {
+    if (replacingQuestion) return;
+    setQuestionPreferenceError(null);
+    setReplacingQuestion(pending.question);
+    try {
+      const replacement = await fetchDailyQuestionReplacement({
+        dateKey: toDateKey(new Date()),
+        refreshToken: String(Date.now()),
+        interestIds: selectedInterestIds,
+        englishLevel: selectedEnglishLevel,
+        currentQuestions: remainingQuestions,
+        avoidQuestions: [...recentlyPresentedQuestionsRef.current, ...recentAnsweredQuestions],
+      });
+      dispatch(insertDailyQuestion({ index: pending.index, question: replacement }));
+      setPendingQuestionReplacement(null);
+    } catch (error) {
+      setQuestionPreferenceError(error instanceof Error ? error.message : "Could not find a replacement question.");
+    } finally {
+      setReplacingQuestion(null);
+    }
+  };
+
   const onDismissQuestion = async (question: string) => {
-    if (dismissingQuestion || questionsStatus === "loading") return;
+    if (dismissingQuestion || replacingQuestion || pendingQuestionReplacement || questionsStatus === "loading") return;
     setQuestionPreferenceError(null);
     setDismissingQuestion(question);
     try {
       await dismissDailyQuestion(question);
-      const previousQuestions = [...recentlyPresentedQuestionsRef.current];
+      const pending = { question, index: topics.indexOf(question) };
+      const remainingQuestions = topics.filter((item) => item !== question);
       dispatch(hideDailyQuestion(question));
-      void dispatch(fetchDailyQuestions({
-        dateKey: toDateKey(new Date()),
-        force: true,
-        refreshToken: String(Date.now()),
-        interestIds: selectedInterestIds,
-        avoidQuestions: [...previousQuestions, ...recentAnsweredQuestions],
-        englishLevel: selectedEnglishLevel,
-      }));
+      setPendingQuestionReplacement(pending);
+      void onReplaceQuestion(pending, remainingQuestions);
     } catch (error) {
       setQuestionPreferenceError(error instanceof Error ? error.message : "Could not save your question preference.");
     } finally {
@@ -2000,6 +2022,10 @@ export default function SpeakScreen() {
 
   if (speakState === "idle") {
     const shouldShowQuestionsSkeleton = questionsStatus === "loading" && topics.length === 0;
+    const visibleTopics: Array<string | null> = [...topics];
+    if (pendingQuestionReplacement) {
+      visibleTopics.splice(pendingQuestionReplacement.index, 0, null);
+    }
 
     return (
       <section className="speak-screen">
@@ -2015,7 +2041,7 @@ export default function SpeakScreen() {
             <button
               className="btn btn-secondary btn-small"
               onClick={onRefreshQuestions}
-              disabled={questionsStatus === "loading"}
+              disabled={questionsStatus === "loading" || dismissingQuestion !== null || replacingQuestion !== null || pendingQuestionReplacement !== null}
             >
               {questionsStatus === "loading" ? "Finding..." : "↻ New questions"}
             </button>
@@ -2029,9 +2055,20 @@ export default function SpeakScreen() {
                   <div className="skeleton-line skeleton-line-medium" />
                 </div>
               ))
-            ) : topics.map((topic) => (
+            ) : visibleTopics.map((topic) => topic === null && pendingQuestionReplacement ? (
+              <div key={`pending-${pendingQuestionReplacement.question}`} className="topic-choice">
+                <div className="topic-btn topic-replacement-placeholder" aria-live="polite">
+                  {replacingQuestion ? "Finding a new question…" : "Question hidden. Replacement unavailable."}
+                </div>
+                {!replacingQuestion && (
+                  <button type="button" className="topic-dismiss-btn" onClick={() => void onReplaceQuestion(pendingQuestionReplacement, topics)}>
+                    Retry
+                  </button>
+                )}
+              </div>
+            ) : topic !== null ? (
               <div key={topic} className="topic-choice">
-                <button className="topic-btn" onClick={() => onSelectTopic(topic)}>
+                <button className="topic-btn" onClick={() => onSelectTopic(topic)} disabled={dismissingQuestion === topic}>
                   {topic}
                 </button>
                 {isAuthenticated && (
@@ -2040,14 +2077,14 @@ export default function SpeakScreen() {
                     className="topic-dismiss-btn"
                     aria-label={`Do not suggest again: ${topic}`}
                     title="Do not suggest this question again"
-                    disabled={dismissingQuestion !== null || questionsStatus === "loading"}
+                    disabled={dismissingQuestion !== null || replacingQuestion !== null || pendingQuestionReplacement !== null || questionsStatus === "loading"}
                     onClick={() => void onDismissQuestion(topic)}
                   >
                     {dismissingQuestion === topic ? "…" : "👎"}
                   </button>
                 )}
               </div>
-            ))}
+            ) : null)}
             {showAddTopicInput ? (
               <form
                 className="topic-btn custom-topic-form"
@@ -2076,6 +2113,12 @@ export default function SpeakScreen() {
               </button>
             )}
           </div>
+
+          {isAuthenticated && selectedInterestIds.length < 3 && (
+            <p className="profile-value top-spaced">
+              More varied interests can help us suggest different topics. <Link href="/profile/interests">Choose interests</Link>
+            </p>
+          )}
 
           {topics.length === 0 && questionsStatus !== "loading" && (
             <div className="profile-value">No daily questions yet. You can still add your own.</div>

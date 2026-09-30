@@ -16,9 +16,9 @@ export const collectRecentAnsweredQuestions = (recordings: Recording[], limit = 
 
   for (const recording of recordings) {
     if (recording.practiceType !== "topic") continue;
-    const answeredTurns = recording.interviewTurns.filter((turn) => turn.answerText.trim().length > 0);
-    if (answeredTurns.length > 0 || recording.transcript.trim().length > 0) add(recording.topic);
-    for (const turn of answeredTurns) add(turn.question);
+    if (recording.transcript.trim().length > 0 || recording.interviewTurns.some((turn) => turn.answerText.trim().length > 0)) {
+      add(recording.topic);
+    }
     if (questions.length >= limit) break;
   }
   return questions;

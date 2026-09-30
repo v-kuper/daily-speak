@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -27,6 +28,15 @@ func (s *Server) handleDailyQuestions(w http.ResponseWriter, r *http.Request) {
 		writeV1Error(w, r, http.StatusBadRequest, "invalid_date", "Query param `date` must be in YYYY-MM-DD format")
 		return
 	}
+	count := 3
+	if raw := values.Get("count"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || (parsed != 1 && parsed != 3) {
+			writeV1Error(w, r, http.StatusBadRequest, "invalid_question_count", "Query param `count` must be 1 or 3")
+			return
+		}
+		count = parsed
+	}
 
 	user, ok := s.optionalAccountUserV1(w, r)
 	if !ok {
@@ -39,9 +49,9 @@ func (s *Server) handleDailyQuestions(w http.ResponseWriter, r *http.Request) {
 		userID = user.ID
 	}
 	result, err := s.practiceGenerator.DailyQuestions(r.Context(), practice.DailyQuestionsInput{
-		UserID:  userID,
+		UserID: userID, Count: count,
 		DateKey: dateKey, RefreshToken: values.Get("refresh"), EnglishLevel: level,
-		Interests: normalizeURLInterests(values), AvoidQuestions: values["avoid"],
+		Interests: normalizeURLInterests(values), CurrentQuestions: values["current"], AvoidQuestions: values["avoid"],
 	})
 	if err != nil {
 		if errors.Is(err, practice.ErrHistoryUnavailable) {

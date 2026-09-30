@@ -1285,7 +1285,7 @@
           "AI"
         ],
         "summary": "Generate daily speaking questions",
-        "description": "Returns three distinct opening questions. Each can start a longer interview about one recognizable interest theme. Uses an optional Bearer access token. If authenticated, the user's saved English level overrides the `level` query parameter, and answered or dismissed questions from the account's full history are excluded.",
+        "description": "Returns three opening questions on different broad subjects by default, or one replacement when count=1. Each can start a longer interview. Uses an optional Bearer access token. If authenticated, the user's saved English level overrides the `level` query parameter, and saved opening topics or dismissed questions from the account's full history are excluded.",
         "security": [
           {
             "bearerAuth": []
@@ -1307,6 +1307,32 @@
           },
           {
             "$ref": "#/components/parameters/EnglishLevelQuery"
+          },
+          {
+            "name": "count",
+            "in": "query",
+            "description": "Number of opening questions to generate. Use 1 to replace a single dismissed card.",
+            "schema": {
+              "type": "integer",
+              "enum": [
+                1,
+                3
+              ],
+              "default": 3
+            }
+          },
+          {
+            "name": "current",
+            "in": "query",
+            "description": "Other questions remaining on screen when count=1; may be repeated. The replacement must have a different subject.",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "style": "form",
+            "explode": true
           },
           {
             "name": "avoid",
@@ -4941,18 +4967,28 @@
       },
       "DailyQuestionsResponse": {
         "type": "object",
-        "description": "Three opening questions for different interest themes where possible.",
+        "description": "Three opening questions on distinct broad subjects, or one replacement question when count=1.",
         "required": [
           "questions"
         ],
         "properties": {
           "questions": {
             "type": "array",
-            "minItems": 3,
+            "minItems": 1,
             "maxItems": 3,
             "items": {
               "type": "string"
-            }
+            },
+            "oneOf": [
+              {
+                "minItems": 1,
+                "maxItems": 1
+              },
+              {
+                "minItems": 3,
+                "maxItems": 3
+              }
+            ]
           }
         }
       },

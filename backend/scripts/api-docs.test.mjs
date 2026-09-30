@@ -103,7 +103,7 @@ const expectedQueryParameters = new Map([
   ["get /api/v1/recordings", ["limit", "cursor"]],
   ["put /api/v1/media/uploads/{uploadId}/parts/{partNumber}", ["sizeBytes", "checksumSha256", "expires", "signature"]],
   ["get /api/v1/media/local/assets/{assetId}/content", ["expires", "signature"]],
-  ["get /api/v1/practice/daily-questions", ["date", "refresh", "interest", "level", "avoid"]],
+  ["get /api/v1/practice/daily-questions", ["date", "refresh", "interest", "level", "count", "current", "avoid"]],
   ["get /api/v1/practice/topic-guidance", ["topic", "refresh", "interest", "level", "avoidQuestion", "avoidWord"]],
   ["get /api/v1/practice/study-words", ["refresh", "interest", "level", "avoidWord"]],
 ]);

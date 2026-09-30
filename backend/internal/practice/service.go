@@ -14,14 +14,15 @@ const (
 )
 
 var (
-	ErrInvalidDateKey     = errors.New("date must use YYYY-MM-DD format")
-	ErrInvalidQuestion    = errors.New("question must be between 1 and 300 characters")
-	ErrHistoryUnavailable = errors.New("question history is unavailable")
-	ErrTopicRequired      = errors.New("topic is required")
-	ErrTopicTooLong       = errors.New("topic is too long")
-	ErrQuestionsExhausted = errors.New("could not generate sufficiently new questions")
-	ErrGuidanceExhausted  = errors.New("could not generate sufficiently new guidance")
-	ErrStudyPackExhausted = errors.New("could not generate a valid study pack")
+	ErrInvalidDateKey       = errors.New("date must use YYYY-MM-DD format")
+	ErrInvalidQuestionCount = errors.New("question count must be 1 or 3")
+	ErrInvalidQuestion      = errors.New("question must be between 1 and 300 characters")
+	ErrHistoryUnavailable   = errors.New("question history is unavailable")
+	ErrTopicRequired        = errors.New("topic is required")
+	ErrTopicTooLong         = errors.New("topic is too long")
+	ErrQuestionsExhausted   = errors.New("could not generate sufficiently new questions")
+	ErrGuidanceExhausted    = errors.New("could not generate sufficiently new guidance")
+	ErrStudyPackExhausted   = errors.New("could not generate a valid study pack")
 )
 
 type Generator interface {
@@ -56,12 +57,14 @@ type Completion struct {
 }
 
 type DailyQuestionsInput struct {
-	UserID         string
-	DateKey        string
-	RefreshToken   string
-	EnglishLevel   string
-	Interests      []string
-	AvoidQuestions []string
+	UserID           string
+	DateKey          string
+	Count            int
+	RefreshToken     string
+	EnglishLevel     string
+	Interests        []string
+	CurrentQuestions []string
+	AvoidQuestions   []string
 }
 
 type TopicGuidanceInput struct {

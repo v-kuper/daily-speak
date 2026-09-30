@@ -145,12 +145,15 @@ client owns the selectable interest catalog and maps saved interest IDs to
 theme names before calling the practice API. The API response counts are
 documented in OpenAPI.
 
-Daily question generation reads the authenticated account's full answered-question
-history from interview turns and legacy recordings, plus explicit question
-dismissals from PostgreSQL. Recent exclusions guide the prompt; all exclusions
-are checked before returning a generated set. The web client can send additional
-recent questions, remembers recently presented options during the open page, and
-dismisses an unwanted suggestion permanently for that account.
+Daily question generation reads saved opening themes from finalized interview
+sessions and legacy topic recordings, plus explicit question dismissals from
+PostgreSQL. Interview follow-up turns do not enter this exclusion history.
+Recent exclusions guide the prompt; all exclusions are checked before returning
+a generated set. The web client remembers recently presented options during the
+open page and can dismiss one suggestion permanently for that account. A
+single-question request then fills only the dismissed card; the other two stay
+visible. The prompt expands selected interests into relatable situations and
+requires the three opening questions to cover different broad subjects.
 Adaptive interview generation uses the English level stored on the
 session as a hard CEFR ceiling. The same generation call may simplify below
 that ceiling when the latest answer is short, fragmented, or disconnected; it

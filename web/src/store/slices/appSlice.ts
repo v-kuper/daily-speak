@@ -614,6 +614,11 @@ export const fetchDailyQuestions = createAsyncThunk<
       if (app.questionsStatus === "loading") {
         return false;
       }
+      // A dismissed card is replaced separately; incidental profile/history updates
+      // must not regenerate the two cards that the learner kept.
+      if (app.questionsDate === dateKey && app.questionsStatus === "ready" && app.topics.length === MIN_DAILY_QUESTIONS - 1) {
+        return false;
+      }
       const interestKey = buildInterestsKey(interestIds);
       const avoidKey = questionHistoryKey(avoidQuestions);
       if (
@@ -1783,6 +1788,11 @@ const appSlice = createSlice({
     hideDailyQuestion: (state, action: PayloadAction<string>) => {
       state.topics = state.topics.filter((question) => question !== action.payload);
     },
+    insertDailyQuestion: (state, action: PayloadAction<{ index: number; question: string }>) => {
+      const { index, question } = action.payload;
+      if (state.topics.length !== MIN_DAILY_QUESTIONS - 1 || state.topics.includes(question)) return;
+      state.topics.splice(Math.max(0, Math.min(index, state.topics.length)), 0, question);
+    },
     clearTopicGuidanceError: (state) => {
       state.topicGuidanceError = null;
     },
@@ -2599,6 +2609,7 @@ const appSlice = createSlice({
 export const {
   clearQuestionsError,
   hideDailyQuestion,
+  insertDailyQuestion,
   clearTopicGuidanceError,
   clearStudyError,
   setPhotoUploadError,

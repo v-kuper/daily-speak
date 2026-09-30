@@ -7,8 +7,8 @@ import (
 	"daily-speaking-practice/backend/internal/db"
 )
 
-// SQLQuestionHistoryRepository keeps exclusions across devices and reads the
-// authoritative interview turns, not the paginated recording summary API.
+// SQLQuestionHistoryRepository keeps exclusions across devices and reads saved
+// opening themes, not follow-up turns or the paginated recording summary API.
 type SQLQuestionHistoryRepository struct{ db *db.DB }
 
 func NewSQLQuestionHistoryRepository(database *db.DB) *SQLQuestionHistoryRepository {
@@ -18,12 +18,9 @@ func NewSQLQuestionHistoryRepository(database *db.DB) *SQLQuestionHistoryReposit
 func (r *SQLQuestionHistoryRepository) ListAvoidQuestions(ctx context.Context, userID string) ([]string, error) {
 	rows, err := r.db.Query(ctx, `
 		SELECT question FROM (
-			SELECT t.question, t.created_at AS asked_at
-			FROM interview_turns t
-			JOIN interview_sessions s ON s.id = t.session_id
-			WHERE s.user_id = $1 AND NOT t.skipped
-			  AND (BTRIM(COALESCE(t.final_transcript, '')) <> ''
-			       OR BTRIM(COALESCE(t.provisional_transcript, '')) <> '')
+			SELECT s.opening_question AS question, s.created_at AS asked_at
+			FROM interview_sessions s
+			WHERE s.user_id = $1 AND s.status = 'finalized'
 			UNION ALL
 			SELECT r.topic, r.timestamp AS asked_at
 			FROM recordings r

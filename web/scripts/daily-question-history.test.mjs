@@ -22,7 +22,7 @@ const recording = (overrides) => ({
   ...overrides,
 });
 
-test("daily question history includes only questions that received answers", () => {
+test("daily question history includes saved opening topics, not interview follow-ups", () => {
   const questions = history.collectRecentAnsweredQuestions([
     recording({
       interviewTurns: [
@@ -33,7 +33,7 @@ test("daily question history includes only questions that received answers", () 
     }),
     recording({ practiceType: "free_talk", topic: "Free talk", transcript: "Hello." }),
   ]);
-  assert.deepEqual(questions, ["What place do you enjoy visiting?", "Why do you like it?"]);
+  assert.deepEqual(questions, ["What place do you enjoy visiting?"]);
 });
 
 test("daily question history preserves recent order, removes duplicates, and respects its limit", () => {

@@ -130,6 +130,47 @@ func TestDailyQuestionsRejectsInvalidInputBeforeProviderCall(t *testing.T) {
 	if provider.calls != 0 {
 		t.Fatalf("provider calls = %d, want 0", provider.calls)
 	}
+	_, err = newTestService(provider).DailyQuestions(context.Background(), DailyQuestionsInput{DateKey: "2026-09-27", Count: 2})
+	if !errors.Is(err, ErrInvalidQuestionCount) || provider.calls != 0 {
+		t.Fatalf("invalid count error = %v, provider calls = %d", err, provider.calls)
+	}
+}
+
+func TestDailyQuestionReplacementAvoidsOnlyItsOwnSlot(t *testing.T) {
+	provider := &fakeCompletionProvider{responses: []Completion{
+		{Content: `{"questions":["What food do you like?"]}`},
+		{Content: `{"questions":["What place feels welcoming to you?"]}`},
+	}}
+	result, err := newTestService(provider).DailyQuestions(context.Background(), DailyQuestionsInput{
+		DateKey: "2026-09-27", Count: 1, Interests: []string{"travel", "food", "music"},
+		CurrentQuestions: []string{"What food do you like?", "What song helps you relax?"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if provider.calls != 2 || !reflect.DeepEqual(result.Questions, []string{"What place feels welcoming to you?"}) {
+		t.Fatalf("calls = %d, questions = %#v", provider.calls, result.Questions)
+	}
+	prompt := provider.requests[0].UserPrompt
+	for _, required := range []string{"exactly 1", "Questions that remain visible", "different broad subject", `{"questions":["question"]}`} {
+		if !strings.Contains(prompt, required) {
+			t.Fatalf("replacement prompt does not contain %q: %s", required, prompt)
+		}
+	}
+}
+
+func TestDailyQuestionsPromptRequiresDistinctEverydayThemes(t *testing.T) {
+	provider := &fakeCompletionProvider{responses: []Completion{{Content: `{"questions":["What helps you relax?","Where do you go on weekends?","Who do you often call?"]}`}}}
+	_, err := newTestService(provider).DailyQuestions(context.Background(), DailyQuestionsInput{DateKey: "2026-09-27", Interests: []string{"music", "cooking", "travel"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	prompt := provider.requests[0].UserPrompt
+	for _, required := range []string{"three different broad subjects", "three clearly different interests", "concrete, relatable situations", "dry textbook"} {
+		if !strings.Contains(prompt, required) {
+			t.Fatalf("daily prompt does not contain %q: %s", required, prompt)
+		}
+	}
 }
 
 func TestDailyQuestionsPreservesProviderError(t *testing.T) {

@@ -7,27 +7,43 @@ import (
 	"daily-speaking-practice/backend/internal/learner"
 )
 
-func dailyQuestionsPrompt(dateKey string, refreshToken string, englishLevel string, interests []string, avoidQuestions []string) string {
+func dailyQuestionsPrompt(dateKey string, refreshToken string, englishLevel string, interests []string, currentQuestions []string, avoidQuestions []string, count int) string {
+	questionLabel := "opening question"
+	if count > 1 {
+		questionLabel = "opening questions"
+	}
 	parts := []string{
-		fmt.Sprintf("Generate exactly %d opening questions for English speaking practice on %s.", dailyQuestionsCount, dateKey),
+		fmt.Sprintf("Generate exactly %d %s for English speaking practice on %s.", count, questionLabel, dateKey),
 		"Use the date only to vary the selection, not as a source of facts or a required question theme.",
 		"Audience: English learner level " + learner.FormatEnglishLevel(englishLevel) + ".",
 		"Language difficulty: " + learner.EnglishLevelPromptGuidance(englishLevel),
 		"Question form: " + learner.EnglishQuestionPromptGuidance(englishLevel),
 		"The selected CEFR level is a hard maximum. Do not use vocabulary or grammar from a higher level.",
 		"Each question is the first question of a longer interview: introduce one recognizable theme broadly enough to leave several concrete aspects for follow-up questions.",
-		"Use one short, open-ended question with one idea per theme, suitable for a spoken answer. Never combine two requests with 'and'. Make the theme clear from the wording without simply asking 'What do you think about [interest]?'.",
+		"First expand the interest labels privately into concrete, relatable situations, choices, memories, or everyday observations. Do not return that planning text.",
+		"Ask something a curious person would enjoy answering aloud, not a dry textbook or trivia question. Avoid generic favorites, abstract definitions, and repeated 'What do you think about...' templates.",
+		"Use one short, open-ended question with one idea per theme, suitable for a spoken answer. Never combine two requests with 'and'. Make the theme clear from the wording.",
 		"A learner must be able to answer even without direct experience of the activity. Do not assume they own something, have done something, or hold a particular opinion.",
-		fmt.Sprintf("Make all %d questions meaningfully different, not near-paraphrases. Prefer different themes when possible.", dailyQuestionsCount),
-		`Return only JSON with this exact shape: {"questions":["question 1","question 2","question 3"]}.`,
 		"Do not add markdown, explanations, numbering, or extra keys.",
 	}
-	if len(interests) > 0 {
-		parts = append(parts, "Learner interests (choose themes from these): "+strings.Join(interests, ", ")+".")
-		parts = append(parts, "Use different interests when at least three clearly distinct ones are available; otherwise choose distinct aspects of the selected interests.")
-		parts = append(parts, "Keep each theme recognizable, but do not force the exact interest label into the question or mix unrelated interests.")
+	if count == 1 {
+		parts = append(parts, `Return only JSON with this exact shape: {"questions":["question"]}.`)
+		if len(currentQuestions) > 0 {
+			parts = append(parts, "Questions that remain visible on screen: "+strings.Join(currentQuestions, " | ")+".")
+			parts = append(parts, "The replacement must explore a different broad subject from every visible question, not merely a different angle or rewording.")
+		}
 	} else {
-		parts = append(parts, "With no interests provided, choose three distinct everyday themes a learner can discuss without specialist knowledge.")
+		parts = append(parts, "The three questions MUST cover three different broad subjects. Three angles on the same subject are invalid, even if the wording differs.")
+		parts = append(parts, `Return only JSON with this exact shape: {"questions":["question 1","question 2","question 3"]}.`)
+	}
+	if len(interests) > 0 {
+		parts = append(parts, "Learner-selected interests (use these as context, not text to copy): "+strings.Join(interests, ", ")+".")
+		if count == dailyQuestionsCount {
+			parts = append(parts, "Choose one question from each of three clearly different interests. If the selected interests are fewer than three or cluster around one broad subject, fill the remaining slots with unrelated everyday subjects anyone can discuss.")
+		}
+		parts = append(parts, "Keep a selected interest recognizable through a specific human situation, but do not force its label into the question or mix unrelated interests inside one question.")
+	} else {
+		parts = append(parts, "With no interests provided, choose distinct everyday subjects a learner can discuss without specialist knowledge.")
 	}
 	if refreshToken != "" {
 		parts = append(parts, "Variation key: "+refreshToken+". Return a different set than earlier generations for the same date.")

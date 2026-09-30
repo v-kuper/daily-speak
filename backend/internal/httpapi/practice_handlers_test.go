@@ -11,13 +11,18 @@ import (
 )
 
 type practiceChatClient struct {
-	calls int
+	calls   int
+	content string
 }
 
 func (f *practiceChatClient) PostChat(_ context.Context, _ any) (ai.ChatResponse, error) {
 	f.calls++
+	content := f.content
+	if content == "" {
+		content = `{"questions":["What did you learn?","What surprised you?","What comes next?"]}`
+	}
 	return ai.ChatResponse{
-		Response: `{"questions":["What did you learn?","What surprised you?","What comes next?"]}`,
+		Response: content,
 	}, nil
 }
 
@@ -37,6 +42,35 @@ func TestDailyQuestionsUsesServerAIClient(t *testing.T) {
 	}
 	if client.calls != 1 {
 		t.Fatalf("injected client calls = %d, want 1", client.calls)
+	}
+}
+
+func TestDailyQuestionReplacementUsesOneQuestionContract(t *testing.T) {
+	client := &practiceChatClient{content: `{"questions":["What makes a place welcoming?"]}`}
+	handler := newTestServer(Config{AIClient: client}).Handler()
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/practice/daily-questions?date=2026-09-27&count=1", nil)
+
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK || strings.TrimSpace(response.Body.String()) != `{"questions":["What makes a place welcoming?"]}` {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+	if client.calls != 1 {
+		t.Fatalf("provider calls = %d, want 1", client.calls)
+	}
+}
+
+func TestDailyQuestionsRejectsUnsupportedCount(t *testing.T) {
+	client := &practiceChatClient{}
+	handler := newTestServer(Config{AIClient: client}).Handler()
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/practice/daily-questions?date=2026-09-27&count=2", nil)
+
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusBadRequest || client.calls != 0 {
+		t.Fatalf("status = %d, calls = %d, body = %s", response.Code, client.calls, response.Body.String())
 	}
 }
 
