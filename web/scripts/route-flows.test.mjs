@@ -6,6 +6,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { Provider } from "react-redux";
 import { AppRouterContext } from "next/dist/shared/lib/app-router-context.shared-runtime.js";
+import { SearchParamsContext } from "next/dist/shared/lib/hooks-client-context.shared-runtime.js";
 import { createTypeScriptLoader } from "./helpers/load-typescript.mjs";
 
 const load = createTypeScriptLoader();
@@ -385,6 +386,64 @@ const renderDetails = (store, recordingId) => renderToStaticMarkup(createElement
     createElement(load("src/components/DetailsScreen.tsx").default, { recordingId })),
 ));
 
+for (const practiceType of ["topic", "free_talk", "photo_description"]) {
+  test(`discarding an unsaved ${practiceType} returns to the start and removes its audio, photo, and auth-save draft`, async (t) => {
+    const store = storeFor({ ...guest, isAuthenticated: true, recordingPracticeType: practiceType,
+      pendingPhotoDataUrl: "data:image/png;base64,YQ==", pendingPhotoObjectDraft: "Old photo",
+      pendingAuthSaveDraft: draft, recordingInputError: "Old error", recordingSaveError: "Old save error",
+      topicGuidanceWords: ["old"], topicGuidanceTopic: "Old topic", recordings: [saved],
+    });
+    const router = routerFor();
+    server(t, () => { assert.fail("discard must not submit a new recording"); });
+    const work = flow("discardRecordingAndNavigate")(store, router);
+    assert.equal(store.getState().app.speakState, "idle");
+    await work;
+    const state = store.getState().app;
+    for (const field of ["selectedTopic", "pendingRecordingAudioStorageKey", "pendingPhotoDataUrl", "pendingAuthSaveDraft", "recordingInputError", "recordingSaveError"]) assert.equal(state[field], null, field);
+    assert.equal(state.recordingDuration, 0);
+    assert.equal(state.pendingPhotoObjectDraft, "");
+    assert.equal(state.pendingSaveAfterAuth, false);
+    assert.deepEqual(state.topicGuidanceWords, []);
+    assert.deepEqual(state.recordings, [saved]);
+    assert.deepEqual(router.visits, [["replace", "/speak"]]);
+    await assert.rejects(recordingDraftAudio.loadRecordingDraftAudio(draft.audioStorageKey), /no longer available/i);
+  });
+}
+
+test("discard cannot interrupt a recording already being saved", async () => {
+  const store = storeFor({ ...guest, recordingSaveStatus: "loading" }), router = routerFor();
+  await flow("discardRecordingAndNavigate")(store, router);
+  assert.equal(store.getState().app.speakState, "recorded");
+  assert.equal(store.getState().app.pendingRecordingAudioStorageKey, draft.audioStorageKey);
+  assert.ok(await recordingDraftAudio.loadRecordingDraftAudio(draft.audioStorageKey));
+  assert.deepEqual(router.visits, []);
+});
+
+test("completed recording offers a discard action without repeating its account limit", () => {
+  const markup = renderToStaticMarkup(createElement(Provider, { store: storeFor({ ...guest, isAuthenticated: true }) },
+    createElement(AppRouterContext.Provider, { value: routerFor() }, createElement(load("src/components/SpeakScreen.tsx").default))));
+  assert.match(markup, /Recording complete/);
+  assert.match(markup, /Выйти без сохранения/);
+  assert.doesNotMatch(markup, /Account recording limit/);
+});
+
+test("history calendar filters recordings by date, describes days with recordings, and links to their detail", () => {
+  const first = { ...saved, id: "first", timestamp: "2026-09-30T12:00:00Z" };
+  const older = { ...saved, id: "older", timestamp: "2026-08-10T12:00:00Z" };
+  const store = storeFor({ recordings: [first, older], calendarVisible: true });
+  store.dispatch(app.setCalendarDate("2026-09-30"));
+  assert.equal(store.getState().app.calendarMonth, 8);
+  const markup = renderToStaticMarkup(createElement(Provider, { store },
+    createElement(AppRouterContext.Provider, { value: routerFor() },
+      createElement(SearchParamsContext.Provider, { value: new URLSearchParams("date=2026-09-30") },
+        createElement(load("src/components/HistoryScreen.tsx").default)))));
+  assert.match(markup, /href="\/history\/first"/);
+  assert.doesNotMatch(markup, /href="\/history\/older"/);
+  assert.match(markup, /Все записи/);
+  assert.match(markup, /aria-label="30 сентября 2026 г., 1 запись" aria-pressed="true"/);
+  assert.match(markup, />Пн<[^]*>Вт<[^]*>Ср<[^]*>Чт<[^]*>Пт<[^]*>Сб<[^]*>Вс</);
+});
+
 test("the live interview shows only the current question without an accumulated transcript", () => {
   const InterviewQuestionCard = load("src/components/InterviewQuestionCard.tsx").default;
   const markup = renderToStaticMarkup(createElement(InterviewQuestionCard, {
@@ -468,13 +527,17 @@ test("the local topic processing route immediately renders its saved conversatio
   assert.match(markup, /I went to Rome\./);
 });
 
-test("topic results render raw and corrected conversation blocks and highlight only the raw answer", () => {
+test("topic shadowing restores corrected learner answers and hides experimental samples", () => {
   const recording = {
     ...saved,
     status: "ready",
     processingStage: null,
     transcript: "I goed home yesterday.",
     correctedTranscript: "I went home yesterday.",
+    shadowingScript: {
+      englishLevel: "a2", text: "Did you say I goed home? I went to the park yesterday.",
+      turns: [{ sequence: 1, question: "Did you say I goed home?", answerText: "I went to the park yesterday." }],
+    },
     suggestions: [{
       wrong: "I goed home",
       right: "I went home",
@@ -498,12 +561,13 @@ test("topic results render raw and corrected conversation blocks and highlight o
   assert.equal((markup.match(/conversation-transcript/g) ?? []).length, 2);
   assert.equal((markup.match(/Interviewer:<\/strong> Did you say I goed home\?/g) ?? []).length, 2);
   assert.match(markup, /You:<\/strong>/);
-  assert.match(markup, /Shadowing practice[\s\S]*I went home yesterday\./);
+  assert.match(markup, /Shadowing practice[\s\S]*Ваш ответ в естественной форме[\s\S]*I went home yesterday\./);
+  assert.doesNotMatch(markup, /I went to the park yesterday\./);
   assert.equal((markup.match(/<mark/g) ?? []).length, 1);
   assert.doesNotMatch(markup, /Interview timeline|interview-timeline/);
 });
 
-test("legacy topic results without corrected turn answers keep the flat natural version", () => {
+test("legacy topic results retain their corrected transcript for shadowing", () => {
   const recording = {
     ...saved,
     status: "ready",
@@ -526,7 +590,27 @@ test("legacy topic results without corrected turn answers keep the flat natural 
   assert.doesNotMatch(markup, /Natural answer is unavailable/);
 });
 
-test("a partial corrected-turn payload falls back to the complete corrected transcript", () => {
+test("answer practice follows shadowing and lists answered questions in their original order", () => {
+  const recording = {
+    ...saved, status: "ready", processingStage: null,
+    transcript: "I goed home. I make dinner.", correctedTranscript: "I went home. I made dinner.",
+    interviewTurns: [
+      { sequence: 3, question: "What happened next?", answerText: "I make dinner.", answerSource: "final" },
+      { sequence: 2, question: "Skipped question?", answerText: " ", answerSource: "none" },
+      { sequence: 1, question: "Where did you go?", answerText: "I goed home.", answerSource: "final" },
+    ],
+  };
+  const markup = renderDetails(storeFor({ isAuthenticated: true, recordings: [recording] }), recording.id);
+  assert.ok(markup.indexOf("details-shadowing-material") < markup.indexOf("details-retake-material"));
+  const practice = markup.slice(markup.indexOf("details-retake-material"));
+  assert.match(practice, /Исправить свои ответы/);
+  assert.match(practice, /Открыть практику по вопросу 1: Where did you go\?/);
+  assert.match(practice, /Открыть практику по вопросу 2: What happened next\?/);
+  assert.ok(practice.indexOf("Where did you go?") < practice.indexOf("What happened next?"));
+  assert.doesNotMatch(practice, /Skipped question/);
+});
+
+test("partial corrected turns fall back to the full corrected learner transcript", () => {
   const recording = {
     ...saved,
     status: "ready",

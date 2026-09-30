@@ -23,7 +23,7 @@ func Run(ctx context.Context, store *workqueue.Store, config Config, processor P
 		poolConfig(config, []string{workqueue.KindGuestPreview}, config.GuestPreviewConcurrency, processor),
 		poolConfig(config, []string{workqueue.KindRecordingProcess, workqueue.KindRecordingStrengths}, config.RecordingConcurrency, processor),
 		poolConfig(config, []string{workqueue.KindInterviewProcess}, config.InterviewConcurrency, processor),
-		poolConfig(config, []string{workqueue.KindShadowingSynthesize}, config.ShadowingConcurrency, processor),
+		poolConfig(config, []string{workqueue.KindShadowingSynthesize, workqueue.KindRecordingFeedbackAudio}, config.ShadowingConcurrency, processor),
 		poolConfig(config, []string{workqueue.KindMediaDelete}, config.CleanupConcurrency, processor),
 	}
 

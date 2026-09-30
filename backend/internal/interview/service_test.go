@@ -366,7 +366,7 @@ func TestPrepareProducesOneHiddenQuestionWithQuestionSpecificWords(t *testing.T)
 	if err != nil || prepared.Candidate.Question != "How do you usually plan a trip?" || len(prepared.OpeningUsefulWords) != 6 || len(prepared.Candidate.UsefulWords) != 6 {
 		t.Fatalf("preparation = %+v, err=%v", prepared, err)
 	}
-	for _, required := range []string{"6 to 10", "nouns, verbs, adjectives", "do not include translations", "profile level"} {
+	for _, required := range []string{"Return 20", "nouns, verbs, adjectives", "do not include translations", "profile level"} {
 		if !strings.Contains(provider.system, required) {
 			t.Fatalf("preparation system prompt does not contain %q: %s", required, provider.system)
 		}
@@ -381,8 +381,12 @@ func TestQuestionGuidanceAllowsMixedWordsButBoundsTheList(t *testing.T) {
 	if _, ok := normalizeUsefulWords([]string{"book", "BOOK"}); ok {
 		t.Fatal("case-insensitive duplicate guidance word was accepted")
 	}
-	if _, ok := normalizeUsefulWords([]string{"one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven"}); ok {
-		t.Fatal("more than ten guidance words were accepted")
+	twenty := []string{"journey", "explore", "memorable", "carefully", "because", "in my opinion", "destination", "book", "compare", "affordable", "in advance", "travel agency", "choose", "relaxing", "usually", "for example", "nearby", "visit", "with friends", "on weekends"}
+	if words, ok := normalizeUsefulWords(twenty); !ok || len(words) != 20 {
+		t.Fatalf("twenty guidance words = %v, valid=%v", words, ok)
+	}
+	if _, ok := normalizeUsefulWords(append(twenty, "additional")); ok {
+		t.Fatal("more than twenty guidance words were accepted")
 	}
 }
 

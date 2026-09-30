@@ -287,10 +287,10 @@ test("adaptive interview contract keeps final speech separate from question meta
   assert.ok(interview.properties.candidates);
   assert.ok(interview.properties.turns);
   assert.equal(interview.properties.candidates.maxItems, 1);
-  assert.equal(interview.properties.openingUsefulWords.maxItems, 10);
-  assert.equal(candidate.properties.usefulWords.maxItems, 10);
-  assert.equal(turn.properties.usefulWords.maxItems, 10);
-  assert.equal(interview.properties.usefulWords.maxItems, 12);
+  assert.equal(interview.properties.openingUsefulWords.maxItems, 20);
+  assert.equal(candidate.properties.usefulWords.maxItems, 20);
+  assert.equal(turn.properties.usefulWords.maxItems, 20);
+  assert.equal(interview.properties.usefulWords.maxItems, 20);
   assert.equal(interview.properties.usefulVocabulary.maxItems, 12);
   assert.equal(interview.properties.usefulVocabulary.items.$ref, "#/components/schemas/InterviewVocabularyItem");
   assert.deepEqual(vocabularyItem.required, ["word", "translation"]);
@@ -417,4 +417,40 @@ test("mobile media contract keeps mutations idempotent and storage requests opaq
   assert.match(recordingQuota.weeklyRemainingSeconds.description, /does not control recording admission/);
   assert.equal(openapi.components.schemas.InterviewSession.properties.maxDurationSeconds.maximum, 600);
   assert.match(openapi.components.schemas.CreateMediaUploadRequest.properties.sizeBytes.description, /8 MiB for a guest/);
+});
+
+
+test("focused feedback and attempt contracts preserve ownership and bounded outputs", () => {
+ const schemas=openapi.components.schemas;
+ assert.equal(schemas.FeedbackFocus.properties.occurrence.minimum,1);
+ assert.equal(schemas.FocusedFeedback.properties.answers.items.properties.items.maxItems,undefined);
+ assert.match(schemas.FocusedFeedback.description,/no numeric limit/);
+ assert.equal(schemas.FeedbackFocus.properties.practiceContext.$ref,"#/components/schemas/FeedbackPracticeContext");
+ assert.deepEqual(schemas.FeedbackPracticeContext.required,["originalText","correctedText","audioFeedbackId"]);
+ assert.equal(schemas.FeedbackPracticeContext.properties.correctedText.maxLength,800);
+ assert.equal(schemas.MicroLesson.properties.points.minItems,3);
+ assert.equal(schemas.MicroLesson.properties.points.maxItems,3);
+ assert.ok(schemas.V1Recording.properties.focusedFeedback);
+ for(const path of [
+  "/api/v1/recordings/{recordingId}/feedback/{feedbackId}/audio",
+  "/api/v1/recordings/{recordingId}/interview-turns/{sequence}/question-audio",
+  "/api/v1/interviews/{interviewId}/questions/{questionIndex}/audio",
+  "/api/v1/recordings/{recordingId}/interview-turns/{sequence}/attempts/{attemptId}/feedback/{feedbackId}/audio",
+ ]){
+  assert.ok(openapi.paths[path].get.security);
+  assert.ok(openapi.paths[path].post.security);
+  assert.ok(openapi.paths[path].post.responses[200], "ready audio returns 200 without synthesis");
+  assert.ok(openapi.paths[path].post.responses[202], "processing audio returns 202");
+ }
+ assert.ok(schemas.StoredMediaPurpose.enum.includes("shadowing_audio"));
+ assert.ok(openapi.paths["/api/v1/recordings/{recordingId}/interview-turns/{sequence}/attempts/{attemptId}/retry"]);
+});
+test("shadowing uses corrected learner text and retains the experimental field for replacement", () => {
+ const schemas = openapi.components.schemas;
+ assert.equal(schemas.V1Recording.properties.shadowingScript.$ref, "#/components/schemas/ShadowingScript");
+ assert.deepEqual(schemas.ShadowingScript.required, ["englishLevel", "text", "turns"]);
+ assert.deepEqual(schemas.ShadowingScript.properties.englishLevel.enum, ["a1", "a2", "b1", "b2", "c1", "c2"]);
+ assert.equal(schemas.ShadowingScript.properties.turns.items.$ref, "#/components/schemas/ShadowingSampleAnswer");
+ assert.match(schemas.V1Recording.properties.correctedTranscript.description, /Corrected learner transcript/);
+ assert.equal(schemas.V1Recording.properties.shadowingScript.deprecated,true);
 });

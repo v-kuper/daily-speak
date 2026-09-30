@@ -160,15 +160,17 @@ that ceiling when the latest answer is short, fragmented, or disconnected; it
 does not run a second model call to classify or validate difficulty.
 
 Adaptive topic interviews use a separate `/api/v1/interviews` lifecycle. The
-selected opening question starts a durable session. Preparation generates 6 to
-10 level-appropriate English words or short phrases for that question, plus one
+selected opening question starts a durable session. Preparation aims for 20
+level-appropriate English words or short phrases for that question, plus one
 hidden next question with its own words. Each answered turn can generate one
 contextual replacement from the answer transcript. If the reserve is empty after
 a skip or failed generation, a durable refill generates one standalone question
 and its words. A partial unique index enforces at most one unconsumed candidate
 per session. The preparation screen shows no answer words; the recording screen
 scrolls only the current question's words above the question. New words may be
-nouns, verbs, adjectives, adverbs, connectors, or short helper phrases. The
+nouns, verbs, adjectives, adverbs, connectors, or short helper phrases. Each list
+is bounded to 20 unique entries; smaller relevant lists and legacy sessions stay
+valid without regenerating existing question artifacts. The
 legacy session-wide vocabulary fields remain in v1 responses for compatibility:
 `usefulWords` mirrors the opening question's words, while new sessions leave
 the translated `usefulVocabulary` list empty.
@@ -180,7 +182,8 @@ question text and answer boundaries remain session data rather than learner
 speech. The browser streams approximately 100 ms PCM packets continuously,
 flushes the remaining samples at each question boundary, and displays the
 latest interim words as they arrive so longer answers do not hide new text
-behind the two-line caption limit. The manual STT connection specifies English
+behind the two-line caption limit. A fixed two-line caption slot keeps recording
+controls in place when subtitles appear or clear. The manual STT connection specifies English
 and finalizes only at the explicit answer boundary so late provider deltas
 remain attached to the correct question.
 Displayed questions are pronounced automatically through Cartesia's bytes TTS
@@ -191,7 +194,12 @@ when that question becomes visible. The opening question may incur an initial
 fetch delay. Playback temporarily pauses microphone capture so synthesized
 speech does not enter the learner's answer, and the long-lived provider key
 stays server-only. Pronunciation does not add work to the durable interview
-worker.
+worker. A separate manual microphone toggle disables the same audio tracks used
+by both the continuous recorder and per-turn/realtime capture, so muted intervals
+contain silence. It keeps the current answer, recorder, connection and timer
+running. Manual mute persists across questions and is independent of temporary
+microphone suppression during question playback; finishing or cancelling speech
+cannot unmute a manually muted microphone. Re-recording resets manual mute.
 The learner may move past an unanswered question or stop on it. The interview
 repository marks that turn as skipped in the same state transition that opens
 the next question, or through the final-turn skip endpoint when recording
@@ -212,12 +220,20 @@ the durable worker and Cartesia's batch endpoint before finalization.
 The rewrite step returns one corrected learner answer for every stored turn in
 the same sequence. The repository stores those answers on the turns and builds
 the corrected interview transcript from the immutable questions and corrected
-answers in chronological order. Shadowing speaks that complete dialogue without
-synthetic role labels. Free-talk and photo-description corrected transcripts
-continue to contain learner speech only.
+answers in chronological order. Shadowing voices this corrected learner dialogue
+without role labels and does not perform another model generation. The rewrite
+uses the current profile English level, preserves the learner's intent, experience,
+facts and uncertainty, and repairs all clear errors and sentence structure. Most
+phrasing stays at that level; an occasional short expression from the next CEFR
+level is allowed only when it stays easy to repeat. The web displays the exact
+corrected answers alongside the audio. Free talk and photo description likewise
+use the corrected learner transcript. The discontinued fictional-answer experiment
+remains identifiable through optional `shadowingScript`; scheduling replaces those
+artifacts once with corrected learner audio, clears the experimental payload and
+retires the old asset through bounded cleanup. Migration 0022 remains immutable.
 
-Full recording analysis is owned by `internal/recording`. Its application
-service runs seven category detectors and a reviewer through the provider port.
+Full recording analysis is owned by `internal/recording`. Historical
+`legacy-v2` processing runs seven category detectors and a reviewer through the provider port.
 It skips the language-switch call when no Cyrillic learner text is present and
 skips review when no candidates exist. Successful detector passes are persisted
 under the worker's active lease and reused on retry only when the analysis input
@@ -232,7 +248,7 @@ resolution compares actual ranges, prioritizes mandatory language translations
 and more severe errors, and gives corrections precedence over overlapping
 strengths. Server-owned learning references remain the rule source.
 
-Saving corrections advances to rewriting and atomically queues an independent
+For the legacy pipeline, saving corrections advances to rewriting and atomically queues an independent
 `recording.strengths` job. It shares the bounded recording worker pool and has
 its own two-minute timeout, retries, active-job fencing, and terminal status.
 A failed strength job never fails the recording. The owner may retry it through
@@ -314,3 +330,89 @@ to `media`, practice normalization to `practice`, recording text to
 `recording`, and local shadowing paths to `shadowing`. There is no catch-all
 domain or utilities package. New business rules must not be added to the
 transport or composition packages.
+
+
+## Focused feedback and immutable interview artifacts
+
+New account recordings use `analysis_pipeline=focused-v1`; migration 0021 keeps
+existing rows and in-flight jobs on `legacy-v2`. The recording analysis service
+makes one structured model call for the whole recording with answer-scoped
+output. Each nonempty interview answer receives all confidently identified errors,
+including articles, prepositions, verb forms, agreement, sentence structure, word
+choice and language switches. There is no numeric cap on errors or total items.
+Acceptable spoken fragments and style preferences are not classified as errors.
+Each error has its own anchored correction, explanation, rule and practice example.
+Up to one genuine praise and one native tip are optional per answer. Free talk and
+photo description use one answer scope. One repair call is allowed for invalid
+model output. The focused checkpoint fingerprint includes the all-errors policy,
+so a resumable job cannot reuse the older top-three result. Legacy fingerprints
+remain unchanged.
+
+The model quotes an exact `original_fragment` and mandatory one-based
+`occurrence`. The service resolves that occurrence inside the designated learner
+answer, validates case and whole-word boundaries, and computes half-open UTF-16
+spans. It rejects quotes from questions or another answer. Overlapping excerpts
+are selected in blocker, praise, native-tip priority. A focus includes a Russian
+contextual heading, before/after contrast, explanation, a rule ID, and a correct
+English practice sentence illustrating the rule in a separate hypothetical situation.
+The web uses this independent `practiceText` for listening and repetition.
+Optional `practiceContext` remains available for compatibility and is
+computed from the canonical learner answer: its own sentence or bounded excerpt
+with only this anchored occurrence corrected. Other wording remains unchanged.
+Unverifiable anchors omit it; long unpunctuated excerpts use ellipses. This works
+for saved analyses without another model call. Its `audioFeedbackId` has a separate
+content-derived identity, so the existing audio endpoint cannot reuse an unrelated
+legacy example. Identical sentences reuse their existing audio identity and cache.
+Rule IDs resolve to server-authored three-point
+Russian micro lessons. Compatibility suggestions mirror blockers and strengths
+mirror at most three praises across the recording. Native tips appear only in
+`focusedFeedback`. Error examples and full-answer shadowing remain separate.
+Focused analysis has a fenced durable checkpoint; it does not queue strengths.
+Historical recordings are changed only through explicit idempotent reanalysis.
+
+The web opens focus cards in a native modal dialog, styled as a bottom sheet on
+small screens. Escape, modal focus containment and return focus follow native
+dialog behavior. The web labels the separate `practiceText` as “Пример применения”
+and uses the focus ID for its cached audio. This illustrative sentence can be
+recorded locally for up to 30 seconds,
+played and replaced; this local repetition does not upload audio or run scoring.
+Each card listen starts with GET of its audio resource. Ready returns a fresh
+private signed request; processing is polled with GET; only not-requested audio
+or an explicitly retried failed synthesis sends POST. Loading blocks duplicate
+clicks; closing the card aborts pending playback. Failed or expired downloads
+refresh the link without regenerating audio. `recording.feedback_audio` runs in
+the bounded speech worker pool and reuses an existing object before synthesis.
+
+Question text is persisted in PostgreSQL once, with a stable session
+`questionIndex` independent of displayed turn sequence. Preparing a question
+atomically creates its artifact record and durable `interview.process`
+`question_audio` job. Its MP3 and manifest use private keys
+`sessions/{sessionId}/questions/{questionIndex}.mp3` and `.json`. The manifest
+records exact text, audio checksum and non-secret synthesis settings. Publication
+checks the current job lease and session owner and attaches both media assets
+in one database transaction. TTS failure leaves the question text available and
+never regenerates the question. The web fetches server-generated speech and
+prefetches the next artifact; the legacy scoped speech-token endpoint remains
+available for older clients. Saved historical questions hydrate only on explicit
+POST to their question-audio resource.
+
+Re-taking a question from Details creates an `interview_answer_attempts` row,
+owned audio and an `answer_attempt` job; it never modifies the original timeline,
+transcript, audio, feedback, later questions or other attempts. The worker probes
+the new audio against the 600-second account limit, persists STT, then analyzes
+only that answer using the original dialogue as context. A fenced feedback
+checkpoint prevents repeated paid analysis after publication failure. Creation
+keys and retries return the same attempt; listing uses a bounded (1–50) keyset
+page, and each attempt can be polled independently. Guests keep their bounded
+preview flow and cannot create saved attempts.
+
+Unsaved sessions, including guests, expire after 24 hours. Maintenance selects
+at most 100 expired sessions with SKIP LOCKED per sweep. Cancellation, deletion,
+or preview expiry first cancels associated jobs and durably retires artifact
+references before cascading their feature rows. Generated object keys are
+registered before upload so a crash cannot erase their cleanup address; unused
+assets expire after 24 hours. The existing media sweep queues at most 100 objects
+per pass and existing media.delete workers control physical delete concurrency,
+retries and backoff. Saved session artifacts and attempts live with their
+recording. Guest promotion transfers question and answer artifact ownership,
+including publication while synthesis is running. No bulk prefix delete is used.

@@ -27,7 +27,7 @@ const (
 	StatusCancelled        = "cancelled"
 	JobKind                = "interview.process"
 	minQuestionUsefulWords = 1
-	maxQuestionUsefulWords = 10
+	maxQuestionUsefulWords = 20
 )
 
 type VocabularyItem struct {
@@ -36,13 +36,15 @@ type VocabularyItem struct {
 }
 
 type Candidate struct {
-	ID          string   `json:"id"`
-	Question    string   `json:"question"`
-	UsefulWords []string `json:"usefulWords"`
-	Source      string   `json:"source,omitempty"`
+	QuestionIndex int      `json:"questionIndex,omitempty"`
+	ID            string   `json:"id"`
+	Question      string   `json:"question"`
+	UsefulWords   []string `json:"usefulWords"`
+	Source        string   `json:"source,omitempty"`
 }
 
 type Turn struct {
+	QuestionIndex         int      `json:"questionIndex,omitempty"`
 	Seq                   int      `json:"seq"`
 	Question              string   `json:"question"`
 	QuestionSource        string   `json:"questionSource"`
@@ -54,21 +56,22 @@ type Turn struct {
 }
 
 type Session struct {
-	ID                 string           `json:"id"`
-	Status             string           `json:"status"`
-	Topic              string           `json:"topic"`
-	OpeningQuestion    string           `json:"openingQuestion"`
-	OpeningUsefulWords []string         `json:"openingUsefulWords"`
-	UsefulWords        []string         `json:"usefulWords"`
-	UsefulVocabulary   []VocabularyItem `json:"usefulVocabulary"`
-	Candidates         []Candidate      `json:"candidates"`
-	Turns              []Turn           `json:"turns"`
-	CurrentTurnSeq     int              `json:"currentTurnSeq"`
-	MaxDurationSeconds int              `json:"maxDurationSeconds"`
-	Error              string           `json:"error,omitempty"`
-	CreatedAt          time.Time        `json:"createdAt"`
-	StartedAt          *time.Time       `json:"-"`
-	ExpiresAt          time.Time        `json:"-"`
+	OpeningQuestionIndex int              `json:"openingQuestionIndex,omitempty"`
+	ID                   string           `json:"id"`
+	Status               string           `json:"status"`
+	Topic                string           `json:"topic"`
+	OpeningQuestion      string           `json:"openingQuestion"`
+	OpeningUsefulWords   []string         `json:"openingUsefulWords"`
+	UsefulWords          []string         `json:"usefulWords"`
+	UsefulVocabulary     []VocabularyItem `json:"usefulVocabulary"`
+	Candidates           []Candidate      `json:"candidates"`
+	Turns                []Turn           `json:"turns"`
+	CurrentTurnSeq       int              `json:"currentTurnSeq"`
+	MaxDurationSeconds   int              `json:"maxDurationSeconds"`
+	Error                string           `json:"error,omitempty"`
+	CreatedAt            time.Time        `json:"createdAt"`
+	StartedAt            *time.Time       `json:"-"`
+	ExpiresAt            time.Time        `json:"-"`
 }
 
 type CreateInput struct {

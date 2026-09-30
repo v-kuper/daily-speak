@@ -81,6 +81,18 @@ func TestInterviewSessionSQLLifecycle(t *testing.T) {
 	if err != nil || started.CurrentTurnSeq != 1 || len(started.Candidates) != 1 {
 		t.Fatalf("start = %+v, err=%v", started, err)
 	}
+	if started.OpeningQuestionIndex != 1 || started.Turns[0].QuestionIndex != 1 || started.Candidates[0].QuestionIndex != 2 {
+		t.Fatalf("immutable indexes = %+v", started)
+	}
+	questionAudio := NewQuestionAudioService(repo, nil)
+	state, err := questionAudio.Audio(ctx, QuestionAudioInput{OwnerID: principalID, SessionID: created.ID, Index: 1}, false)
+	if err != nil || state.Status != "processing" {
+		t.Fatalf("question audio GET=%+v err=%v", state, err)
+	}
+	var artifactCount int
+	if err := database.QueryRow(ctx, `SELECT COUNT(*) FROM interview_question_artifacts WHERE session_id=$1`, created.ID).Scan(&artifactCount); err != nil || artifactCount != 2 {
+		t.Fatalf("question artifacts=%d err=%v", artifactCount, err)
+	}
 	if len(started.OpeningUsefulWords) != 6 || len(started.Turns) != 1 ||
 		len(started.Turns[0].UsefulWords) != 6 || len(started.Candidates[0].UsefulWords) != 6 {
 		t.Fatalf("question guidance = opening:%v turns:%+v candidates:%+v",
@@ -96,6 +108,9 @@ func TestInterviewSessionSQLLifecycle(t *testing.T) {
 	advanced, err := service.Advance(ctx, advance)
 	if err != nil || advanced.CurrentTurnSeq != 2 || advanced.Turns[0].EndedAtMs == nil {
 		t.Fatalf("advance = %+v, err=%v", advanced, err)
+	}
+	if advanced.Turns[1].QuestionIndex != 2 {
+		t.Fatalf("artifact changed on advance: %+v", advanced.Turns[1])
 	}
 	if len(advanced.Candidates) != 0 || len(advanced.Turns[1].UsefulWords) != 6 ||
 		advanced.Turns[1].UsefulWords[0] != "destination" {

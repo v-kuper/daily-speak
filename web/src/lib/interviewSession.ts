@@ -3,8 +3,9 @@ import { ensureGuestPreviewIdentity } from "./guestPreview";
 import { resolveInterestLabels } from "./interestCatalog";
 import { newIdempotencyKey, uploadMedia } from "./mediaUpload";
 
-export type InterviewCandidate = { id: string; question: string; usefulWords: string[] };
+export type InterviewCandidate = { questionIndex?: number; id: string; question: string; usefulWords: string[] };
 export type InterviewTurn = {
+ questionIndex?: number;
   seq: number;
   question: string;
   askedAtMs: number;
@@ -18,6 +19,7 @@ export type InterviewTurn = {
   liveTranscriptInterim?: string;
 };
 export type InterviewSession = {
+ openingQuestionIndex?: number;
   id: string;
   status: string;
   topic: string;
@@ -88,7 +90,7 @@ export const parseQuestionUsefulWords = (payload: unknown): string[] => {
     if (typeof value !== "string") return [];
     const word = value.trim().replace(/\s+/g, " ");
     const key = word.toLocaleLowerCase();
-    if (!word || seen.has(key) || seen.size >= 10) return [];
+    if (!word || seen.has(key) || seen.size >= 20) return [];
     seen.add(key);
     return [word];
   });
@@ -107,6 +109,7 @@ const parseSession = (payload: unknown): InterviewSession => {
     if (!Number.isSafeInteger(turn.seq) || Number(turn.seq) < 1 || typeof turn.question !== "string") return [];
     return [{
       seq: Number(turn.seq),
+ ...(Number.isSafeInteger(turn.questionIndex) && Number(turn.questionIndex)>0 ? {questionIndex:Number(turn.questionIndex)} : {}),
       question: turn.question,
       askedAtMs: Number.isFinite(turn.askedAtMs) ? Math.max(0, Number(turn.askedAtMs)) : 0,
       endedAtMs: Number.isFinite(turn.endedAtMs) ? Math.max(0, Number(turn.endedAtMs)) : null,
@@ -121,6 +124,7 @@ const parseSession = (payload: unknown): InterviewSession => {
     if (typeof candidate.id !== "string" || !candidate.id || typeof candidate.question !== "string" || !candidate.question.trim()) return [];
     return [{
       id: candidate.id,
+ ...(Number.isSafeInteger(candidate.questionIndex) && Number(candidate.questionIndex)>0 ? {questionIndex:Number(candidate.questionIndex)} : {}),
       question: candidate.question.trim(),
       usefulWords: parseQuestionUsefulWords(candidate.usefulWords),
     }];
@@ -128,6 +132,7 @@ const parseSession = (payload: unknown): InterviewSession => {
   const openingUsefulWords = parseQuestionUsefulWords(source.openingUsefulWords);
   return {
     id: source.id,
+ ...(Number.isSafeInteger(source.openingQuestionIndex) && Number(source.openingQuestionIndex)>0 ? {openingQuestionIndex:Number(source.openingQuestionIndex)} : {}),
     status: typeof source.status === "string" ? source.status : "preparing",
     topic: typeof source.topic === "string" ? source.topic : "",
     openingQuestion: typeof source.openingQuestion === "string" && source.openingQuestion.trim()

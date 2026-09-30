@@ -71,6 +71,26 @@ func (t *sqlDeletionTransaction) QueueAsset(ctx context.Context, assetID string,
 }
 
 func (t *sqlDeletionTransaction) Remove(ctx context.Context, userID string, recordingID string) (bool, error) {
+	if _, err := t.tx.Exec(ctx, `UPDATE media_assets SET attached_at=NULL,retention_until=NOW(),updated_at=NOW()
+ WHERE state='ready' AND id IN (
+ SELECT audio_asset_id FROM recording_feedback_audio WHERE recording_id=$1
+ UNION SELECT audio_asset_id FROM interview_answer_attempts WHERE recording_id=$1
+ UNION SELECT q.audio_asset_id FROM interview_question_artifacts q JOIN interview_sessions s ON s.id=q.session_id WHERE s.recording_id=$1
+ UNION SELECT q.manifest_asset_id FROM interview_question_artifacts q JOIN interview_sessions s ON s.id=q.session_id WHERE s.recording_id=$1
+ UNION SELECT t.audio_asset_id FROM interview_turns t JOIN interview_sessions s ON s.id=t.session_id WHERE s.recording_id=$1
+ UNION SELECT u.asset_id FROM media_uploads u JOIN interview_sessions s ON s.id=u.interview_session_id WHERE s.recording_id=$1)`, recordingID); err != nil {
+		return false, err
+	}
+	if _, err := t.tx.Exec(ctx, `UPDATE processing_jobs SET state='cancelled',completed_at=NOW(),lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=NOW()
+ WHERE state IN ('queued','running','retry_wait') AND (
+ kind='recording.feedback_audio' AND resource_id IN(SELECT id FROM recording_feedback_audio WHERE recording_id=$1)
+ OR kind='interview.process' AND (resource_id IN(SELECT id FROM interview_answer_attempts WHERE recording_id=$1)
+ OR payload->>'sessionId' IN(SELECT id FROM interview_sessions WHERE recording_id=$1)
+ OR resource_id IN(SELECT id FROM interview_sessions WHERE recording_id=$1)
+ OR resource_id IN(SELECT t.id FROM interview_turns t JOIN interview_sessions s ON s.id=t.session_id WHERE s.recording_id=$1)))`, recordingID); err != nil {
+		return false, err
+	}
+
 	if _, err := t.tx.Exec(ctx, `
 		UPDATE processing_jobs
 		SET state = 'cancelled', completed_at = NOW(), updated_at = NOW(),

@@ -22,18 +22,22 @@ type AnalysisResult struct {
 	Suggestions     []Suggestion
 	Strengths       []Strength
 	StrengthsStatus string
+	FocusedFeedback *FocusedFeedback
 }
 
 type AnalysisInput struct {
-	RecordingID    string
-	Transcript     string
-	InterviewTurns []InterviewDialogueTurn
-	Topic          string
-	Interests      []string
-	PracticeType   string
-	PhotoObject    *string
-	EnglishLevel   string
-	Checkpoint     AnalysisCheckpoint
+	Pipeline          string                  `json:",omitempty"`
+	ContextTurns      []InterviewDialogueTurn `json:",omitempty"`
+	RecordingID       string
+	Transcript        string
+	InterviewTurns    []InterviewDialogueTurn
+	Topic             string
+	Interests         []string
+	PracticeType      string
+	PhotoObject       *string
+	EnglishLevel      string
+	FocusedCheckpoint FocusedCheckpoint `json:"-"`
+	Checkpoint        AnalysisCheckpoint
 }
 
 type AnalysisLogger interface {
@@ -73,6 +77,9 @@ func NewAnalysisService(provider AnalysisProvider, config AnalysisConfig) *Analy
 }
 
 func (s *AnalysisService) Analyze(ctx context.Context, request AnalysisInput, logger AnalysisLogger) (AnalysisResult, error) {
+	if request.Pipeline == FocusedPipeline {
+		return s.analyzeFocused(ctx, request, logger)
+	}
 	transcript := recordingTranscriptForPrompt(request.Transcript)
 	if transcript == "" {
 		return AnalysisResult{Suggestions: []Suggestion{}, Strengths: []Strength{}}, nil

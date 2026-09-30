@@ -28,6 +28,7 @@ type retryAIClient struct {
 	release          chan struct{}
 	once             sync.Once
 	blockStrengths   bool
+	focused          bool
 	strengthsStarted chan struct{}
 	strengthsRelease chan struct{}
 	strengthsOnce    sync.Once
@@ -37,6 +38,8 @@ func (client *retryAIClient) PostChat(ctx context.Context, body any) (ai.ChatRes
 	prompt := retryPromptFromBody(body)
 	operation := "detector"
 	switch {
+	case strings.Contains(prompt, "Allowed rule pairs:") && strings.Contains(prompt, "practiceText"):
+		operation = "focused"
 	case strings.Contains(prompt, "adjudicator, not an error detector"):
 		operation = "review"
 	case strings.Contains(prompt, "Identify up to three genuine strengths"):
@@ -72,6 +75,8 @@ func (client *retryAIClient) PostChat(ctx context.Context, body any) (ai.ChatRes
 		}
 	}
 	switch {
+	case operation == "focused":
+		return ai.ChatResponse{Response: `{"answers":[{"turnSequence":0,"items":[{"kind":"blocker","original_fragment":"go","occurrence":1,"title":"Вы хотели рассказать о вчерашнем действии","explanation":"Для завершённого действия в прошлом используйте went.","corrected_fragment":"went","ruleId":"verb-forms","category":"verb_grammar","practiceText":"I went home yesterday."}]}]}`}, nil
 	case strings.Contains(prompt, "adjudicator, not an error detector"):
 		return ai.ChatResponse{Response: `{"decisions":{}}`}, nil
 	case strings.Contains(prompt, "Identify up to three genuine strengths"):
@@ -154,10 +159,10 @@ func newRecordingRetryFixture(t *testing.T, stage string, client *retryAIClient)
 	if _, err := database.Exec(context.Background(), `
 		INSERT INTO recordings
 		  (id, user_id, topic, duration, timestamp, transcript, suggestions, corrected_transcript,
-		   status, processing_stage, processing_error, shadowing_status, shadowing_updated_at)
+		   status, processing_stage, processing_error, shadowing_status, shadowing_updated_at, analysis_pipeline)
 		VALUES ($1, $2, 'Retry test', 20, NOW(), 'I go home yesterday.', $3::jsonb, '',
-		        'failed', $4, 'AI suggestions could not be generated.', 'pending', NOW())`,
-		recordingID, owner.ID, suggestions, stage); err != nil {
+		        'failed', $4, 'AI suggestions could not be generated.', 'pending', NOW(), $5)`,
+		recordingID, owner.ID, suggestions, stage, retryFixturePipeline(client)); err != nil {
 		t.Fatalf("insert recording: %v", err)
 	}
 
@@ -173,6 +178,40 @@ func newRecordingRetryFixture(t *testing.T, stage string, client *retryAIClient)
 	}
 	startTestWorkers(t, fixture.server)
 	return fixture
+}
+
+func retryFixturePipeline(client *retryAIClient) string {
+	if client.focused {
+		return recording.FocusedPipeline
+	}
+	return "legacy-v2"
+}
+
+func TestFocusedRecordingRetryUsesOneAnalysisAndNoStrengthsJob(t *testing.T) {
+	client := &retryAIClient{focused: true, blockFirst: true, started: make(chan struct{}), release: make(chan struct{})}
+	fixture := newRecordingRetryFixture(t, "suggestions", client)
+	if response := fixture.post(t, fixture.ownerAccessToken); response.Code != http.StatusOK {
+		t.Fatalf("retry status=%d body=%s", response.Code, response.Body.String())
+	}
+	select {
+	case <-client.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("focused analysis did not start")
+	}
+	if response := fixture.post(t, fixture.ownerAccessToken); response.Code != http.StatusOK {
+		t.Fatalf("duplicate retry status=%d", response.Code)
+	}
+	close(client.release)
+	record := fixture.waitForStatus(t, "ready")
+	feedback := recording.DecodeFocusedFeedback(record.FocusedFeedbackJSON)
+	if feedback == nil || len(feedback.Answers) != 1 || len(feedback.Answers[0].Items) != 1 || record.StrengthsStatus != "ready" {
+		t.Fatalf("focused feedback=%+v strengths=%s", feedback, record.StrengthsStatus)
+	}
+	counts := client.operationCallCounts()
+	if counts["focused"] != 1 || counts["rewrite"] != 1 || counts["detector"] != 0 || counts["strengths"] != 0 {
+		t.Fatalf("unexpected calls: %+v", counts)
+	}
+	fixture.waitForShadowingStatus(t, "ready")
 }
 
 func (fixture recordingRetryFixture) post(t *testing.T, accessToken string) *httptest.ResponseRecorder {

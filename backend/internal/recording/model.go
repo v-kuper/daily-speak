@@ -60,6 +60,9 @@ type Strength struct {
 // Record is the persistence-neutral representation shared by recording use
 // cases. Delivery adapters are responsible for their own response formatting.
 type Record struct {
+	AnalysisPipeline    string
+	FocusedFeedbackJSON []byte
+	ShadowingScriptJSON []byte
 	ID                  string
 	Topic               string
 	Duration            int
@@ -86,6 +89,7 @@ type Record struct {
 // InterviewTurn is an optional timeline attached to a saved interview. The
 // ordinary Transcript field always contains learner speech only.
 type InterviewTurn struct {
+	QuestionIndex       int     `json:"questionIndex,omitempty"`
 	Sequence            int     `json:"sequence"`
 	Question            string  `json:"question"`
 	AskedAtMS           int     `json:"askedAtMs"`

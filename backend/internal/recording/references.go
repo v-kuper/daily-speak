@@ -11,6 +11,8 @@ type learningReferenceDefinition struct {
 }
 
 var learningReferenceCatalog = map[string]learningReferenceDefinition{
+	"english-fillers":                newReference("English hesitation phrases", "Use an English filler while finding the next words.", "", CategoryLanguageSwitch, CategoryNaturalness),
+	"expressing-ideas-in-english":    newReference("Expressing ideas in English", "Use English words or paraphrases to express your intended meaning.", "", CategoryLanguageSwitch, CategoryVocabulary),
 	"subject-verb-agreement":         newReference("Subject-verb agreement", "Match the verb form to the subject in person and number.", "https://dictionary.cambridge.org/us/grammar/british-grammar/subject-verb-agreement", CategoryVerbGrammar),
 	"verb-forms":                     newReference("Verb forms", "Choose the verb form required by the tense and construction.", "https://dictionary.cambridge.org/us/grammar/british-grammar/verbs-basic-forms", CategoryVerbGrammar),
 	"present-simple-vs-continuous":   newReference("Present simple and continuous", "Choose between habits or states and actions in progress.", "", CategoryVerbGrammar),

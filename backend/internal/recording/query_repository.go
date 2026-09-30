@@ -48,9 +48,10 @@ func (repository *SQLQueryRepository) interviewTurns(ctx context.Context, querie
 	rows, err := querier.Query(ctx, `
 		SELECT t.seq, t.question, t.asked_at_ms, t.ended_at_ms,
 		       t.provisional_transcript, t.final_transcript,
-		       COALESCE(t.corrected_answer_text, '')
+		       COALESCE(t.corrected_answer_text, ''), COALESCE(a.question_index, 0)
 		FROM interview_turns t
 		JOIN interview_sessions s ON s.id = t.session_id
+		LEFT JOIN interview_question_artifacts a ON a.id=t.question_artifact_id
 		WHERE s.recording_id = $1 AND NOT t.skipped
 		ORDER BY t.seq`, recordingID)
 	if err != nil {
@@ -62,7 +63,7 @@ func (repository *SQLQueryRepository) interviewTurns(ctx context.Context, querie
 		var turn InterviewTurn
 		if err := rows.Scan(&turn.Sequence, &turn.Question, &turn.AskedAtMS,
 			&turn.EndedAtMS, &turn.Provisional, &turn.FinalText,
-			&turn.CorrectedAnswerText); err != nil {
+			&turn.CorrectedAnswerText, &turn.QuestionIndex); err != nil {
 			return nil, err
 		}
 		turn.ResolveAnswer()
@@ -83,7 +84,7 @@ func (repository *SQLQueryRepository) List(ctx context.Context, userID string, o
 		SELECT id, topic, duration, timestamp, status, transcript, corrected_transcript,
 		       suggestions, strengths, strengths_status, processing_stage, practice_type, photo_object,
 		       processing_error, shadowing_status, shadowing_error, shadowing_updated_at,
-		       audio_asset_id, photo_asset_id, shadowing_asset_id
+		       audio_asset_id, photo_asset_id, shadowing_asset_id, analysis_pipeline, focused_feedback, shadowing_script
 		FROM recordings
 		WHERE user_id = $1
 		  AND ($2::timestamptz IS NULL OR (timestamp, id) < ($2::timestamptz, $3::text))
@@ -121,7 +122,7 @@ const recordSelectSQL = `
 	SELECT id, topic, duration, timestamp, status, transcript, corrected_transcript,
 	       suggestions, strengths, strengths_status, processing_stage, practice_type, photo_object,
 	       processing_error, shadowing_status, shadowing_error, shadowing_updated_at,
-	       audio_asset_id, photo_asset_id, shadowing_asset_id
+	       audio_asset_id, photo_asset_id, shadowing_asset_id, analysis_pipeline, focused_feedback, shadowing_script
 	FROM recordings
 	WHERE id = $1 AND user_id = $2
 	LIMIT 1`
@@ -134,7 +135,7 @@ func recordDestinations(record *Record) []any {
 		&record.PhotoObject, &record.ProcessingError, &record.ShadowingStatus,
 		&record.ShadowingError,
 		&record.ShadowingUpdatedAt, &record.AudioAssetID, &record.PhotoAssetID,
-		&record.ShadowingAssetID,
+		&record.ShadowingAssetID, &record.AnalysisPipeline, &record.FocusedFeedbackJSON, &record.ShadowingScriptJSON,
 	}
 }
 

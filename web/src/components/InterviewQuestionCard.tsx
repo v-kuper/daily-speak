@@ -8,7 +8,7 @@ type InterviewQuestionCardProps = {
   turns: InterviewTurn[];
   canAdvance: boolean;
   onNext: () => void;
-  onListen: (question: string) => void;
+  onListen: (turn: InterviewTurn) => void;
   onToggleSpeechMuted: () => void;
   speechState: QuestionSpeechState;
   speechError: string | null;
@@ -57,7 +57,7 @@ export default function InterviewQuestionCard({
           <button
             className="interview-question-listen"
             type="button"
-            onClick={() => onListen(current.question)}
+            onClick={() => onListen(current)}
             disabled={speechMuted}
             aria-label={speechState === "playing" || speechState === "loading"
               ? "Stop question audio"
@@ -87,9 +87,11 @@ export default function InterviewQuestionCard({
 
       {speechError && <div className="interview-question-speech-error" role="status">{speechError}</div>}
 
-      {liveTranscriptionAvailable && liveCaption && (
-        <div className="interview-live-caption" role="status" aria-live="polite" aria-atomic="true">
-          {liveCaption}
+      {liveTranscriptionAvailable && (
+        <div className="interview-caption-slot">
+          {liveCaption && <div className="interview-live-caption" role="status" aria-live="polite" aria-atomic="true">
+            {liveCaption}
+          </div>}
         </div>
       )}
       {!liveTranscriptionAvailable && (

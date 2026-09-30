@@ -89,7 +89,9 @@ test("question words are normalized and bounded", () => {
   assert.deepEqual(parseQuestionUsefulWords([" plan ", "PLAN", "in   advance", "book", null]), [
     "plan", "in advance", "book",
   ]);
-  assert.equal(parseQuestionUsefulWords(Array.from({ length: 12 }, (_, index) => `word ${index}`)).length, 10);
+  const words = Array.from({ length: 20 }, (_, index) => `word ${index}`);
+  assert.deepEqual(parseQuestionUsefulWords(words), words);
+  assert.equal(parseQuestionUsefulWords([...words, "extra word"]).length, 20);
 });
 
 test("navigation cancels an unsaved interview but protects an ongoing or completed save", () => {
@@ -230,7 +232,7 @@ test("a prepared Next commits only after its audio boundary and preserves late s
       liveTranscriptFinal: "I went",
       liveTranscriptInterim: "",
     }],
-    candidates: [{ id: "candidate-2", question: "What did you enjoy?", usefulWords: ["explore", "memorable"] }],
+    candidates: [{ id: "candidate-2", questionIndex: 7, question: "What did you enjoy?", usefulWords: ["explore", "memorable"] }],
     currentTurnSeq: 1,
     maxDurationSeconds: 600,
   };
@@ -251,6 +253,7 @@ test("a prepared Next commits only after its audio boundary and preserves late s
   assert.equal(committed.turns[0].endedAtMs, 1200);
   assert.equal(committed.turns[0].liveTranscriptFinal, "I went to Rome.");
   assert.equal(committed.turns[1].question, "What did you enjoy?");
+  assert.equal(committed.turns[1].questionIndex, 7, "automatic playback must address the new question before the server response arrives");
   assert.deepEqual(committed.turns[1].usefulWords, ["explore", "memorable"]);
   assert.deepEqual(committed.candidates, []);
 });
@@ -577,7 +580,8 @@ test("opening question audio waits until microphone access activates the intervi
     screen.indexOf("beginRecordingFromMicrophone(() =>", screen.indexOf("const prepareOpeningAudio =")),
   );
   assert.ok(startup.indexOf("await startInterview(") >= 0);
-  assert.ok(startup.indexOf("await startInterview(") < startup.indexOf("await getInterviewQuestionSpeechToken("));
+  assert.ok(startup.indexOf("await startInterview(") < startup.indexOf("fetchArtifactAudioBytes("));
+  assert.doesNotMatch(screen, /fetchQuestionSpeech\(|getInterviewQuestionSpeechToken\(/);
   assert.match(screen, /stream = await getUserMedia\([\s\S]*?await beforeRecordingStart\(isCurrent\)/);
   const readyScreenEffects = screen.slice(screen.indexOf("const openingInterviewId ="), screen.indexOf("if (!autoStartPhotoRef.current"));
   assert.doesNotMatch(readyScreenEffects, /getInterviewQuestionSpeechToken\(/);
@@ -590,7 +594,7 @@ test("visible interview questions autoplay once and expose a persistent mute con
   const card = readFileSync(resolve("src/components/InterviewQuestionCard.tsx"), "utf8");
   const screen = readFileSync(resolve("src/components/SpeakScreen.tsx"), "utf8");
   assert.match(screen, /automaticallySpokenQuestionRef/);
-  assert.match(screen, /playInterviewQuestion\(visibleInterviewTurn\.question\)/);
+  assert.match(screen, /playInterviewQuestion\(visibleInterviewTurn\)/);
   assert.match(screen, /player\.unlock\(\)/);
   assert.match(card, /Mute questions/);
   assert.match(card, /Unmute questions/);

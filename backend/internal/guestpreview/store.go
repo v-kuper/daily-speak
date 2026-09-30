@@ -254,6 +254,22 @@ func (s *Store) Expire(ctx context.Context) error {
 		if _, err := tx.Exec(ctx, `UPDATE guest_previews SET state = 'failed', processing_error = 'Guest preview expired', updated_at = NOW() WHERE id = $1 AND state <> 'promoted' AND expires_at <= NOW()`, item.id); err != nil {
 			return err
 		}
+
+		if _, err := tx.Exec(ctx, `UPDATE media_assets SET attached_at=NULL,retention_until=NOW(),updated_at=NOW()
+ WHERE state='ready' AND id IN (
+ SELECT q.audio_asset_id FROM interview_question_artifacts q JOIN interview_sessions s ON s.id=q.session_id WHERE s.guest_preview_id=$1 AND s.recording_id IS NULL
+ UNION SELECT q.manifest_asset_id FROM interview_question_artifacts q JOIN interview_sessions s ON s.id=q.session_id WHERE s.guest_preview_id=$1 AND s.recording_id IS NULL
+ UNION SELECT t.audio_asset_id FROM interview_turns t JOIN interview_sessions s ON s.id=t.session_id WHERE s.guest_preview_id=$1 AND s.recording_id IS NULL
+ UNION SELECT u.asset_id FROM media_uploads u JOIN interview_sessions s ON s.id=u.interview_session_id WHERE s.guest_preview_id=$1 AND s.recording_id IS NULL)`, item.id); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE processing_jobs SET state='cancelled',completed_at=NOW(),lease_token=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=NOW()
+ WHERE kind='interview.process' AND state IN ('queued','running','retry_wait') AND
+ (payload->>'sessionId' IN(SELECT id FROM interview_sessions WHERE guest_preview_id=$1 AND recording_id IS NULL)
+ OR resource_id IN(SELECT id FROM interview_sessions WHERE guest_preview_id=$1 AND recording_id IS NULL)
+ OR resource_id IN(SELECT t.id FROM interview_turns t JOIN interview_sessions s ON s.id=t.session_id WHERE s.guest_preview_id=$1 AND s.recording_id IS NULL))`, item.id); err != nil {
+			return err
+		}
 		if _, err := tx.Exec(ctx, `DELETE FROM interview_sessions WHERE guest_preview_id = $1 AND recording_id IS NULL`, item.id); err != nil {
 			return err
 		}

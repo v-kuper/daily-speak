@@ -110,7 +110,7 @@ test("detail cards use stable anchor IDs and hide unreachable transcript links",
   const ambiguous = renderDetails({ transcript: "I go every day. Yesterday I go.", suggestions: [{ ...corrections[0], span: undefined }] });
   assert.doesNotMatch(ambiguous, /Show in transcript/);
   assert.match(ambiguous, /Use past simple for yesterday/);
-  assert.match(markup, /Natural practice version/);
+  assert.match(markup, /Ваш ответ в естественной форме/);
 });
 
 test("failure on a previous recording does not end another recording's shadowing request", async t => {

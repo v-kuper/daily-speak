@@ -1,3 +1,4 @@
+import { parseFocusedFeedback } from "../../lib/focusedFeedback";
 import { createAsyncThunk, createSlice, type PayloadAction } from "@reduxjs/toolkit";
 import { apiFetch, readApiJSON } from "../../lib/apiClient";
 import {
@@ -12,7 +13,7 @@ import {
   removeRecording
 } from "../../lib/recordingDeletion";
 import { parseRecordingProcessingStage } from "../../lib/recordingProcessing";
-import { parseShadowingStatus } from "../../lib/shadowing";
+import { parseShadowingScript, parseShadowingStatus } from "../../lib/shadowing";
 import { DEFAULT_ENGLISH_LEVEL, normalizeEnglishLevel, parseEnglishLevel, type EnglishLevel } from "../../lib/englishLevel";
 import { isCurrentInterviewGuidanceRequest } from "../../lib/interviewGuidance";
 import {
@@ -549,6 +550,7 @@ const parseRecording = (value: unknown): Recording | null => {
     status,
     transcript,
     interviewTurns: parseInterviewTurns(candidate.interviewTurns),
+ focusedFeedback: parseFocusedFeedback(candidate.focusedFeedback),
     correctedTranscript,
     suggestions,
     strengths,
@@ -561,6 +563,7 @@ const parseRecording = (value: unknown): Recording | null => {
     photoObject,
     processingError,
     shadowingStatus,
+    shadowingScript: parseShadowingScript(candidate.shadowingScript),
     shadowingError,
     shadowingUpdatedAt,
     media
@@ -1567,7 +1570,7 @@ const upsertRecordingMutation = (state: AppState, recording: Recording, kind: "s
     ...current, strengths: recording.strengths, strengthsStatus: recording.strengthsStatus,
   } : {
     ...current, shadowingStatus: recording.shadowingStatus, shadowingError: recording.shadowingError,
-    shadowingUpdatedAt: recording.shadowingUpdatedAt,
+    shadowingUpdatedAt: recording.shadowingUpdatedAt, shadowingScript: recording.shadowingScript,
     media: current.media ? { ...current.media, shadowing: recording.media?.shadowing ?? null } : recording.media,
   });
 };
@@ -2122,6 +2125,25 @@ const appSlice = createSlice({
       state.pendingPhotoError = null;
       state.recordingPracticeType = "topic";
     },
+    discardRecordingDraft: (state) => {
+      state.speakState = "idle";
+      state.selectedTopic = null;
+      state.recordingDuration = 0;
+      state.showQuestions = false;
+      state.showAddTopicInput = false;
+      state.customTopicDraft = "";
+      state.pendingRecordingAudioStorageKey = null;
+      state.recordingInputError = null;
+      state.recordingSaveStatus = "idle";
+      state.recordingSaveError = null;
+      state.pendingPhotoDataUrl = null;
+      state.pendingPhotoObjectDraft = "";
+      state.pendingPhotoError = null;
+      state.pendingSaveAfterAuth = false;
+      state.pendingAuthSaveDraft = null;
+      state.recordingPracticeType = "topic";
+      clearTopicGuidanceState(state);
+    },
     finishGuestPreviewFlow: (state, action: PayloadAction<string | null>) => {
       state.speakState = "idle";
       state.selectedTopic = null;
@@ -2174,6 +2196,12 @@ const appSlice = createSlice({
     },
     toggleCalendar: (state) => {
       state.calendarVisible = !state.calendarVisible;
+    },
+    setCalendarDate: (state, action: PayloadAction<string>) => {
+      const date = new Date(`${action.payload}T12:00:00`);
+      if (!Number.isFinite(date.getTime())) return;
+      state.calendarMonth = date.getMonth();
+      state.calendarYear = date.getFullYear();
     },
     previousMonth: (state) => {
       if (state.calendarMonth === 0) {
@@ -2747,12 +2775,14 @@ export const {
   stopRecording,
   reRecord,
   backToQuestionsList,
+  discardRecordingDraft,
   finishGuestPreviewFlow,
   openAuthForSave,
   toggleAddTopicInput,
   setCustomTopicDraft,
   useCustomTopic,
   toggleCalendar,
+  setCalendarDate,
   previousMonth,
   nextMonth,
   selectRecording,

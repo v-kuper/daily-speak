@@ -28,6 +28,19 @@ func TestSQLProcessingRepositoryCompletesInterviewAtomically(t *testing.T) {
 		t.Fatalf("migrate test database: %v", err)
 	}
 	repository := NewSQLProcessingRepository(database)
+	t.Run("rewrite uses the current profile level instead of the interview snapshot", func(t *testing.T) {
+		fixture := newInterviewCompletionFixture(t, database)
+		if _, err := database.Exec(ctx, `UPDATE users SET english_level='a2' WHERE id=$1`, fixture.userID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := database.Exec(ctx, `UPDATE interview_sessions SET english_level='c1' WHERE id=$1`, fixture.sessionID); err != nil {
+			t.Fatal(err)
+		}
+		work, found, err := repository.LoadProcessingWork(ctx, fixture.job)
+		if err != nil || !found || work.EnglishLevel != "a2" {
+			t.Fatalf("profile level=%q found=%v err=%v", work.EnglishLevel, found, err)
+		}
+	})
 
 	t.Run("stores corrected turns, chronological script, and shadowing job", func(t *testing.T) {
 		fixture := newInterviewCompletionFixture(t, database)

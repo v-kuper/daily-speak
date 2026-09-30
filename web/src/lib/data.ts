@@ -1,4 +1,4 @@
-import type { ShadowingStatus } from "./shadowing";
+import type { ShadowingScript, ShadowingStatus } from "./shadowing";
 import type { SavedInterviewTurn } from "./interviewTimeline";
 
 export type TopicData = {
@@ -60,7 +60,15 @@ export type RecordingMedia = {
   photo: RecordingMediaAsset | null;
   shadowing: RecordingMediaAsset | null;
 };
+export type FeedbackFocus = {
+ id: string; kind: "praise" | "blocker" | "native_tip"; originalFragment: string; occurrence: number;
+ span: FeedbackSpan; title: string; explanation: string; correctedFragment?: string; ruleId: string;
+ practiceText?: string; practiceContext?: { originalText: string; correctedText: string; audioFeedbackId: string };
+ microLesson?: { title: string; points: [string, string, string] };
+};
+export type FocusedFeedback = { version: 1; answers: { turnSequence?: number; items: FeedbackFocus[] }[] };
 export type Recording = {
+ focusedFeedback?: FocusedFeedback;
   id: string;
   topic: string;
   duration: number;
@@ -79,6 +87,7 @@ export type Recording = {
   photoObject: string | null;
   processingError: string | null;
   shadowingStatus: ShadowingStatus;
+  shadowingScript?: ShadowingScript | null;
   shadowingError: string | null;
   shadowingUpdatedAt: string;
   media: RecordingMedia | null;
