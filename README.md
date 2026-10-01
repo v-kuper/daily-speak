@@ -90,6 +90,31 @@ is unavailable. The backend and worker use the same backend image but different
 entrypoints. Uploaded audio belongs only to the backend project and is shared
 between API and worker through `UPLOADS_HOST_DIR`.
 
+### Local browser testing
+
+Start Docker Desktop, then run from the repository root. For initial setup, copy
+`.env.example` to the root `.env.local` and fill in the server credentials; keep
+an existing `.env.local` if it is already configured.
+
+```bash
+npm run docker:local
+```
+
+This explicitly reads the root `.env.local`, builds and starts web, API, worker,
+and PostgreSQL, and waits for the services to be running or healthy. With the
+example ports, open [http://localhost:3218/speak](http://localhost:3218/speak).
+If you change `APP_PORT`, use that port instead. Run the same command again after
+code changes to rebuild the containers. This Docker setup does not hot reload.
+
+```bash
+npm run docker:local:logs
+npm run docker:local:stop
+```
+
+Stopping preserves the PostgreSQL volume and uploaded audio for the next run.
+The existing `docker:app`, `docker:logs`, and `docker:stop` commands use Compose's
+default `.env` configuration.
+
 ## Environment ownership
 
 - Web: `PUBLIC_API_BASE_URL` is the public absolute HTTP(S) API origin.
