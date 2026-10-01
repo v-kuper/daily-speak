@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	apidocs "daily-speaking-practice/backend/docs"
+	"daily-speaking-practice/backend/internal/activity"
 	"daily-speaking-practice/backend/internal/auth"
 	"daily-speaking-practice/backend/internal/guestpreview"
 	"daily-speaking-practice/backend/internal/interview"
@@ -20,6 +21,7 @@ import (
 )
 
 type Dependencies struct {
+	ActivityService           *activity.Service
 	OperationsMonitor         *operations.Monitor
 	PracticeGenerator         practice.Generator
 	ProfileService            *profile.Service
@@ -49,6 +51,7 @@ type Dependencies struct {
 }
 
 type Server struct {
+	activityService           *activity.Service
 	operationsMonitor         *operations.Monitor
 	practiceGenerator         practice.Generator
 	profileService            *profile.Service
@@ -83,6 +86,7 @@ type requestLimiter interface {
 
 func NewServer(dependencies Dependencies) *Server {
 	return &Server{
+		activityService:   dependencies.ActivityService,
 		operationsMonitor: dependencies.OperationsMonitor,
 		practiceGenerator: dependencies.PracticeGenerator,
 		profileService:    dependencies.ProfileService, subscriptionService: dependencies.SubscriptionService,

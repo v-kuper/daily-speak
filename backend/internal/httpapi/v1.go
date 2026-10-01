@@ -111,6 +111,10 @@ func (s *Server) dispatchV1(w http.ResponseWriter, r *http.Request) {
 		s.handleStudyWords(w, r)
 	case path == "/api/v1/profile" && r.Method == http.MethodGet:
 		s.handleUserData(w, r)
+	case path == "/api/v1/profile/activity" && r.Method == http.MethodGet:
+		s.handleActivitySummary(w, r)
+	case path == "/api/v1/profile/activity" && r.Method == http.MethodPost:
+		s.handleActivityRecord(w, r)
 	case path == "/api/v1/profile/interests" && r.Method == http.MethodPut:
 		s.handleUserInterests(w, r)
 	case path == "/api/v1/profile/english-level" && r.Method == http.MethodGet:
@@ -133,7 +137,7 @@ func (s *Server) dispatchV1(w http.ResponseWriter, r *http.Request) {
 func isApplicationV1Resource(path string) bool {
 	switch path {
 	case "/api/v1/practice/daily-questions", "/api/v1/practice/daily-questions/dismiss", "/api/v1/practice/topic-guidance", "/api/v1/practice/study-words",
-		"/api/v1/profile", "/api/v1/profile/interests", "/api/v1/profile/english-level", "/api/v1/subscription":
+		"/api/v1/profile", "/api/v1/profile/activity", "/api/v1/profile/interests", "/api/v1/profile/english-level", "/api/v1/subscription":
 		return true
 	default:
 		return false

@@ -10,6 +10,7 @@ import {
 } from "../store/slices/appSlice";
 import { ENGLISH_LEVEL_OPTIONS, parseEnglishLevel } from "../lib/englishLevel";
 import { useAppDispatch, useAppSelector } from "../store/hooks";
+import ProfileActivity from "./ProfileActivity";
 
 type ProfileSection = "home" | "subscription" | "english-level";
 
@@ -166,6 +167,8 @@ export default function ProfileScreen({ section }: { section: ProfileSection }) 
     <section className="profile-screen">
       <h2>Профиль</h2>
       <p className="profile-subtitle">Выберите, что хотите посмотреть или отредактировать.</p>
+
+      <ProfileActivity />
 
       <div className="profile-card">
         <div className="profile-row">

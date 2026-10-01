@@ -1,12 +1,14 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import PracticeActionIcon from "./PracticeActionIcon";
+import { useSpeakingActivity } from "../lib/activityTracking";
 
 export default function LocalSpeechRecorder({ maxSeconds = 30, onSave, saveLabel = "Сохранить новую попытку", repeatLabel = "Повторить правильный вариант голосом", initialDraft, onDraftChange, onBusyChange }: {
  maxSeconds?: number; onSave?: (blob: Blob) => Promise<void>; saveLabel?: string; repeatLabel?: string;
  initialDraft?: Blob; onDraftChange?: (blob: Blob | null) => void; onBusyChange?: (busy: boolean) => void;
 }) {
  const [state, setState] = useState<"idle" | "starting" | "recording" | "ready" | "saving">(initialDraft ? "ready" : "idle");
+ useSpeakingActivity(state === "recording");
  const [error, setError] = useState(""); const [url, setURL] = useState<string | null>(null);
  const [seconds, setSeconds] = useState(0);
  const recorder = useRef<MediaRecorder | null>(null); const stream = useRef<MediaStream | null>(null);

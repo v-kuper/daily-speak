@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"daily-speaking-practice/backend/internal/activity"
 	"daily-speaking-practice/backend/internal/ai"
 	"daily-speaking-practice/backend/internal/auth"
 	"daily-speaking-practice/backend/internal/db"
@@ -79,6 +80,7 @@ func NewAPI(config APIConfig) *httpapi.Server {
 	recordingDeletion := recording.NewSQLDeletionRepository(config.DB)
 	recordingProcessing := recording.NewSQLProcessingRepository(config.DB)
 	return httpapi.NewServer(httpapi.Dependencies{
+		ActivityService:           activity.NewService(activity.NewSQLRepository(config.DB)),
 		OperationsMonitor:         operations.NewMonitor(config.DB, workqueue.NewStore(config.DB)),
 		PracticeGenerator:         practiceGenerator,
 		ProfileService:            profile.NewService(profile.NewSQLRepository(config.DB)),

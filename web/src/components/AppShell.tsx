@@ -5,8 +5,10 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useAppDispatch, useAppSelector } from "../store/hooks";
 import { fetchUserData, logout, restoreSession } from "../store/slices/appSlice";
+import { flushActivity, useActivityTracking } from "../lib/activityTracking";
 
 export default function AppShell({ children }: { children: ReactNode }) {
+  useActivityTracking();
   const dispatch = useAppDispatch();
   const pathname = usePathname();
   const router = useRouter();
@@ -26,6 +28,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
   }, [dispatch, isAuthenticated, pendingSaveAfterAuth, userDataStatus]);
 
   const onLogout = async () => {
+    await flushActivity().catch(() => undefined);
     await dispatch(logout());
     router.replace("/speak");
   };

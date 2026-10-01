@@ -13,6 +13,15 @@ Every response carries `X-Request-ID`. Clients should include it in support and
 diagnostic reports. A caller may supply a safe `X-Request-ID`; otherwise the
 server creates one.
 
+`GET /api/v1/profile/activity` adds lifetime speaking milliseconds and a bounded
+366-day calendar in an optional IANA `timezone` (default UTC).
+`POST /api/v1/profile/activity` adds account-only interval telemetry with stable
+per-account keys and atomic, overlap-safe acceptance. Clients pause review after
+120 idle seconds and exclude hidden-page/loading time. Recording deletion cannot
+decrement accepted activity. Existing recordings are preserved once as a clearly
+identified historical duration estimate. See [USER_ACTIVITY.md](USER_ACTIVITY.md)
+and OpenAPI for the complete accounting policy and request limits.
+
 Web and native clients use the same `/api/v1/*` contract. Unversioned
 application routes are not supported. The web sandbox may move faster in its
 UI, but it does not receive a private backend protocol.

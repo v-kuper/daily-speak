@@ -33,6 +33,7 @@ import ProtectedMediaImage from "./ProtectedMediaImage";
 import ConversationTranscript from "./ConversationTranscript";
 import FocusedFeedbackReview, { FeedbackLegend } from "./FocusedFeedbackReview";
 import InterviewRetakes from "./InterviewRetakes";
+import { useReviewActivity } from "../lib/activityTracking";
 
 const formatPracticeLabel = (value: "free_talk" | "topic" | "photo_description"): string => {
   switch (value) {
@@ -131,6 +132,7 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
     return startRecordingDetailLifecycle(store, routeRecordingId);
   }, [store, routeRecordingId]);
   const recordingId = recording?.id ?? null;
+  const reviewRef = useReviewActivity(recording?.status === "ready" && Boolean(recording.focusedFeedback));
   const recordingAudioStorageKey = recording?.localAudioStorageKey ?? null;
   const recordingAudioDownloadPath = recording?.media?.audio?.downloadPath ?? null;
   const recordingStatus = recording?.status;
@@ -485,7 +487,7 @@ export default function DetailsScreen({ recordingId: routeRecordingId }: { recor
     : null;
 
   return (
-    <section>
+    <section ref={reviewRef}>
       <Link className="back-btn" href="/history">
         ← Back
       </Link>

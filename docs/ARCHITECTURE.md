@@ -1,6 +1,6 @@
 # Architecture
 
-Last reviewed: 2026-09-29
+Last reviewed: 2026-10-01
 
 ## System boundary
 
@@ -136,6 +136,12 @@ backup/restore rehearsals, and measured capacity. Operational thresholds and
 procedures live in [`BACKEND_OPERATIONS.md`](BACKEND_OPERATIONS.md).
 
 ## Code ownership
+
+Profile activity has an independent append-only ledger owned by
+`internal/activity`. It unions observed recording, question-listening and active
+feedback intervals, preserves earned time after recording deletion, and projects
+calendar days in the learner's timezone. The lifetime counter and shared v1
+telemetry contract are documented in [USER_ACTIVITY.md](USER_ACTIVITY.md).
 
 Speaking practice uses the learner's selected interest themes to generate three
 opening questions. The chosen question becomes the first question of an
@@ -320,6 +326,7 @@ backend/internal/recording   recording creation, deletion, processing, analysis
 backend/internal/guestpreview     bounded anonymous preview lifecycle
 backend/internal/shadowing        pronunciation generation lifecycle
 backend/internal/profile          profile application service and repository
+backend/internal/activity         permanent practice-time ledger and daily activity
 backend/internal/subscription     subscription application service and repository
 backend/internal/storage     local and S3 storage adapters
 backend/internal/worker      worker configuration and pool lifecycle

@@ -1,5 +1,6 @@
 "use client";
 import { fetchArtifactAudioBytes } from "../lib/artifactAudio";
+import { useSpeakingActivity } from "../lib/activityTracking";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { useRouter } from "next/navigation";
@@ -227,6 +228,10 @@ export default function SpeakScreen() {
     pendingPhotoObjectDraft,
     pendingPhotoError
   } = useAppSelector((state) => state.app);
+
+  useSpeakingActivity(questionSpeechState === "playing" || (speakState === "recording" &&
+    (recordingPracticeType !== "topic" || (!microphoneMuted && !interviewBoundaryPending &&
+      (questionSpeechState === "idle" || questionSpeechState === "error")))));
 
   const recentAnsweredQuestions = useMemo(
     () => collectRecentAnsweredQuestions(recordings),

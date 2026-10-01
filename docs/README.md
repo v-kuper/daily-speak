@@ -12,6 +12,8 @@ not remain here as competing architecture documentation.
   feature workflow, API rules, and completion criteria.
 - [`api-compatibility.md`](api-compatibility.md): stable `/api/v1` compatibility
   and deprecation rules for mobile clients.
+- [`USER_ACTIVITY.md`](USER_ACTIVITY.md): cumulative speaking time, activity
+  calendar, idle tracking, historical estimates and telemetry contract.
 - [`BACKEND_OPERATIONS.md`](BACKEND_OPERATIONS.md): readiness, limits, metrics,
   scaling, backups, load tests, and failure drills.
 - [`LOCAL_WINDOWS_CICD.md`](LOCAL_WINDOWS_CICD.md): current Windows test-host
